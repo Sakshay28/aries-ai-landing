@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/timeout",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/instagram-refresh",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/reset-counters",
+      "schedule": "0 0 1 * *"
+    }
+  ]
+}

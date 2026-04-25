@@ -1,0 +1,55 @@
+import { Resend } from 'resend';
+
+const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key');
+
+export async function sendNewLeadEmail(to: string, leadName: string, businessName: string) {
+  try {
+    await resend.emails.send({
+      from: 'Aries AI <notifications@ariesai.in>',
+      to,
+      subject: `New Lead: ${leadName}`,
+      html: `<p>Great news! You have a new lead (<strong>${leadName}</strong>) for <strong>${businessName}</strong>.</p><p>Check your dashboard to view the conversation and lead details.</p>`,
+    });
+  } catch (error) {
+    console.error('Failed to send new lead email:', error);
+  }
+}
+
+export async function sendWeeklySummaryEmail(to: string, businessName: string, leadsCount: number, messagesCount: number) {
+  try {
+    await resend.emails.send({
+      from: 'Aries AI <analytics@ariesai.in>',
+      to,
+      subject: `Weekly Summary for ${businessName}`,
+      html: `<p>Here is your weekly summary for <strong>${businessName}</strong>.</p><ul><li>New Leads: ${leadsCount}</li><li>Messages Sent: ${messagesCount}</li></ul><p>Keep up the great work!</p>`,
+    });
+  } catch (error) {
+    console.error('Failed to send weekly summary email:', error);
+  }
+}
+
+export async function sendBillingReceipt(to: string, businessName: string, amount: string, planName: string) {
+  try {
+    await resend.emails.send({
+      from: 'Aries AI Billing <billing@ariesai.in>',
+      to,
+      subject: `Receipt for ${planName} Plan`,
+      html: `<p>Thank you for your payment, <strong>${businessName}</strong>.</p><p>We have successfully received your payment of <strong>${amount}</strong> for the <strong>${planName}</strong> plan.</p><p>You can download your full invoice from the billing dashboard.</p>`,
+    });
+  } catch (error) {
+    console.error('Failed to send billing receipt:', error);
+  }
+}
+
+export async function sendBotOfflineAlert(to: string, businessName: string) {
+  try {
+    await resend.emails.send({
+      from: 'Aries AI Alerts <alerts@ariesai.in>',
+      to,
+      subject: `URGENT: Your Bot is Offline`,
+      html: `<p>Hello,</p><p>The WhatsApp connection for <strong>${businessName}</strong> has been disconnected (Meta token expired).</p><p>Your bot is currently <strong>offline</strong> and cannot reply to customers.</p><p>Please log in to your dashboard immediately to reconnect WhatsApp.</p>`,
+    });
+  } catch (error) {
+    console.error('Failed to send bot offline alert:', error);
+  }
+}
