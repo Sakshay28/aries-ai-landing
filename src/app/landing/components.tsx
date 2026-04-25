@@ -471,6 +471,7 @@ export function Footer() {
       <div className="lp-footer-inner">
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <img src="/logo.png" alt="Aries AI" style={{ height: 36, filter: "brightness(0) invert(1)" }} />
+        </div>
         <div style={{ display: "flex", gap: 28, fontSize: 13 }}>
           <a href="#">Privacy Policy</a>
           <a href="#">Terms of Service</a>
