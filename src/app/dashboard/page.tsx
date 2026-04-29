@@ -3,14 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 
-// ═══════════════════════════════════════
-// 📊 Client Dashboard — Stats & Overview
-// ═══════════════════════════════════════
-// Now fetches REAL data from API endpoints.
-// No more mock data — all Supabase-backed.
-// ═══════════════════════════════════════
-
-interface DashboardStats {
+interface Stats {
   totalLeads: number;
   newLeadsToday: number;
   activeConversations: number;
@@ -18,467 +11,210 @@ interface DashboardStats {
   conversionRate: string;
   messagesThisMonth: number;
   messageLimit: number;
-  topChannel: string;
-  peakHour: string;
   leadsByStatus: { status: string; count: number }[];
-  leadsByChannel: { channel: string; count: number }[];
   dailyLeads: { date: string; count: number }[];
 }
 
-interface Lead {
-  id: string;
-  name: string | null;
-  phone: string | null;
-  lead_status: string;
-  lead_score: number;
-  channel: string;
-  enquiry_type: string | null;
-  last_message_at: string;
-  created_at: string;
-}
+function SetupChecklist({ stats }: { stats: Stats | null }) {
+  const steps = [
+    { label: "Connect WhatsApp Business Account", done: false, href: "/dashboard/whatsapp" },
+    { label: "Configure your AI Bot", done: false, href: "/dashboard/settings" },
+    { label: "Create a message template", done: false, href: "/dashboard/templates" },
+    { label: "Receive your first lead", done: (stats?.totalLeads ?? 0) > 0, href: "/dashboard/leads" },
+    { label: "Send your first broadcast", done: false, href: "/dashboard/broadcast" },
+  ];
+  const done = steps.filter(s => s.done).length;
+  const pct = Math.round((done / steps.length) * 100);
 
-interface Conversation {
-  id: string;
-  sender_name: string | null;
-  sender_id: string;
-  current_step: string;
-  is_active: boolean;
-  escalated: boolean;
-  last_message_at: string;
-  channel: string;
-  message_count: number;
-}
-
-function StatCard({ icon, label, value, sub, color }: { icon: string; label: string; value: string | number; sub?: string; color: string }) {
   return (
-    <div className="glass-card" style={{ padding: "1.5rem", borderTop: `3px solid ${color}` }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+    <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, overflow: "hidden", marginBottom: 20 }}>
+      <div style={{ padding: "16px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
-          <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: "0.5rem" }}>{label}</p>
-          <p style={{ fontSize: "2rem", fontWeight: 800, color }}>{value}</p>
-          {sub && <p style={{ color: "var(--text-muted)", fontSize: "0.75rem", marginTop: "0.25rem" }}>{sub}</p>}
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}>Setup WhatsApp Automation</div>
+          <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{steps.length - done} steps remaining</div>
         </div>
-        <span style={{ fontSize: "2rem" }}>{icon}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 100, height: 5, background: "#f3f4f6", borderRadius: 100, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${pct}%`, background: "#25D366", borderRadius: 100, transition: "width 0.5s" }} />
+          </div>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#25D366", minWidth: 30 }}>{pct}%</span>
+        </div>
       </div>
-    </div>
-  );
-}
-
-function getStatusColor(status: string) {
-  const colors: Record<string, string> = {
-    new: "#6C5CE7", hot: "#E17055", warm: "#FDCB6E", cold: "#636E72", converted: "#00CEC9", lost: "#E17055",
-    active: "#00B894", resolved: "#636E72", escalated: "#E17055",
-  };
-  return colors[status] || "#636E72";
-}
-
-function getScoreColor(score: number) {
-  if (score >= 80) return "#00B894";
-  if (score >= 50) return "#FDCB6E";
-  return "#E17055";
-}
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} min ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs} hr ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
-
-function LoadingPulse() {
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "3rem", color: "var(--text-muted)" }}>
-      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-        <span style={{ animation: "pulse 1.5s infinite", fontSize: "1.5rem" }}>⏳</span>
-        <span>Loading data...</span>
-      </div>
-    </div>
-  );
-}
-
-function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <div style={{ padding: "1rem 1.5rem", background: "rgba(225, 112, 85, 0.1)", border: "1px solid rgba(225, 112, 85, 0.3)", borderRadius: "8px", marginBottom: "1.5rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-      <span style={{ color: "#E17055", fontSize: "0.9rem" }}>❌ {message}</span>
-      <button onClick={onRetry} style={{ padding: "0.4rem 1rem", background: "#E17055", border: "none", borderRadius: "6px", color: "white", cursor: "pointer", fontSize: "0.8rem", fontWeight: 600 }}>Retry</button>
+      {steps.map((s, i) => (
+        <Link key={i} href={s.href} style={{
+          display: "flex", alignItems: "center", gap: 14,
+          padding: "13px 20px", textDecoration: "none", color: "inherit",
+          borderBottom: i < steps.length - 1 ? "1px solid #f9fafb" : "none",
+          background: "white", transition: "background 150ms",
+        }}
+          onMouseEnter={e => e.currentTarget.style.background = "#fafbfc"}
+          onMouseLeave={e => e.currentTarget.style.background = "white"}>
+          <div style={{
+            width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
+            border: `2px solid ${s.done ? "#25D366" : "#d1d5db"}`,
+            background: s.done ? "#25D366" : "white",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            {s.done
+              ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              : <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#d1d5db" }} />
+            }
+          </div>
+          <span style={{ fontSize: 14, color: s.done ? "#9ca3af" : "#374151", fontWeight: s.done ? 400 : 500, flex: 1, textDecoration: s.done ? "line-through" : "none" }}>{s.label}</span>
+          {!s.done && <span style={{ fontSize: 12, color: "#25D366", fontWeight: 700 }}>Start →</span>}
+        </Link>
+      ))}
     </div>
   );
 }
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeTab, setActiveTab] = useState<"overview" | "leads" | "conversations">("overview");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [leadFilter, setLeadFilter] = useState("all");
 
-  const fetchDashboardData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const fetchData = useCallback(async () => {
     try {
-      const [statsRes, leadsRes, convsRes] = await Promise.all([
-        fetch("/api/dashboard/stats"),
-        fetch("/api/dashboard/leads?limit=50"),
-        fetch("/api/dashboard/conversations?limit=20"),
-      ]);
-
-      if (!statsRes.ok) throw new Error(`Stats API error: ${statsRes.status}`);
-      if (!leadsRes.ok) throw new Error(`Leads API error: ${leadsRes.status}`);
-
-      const statsData = await statsRes.json();
-      const leadsData = await leadsRes.json();
-
-      if (statsData.success) setStats(statsData.data);
-      else throw new Error(statsData.error || "Failed to fetch stats");
-
-      if (leadsData.success) setLeads(leadsData.data || []);
-      else throw new Error(leadsData.error || "Failed to fetch leads");
-
-      // Conversations endpoint might not exist yet — handle gracefully
-      if (convsRes.ok) {
-        const convsData = await convsRes.json();
-        if (convsData.success) setConversations(convsData.data || []);
-      }
-    } catch (err) {
-      console.error("Dashboard fetch error:", err);
-      setError(err instanceof Error ? err.message : "Failed to load dashboard");
-    } finally {
-      setLoading(false);
-    }
+      const res = await fetch("/api/dashboard/stats");
+      const d = await res.json();
+      if (d.success) setStats(d.data);
+      else setError(d.error);
+    } catch { setError("Network error"); }
+    finally { setLoading(false); }
   }, []);
 
-  useEffect(() => {
-    fetchDashboardData();
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(fetchDashboardData, 30000);
-    return () => clearInterval(interval);
-  }, [fetchDashboardData]);
+  useEffect(() => { fetchData(); const t = setInterval(fetchData, 30000); return () => clearInterval(t); }, [fetchData]);
 
-  const usagePercent = stats ? Math.round((stats.messagesThisMonth / stats.messageLimit) * 100) : 0;
-
-  const filteredLeads = leadFilter === "all"
-    ? leads
-    : leads.filter((l) => l.lead_status === leadFilter);
+  const usagePct = stats ? Math.min(100, Math.round((stats.messagesThisMonth / stats.messageLimit) * 100)) : 0;
+  const statusColors: Record<string, { color: string; bg: string }> = {
+    new: { color: "#7c3aed", bg: "#ede9fe" }, hot: { color: "#ea580c", bg: "#fff7ed" },
+    warm: { color: "#d97706", bg: "#fffbeb" }, cold: { color: "#6b7280", bg: "#f3f4f6" },
+    converted: { color: "#16a34a", bg: "#f0fdf4" }, lost: { color: "#dc2626", bg: "#fef2f2" },
+  };
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg-primary)" }}>
-      {/* Sidebar */}
-      <aside style={{
-        width: sidebarOpen ? "260px" : "70px",
-        background: "var(--bg-secondary)",
-        borderRight: "1px solid var(--border)",
-        padding: "1.5rem 0",
-        display: "flex",
-        flexDirection: "column",
-        transition: "width 0.3s ease",
-        position: "fixed",
-        top: 0,
-        left: 0,
-        bottom: 0,
-        zIndex: 100,
-      }}>
-        <div style={{ padding: "0 1.25rem", marginBottom: "2rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {sidebarOpen && (
-            <Link href="/" style={{ textDecoration: "none" }}>
-              <img src="/logo.png" alt="Aries AI" style={{ height: "36px" }} />
-            </Link>
-          )}
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "1.25rem" }}>
-            {sidebarOpen ? "◀" : "▶"}
-          </button>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 288px", gap: 20, alignItems: "start" }}>
+      {/* Left column */}
+      <div>
+        {/* Trial banner */}
+        <div style={{ background: "linear-gradient(135deg,#f0fdf4,#dcfce7)", border: "1px solid #86efac", borderRadius: 14, padding: "16px 22px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#166534" }}>Unlock Everything for 14 Days — Free!</div>
+            <div style={{ fontSize: 12, color: "#16a34a", marginTop: 3 }}>Access all Pro features. No credit card required.</div>
+          </div>
+          <Link href="/dashboard/billing" style={{ background: "#25D366", color: "white", padding: "10px 22px", borderRadius: 10, fontWeight: 700, fontSize: 14, textDecoration: "none", whiteSpace: "nowrap", flexShrink: 0, boxShadow: "0 4px 12px rgba(37,211,102,0.3)" }}>
+            Start Free Trial →
+          </Link>
         </div>
 
-        <nav style={{ flex: 1 }}>
+        {/* Stats */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
           {[
-            { icon: "📊", label: "Dashboard", href: "/dashboard", active: true },
-            { icon: "👥", label: "Leads", href: "/dashboard/leads", active: false },
-            { icon: "💬", label: "Conversations", href: "/dashboard/conversations", active: false },
-            { icon: "📢", label: "Broadcast", href: "/dashboard/broadcast", active: false },
-            { icon: "🤖", label: "Bot Settings", href: "/dashboard/settings", active: false },
-            { icon: "📱", label: "WhatsApp", href: "/dashboard/whatsapp", active: false },
-            { icon: "📈", label: "Analytics", href: "/dashboard/analytics", active: false },
-            { icon: "💳", label: "Billing", href: "/dashboard/billing", active: false },
-          ].map((item) => (
-            <Link key={item.label} href={item.href} style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.75rem",
-              padding: "0.75rem 1.25rem",
-              color: item.active ? "var(--primary)" : "var(--text-secondary)",
-              textDecoration: "none",
-              background: item.active ? "rgba(108, 92, 231, 0.1)" : "transparent",
-              borderRight: item.active ? "3px solid var(--primary)" : "3px solid transparent",
-              fontSize: "0.9rem",
-              fontWeight: item.active ? 600 : 400,
-              transition: "all 0.2s ease",
-            }}>
-              <span style={{ fontSize: "1.1rem" }}>{item.icon}</span>
-              {sidebarOpen && <span>{item.label}</span>}
-            </Link>
-          ))}
-        </nav>
-
-        {sidebarOpen && stats && (
-          <div style={{ padding: "1rem 1.25rem", borderTop: "1px solid var(--border)" }}>
-            <p style={{ color: "var(--text-muted)", fontSize: "0.75rem", marginBottom: "0.5rem" }}>Messages: {stats.messagesThisMonth.toLocaleString()} / {stats.messageLimit.toLocaleString()}</p>
-            <div style={{ width: "100%", height: "6px", background: "var(--bg-tertiary)", borderRadius: "3px", overflow: "hidden" }}>
-              <div style={{ width: `${usagePercent}%`, height: "100%", background: usagePercent > 80 ? "#E17055" : "var(--gradient-primary)", borderRadius: "3px", transition: "width 0.5s ease" }} />
+            { label: "Total Leads", value: stats?.totalLeads, sub: `+${stats?.newLeadsToday ?? 0} today`, accent: "#25D366" },
+            { label: "Live Conversations", value: stats?.activeConversations, sub: "Active now", accent: "#3b82f6" },
+            { label: "Messages Used", value: stats?.messagesThisMonth, sub: `${usagePct}% of limit`, accent: "#8b5cf6" },
+            { label: "Confirmed Bookings", value: stats?.confirmedBookings, sub: stats?.conversionRate ? `${stats.conversionRate} rate` : "This month", accent: "#f59e0b" },
+          ].map(s => (
+            <div key={s.label} style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, padding: "18px 16px", borderTop: `3px solid ${s.accent}` }}>
+              <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-1px", color: "#111827", marginBottom: 6 }}>
+                {loading ? "—" : (s.value ?? 0).toLocaleString()}
+              </div>
+              <div style={{ fontSize: 12, color: "#9ca3af" }}>{s.label}</div>
+              <div style={{ fontSize: 11, color: s.accent, fontWeight: 600, marginTop: 4 }}>{s.sub}</div>
             </div>
-          </div>
-        )}
-      </aside>
+          ))}
+        </div>
 
-      {/* Main Content */}
-      <main style={{ flex: 1, marginLeft: sidebarOpen ? "260px" : "70px", transition: "margin-left 0.3s ease" }}>
-        {/* Top Header */}
-        <header style={{
-          padding: "1rem 2rem",
-          background: "var(--bg-secondary)",
-          borderBottom: "1px solid var(--border)",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          position: "sticky",
-          top: 0,
-          zIndex: 50,
-        }}>
-          <div>
-            <h1 style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--text-primary)" }}>Dashboard</h1>
-            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>Welcome back! Here&apos;s your business overview.</p>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-            <button onClick={fetchDashboardData} style={{
-              padding: "0.5rem 1rem",
-              background: "var(--bg-tertiary)",
-              border: "1px solid var(--border)",
-              borderRadius: "8px",
-              color: "var(--text-secondary)",
-              cursor: "pointer",
-              fontSize: "0.85rem",
-            }}>
-              🔄 Refresh
-            </button>
-            <div style={{
-              width: "36px", height: "36px", borderRadius: "50%",
-              background: "var(--gradient-primary)", display: "flex", alignItems: "center", justifyContent: "center",
-              fontWeight: 700, fontSize: "0.85rem", color: "white",
-            }}>S</div>
-          </div>
-        </header>
+        {/* Setup checklist */}
+        <SetupChecklist stats={stats} />
 
-        {stats && (
-          <div style={{ padding: "0 2rem", marginTop: "1.5rem" }}>
-            {usagePercent >= 100 ? (
-              <div style={{ background: "rgba(225, 112, 85, 0.1)", border: "1px solid #E17055", padding: "1rem 1.5rem", borderRadius: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <h3 style={{ color: "#E17055", margin: 0, fontSize: "1rem" }}>⚠️ Message Limit Reached</h3>
-                  <p style={{ color: "var(--text-secondary)", margin: "0.25rem 0 0", fontSize: "0.85rem" }}>You have used {stats.messagesThisMonth} of your {stats.messageLimit} monthly messages. Your bot is currently paused.</p>
-                </div>
-                <Link href="/dashboard/billing" style={{ padding: "0.5rem 1rem", background: "#E17055", color: "white", textDecoration: "none", borderRadius: "6px", fontWeight: 600, fontSize: "0.85rem" }}>Upgrade Plan</Link>
-              </div>
-            ) : usagePercent >= 80 ? (
-              <div style={{ background: "rgba(253, 203, 110, 0.1)", border: "1px solid #FDCB6E", padding: "1rem 1.5rem", borderRadius: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <h3 style={{ color: "#FDCB6E", margin: 0, fontSize: "1rem" }}>⚠️ Approaching Limit</h3>
-                  <p style={{ color: "var(--text-secondary)", margin: "0.25rem 0 0", fontSize: "0.85rem" }}>You have used {usagePercent}% of your monthly AI messages ({stats.messagesThisMonth} / {stats.messageLimit}).</p>
-                </div>
-                <Link href="/dashboard/billing" style={{ padding: "0.5rem 1rem", background: "var(--bg-tertiary)", color: "var(--text-primary)", textDecoration: "none", borderRadius: "6px", fontWeight: 600, fontSize: "0.85rem", border: "1px solid var(--border)" }}>View Upgrade Options</Link>
-              </div>
-            ) : null}
-          </div>
-        )}
-
-        <div style={{ padding: "2rem" }}>
-          {/* Error Banner */}
-          {error && <ErrorBanner message={error} onRetry={fetchDashboardData} />}
-
-          {/* Tab Switcher */}
-          <div style={{ display: "flex", gap: "0.5rem", marginBottom: "2rem" }}>
-            {(["overview", "leads", "conversations"] as const).map((tab) => (
-              <button key={tab} onClick={() => setActiveTab(tab)} style={{
-                padding: "0.6rem 1.5rem",
-                border: "1px solid var(--border)",
-                borderRadius: "8px",
-                background: activeTab === tab ? "var(--primary)" : "transparent",
-                color: activeTab === tab ? "white" : "var(--text-secondary)",
-                cursor: "pointer",
-                fontWeight: 600,
-                fontSize: "0.85rem",
-                textTransform: "capitalize",
-                transition: "all 0.2s ease",
-              }}>{tab}</button>
+        {/* Quick Actions */}
+        <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, overflow: "hidden", marginBottom: 20 }}>
+          <div style={{ padding: "16px 20px", borderBottom: "1px solid #f3f4f6", fontSize: 15, fontWeight: 700 }}>Quick Actions</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+            {[
+              { label: "Send Broadcast", desc: "Message all your leads at once", href: "/dashboard/broadcast", accent: "#25D366" },
+              { label: "Create Template", desc: "Submit a new WhatsApp template", href: "/dashboard/templates", accent: "#3b82f6" },
+              { label: "Configure AI Bot", desc: "Set personality, FAQs, hours", href: "/dashboard/settings", accent: "#8b5cf6" },
+              { label: "View Analytics", desc: "Track leads and conversions", href: "/dashboard/analytics", accent: "#f59e0b" },
+            ].map((a, i) => (
+              <Link key={a.label} href={a.href} style={{
+                display: "flex", flexDirection: "column", gap: 4, padding: "18px 20px",
+                textDecoration: "none", color: "inherit",
+                borderRight: i % 2 === 0 ? "1px solid #f3f4f6" : "none",
+                borderBottom: i < 2 ? "1px solid #f3f4f6" : "none",
+                background: "white", transition: "background 150ms",
+              }}
+                onMouseEnter={e => e.currentTarget.style.background = "#fafbfc"}
+                onMouseLeave={e => e.currentTarget.style.background = "white"}>
+                <div style={{ width: 3, height: 3, borderRadius: "50%", background: a.accent }} />
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{a.label}</div>
+                <div style={{ fontSize: 12, color: "#9ca3af" }}>{a.desc}</div>
+              </Link>
             ))}
           </div>
+        </div>
+      </div>
 
-          {/* Loading State */}
-          {loading && !stats && <LoadingPulse />}
+      {/* Right panel */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {/* Credits */}
+        <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, padding: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", marginBottom: 14 }}>Message Credits</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+            <span style={{ fontSize: 26, fontWeight: 800, color: "#111827" }}>{(stats?.messagesThisMonth ?? 0).toLocaleString()}</span>
+            <span style={{ fontSize: 12, color: "#9ca3af" }}>/ {(stats?.messageLimit ?? 1000).toLocaleString()}</span>
+          </div>
+          <div style={{ height: 6, background: "#f3f4f6", borderRadius: 100, marginBottom: 6, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${usagePct}%`, background: usagePct > 80 ? "linear-gradient(90deg,#f59e0b,#ef4444)" : "#25D366", borderRadius: 100, transition: "width 0.5s" }} />
+          </div>
+          <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 16 }}>Used this month — {usagePct}%</div>
+          <Link href="/dashboard/billing" style={{ display: "block", textAlign: "center", background: "#25D366", color: "white", padding: "10px 0", borderRadius: 10, fontWeight: 700, fontSize: 14, textDecoration: "none" }}>
+            Upgrade Plan
+          </Link>
+        </div>
 
-          {/* Overview Tab */}
-          {activeTab === "overview" && stats && (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
-                <StatCard icon="👥" label="Total Leads" value={stats.totalLeads} sub={`${stats.newLeadsToday} new today`} color="#6C5CE7" />
-                <StatCard icon="💬" label="Active Conversations" value={stats.activeConversations} sub="Currently active" color="#00B894" />
-                <StatCard icon="📩" label="Messages This Month" value={stats.messagesThisMonth.toLocaleString()} sub={`${usagePercent}% of limit used`} color="#00CEC9" />
-                <StatCard icon="📅" label="Bookings" value={stats.confirmedBookings} sub={`${stats.conversionRate} conversion`} color="#FDCB6E" />
-                <StatCard icon="📡" label="Top Channel" value={stats.topChannel} sub="Most leads from" color="#A29BFE" />
-                <StatCard icon="📊" label="Leads by Status" value={stats.leadsByStatus.length} sub="Categories tracked" color="#FD79A8" />
-              </div>
-
-              {/* Recent Leads */}
-              <div className="glass-card" style={{ padding: "1.5rem", marginBottom: "2rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-                  <h2 style={{ fontSize: "1.1rem", fontWeight: 700 }}>Recent Leads</h2>
-                  <button onClick={() => setActiveTab("leads")} style={{ background: "none", border: "none", color: "var(--primary)", cursor: "pointer", fontWeight: 600, fontSize: "0.85rem" }}>View All →</button>
-                </div>
-                {leads.length === 0 ? (
-                  <p style={{ color: "var(--text-muted)", textAlign: "center", padding: "2rem" }}>No leads yet. Leads will appear here when customers message your WhatsApp.</p>
-                ) : (
-                  <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                      <thead>
-                        <tr>
-                          {["Name", "Status", "Score", "Channel", "Activity"].map((h) => (
-                            <th key={h} style={{ textAlign: "left", padding: "0.75rem", color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {leads.slice(0, 5).map((lead) => (
-                          <tr key={lead.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                            <td style={{ padding: "0.75rem" }}>
-                              <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{lead.name || "Unknown"}</div>
-                              <div style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>{lead.phone}</div>
-                            </td>
-                            <td style={{ padding: "0.75rem" }}>
-                              <span style={{ padding: "0.25rem 0.75rem", borderRadius: "12px", fontSize: "0.75rem", fontWeight: 600, background: `${getStatusColor(lead.lead_status)}22`, color: getStatusColor(lead.lead_status) }}>{lead.lead_status}</span>
-                            </td>
-                            <td style={{ padding: "0.75rem" }}>
-                              <span style={{ fontWeight: 700, color: getScoreColor(lead.lead_score) }}>{lead.lead_score}</span>
-                            </td>
-                            <td style={{ padding: "0.75rem", color: "var(--text-muted)", fontSize: "0.85rem" }}>{lead.channel}</td>
-                            <td style={{ padding: "0.75rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>{timeAgo(lead.last_message_at)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+        {/* Lead Pipeline */}
+        <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, padding: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", marginBottom: 14 }}>Lead Pipeline</div>
+          {stats && stats.leadsByStatus.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {stats.leadsByStatus.map(({ status, count }) => {
+                const c = statusColors[status] || { color: "#6b7280", bg: "#f3f4f6" };
+                return (
+                  <div key={status} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 700, textTransform: "capitalize", background: c.bg, color: c.color }}>{status}</span>
+                    <span style={{ fontSize: 15, fontWeight: 800, color: "#111827" }}>{count}</span>
                   </div>
-                )}
-              </div>
-
-              {/* Leads by Status Breakdown */}
-              {stats.leadsByStatus.length > 0 && (
-                <div className="glass-card" style={{ padding: "1.5rem" }}>
-                  <h2 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "1rem" }}>Lead Status Breakdown</h2>
-                  <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-                    {stats.leadsByStatus.map(({ status, count }) => (
-                      <div key={status} style={{ padding: "0.75rem 1.25rem", background: `${getStatusColor(status)}15`, borderRadius: "8px", border: `1px solid ${getStatusColor(status)}33` }}>
-                        <span style={{ color: getStatusColor(status), fontWeight: 700, fontSize: "1.2rem" }}>{count}</span>
-                        <span style={{ color: "var(--text-muted)", fontSize: "0.8rem", marginLeft: "0.5rem", textTransform: "capitalize" }}>{status}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Leads Tab */}
-          {activeTab === "leads" && (
-            <div className="glass-card" style={{ padding: "1.5rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
-                <h2 style={{ fontSize: "1.1rem", fontWeight: 700 }}>All Leads ({filteredLeads.length})</h2>
-                <div style={{ display: "flex", gap: "0.5rem" }}>
-                  {["all", "new", "hot", "warm", "converted"].map((f) => (
-                    <button key={f} onClick={() => setLeadFilter(f)} style={{ padding: "0.4rem 1rem", border: "1px solid var(--border)", borderRadius: "6px", background: leadFilter === f ? "var(--primary)" : "transparent", color: leadFilter === f ? "white" : "var(--text-secondary)", cursor: "pointer", fontSize: "0.8rem", textTransform: "capitalize" }}>{f}</button>
-                  ))}
-                </div>
-              </div>
-              {filteredLeads.length === 0 ? (
-                <p style={{ color: "var(--text-muted)", textAlign: "center", padding: "2rem" }}>No leads found for this filter.</p>
-              ) : (
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr>
-                      {["Name", "Status", "Score", "Channel", "Type", "Activity"].map((h) => (
-                        <th key={h} style={{ textAlign: "left", padding: "0.75rem", color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredLeads.map((lead) => (
-                      <tr key={lead.id} style={{ borderBottom: "1px solid var(--border)", cursor: "pointer" }} onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "rgba(108, 92, 231, 0.05)"; }} onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "transparent"; }}>
-                        <td style={{ padding: "0.75rem" }}>
-                          <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{lead.name || "Unknown"}</div>
-                          <div style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>{lead.phone}</div>
-                        </td>
-                        <td style={{ padding: "0.75rem" }}>
-                          <span style={{ padding: "0.25rem 0.75rem", borderRadius: "12px", fontSize: "0.75rem", fontWeight: 600, background: `${getStatusColor(lead.lead_status)}22`, color: getStatusColor(lead.lead_status) }}>{lead.lead_status}</span>
-                        </td>
-                        <td style={{ padding: "0.75rem" }}><span style={{ fontWeight: 700, color: getScoreColor(lead.lead_score) }}>{lead.lead_score}</span></td>
-                        <td style={{ padding: "0.75rem", color: "var(--text-muted)", fontSize: "0.85rem" }}>{lead.channel}</td>
-                        <td style={{ padding: "0.75rem", color: "var(--text-secondary)", fontSize: "0.85rem" }}>{lead.enquiry_type || "—"}</td>
-                        <td style={{ padding: "0.75rem", color: "var(--text-muted)", fontSize: "0.8rem" }}>{timeAgo(lead.last_message_at)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+                );
+              })}
             </div>
-          )}
-
-          {/* Conversations Tab */}
-          {activeTab === "conversations" && (
-            <div style={{ display: "grid", gridTemplateColumns: "350px 1fr", gap: "1rem", height: "calc(100vh - 220px)" }}>
-              {/* Conversation List */}
-              <div className="glass-card" style={{ padding: "0", overflow: "hidden" }}>
-                <div style={{ padding: "1rem 1.25rem", borderBottom: "1px solid var(--border)" }}>
-                  <h2 style={{ fontSize: "1rem", fontWeight: 700, marginBottom: "0.5rem" }}>Conversations</h2>
-                  <input type="text" placeholder="Search conversations..." style={{ width: "100%", padding: "0.5rem 0.75rem", background: "var(--bg-tertiary)", border: "1px solid var(--border)", borderRadius: "6px", color: "var(--text-primary)", fontSize: "0.85rem" }} />
-                </div>
-                <div style={{ overflowY: "auto", maxHeight: "calc(100vh - 320px)" }}>
-                  {conversations.length === 0 ? (
-                    <p style={{ color: "var(--text-muted)", textAlign: "center", padding: "2rem", fontSize: "0.85rem" }}>No active conversations.</p>
-                  ) : (
-                    conversations.map((conv, i) => (
-                      <div key={conv.id} style={{
-                        padding: "1rem 1.25rem",
-                        borderBottom: "1px solid var(--border)",
-                        cursor: "pointer",
-                        background: i === 0 ? "rgba(108, 92, 231, 0.08)" : "transparent",
-                        borderLeft: i === 0 ? "3px solid var(--primary)" : "3px solid transparent",
-                      }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.25rem" }}>
-                          <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>{conv.sender_name || conv.sender_id}</span>
-                          <span style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>{timeAgo(conv.last_message_at)}</span>
-                        </div>
-                        <p style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>Step: {conv.current_step} · {conv.message_count} msgs</p>
-                        <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.25rem" }}>
-                          <span style={{ fontSize: "0.7rem", padding: "0.1rem 0.5rem", borderRadius: "4px", background: conv.is_active ? "#00B89422" : "#636E7222", color: conv.is_active ? "#00B894" : "#636E72" }}>{conv.is_active ? "active" : "closed"}</span>
-                          {conv.escalated && <span style={{ fontSize: "0.7rem", padding: "0.1rem 0.5rem", borderRadius: "4px", background: "#E1705522", color: "#E17055" }}>escalated</span>}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Chat View Placeholder */}
-              <div className="glass-card" style={{ padding: "0", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                <p style={{ color: "var(--text-muted)", fontSize: "1rem" }}>💬 Select a conversation to view messages</p>
-                <p style={{ color: "var(--text-muted)", fontSize: "0.8rem", marginTop: "0.5rem" }}>Messages are handled by the AI bot in real-time</p>
-              </div>
-            </div>
+          ) : (
+            <div style={{ textAlign: "center", color: "#9ca3af", fontSize: 13, padding: "16px 0" }}>No leads yet</div>
           )}
         </div>
-      </main>
+
+        {/* Daily trend */}
+        <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, padding: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", marginBottom: 14 }}>Leads — Last 7 Days</div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 56 }}>
+            {(stats?.dailyLeads ?? Array(7).fill({ count: 0 })).map((d: { count: number }, i: number) => {
+              const max = Math.max(...(stats?.dailyLeads ?? []).map((x: { count: number }) => x.count), 1);
+              const h = Math.max((d.count / max) * 56, 4);
+              return (
+                <div key={i} title={`${d.count} leads`} style={{ flex: 1, height: h, background: "#25D366", borderRadius: "4px 4px 0 0", opacity: i === 6 ? 1 : 0.5 + (i / 12), transition: "all 0.5s" }} />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Conversion rate */}
+        {error && (
+          <div style={{ padding: "12px 16px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 10, fontSize: 13, color: "#dc2626" }}>
+            {error} <button onClick={fetchData} style={{ background: "none", border: "none", color: "#dc2626", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Retry</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

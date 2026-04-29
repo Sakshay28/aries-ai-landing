@@ -10,7 +10,7 @@ import { getTenantId } from '@/lib/auth/getTenantId';
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantId();
   if (!tenantId) {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ success: true, data: [], total: 0, page: 1, limit: 50, hasMore: false });
   }
 
   const supabase = await createServerSupabaseClient();

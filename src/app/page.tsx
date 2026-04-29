@@ -38,8 +38,8 @@ function Navbar() {
           ))}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <Link href="/login" style={{ background: G, color: "#fff", padding: "10px 22px", borderRadius: 8, fontSize: 14, fontWeight: 700, textDecoration: "none", minWidth: 140, textAlign: "center" }}>Login</Link>
-          <Link href="/signup" style={{ background: G, color: "#fff", padding: "10px 22px", borderRadius: 8, fontSize: 14, fontWeight: 700, textDecoration: "none", minWidth: 140, textAlign: "center" }}>Start Free Trial →</Link>
+          <Link href="/login" className="btn-anim" style={{ background: G, color: "#fff", padding: "10px 22px", borderRadius: 8, fontSize: 14, fontWeight: 700, textDecoration: "none", minWidth: 140, textAlign: "center" }}>Login</Link>
+          <Link href="/signup" className="btn-anim" style={{ background: G, color: "#fff", padding: "10px 22px", borderRadius: 8, fontSize: 14, fontWeight: 700, textDecoration: "none", minWidth: 140, textAlign: "center" }}>Start Free Trial →</Link>
         </div>
       </div>
     </nav>
@@ -96,10 +96,10 @@ function Hero() {
             Your AI assistant replies to customer enquiries, takes bookings, captures leads, and follows up — 24/7. While you sleep.
           </p>
           <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 40 }}>
-            <Link href="/signup" style={{ background: G, color: "#fff", padding: "16px 32px", borderRadius: 10, fontSize: 16, fontWeight: 700, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8, boxShadow: "0 8px 24px rgba(37,211,102,0.35)" }}>
+            <Link href="/signup" className="btn-anim" style={{ background: G, color: "#fff", padding: "16px 32px", borderRadius: 10, fontSize: 16, fontWeight: 700, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8 }}>
               Start Free 14-Day Trial →
             </Link>
-            <a href="#how-it-works" style={{ background: "#fff", color: "#111", padding: "16px 28px", borderRadius: 10, fontSize: 16, fontWeight: 600, textDecoration: "none", border: "1.5px solid #ddd" }}>
+            <a href="#how-it-works" className="btn-anim-outline" style={{ background: "#fff", color: "#111", padding: "16px 28px", borderRadius: 10, fontSize: 16, fontWeight: 600, textDecoration: "none", border: "1.5px solid #ddd" }}>
               See How It Works
             </a>
           </div>
@@ -382,7 +382,7 @@ function SetupSection() {
               </div>
             ))}
           </div>
-          <a href="#" style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 40, background: "#25D366", color: "#fff", padding: "14px 28px", borderRadius: 10, fontWeight: 700, fontSize: 15, textDecoration: "none", boxShadow: "0 4px 16px rgba(37,211,102,0.3)" }}>
+          <a href="#" className="btn-anim" style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 40, background: "#25D366", color: "#fff", padding: "14px 28px", borderRadius: 10, fontWeight: 700, fontSize: 15, textDecoration: "none" }}>
             Start Free for 14 Days →
           </a>
         </div>
@@ -409,26 +409,53 @@ function SetupSection() {
 }
 
 function Pricing() {
+  const [billing, setBilling] = useState<"monthly" | "annual">("monthly");
   const plans = [
     {
-      name: "Starter", oldPrice: "1,499", price: "999", period: "/month",
+      name: "Starter", price: "999", period: "/month", oldPrice: "1,499",
       desc: "For single location businesses",
-      features: ["1 WhatsApp number", "1,000 conversations/month", "AI-powered replies", "Lead dashboard", "Google Sheets sync", "Email support"],
+      caps: ["Up to 500 contacts", "1,000 conversations/month"],
+      features: ["Free WhatsApp Business API", "Free Blue Tick Application", "₹50 Free Conversation Credits", "Unlimited Free Service Conversations", "Basic AI Chatbot", "Live Chat Dashboard", "Create Template Messages", "Upload & Manage Contacts", "Up to 5 Tags"],
       cta: "Start Free Trial", popular: false,
+      templateCharges: { marketing: "₹1.09", utility: "₹0.145", auth: "₹0.145", service: "Unlimited Free" },
+      voiceCalls: null,
     },
     {
-      name: "Growth", oldPrice: "3,999", price: "2,999", period: "/month",
-      desc: "For growing businesses",
-      features: ["Everything in Starter", "5,000 conversations/month", "Instagram automation", "Smart follow-ups", "Broadcast messages", "Priority support"],
+      name: "Growth", price: "2,499", period: "/month", oldPrice: "3,999",
+      desc: "Scale your WhatsApp marketing",
+      caps: ["Up to 10,000 contacts", "5,000 conversations/month"],
+      features: ["Everything in Free, plus:", "AI Chatbot with Custom Training", "WhatsApp Broadcast Campaigns", "Click-to-WhatsApp Ads Manager", "Campaign Analytics & Reports", "Custom Attributes & Segments", "Up to 20 Tags", "Email Support"],
+      cta: "Start Free Trial", popular: false,
+      templateCharges: { marketing: "₹1.09", utility: "₹0.145", auth: "₹0.145", service: "Unlimited Free" },
+      voiceCalls: null,
+    },
+    {
+      name: "Pro", price: "4,999", period: "/month", oldPrice: "6,999",
+      desc: "WhatsApp + Instagram AI automation",
+      caps: ["Up to 50,000 contacts", "Unlimited conversations"],
+      features: ["Everything in Growth, plus:", "Instagram DM Automation", "Advanced Gemini AI Engine", "Multi-Agent Live Chat", "CRM & Advanced Analytics", "Workflow Automation Builder", "In-Chat Payments (UPI/Cards)", "Unlimited Tags & Attributes", "Priority Support"],
       cta: "Start Free Trial", popular: true,
+      templateCharges: { marketing: "₹0.90", utility: "₹0.145", auth: "₹0.145", service: "Unlimited Free" },
+      voiceCalls: null,
     },
     {
-      name: "Pro", oldPrice: "5,999", price: "4,999", period: "/month",
-      desc: "For serious operators",
-      features: ["Everything in Growth", "Unlimited conversations", "Custom AI personality", "Shopify integration", "Multi-location support", "Dedicated manager"],
-      cta: "Contact Us", popular: false,
+      name: "Ultra Premium", price: "6,999", period: "/month", oldPrice: "9,999",
+      desc: "AI Voice Calling + Full automation suite",
+      caps: ["Unlimited contacts", "Unlimited conversations"],
+      features: ["Everything in Pro, plus:", "🔥 AI Voice Calling for Booking Confirmation", "150 AI Voice Calls Included", "Auto WhatsApp Fallback on Missed Calls", "Dedicated Account Manager", "Custom Integrations & API Access", "White-label Reports", "Onboarding Assistance", "24/7 Priority Support"],
+      cta: "Start Free Trial", popular: false,
+      templateCharges: { marketing: "Custom", utility: "₹0.145", auth: "₹0.145", service: "Unlimited Free" },
+      voiceCalls: { included: 150, addon: "₹15/call after 150 calls", topup: "₹999 for 100 extra calls" },
     },
   ];
+
+  const getPrice = (price: string) => {
+    if (price === "0") return "0";
+    const num = parseInt(price.replace(",", ""));
+    if (billing === "annual") return Math.round(num * 0.8).toLocaleString("en-IN");
+    return price;
+  };
+
   return (
     <section id="pricing" style={{ padding: "64px 40px 100px", background: "#fff", scrollMarginTop: 20 }}>
       <style>{`
@@ -450,60 +477,143 @@ function Pricing() {
         .pc:hover .po { color: #666; }
         .pc .pb { background: #111; color: #fff; transition: all 0.4s; }
         .pc:hover .pb { background: #25D366; box-shadow: 0 4px 20px rgba(37,211,102,0.35); }
+        .pc .pb:hover { transform: translateY(-3px) scale(1.03); box-shadow: 0 12px 28px rgba(37,211,102,0.5) !important; }
         .pc .pf { color: #666; transition: color 0.4s; }
         .pc:hover .pf { color: #ddd; }
+        .pc .pf-highlight { color: #25D366; font-weight: 700; }
+        .pc:hover .pf-highlight { color: #4ade80; }
         .pc .pop-badge { opacity: 0; transition: opacity 0.4s; }
         .pc:hover .pop-badge { opacity: 1; }
         .pc .sep { border-color: #f0f0f0; transition: border-color 0.4s; }
         .pc:hover .sep { border-color: #333; }
+        .pc .cap-label { color: #555; transition: color 0.4s; font-weight: 600; font-size: 13px; }
+        .pc:hover .cap-label { color: #ccc; }
+        .pc .tmpl-section { background: #f8fafb; transition: background 0.4s; border-radius: 12px; padding: 16px; margin-top: 20px; }
+        .pc:hover .tmpl-section { background: #1a1a1a; }
+        .pc .tmpl-title { color: #128C7E; font-size: 12px; font-weight: 700; margin-bottom: 8px; transition: color 0.4s; }
+        .pc:hover .tmpl-title { color: #4ade80; }
+        .pc .tmpl-item { color: #666; font-size: 13px; transition: color 0.4s; display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+        .pc:hover .tmpl-item { color: #bbb; }
+        .pc .voice-box { background: linear-gradient(135deg, #f0fdf4, #dcfce7); border: 1px solid #bbf7d0; border-radius: 12px; padding: 14px; margin-top: 16px; transition: all 0.4s; }
+        .pc:hover .voice-box { background: linear-gradient(135deg, #052e16, #064e3b); border-color: #065f46; }
+        .pc .voice-title { color: #128C7E; font-size: 13px; font-weight: 800; margin-bottom: 6px; transition: color 0.4s; }
+        .pc:hover .voice-title { color: #4ade80; }
+        .pc .voice-detail { color: #555; font-size: 12px; padding: 2px 0; transition: color 0.4s; }
+        .pc:hover .voice-detail { color: #a7f3d0; }
+        .toggle-area { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 48; }
+        .toggle-area span { font-size: 14px; font-weight: 600; color: #999; cursor: pointer; transition: color 0.2s; user-select: none; }
+        .toggle-area span.active { color: #111; }
+        .t-switch { width: 44px; height: 24px; border-radius: 100px; background: #ddd; border: none; cursor: pointer; position: relative; transition: background 0.3s; padding: 0; }
+        .t-switch.on { background: #25D366; }
+        .t-thumb { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform 0.3s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .t-switch.on .t-thumb { transform: translateX(20px); }
+        .save-tag { display: inline-block; background: #dcfce7; color: #128C7E; font-size: 11px; font-weight: 700; border-radius: 100px; padding: 2px 8px; margin-left: 6px; }
       `}</style>
-      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-        <div style={{ textAlign: "center", marginBottom: 64 }}>
+      <div style={{ maxWidth: 1300, margin: "0 auto" }}>
+        <div style={{ textAlign: "center", marginBottom: 40 }}>
           <span style={{ background: "#dcfce7", color: GD, padding: "6px 16px", borderRadius: 100, fontSize: 13, fontWeight: 600 }}>Pricing</span>
           <h2 style={{ fontSize: "clamp(28px,3vw,44px)", fontWeight: 900, marginTop: 16, letterSpacing: "-1px" }}>
             Simple, <span style={{ color: G }}>Transparent</span> Pricing
           </h2>
-          <p style={{ color: "#999", fontSize: 16, marginTop: 12 }}>14-day free trial · Pay with UPI later · Cancel anytime</p>
+          <p style={{ color: "#999", fontSize: 16, marginTop: 12 }}>No hidden charges. Pay only for what you use. All plans include WhatsApp Business API.</p>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 24, maxWidth: 1080, margin: "0 auto" }}>
+
+        {/* Billing Toggle */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginBottom: 48 }}>
+          <span className={billing === "monthly" ? "active" : ""} style={{ fontSize: 14, fontWeight: 600, color: billing === "monthly" ? "#111" : "#999", cursor: "pointer" }} onClick={() => setBilling("monthly")}>Monthly</span>
+          <button className={`t-switch ${billing === "annual" ? "on" : ""}`} onClick={() => setBilling(b => b === "monthly" ? "annual" : "monthly")} aria-label="Toggle billing cycle">
+            <span className="t-thumb" />
+          </button>
+          <span style={{ fontSize: 14, fontWeight: 600, color: billing === "annual" ? "#111" : "#999", cursor: "pointer" }} onClick={() => setBilling("annual")}>
+            Annual <span className="save-tag">Save 20%</span>
+          </span>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 20, maxWidth: 1280, margin: "0 auto" }}>
           {plans.map(plan => (
             <div key={plan.name} className="pc" style={{
-              borderRadius: 24, padding: "44px 40px", position: "relative",
+              borderRadius: 24, padding: "36px 28px 28px", position: "relative",
             }}>
               {plan.popular && (
                 <div className="pop-badge" style={{ position: "absolute", top: -14, left: "50%", transform: "translateX(-50%)", background: G, color: "#fff", padding: "5px 20px", borderRadius: 100, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap", letterSpacing: "0.5px" }}>
                   MOST POPULAR
                 </div>
               )}
-              <h3 style={{ fontSize: 24, fontWeight: 700, marginBottom: 4, color: "inherit" }}>{plan.name}</h3>
-              <p className="pd" style={{ fontSize: 14, marginBottom: 28 }}>{plan.desc}</p>
-              <div style={{ marginBottom: 28 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                  <span className="po" style={{ fontSize: 16, textDecoration: "line-through" }}>₹{plan.oldPrice}</span>
-                  <span style={{ background: "#FEF2F2", color: "#DC2626", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 100 }}>
-                    {Math.round((1 - parseInt(plan.price.replace(",", "")) / parseInt(plan.oldPrice.replace(",", ""))) * 100)}% OFF
-                  </span>
-                </div>
+              <h3 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4, color: "inherit" }}>{plan.name}</h3>
+              <p className="pd" style={{ fontSize: 13, marginBottom: 24, lineHeight: 1.5 }}>{plan.desc}</p>
+
+              {/* Price */}
+              <div style={{ marginBottom: 24 }}>
+                {plan.oldPrice && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                    <span className="po" style={{ fontSize: 15, textDecoration: "line-through" }}>₹{plan.oldPrice}</span>
+                    <span style={{ background: "#FEF2F2", color: "#DC2626", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 100 }}>
+                      {Math.round((1 - parseInt(plan.price.replace(",", "")) / parseInt(plan.oldPrice.replace(",", ""))) * 100)}% OFF
+                    </span>
+                  </div>
+                )}
                 <span className="ps" style={{ fontSize: 15 }}>₹</span>
-                <span style={{ fontSize: 52, fontWeight: 900, letterSpacing: "-2px", color: "inherit" }}>{plan.price}</span>
-                <span className="ps" style={{ fontSize: 15 }}>{plan.period}</span>
+                <span style={{ fontSize: 44, fontWeight: 900, letterSpacing: "-2px", color: "inherit" }}>{getPrice(plan.price)}</span>
+                <span className="ps" style={{ fontSize: 14 }}> {plan.period}</span>
+                {billing === "annual" && plan.price !== "0" && (
+                  <div style={{ fontSize: 12, color: G, fontWeight: 600, marginTop: 4 }}>Billed annually</div>
+                )}
               </div>
+
               <Link href="/signup" className="pb" style={{
                 display: "block", textAlign: "center",
-                padding: "14px", borderRadius: 12,
+                padding: "13px", borderRadius: 12,
                 fontWeight: 700, fontSize: 15, textDecoration: "none",
               }}>
                 {plan.cta}
               </Link>
-              <hr className="sep" style={{ border: "none", borderTop: "1px solid", margin: "28px 0" }} />
-              <ul style={{ listStyle: "none", display: "flex", flexDirection: "column", gap: 14, padding: 0, margin: 0 }}>
+
+              {/* Caps */}
+              <hr className="sep" style={{ border: "none", borderTop: "1px solid", margin: "20px 0 16px" }} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+                {plan.caps.map(cap => (
+                  <div key={cap} className="cap-label" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12 }}>📊</span> {cap}
+                  </div>
+                ))}
+              </div>
+
+              {/* Features */}
+              <hr className="sep" style={{ border: "none", borderTop: "1px solid", margin: "0 0 16px" }} />
+              <ul style={{ listStyle: "none", display: "flex", flexDirection: "column", gap: 10, padding: 0, margin: 0 }}>
                 {plan.features.map(f => (
-                  <li key={f} className="pf" style={{ display: "flex", gap: 10, fontSize: 14, alignItems: "center" }}>
-                    <span style={{ color: G, fontWeight: 700, fontSize: 13 }}>✓</span>{f}
+                  <li key={f} className={f.startsWith("🔥") ? "pf pf-highlight" : "pf"} style={{ display: "flex", gap: 10, fontSize: 13, alignItems: "flex-start", lineHeight: 1.5 }}>
+                    <span style={{ color: G, fontWeight: 700, fontSize: 13, flexShrink: 0 }}>✓</span>{f}
                   </li>
                 ))}
               </ul>
+
+              {/* Voice Call Add-On */}
+              {plan.voiceCalls && (
+                <div className="voice-box">
+                  <div className="voice-title">📞 AI Voice Call Add-On</div>
+                  <div className="voice-detail">• {plan.voiceCalls.included} calls included free</div>
+                  <div className="voice-detail">• {plan.voiceCalls.addon}</div>
+                  <div className="voice-detail">• Top-up: {plan.voiceCalls.topup}</div>
+                </div>
+              )}
+
+              {/* Template Charges */}
+              <div className="tmpl-section">
+                <div className="tmpl-title">Per Template Message Charges</div>
+                <div className="tmpl-item"><span style={{ color: G, fontWeight: 700 }}>✓</span> Marketing: <strong>{plan.templateCharges.marketing}</strong></div>
+                <div className="tmpl-item"><span style={{ color: G, fontWeight: 700 }}>✓</span> Utility: <strong>{plan.templateCharges.utility}</strong></div>
+                <div className="tmpl-item"><span style={{ color: G, fontWeight: 700 }}>✓</span> Authentication: <strong>{plan.templateCharges.auth}</strong></div>
+                <div className="tmpl-item"><span style={{ color: G, fontWeight: 700 }}>✓</span> Service: <strong>{plan.templateCharges.service}</strong></div>
+              </div>
             </div>
+          ))}
+        </div>
+
+        {/* Trust strip */}
+        <div style={{ display: "flex", justifyContent: "center", gap: 32, flexWrap: "wrap", paddingTop: 48 }}>
+          {["🔒 Secure Payments", "📱 Cancel Anytime", "💬 14-Day Free Trial on Paid Plans", "🇮🇳 UPI, Cards & Net Banking"].map(t => (
+            <span key={t} style={{ fontSize: 13, color: "#999", fontWeight: 500 }}>{t}</span>
           ))}
         </div>
       </div>
@@ -522,9 +632,14 @@ function CTA() {
         <p style={{ color: "rgba(255,255,255,0.85)", fontSize: 18, marginBottom: 36 }}>
           Join hundreds of businesses already converting WhatsApp enquiries into revenue — automatically.
         </p>
-        <Link href="/signup" style={{ background: "#fff", color: G, padding: "18px 40px", borderRadius: 12, fontWeight: 800, fontSize: 17, textDecoration: "none", display: "inline-block", boxShadow: "0 8px 32px rgba(0,0,0,0.15)" }}>
-          Start Your Free Trial →
-        </Link>
+        <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
+          <Link href="/signup" className="btn-anim-white" style={{ background: "#fff", color: G, padding: "18px 40px", borderRadius: 12, fontWeight: 800, fontSize: 17, textDecoration: "none", display: "inline-block" }}>
+            Start Your Free Trial →
+          </Link>
+          <a href="#contact-us" className="btn-anim-white" style={{ background: "#fff", color: G, padding: "18px 40px", borderRadius: 12, fontWeight: 800, fontSize: 17, textDecoration: "none", display: "inline-block" }}>
+            Contact Us
+          </a>
+        </div>
         <p style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginTop: 16 }}>Pay with UPI later · Cancel anytime</p>
       </div>
     </section>
@@ -552,6 +667,34 @@ function Footer() {
 export default function LandingPage() {
   return (
     <div style={s.body}>
+      <style>{`
+        .btn-anim {
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+          box-shadow: 0 4px 12px rgba(37,211,102,0.2) !important;
+        }
+        .btn-anim:hover {
+          transform: translateY(-4px) scale(1.03) !important;
+          box-shadow: 0 16px 40px rgba(37, 211, 102, 0.45) !important;
+        }
+        .btn-anim-outline {
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        }
+        .btn-anim-outline:hover {
+          transform: translateY(-4px) scale(1.03) !important;
+          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.08) !important;
+          border-color: #25D366 !important;
+          color: #25D366 !important;
+        }
+        .btn-anim-white {
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.15) !important;
+        }
+        .btn-anim-white:hover {
+          transform: translateY(-4px) scale(1.03) !important;
+          box-shadow: 0 20px 48px rgba(0, 0, 0, 0.25) !important;
+          color: #128C7E !important;
+        }
+      `}</style>
       <Navbar />
       <Hero />
       <ShowcaseSection />

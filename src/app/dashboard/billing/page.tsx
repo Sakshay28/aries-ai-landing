@@ -23,92 +23,74 @@ export default function BillingPage() {
     });
   }, []);
 
+  const usagePct = tenant ? Math.min(100, (tenant.messages_used / tenant.message_limit) * 100) : 0;
+
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg-primary)" }}>
-      {/* Sidebar */}
-      <aside style={{ width: "260px", background: "var(--bg-secondary)", borderRight: "1px solid var(--border)", padding: "1.5rem 0", display: "flex", flexDirection: "column", position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 100 }}>
-        <div style={{ padding: "0 1.25rem", marginBottom: "2rem" }}>
-          <Link href="/" style={{ textDecoration: "none" }}>
-            <img src="/logo.png" alt="Aries AI" style={{ height: "36px" }} />
-          </Link>
-        </div>
-        <nav style={{ flex: 1 }}>
-          {[
-            { icon: "📊", label: "Dashboard", href: "/dashboard" },
-            { icon: "👥", label: "Leads", href: "/dashboard/leads" },
-            { icon: "💬", label: "Conversations", href: "/dashboard/conversations" },
-            { icon: "📢", label: "Broadcast", href: "/dashboard/broadcast" },
-            { icon: "🤖", label: "Bot Settings", href: "/dashboard/settings" },
-            { icon: "📱", label: "WhatsApp", href: "/dashboard/whatsapp" },
-            { icon: "📈", label: "Analytics", href: "/dashboard/analytics" },
-            { icon: "💳", label: "Billing", href: "/dashboard/billing", active: true },
-          ].map((item) => (
-            <Link key={item.label} href={item.href} style={{
-              display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 1.25rem",
-              color: item.active ? "var(--primary)" : "var(--text-secondary)", textDecoration: "none",
-              background: item.active ? "rgba(108, 92, 231, 0.1)" : "transparent",
-              borderRight: item.active ? "3px solid var(--primary)" : "3px solid transparent",
-              fontSize: "0.9rem", fontWeight: item.active ? 600 : 400,
-            }}>
-              <span style={{ fontSize: "1.1rem" }}>{item.icon}</span><span>{item.label}</span>
-            </Link>
-          ))}
-        </nav>
-      </aside>
-
-      <main style={{ flex: 1, marginLeft: "260px", padding: "2rem" }}>
-        <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: "1.5rem" }}>💳 Billing & Usage</h1>
-        <div className="glass-card" style={{ padding: "2rem", maxWidth: "800px" }}>
-          {loading ? (
-             <p>Loading billing info...</p>
-          ) : (
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2rem" }}>
-                <div>
-                  <h2 style={{ fontSize: "1.2rem", fontWeight: 700 }}>Current Plan: <span style={{ textTransform: "capitalize", color: "var(--primary)" }}>{tenant?.plan_type}</span></h2>
-                  <p style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>Status: <span style={{ color: "#00B894", fontWeight: 600 }}>{tenant?.plan_status}</span></p>
-                </div>
-                <button className="btn btn-primary" style={{ padding: "0.75rem 1.5rem", borderRadius: "8px", fontWeight: 600 }}>Upgrade Plan</button>
-              </div>
-
-              <div style={{ marginBottom: "2rem" }}>
-                <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "1rem" }}>Monthly Usage</h3>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-                  <span style={{ color: "var(--text-secondary)" }}>AI Messages</span>
-                  <span style={{ fontWeight: 600 }}>{tenant?.messages_used} / {tenant?.message_limit}</span>
-                </div>
-                <div style={{ width: "100%", height: "8px", background: "var(--bg-tertiary)", borderRadius: "4px", overflow: "hidden" }}>
-                  <div style={{ width: `${Math.min(100, (tenant?.messages_used / tenant?.message_limit) * 100)}%`, height: "100%", background: "var(--primary)", transition: "width 0.5s" }} />
-                </div>
-              </div>
-
-              <div>
-                <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "1rem" }}>Invoice History</h3>
-                <div style={{ border: "1px solid var(--border)", borderRadius: "8px" }}>
-                  {tenant?.invoices && tenant.invoices.length > 0 ? (
-                    tenant.invoices.map((inv: any) => (
-                      <div key={inv.id} style={{ padding: "1rem", display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border)" }}>
-                        <div>
-                          <div style={{ fontWeight: 600 }}>{tenant.plan_type} Plan</div>
-                          <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{new Date(inv.date).toLocaleDateString()}</div>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-                          <span style={{ fontWeight: 700 }}>₹{inv.amount}</span>
-                          <span style={{ padding: "0.25rem 0.5rem", background: "rgba(0,184,148,0.1)", color: "#00B894", borderRadius: "4px", fontSize: "0.75rem", fontWeight: 600, textTransform: "capitalize" }}>{inv.status}</span>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div style={{ padding: "1rem", textAlign: "center", color: "var(--text-muted)", fontSize: "0.85rem" }}>
-                      No invoices found.
-                    </div>
-                  )}
-                </div>
+    <>
+      {loading ? (
+        <div style={{ padding: "48px", textAlign: "center", color: "#9ca3af" }}>Loading billing info...</div>
+      ) : (
+        <>
+          {/* Plan Overview */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "24px" }}>
+            <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "28px" }}>
+              <div style={{ fontSize: "12px", fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: "8px" }}>Current Plan</div>
+              <div style={{ fontSize: "28px", fontWeight: 800, textTransform: "capitalize", color: "#111827", letterSpacing: "-0.5px" }}>{tenant?.plan_type}</div>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "4px 10px", borderRadius: "100px", fontSize: "12px", fontWeight: 600, background: "#f0fdf4", color: "#16a34a", marginTop: "8px" }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor" }} />
+                {tenant?.plan_status}
               </div>
             </div>
-          )}
-        </div>
-      </main>
-    </div>
+            <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "28px" }}>
+              <div style={{ fontSize: "12px", fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: "8px" }}>Monthly Usage</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "12px" }}>
+                <span style={{ fontSize: "28px", fontWeight: 800, color: "#111827", letterSpacing: "-0.5px" }}>{tenant?.messages_used?.toLocaleString()}</span>
+                <span style={{ fontSize: "14px", color: "#9ca3af" }}>/ {tenant?.message_limit?.toLocaleString()}</span>
+              </div>
+              <div style={{ width: "100%", height: "8px", background: "#f3f4f6", borderRadius: "100px", overflow: "hidden" }}>
+                <div style={{ width: `${usagePct}%`, height: "100%", background: usagePct > 80 ? "linear-gradient(90deg, #f59e0b, #dc2626)" : "linear-gradient(90deg, #25D366, #128C7E)", borderRadius: "100px", transition: "width 0.5s ease" }} />
+              </div>
+              <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "6px" }}>{Math.round(usagePct)}% used</div>
+            </div>
+          </div>
+
+          {/* Upgrade CTA */}
+          <div style={{ background: "linear-gradient(135deg, #f0fdf4, #dcfce7)", border: "1px solid #bbf7d0", borderRadius: "16px", padding: "28px", marginBottom: "24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#111827", marginBottom: "4px" }}>Need more messages or features?</h3>
+              <p style={{ fontSize: "14px", color: "#6b7280" }}>Upgrade your plan to unlock unlimited conversations and advanced AI.</p>
+            </div>
+            <Link href="/#pricing" style={{ padding: "12px 24px", background: "#25D366", color: "white", borderRadius: "10px", fontWeight: 700, fontSize: "14px", textDecoration: "none", whiteSpace: "nowrap", transition: "all 200ms" }}>
+              View Plans →
+            </Link>
+          </div>
+
+          {/* Invoice History */}
+          <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "16px", overflow: "hidden" }}>
+            <div style={{ padding: "20px 24px", borderBottom: "1px solid #f3f4f6" }}>
+              <h2 style={{ fontSize: "15px", fontWeight: 700 }}>Invoice History</h2>
+            </div>
+            {tenant?.invoices && tenant.invoices.length > 0 ? (
+              tenant.invoices.map((inv: any) => (
+                <div key={inv.id} style={{ padding: "16px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f3f4f6" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: "14px", textTransform: "capitalize" }}>{tenant.plan_type} Plan</div>
+                    <div style={{ fontSize: "13px", color: "#9ca3af", marginTop: "2px" }}>{new Date(inv.date).toLocaleDateString()}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <span style={{ fontWeight: 800, fontSize: "15px" }}>₹{inv.amount}</span>
+                    <span style={{ padding: "4px 10px", background: "#f0fdf4", color: "#16a34a", borderRadius: "100px", fontSize: "12px", fontWeight: 600, textTransform: "capitalize" }}>{inv.status}</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div style={{ padding: "48px 24px", textAlign: "center", color: "#9ca3af", fontSize: "14px" }}>
+                No invoices found yet.
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </>
   );
 }

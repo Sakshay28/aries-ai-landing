@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
+
 
 // ═══════════════════════════════════════
 // 🤖 Bot Settings — Now saves to Supabase!
@@ -169,75 +169,36 @@ export default function BotSettingsPage() {
     { id: "test", label: "Test Bot", icon: "🧪" },
   ];
 
-  const inputStyle = { width: "100%", padding: "0.7rem 1rem", background: "var(--bg-tertiary)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--text-primary)", fontSize: "0.9rem" };
-  const labelStyle = { display: "block" as const, color: "var(--text-secondary)", fontSize: "0.85rem", marginBottom: "0.5rem", fontWeight: 600 };
+  const inputStyle = { width: "100%", padding: "0.7rem 1rem", background: "#fafbfc", border: "1px solid #e5e7eb", borderRadius: "8px", color: "#111827", fontSize: "0.9rem" };
+  const labelStyle = { display: "block" as const, color: "#6b7280", fontSize: "0.85rem", marginBottom: "0.5rem", fontWeight: 600 };
 
   if (loading) {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-primary)", color: "var(--text-muted)" }}>
-        ⏳ Loading settings...
-      </div>
-    );
+    return <div style={{ padding: "48px", textAlign: "center", color: "#9ca3af" }}>⏳ Loading settings...</div>;
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg-primary)" }}>
-      {/* Sidebar */}
-      <aside style={{
-        width: "260px", background: "var(--bg-secondary)", borderRight: "1px solid var(--border)",
-        padding: "1.5rem 0", display: "flex", flexDirection: "column", position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 100,
-      }}>
-        <div style={{ padding: "0 1.25rem", marginBottom: "2rem" }}>
-          <Link href="/" style={{ textDecoration: "none" }}>
-            <img src="/logo.png" alt="Aries AI" style={{ height: "36px" }} />
-          </Link>
-        </div>
-        <nav style={{ flex: 1 }}>
-          {[
-            { icon: "📊", label: "Dashboard", href: "/dashboard" },
-            { icon: "🤖", label: "Bot Settings", href: "/dashboard/settings", active: true },
-            { icon: "📱", label: "WhatsApp", href: "/dashboard/whatsapp" },
-            { icon: "📢", label: "Broadcast", href: "/dashboard/broadcast" },
-          ].map((item) => (
-            <Link key={item.label} href={item.href} style={{
-              display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 1.25rem",
-              color: item.active ? "var(--primary)" : "var(--text-secondary)", textDecoration: "none",
-              background: item.active ? "rgba(108, 92, 231, 0.1)" : "transparent",
-              borderRight: item.active ? "3px solid var(--primary)" : "3px solid transparent",
-              fontSize: "0.9rem", fontWeight: item.active ? 600 : 400,
-            }}>
-              <span style={{ fontSize: "1.1rem" }}>{item.icon}</span><span>{item.label}</span>
-            </Link>
-          ))}
-        </nav>
-      </aside>
+    <>
+      {/* Save Button Bar */}
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "12px", marginBottom: "20px" }}>
+        {error && <span style={{ color: "#dc2626", fontSize: "13px" }}>❌ {error}</span>}
+        <button onClick={handleSave} disabled={saving} style={{
+          padding: "10px 24px", background: saved ? "#16a34a" : "#25D366", border: "none", borderRadius: "10px",
+          color: "white", fontWeight: 700, cursor: saving ? "wait" : "pointer", transition: "all 200ms", opacity: saving ? 0.7 : 1,
+          fontFamily: "inherit", fontSize: "14px", boxShadow: "0 4px 14px rgba(37,211,102,0.25)",
+        }}>
+          {saving ? "⏳ Saving..." : saved ? "✅ Saved!" : "💾 Save Changes"}
+        </button>
+      </div>
 
-      <main style={{ flex: 1, marginLeft: "260px" }}>
-        <header style={{ padding: "1rem 2rem", background: "var(--bg-secondary)", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 50 }}>
-          <div>
-            <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>🤖 Bot Settings</h1>
-            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>Configure your AI assistant&apos;s behavior. Changes save to your account.</p>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-            {error && <span style={{ color: "#E17055", fontSize: "0.8rem" }}>❌ {error}</span>}
-            <button onClick={handleSave} disabled={saving} style={{
-              padding: "0.6rem 1.5rem", background: saved ? "#00B894" : "var(--gradient-primary)", border: "none", borderRadius: "8px",
-              color: "white", fontWeight: 600, cursor: saving ? "wait" : "pointer", transition: "all 0.3s ease", opacity: saving ? 0.7 : 1,
-            }}>
-              {saving ? "⏳ Saving..." : saved ? "✅ Saved!" : "💾 Save Changes"}
-            </button>
-          </div>
-        </header>
-
-        <div style={{ padding: "2rem", display: "flex", gap: "2rem" }}>
+      <div style={{ display: "flex", gap: "24px" }}>
           {/* Settings Navigation */}
           <div style={{ width: "200px", flexShrink: 0 }}>
             {sections.map((s) => (
               <button key={s.id} onClick={() => setActiveSection(s.id)} style={{
                 display: "flex", alignItems: "center", gap: "0.5rem", width: "100%", padding: "0.6rem 1rem",
                 border: "none", borderRadius: "8px", marginBottom: "0.25rem", cursor: "pointer", fontSize: "0.85rem",
-                background: activeSection === s.id ? "rgba(108, 92, 231, 0.15)" : "transparent",
-                color: activeSection === s.id ? "var(--primary)" : "var(--text-secondary)", fontWeight: activeSection === s.id ? 600 : 400,
+                background: activeSection === s.id ? "#f0fdf4" : "transparent",
+                color: activeSection === s.id ? "#128C7E" : "#6b7280", fontWeight: activeSection === s.id ? 600 : 400,
               }}>
                 <span>{s.icon}</span><span>{s.label}</span>
               </button>
@@ -247,7 +208,7 @@ export default function BotSettingsPage() {
           {/* Settings Content */}
           <div style={{ flex: 1, maxWidth: "700px" }}>
             {activeSection === "general" && (
-              <div className="glass-card" style={{ padding: "2rem" }}>
+              <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "28px" }}>
                 <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "1.5rem" }}>⚙️ General Settings</h2>
                 <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
                   <div>
@@ -269,7 +230,7 @@ export default function BotSettingsPage() {
                   <div>
                     <label style={labelStyle}>Welcome Message</label>
                     <textarea value={config.welcome_message || ""} onChange={(e) => updateConfig("welcome_message", e.target.value)} rows={3} style={{ ...inputStyle, resize: "vertical" as const }} />
-                    <p style={{ color: "var(--text-muted)", fontSize: "0.75rem", marginTop: "0.25rem" }}>Variables: {"{business_name}"}, {"{customer_name}"}</p>
+                    <p style={{ color: "#9ca3af", fontSize: "0.75rem", marginTop: "0.25rem" }}>Variables: {"{business_name}"}, {"{customer_name}"}</p>
                   </div>
                   <div>
                     <label style={labelStyle}>Welcome Offer (optional)</label>
@@ -288,18 +249,18 @@ export default function BotSettingsPage() {
             )}
 
             {activeSection === "personality" && (
-              <div className="glass-card" style={{ padding: "2rem" }}>
+              <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "28px" }}>
                 <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "1.5rem" }}>🧠 AI Personality</h2>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1.5rem" }}>
                   {PERSONALITY_OPTIONS.map((p) => (
                     <button key={p.value} onClick={() => updateConfig("bot_personality", p.value)} style={{
-                      padding: "1.25rem", border: config.bot_personality === p.value ? "2px solid var(--primary)" : "1px solid var(--border)",
-                      borderRadius: "12px", background: config.bot_personality === p.value ? "rgba(108, 92, 231, 0.1)" : "var(--bg-tertiary)",
+                      padding: "1.25rem", border: config.bot_personality === p.value ? "2px solid #25D366" : "1px solid #e5e7eb",
+                      borderRadius: "12px", background: config.bot_personality === p.value ? "rgba(108, 92, 231, 0.1)" : "#fafbfc",
                       cursor: "pointer", textAlign: "left",
                     }}>
                       <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>{p.icon}</div>
-                      <div style={{ fontWeight: 700, fontSize: "0.95rem", marginBottom: "0.25rem", color: "var(--text-primary)" }}>{p.label}</div>
-                      <div style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{p.desc}</div>
+                      <div style={{ fontWeight: 700, fontSize: "0.95rem", marginBottom: "0.25rem", color: "#111827" }}>{p.label}</div>
+                      <div style={{ color: "#9ca3af", fontSize: "0.8rem" }}>{p.desc}</div>
                     </button>
                   ))}
                 </div>
@@ -307,12 +268,12 @@ export default function BotSettingsPage() {
             )}
 
             {activeSection === "hours" && (
-              <div className="glass-card" style={{ padding: "2rem" }}>
+              <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "28px" }}>
                 <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "1.5rem" }}>🕐 Working Hours</h2>
                 <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginBottom: "1.5rem" }}>
                   {Object.entries(config.working_hours || {}).map(([day, hours]) => (
                     <div key={day} style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-                      <span style={{ width: "100px", color: "var(--text-secondary)", fontSize: "0.85rem", fontWeight: 600, textTransform: "capitalize" }}>{day}</span>
+                      <span style={{ width: "100px", color: "#6b7280", fontSize: "0.85rem", fontWeight: 600, textTransform: "capitalize" }}>{day}</span>
                       <input type="text" value={hours} onChange={(e) => {
                         const newHours = { ...config.working_hours, [day]: e.target.value };
                         updateConfig("working_hours", newHours);
@@ -323,34 +284,34 @@ export default function BotSettingsPage() {
                 <div>
                   <label style={labelStyle}>Off-Hours Message</label>
                   <textarea value={config.off_hours_message || ""} onChange={(e) => updateConfig("off_hours_message", e.target.value)} rows={3} style={{ ...inputStyle, resize: "vertical" as const }} />
-                  <p style={{ color: "var(--text-muted)", fontSize: "0.75rem", marginTop: "0.25rem" }}>Sent when a customer messages outside working hours.</p>
+                  <p style={{ color: "#9ca3af", fontSize: "0.75rem", marginTop: "0.25rem" }}>Sent when a customer messages outside working hours.</p>
                 </div>
               </div>
             )}
 
             {activeSection === "faqs" && (
-              <div className="glass-card" style={{ padding: "2rem" }}>
+              <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "28px" }}>
                 <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "0.5rem" }}>❓ Custom FAQs</h2>
-                <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: "1.5rem" }}>Add Q&A pairs that your bot will use to answer common questions.</p>
+                <p style={{ color: "#9ca3af", fontSize: "0.85rem", marginBottom: "1.5rem" }}>Add Q&A pairs that your bot will use to answer common questions.</p>
                 
                 {config.custom_faqs.map((faq, i) => (
-                  <div key={i} style={{ padding: "1rem", background: "var(--bg-tertiary)", borderRadius: "8px", marginBottom: "0.75rem", position: "relative" }}>
+                  <div key={i} style={{ padding: "1rem", background: "#fafbfc", borderRadius: "8px", marginBottom: "0.75rem", position: "relative" }}>
                     <button onClick={() => removeFaq(i)} style={{ position: "absolute", top: "0.5rem", right: "0.5rem", background: "none", border: "none", color: "#E17055", cursor: "pointer", fontSize: "1rem" }}>✕</button>
                     <p style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: "0.25rem" }}>Q: {faq.question}</p>
-                    <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>A: {faq.answer}</p>
+                    <p style={{ color: "#6b7280", fontSize: "0.85rem" }}>A: {faq.answer}</p>
                   </div>
                 ))}
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "1rem", padding: "1rem", border: "1px dashed var(--border)", borderRadius: "8px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "1rem", padding: "1rem", border: "1px dashed #e5e7eb", borderRadius: "8px" }}>
                   <input type="text" value={newFaqQ} onChange={(e) => setNewFaqQ(e.target.value)} placeholder="Question (e.g., What's your parking situation?)" style={inputStyle} />
                   <textarea value={newFaqA} onChange={(e) => setNewFaqA(e.target.value)} placeholder="Answer (e.g., Free valet parking for all guests!)" rows={2} style={{ ...inputStyle, resize: "vertical" as const }} />
-                  <button onClick={addFaq} style={{ alignSelf: "flex-start", padding: "0.5rem 1.25rem", background: "var(--gradient-primary)", border: "none", borderRadius: "6px", color: "white", fontWeight: 600, cursor: "pointer", fontSize: "0.85rem" }}>+ Add FAQ</button>
+                  <button onClick={addFaq} style={{ alignSelf: "flex-start", padding: "0.5rem 1.25rem", background: "#25D366", border: "none", borderRadius: "6px", color: "white", fontWeight: 600, cursor: "pointer", fontSize: "0.85rem" }}>+ Add FAQ</button>
                 </div>
               </div>
             )}
 
             {activeSection === "followups" && (
-              <div className="glass-card" style={{ padding: "2rem" }}>
+              <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "28px" }}>
                 <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "1.5rem" }}>📤 Follow-up Settings</h2>
                 {[
                   { key: "followup_30min" as keyof BotConfig, label: "30-Minute Follow-up", desc: "Confirm booking status" },
@@ -358,14 +319,14 @@ export default function BotSettingsPage() {
                   { key: "followup_24hr" as keyof BotConfig, label: "24-Hour Follow-up", desc: "Create urgency with special offers" },
                   { key: "followup_7day" as keyof BotConfig, label: "7-Day Follow-up", desc: "Re-engage cold leads" },
                 ].map((item) => (
-                  <div key={item.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "1rem", borderBottom: "1px solid var(--border)" }}>
+                  <div key={item.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "1rem", borderBottom: "1px solid #e5e7eb" }}>
                     <div>
                       <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>{item.label}</span>
-                      <p style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{item.desc}</p>
+                      <p style={{ color: "#9ca3af", fontSize: "0.8rem" }}>{item.desc}</p>
                     </div>
                     <button onClick={() => updateConfig(item.key, !config[item.key])} style={{
                       width: "48px", height: "26px", borderRadius: "13px", border: "none", cursor: "pointer",
-                      background: config[item.key] ? "var(--primary)" : "var(--bg-secondary)", position: "relative", transition: "background 0.3s",
+                      background: config[item.key] ? "#25D366" : "#f3f4f6", position: "relative", transition: "background 0.3s",
                     }}>
                       <span style={{ position: "absolute", width: "20px", height: "20px", borderRadius: "50%", background: "white", top: "3px", left: config[item.key] ? "25px" : "3px", transition: "left 0.3s" }} />
                     </button>
@@ -374,13 +335,13 @@ export default function BotSettingsPage() {
                 <div style={{ marginTop: "1.5rem" }}>
                   <label style={labelStyle}>Escalation Timeout (minutes)</label>
                   <input type="number" value={config.escalation_timeout_mins} onChange={(e) => updateConfig("escalation_timeout_mins", parseInt(e.target.value) || 30)} min={5} max={120} style={{ ...inputStyle, width: "200px" }} />
-                  <p style={{ color: "var(--text-muted)", fontSize: "0.75rem", marginTop: "0.25rem" }}>Alert staff if bot can&apos;t resolve within this time</p>
+                  <p style={{ color: "#9ca3af", fontSize: "0.75rem", marginTop: "0.25rem" }}>Alert staff if bot can&apos;t resolve within this time</p>
                 </div>
               </div>
             )}
 
             {activeSection === "escalation" && (
-              <div className="glass-card" style={{ padding: "2rem" }}>
+              <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "28px" }}>
                 <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "1.5rem" }}>🚨 Escalation & Staff</h2>
                 <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
                   <div>
@@ -390,7 +351,7 @@ export default function BotSettingsPage() {
                   <div>
                     <label style={labelStyle}>Staff Alert Phone</label>
                     <input type="tel" value={config.staff_phone || ""} onChange={(e) => updateConfig("staff_phone", e.target.value)} style={inputStyle} placeholder="+91 98765 43210" />
-                    <p style={{ color: "var(--text-muted)", fontSize: "0.75rem", marginTop: "0.25rem" }}>Receives WhatsApp alerts for escalations and new bookings.</p>
+                    <p style={{ color: "#9ca3af", fontSize: "0.75rem", marginTop: "0.25rem" }}>Receives WhatsApp alerts for escalations and new bookings.</p>
                   </div>
                   <div>
                     <label style={labelStyle}>Manager Phone (optional)</label>
@@ -401,7 +362,7 @@ export default function BotSettingsPage() {
             )}
 
             {activeSection === "features" && (
-              <div className="glass-card" style={{ padding: "2rem" }}>
+              <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "28px" }}>
                 <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "1.5rem" }}>🔧 Advanced</h2>
                 <div style={{ marginBottom: "1.5rem" }}>
                   <label style={labelStyle}>USPs (one per line)</label>
@@ -419,34 +380,33 @@ export default function BotSettingsPage() {
             )}
 
             {activeSection === "test" && (
-              <div className="glass-card" style={{ padding: "2rem" }}>
+              <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "28px" }}>
                 <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "1.5rem" }}>🧪 Test Your Bot</h2>
-                <div style={{ background: "var(--bg-tertiary)", borderRadius: "12px", padding: "1.5rem", minHeight: "300px", display: "flex", flexDirection: "column" }}>
+                <div style={{ background: "#fafbfc", borderRadius: "12px", padding: "1.5rem", minHeight: "300px", display: "flex", flexDirection: "column" }}>
                   <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "1rem" }}>
                     {testMessage && (
-                      <div style={{ alignSelf: "flex-end", maxWidth: "70%", padding: "0.75rem 1rem", background: "var(--primary)", borderRadius: "12px 12px 4px 12px", fontSize: "0.9rem", color: "white" }}>
+                      <div style={{ alignSelf: "flex-end", maxWidth: "70%", padding: "0.75rem 1rem", background: "#25D366", borderRadius: "12px 12px 4px 12px", fontSize: "0.9rem", color: "white" }}>
                         {testMessage}
                       </div>
                     )}
                     {testResponse && (
-                      <div style={{ alignSelf: "flex-start", maxWidth: "70%", padding: "0.75rem 1rem", background: "var(--bg-secondary)", borderRadius: "12px 12px 12px 4px", fontSize: "0.9rem" }}>
+                      <div style={{ alignSelf: "flex-start", maxWidth: "70%", padding: "0.75rem 1rem", background: "#f3f4f6", borderRadius: "12px 12px 12px 4px", fontSize: "0.9rem" }}>
                         {testResponse}
                       </div>
                     )}
                     {!testMessage && !testResponse && (
-                      <p style={{ color: "var(--text-muted)", textAlign: "center", marginTop: "3rem" }}>Send a test message to preview your bot&apos;s response.</p>
+                      <p style={{ color: "#9ca3af", textAlign: "center", marginTop: "3rem" }}>Send a test message to preview your bot&apos;s response.</p>
                     )}
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem" }}>
                     <input type="text" value={testMessage} onChange={(e) => setTestMessage(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleTest(); }} placeholder="Type a test message..." style={{ ...inputStyle, flex: 1 }} />
-                    <button onClick={handleTest} style={{ padding: "0.6rem 1.5rem", background: "var(--gradient-primary)", border: "none", borderRadius: "8px", color: "white", fontWeight: 600, cursor: "pointer" }}>Send</button>
+                    <button onClick={handleTest} style={{ padding: "0.6rem 1.5rem", background: "#25D366", border: "none", borderRadius: "8px", color: "white", fontWeight: 600, cursor: "pointer" }}>Send</button>
                   </div>
                 </div>
               </div>
             )}
           </div>
         </div>
-      </main>
-    </div>
+    </>
   );
 }

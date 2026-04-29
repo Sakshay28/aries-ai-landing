@@ -6,6 +6,7 @@ import Link from "next/link";
 export default function LeadsPage() {
   const [leads, setLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("all");
 
   useEffect(() => {
     fetch("/api/dashboard/leads?limit=100")
@@ -16,72 +17,93 @@ export default function LeadsPage() {
       });
   }, []);
 
-  return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg-primary)" }}>
-      {/* Sidebar */}
-      <aside style={{ width: "260px", background: "var(--bg-secondary)", borderRight: "1px solid var(--border)", padding: "1.5rem 0", display: "flex", flexDirection: "column", position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 100 }}>
-        <div style={{ padding: "0 1.25rem", marginBottom: "2rem" }}>
-          <Link href="/" style={{ textDecoration: "none" }}>
-            <img src="/logo.png" alt="Aries AI" style={{ height: "36px" }} />
-          </Link>
-        </div>
-        <nav style={{ flex: 1 }}>
-          {[
-            { icon: "📊", label: "Dashboard", href: "/dashboard" },
-            { icon: "👥", label: "Leads", href: "/dashboard/leads", active: true },
-            { icon: "💬", label: "Conversations", href: "/dashboard/conversations" },
-            { icon: "📢", label: "Broadcast", href: "/dashboard/broadcast" },
-            { icon: "🤖", label: "Bot Settings", href: "/dashboard/settings" },
-            { icon: "📱", label: "WhatsApp", href: "/dashboard/whatsapp" },
-            { icon: "📈", label: "Analytics", href: "/dashboard/analytics" },
-            { icon: "💳", label: "Billing", href: "/dashboard/billing" },
-          ].map((item) => (
-            <Link key={item.label} href={item.href} style={{
-              display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 1.25rem",
-              color: item.active ? "var(--primary)" : "var(--text-secondary)", textDecoration: "none",
-              background: item.active ? "rgba(108, 92, 231, 0.1)" : "transparent",
-              borderRight: item.active ? "3px solid var(--primary)" : "3px solid transparent",
-              fontSize: "0.9rem", fontWeight: item.active ? 600 : 400,
-            }}>
-              <span style={{ fontSize: "1.1rem" }}>{item.icon}</span><span>{item.label}</span>
-            </Link>
-          ))}
-        </nav>
-      </aside>
+  const filtered = filter === "all" ? leads : leads.filter(l => l.lead_status === filter);
 
-      <main style={{ flex: 1, marginLeft: "260px", padding: "2rem" }}>
-        <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: "1.5rem" }}>👥 All Leads</h1>
-        <div className="glass-card" style={{ padding: "1.5rem" }}>
-          {loading ? (
-             <p>Loading leads...</p>
-          ) : leads.length === 0 ? (
-             <p style={{ color: "var(--text-muted)" }}>No leads captured yet.</p>
-          ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  {["Name", "Phone", "Status", "Score", "Channel"].map((h) => (
-                    <th key={h} style={{ textAlign: "left", padding: "0.75rem", color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {leads.map((lead) => (
-                  <tr key={lead.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                    <td style={{ padding: "0.75rem", fontWeight: 600, fontSize: "0.9rem" }}>{lead.name || "Unknown"}</td>
-                    <td style={{ padding: "0.75rem", color: "var(--text-muted)", fontSize: "0.85rem" }}>{lead.phone}</td>
-                    <td style={{ padding: "0.75rem" }}>
-                      <span style={{ padding: "0.25rem 0.75rem", borderRadius: "12px", fontSize: "0.75rem", fontWeight: 600, background: "rgba(108, 92, 231, 0.1)", color: "#6C5CE7" }}>{lead.lead_status}</span>
-                    </td>
-                    <td style={{ padding: "0.75rem", fontWeight: 700 }}>{lead.lead_score}</td>
-                    <td style={{ padding: "0.75rem", color: "var(--text-muted)", fontSize: "0.85rem" }}>{lead.channel}</td>
-                  </tr>
+  const getStatusColor = (status: string) => {
+    const m: Record<string, { bg: string; color: string }> = {
+      new: { bg: "#ede9fe", color: "#7c3aed" },
+      hot: { bg: "#fff7ed", color: "#ea580c" },
+      warm: { bg: "#fffbeb", color: "#d97706" },
+      cold: { bg: "#f3f4f6", color: "#6b7280" },
+      converted: { bg: "#f0fdf4", color: "#16a34a" },
+      lost: { bg: "#fef2f2", color: "#dc2626" },
+    };
+    return m[status] || { bg: "#f3f4f6", color: "#6b7280" };
+  };
+
+  const getScoreColor = (score: number) => {
+    if (score >= 80) return "#16a34a";
+    if (score >= 50) return "#d97706";
+    return "#dc2626";
+  };
+
+  return (
+    <>
+      {/* Filter Bar */}
+      <div style={{ display: "flex", gap: "8px", marginBottom: "24px", flexWrap: "wrap" }}>
+        {["all", "new", "hot", "warm", "cold", "converted"].map((f) => (
+          <button key={f} onClick={() => setFilter(f)} style={{
+            padding: "8px 18px",
+            border: "1px solid",
+            borderColor: filter === f ? "#25D366" : "#e5e7eb",
+            borderRadius: "100px",
+            background: filter === f ? "#f0fdf4" : "white",
+            color: filter === f ? "#128C7E" : "#6b7280",
+            cursor: "pointer",
+            fontSize: "13px",
+            fontWeight: filter === f ? 700 : 500,
+            textTransform: "capitalize",
+            transition: "all 200ms ease",
+            fontFamily: "inherit",
+          }}>{f === "all" ? `All (${leads.length})` : f}</button>
+        ))}
+      </div>
+
+      {/* Leads Table */}
+      <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "16px", overflow: "hidden" }}>
+        {loading ? (
+          <div style={{ padding: "48px", textAlign: "center", color: "#9ca3af" }}>Loading leads...</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: "48px", textAlign: "center", color: "#9ca3af" }}>
+            <div style={{ fontSize: "32px", marginBottom: "8px", opacity: 0.5 }}>📭</div>
+            No leads {filter !== "all" ? `with status "${filter}"` : "captured yet"}.
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                {["Name", "Phone", "Status", "Score", "Channel", "Activity"].map((h) => (
+                  <th key={h} style={{ textAlign: "left", padding: "14px 16px", color: "#9ca3af", fontSize: "11px", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.8px", borderBottom: "1px solid #f3f4f6", background: "#fafbfc" }}>{h}</th>
                 ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </main>
-    </div>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((lead) => {
+                const sc = getStatusColor(lead.lead_status);
+                return (
+                  <tr key={lead.id} style={{ borderBottom: "1px solid #f3f4f6", transition: "background 200ms" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "#fafbfc"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <td style={{ padding: "14px 16px", fontWeight: 600, fontSize: "14px" }}>{lead.name || "Unknown"}</td>
+                    <td style={{ padding: "14px 16px", color: "#9ca3af", fontSize: "13px" }}>{lead.phone}</td>
+                    <td style={{ padding: "14px 16px" }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "4px 10px", borderRadius: "100px", fontSize: "12px", fontWeight: 600, background: sc.bg, color: sc.color, textTransform: "capitalize" }}>
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor" }} />
+                        {lead.lead_status}
+                      </span>
+                    </td>
+                    <td style={{ padding: "14px 16px", fontWeight: 800, fontSize: "14px", color: getScoreColor(lead.lead_score) }}>{lead.lead_score}</td>
+                    <td style={{ padding: "14px 16px", color: "#9ca3af", fontSize: "13px", textTransform: "capitalize" }}>{lead.channel}</td>
+                    <td style={{ padding: "14px 16px", color: "#9ca3af", fontSize: "13px" }}>
+                      {new Date(lead.last_message_at).toLocaleDateString()}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
   );
 }

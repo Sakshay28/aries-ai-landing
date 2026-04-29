@@ -64,12 +64,12 @@ export default function LandingPage() {
   const { progress, inRange, spacerRef } = useScrollytelling();
 
   const scenes = useMemo(() => ({
-    hero:     { opacity: getSceneOpacity(progress, 0), progress: getSceneProgress(progress, 0) },
+    hero: { opacity: getSceneOpacity(progress, 0), progress: getSceneProgress(progress, 0) },
     incoming: { opacity: getSceneOpacity(progress, 1), progress: getSceneProgress(progress, 1) },
-    ai:       { opacity: getSceneOpacity(progress, 2), progress: getSceneProgress(progress, 2) },
+    ai: { opacity: getSceneOpacity(progress, 2), progress: getSceneProgress(progress, 2) },
     workflow: { opacity: getSceneOpacity(progress, 3), progress: getSceneProgress(progress, 3) },
-    revenue:  { opacity: getSceneOpacity(progress, 4), progress: getSceneProgress(progress, 4) },
-    cta:      { opacity: getSceneOpacity(progress, 5), progress: getSceneProgress(progress, 5) },
+    revenue: { opacity: getSceneOpacity(progress, 4), progress: getSceneProgress(progress, 4) },
+    cta: { opacity: getSceneOpacity(progress, 5), progress: getSceneProgress(progress, 5) },
   }), [progress]);
 
   const activePhase = Math.min(5, Math.floor(progress * 6));

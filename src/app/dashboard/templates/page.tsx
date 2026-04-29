@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
 
 const PREBUILT_TEMPLATES = [
   { name: "restaurant_reservation_confirm", category: "UTILITY", text: "Hi {{1}}, your table for {{2}} at {{3}} is confirmed. We look forward to hosting you! 🍽️" },
@@ -33,11 +32,7 @@ export default function TemplatesPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch("/api/dashboard/templates", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newTemplate)
-    });
+    const res = await fetch("/api/dashboard/templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newTemplate) });
     const data = await res.json();
     if (data.success) {
       setTemplates([...templates, data.data]);
@@ -51,128 +46,103 @@ export default function TemplatesPage() {
     setShowModal(true);
   };
 
+  const inputStyle = { width: "100%", padding: "12px 14px", background: "#fafbfc", border: "1px solid #e5e7eb", borderRadius: "10px", fontSize: "14px", color: "#111827", fontFamily: "inherit" as const, outline: "none" };
+
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg-primary)" }}>
-      {/* Sidebar */}
-      <aside style={{ width: "260px", background: "var(--bg-secondary)", borderRight: "1px solid var(--border)", padding: "1.5rem 0", display: "flex", flexDirection: "column", position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 100 }}>
-        <div style={{ padding: "0 1.25rem", marginBottom: "2rem" }}>
-          <Link href="/" style={{ textDecoration: "none" }}>
-            <img src="/logo.png" alt="Aries AI" style={{ height: "36px" }} />
-          </Link>
-        </div>
-        <nav style={{ flex: 1 }}>
-          {[
-            { icon: "📊", label: "Dashboard", href: "/dashboard" },
-            { icon: "👥", label: "Leads", href: "/dashboard/leads" },
-            { icon: "💬", label: "Conversations", href: "/dashboard/conversations" },
-            { icon: "📢", label: "Broadcast", href: "/dashboard/broadcast" },
-            { icon: "📝", label: "Templates", href: "/dashboard/templates", active: true },
-            { icon: "🤖", label: "Bot Settings", href: "/dashboard/settings" },
-            { icon: "📱", label: "WhatsApp", href: "/dashboard/whatsapp" },
-            { icon: "📈", label: "Analytics", href: "/dashboard/analytics" },
-            { icon: "💳", label: "Billing", href: "/dashboard/billing" },
-          ].map((item) => (
-            <Link key={item.label} href={item.href} style={{
-              display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 1.25rem",
-              color: item.active ? "var(--primary)" : "var(--text-secondary)", textDecoration: "none",
-              background: item.active ? "rgba(108, 92, 231, 0.1)" : "transparent",
-              borderRight: item.active ? "3px solid var(--primary)" : "3px solid transparent",
-              fontSize: "0.9rem", fontWeight: item.active ? 600 : 400,
-            }}>
-              <span style={{ fontSize: "1.1rem" }}>{item.icon}</span><span>{item.label}</span>
-            </Link>
-          ))}
-        </nav>
-      </aside>
+    <>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "20px" }}>
+        <button onClick={() => setShowModal(true)} style={{ padding: "10px 20px", background: "#25D366", color: "white", border: "none", borderRadius: "10px", fontWeight: 700, cursor: "pointer", fontSize: "14px", fontFamily: "inherit", boxShadow: "0 4px 14px rgba(37,211,102,0.25)", transition: "all 200ms" }}>
+          + Create Template
+        </button>
+      </div>
 
-      <main style={{ flex: 1, marginLeft: "260px", padding: "2rem" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
-          <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>📝 Template Manager</h1>
-          <button onClick={() => setShowModal(true)} style={{ padding: "0.6rem 1.2rem", background: "var(--primary)", color: "white", border: "none", borderRadius: "8px", fontWeight: 600, cursor: "pointer" }}>
-            + Create Template
-          </button>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: "2rem" }}>
-          
-          <div className="glass-card" style={{ padding: "1.5rem" }}>
-            <h2 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "1.5rem" }}>My WhatsApp Templates</h2>
-            {loading ? <p>Loading templates from Meta...</p> : (
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr>
-                    {["Template Name", "Category", "Status", "Reason"].map((h) => (
-                      <th key={h} style={{ textAlign: "left", padding: "0.75rem", color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {templates.map((t) => (
-                    <tr key={t.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                      <td style={{ padding: "1rem 0.75rem", fontWeight: 600, fontSize: "0.9rem" }}>{t.name}</td>
-                      <td style={{ padding: "1rem 0.75rem", color: "var(--text-secondary)", fontSize: "0.85rem" }}>{t.category}</td>
-                      <td style={{ padding: "1rem 0.75rem" }}>
-                        <span style={{ 
-                          padding: "0.25rem 0.75rem", borderRadius: "12px", fontSize: "0.75rem", fontWeight: 600, 
-                          background: t.status === 'APPROVED' ? 'rgba(0,184,148,0.1)' : t.status === 'REJECTED' ? 'rgba(225,112,85,0.1)' : 'rgba(253,203,110,0.1)',
-                          color: t.status === 'APPROVED' ? '#00B894' : t.status === 'REJECTED' ? '#E17055' : '#FDCB6E'
-                        }}>{t.status}</span>
-                      </td>
-                      <td style={{ padding: "1rem 0.75rem", color: "#E17055", fontSize: "0.8rem", maxWidth: "200px" }}>{t.rejection_reason || "—"}</td>
-                    </tr>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "20px" }}>
+        {/* My Templates */}
+        <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "16px", overflow: "hidden" }}>
+          <div style={{ padding: "20px 24px", borderBottom: "1px solid #f3f4f6" }}>
+            <h2 style={{ fontSize: "15px", fontWeight: 700 }}>My WhatsApp Templates</h2>
+          </div>
+          {loading ? (
+            <div style={{ padding: "48px", textAlign: "center", color: "#9ca3af" }}>Loading templates from Meta...</div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  {["Template Name", "Category", "Status", "Reason"].map((h) => (
+                    <th key={h} style={{ textAlign: "left", padding: "14px 16px", color: "#9ca3af", fontSize: "11px", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.8px", borderBottom: "1px solid #f3f4f6", background: "#fafbfc" }}>{h}</th>
                   ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-
-          <div className="glass-card" style={{ padding: "1.5rem", height: "fit-content" }}>
-            <h2 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "1rem" }}>Pre-built Library</h2>
-            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: "1.5rem" }}>Click any template to customize and submit it for Meta approval instantly.</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-              {PREBUILT_TEMPLATES.map((t, i) => (
-                <button key={i} onClick={() => loadPrebuilt(t)} style={{ textAlign: "left", padding: "0.75rem", background: "var(--bg-tertiary)", border: "1px solid var(--border)", borderRadius: "8px", cursor: "pointer", transition: "border 0.2s" }} onMouseEnter={(e) => e.currentTarget.style.borderColor = "var(--primary)"} onMouseLeave={(e) => e.currentTarget.style.borderColor = "var(--border)"}>
-                  <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: "0.25rem", color: "var(--text-primary)" }}>{t.name.replace(/_/g, ' ')}</div>
-                  <div style={{ color: "var(--text-muted)", fontSize: "0.75rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.text}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
+                </tr>
+              </thead>
+              <tbody>
+                {templates.map((t) => (
+                  <tr key={t.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                    <td style={{ padding: "14px 16px", fontWeight: 600, fontSize: "14px" }}>{t.name}</td>
+                    <td style={{ padding: "14px 16px", color: "#6b7280", fontSize: "13px" }}>{t.category}</td>
+                    <td style={{ padding: "14px 16px" }}>
+                      <span style={{
+                        padding: "4px 10px", borderRadius: "100px", fontSize: "12px", fontWeight: 600,
+                        background: t.status === 'APPROVED' ? '#f0fdf4' : t.status === 'REJECTED' ? '#fef2f2' : '#fffbeb',
+                        color: t.status === 'APPROVED' ? '#16a34a' : t.status === 'REJECTED' ? '#dc2626' : '#d97706'
+                      }}>{t.status}</span>
+                    </td>
+                    <td style={{ padding: "14px 16px", color: "#dc2626", fontSize: "13px", maxWidth: "200px" }}>{t.rejection_reason || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
-        {/* Modal */}
-        {showModal && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(4px)" }}>
-            <div className="glass-card" style={{ width: "500px", padding: "2rem" }}>
-              <h2 style={{ fontSize: "1.25rem", fontWeight: 700, marginBottom: "1.5rem" }}>Submit New Template</h2>
-              <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                <div>
-                  <label style={{ fontSize: "0.85rem", color: "var(--text-secondary)", fontWeight: 600, marginBottom: "0.5rem", display: "block" }}>Template Name (lowercase, underscores)</label>
-                  <input required className="input" value={newTemplate.name} onChange={e => setNewTemplate({...newTemplate, name: e.target.value.toLowerCase().replace(/[^a-z_]/g, '')})} placeholder="e.g. spring_sale_offer" style={{ width: "100%", padding: "0.75rem" }} />
-                </div>
-                <div>
-                  <label style={{ fontSize: "0.85rem", color: "var(--text-secondary)", fontWeight: 600, marginBottom: "0.5rem", display: "block" }}>Category</label>
-                  <select className="input" value={newTemplate.category} onChange={e => setNewTemplate({...newTemplate, category: e.target.value})} style={{ width: "100%", padding: "0.75rem" }}>
-                    <option value="MARKETING">Marketing</option>
-                    <option value="UTILITY">Utility</option>
-                    <option value="AUTHENTICATION">Authentication</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: "0.85rem", color: "var(--text-secondary)", fontWeight: 600, marginBottom: "0.5rem", display: "block" }}>Message Text (use {'{{1}}'}, {'{{2}}'} for variables)</label>
-                  <textarea required className="input" value={newTemplate.text} onChange={e => setNewTemplate({...newTemplate, text: e.target.value})} rows={4} style={{ width: "100%", padding: "0.75rem", resize: "vertical" }} />
-                </div>
-                <div style={{ display: "flex", gap: "1rem", marginTop: "1rem" }}>
-                  <button type="button" onClick={() => setShowModal(false)} style={{ flex: 1, padding: "0.75rem", background: "transparent", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--text-secondary)", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-                  <button type="submit" style={{ flex: 1, padding: "0.75rem", background: "var(--primary)", border: "none", borderRadius: "8px", color: "white", fontWeight: 600, cursor: "pointer" }}>Submit to Meta</button>
-                </div>
-              </form>
-            </div>
+        {/* Pre-built Library */}
+        <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "16px", padding: "20px", height: "fit-content" }}>
+          <h2 style={{ fontSize: "15px", fontWeight: 700, marginBottom: "8px" }}>Pre-built Library</h2>
+          <p style={{ color: "#9ca3af", fontSize: "13px", marginBottom: "16px" }}>Click to customize and submit for Meta approval.</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {PREBUILT_TEMPLATES.map((t, i) => (
+              <button key={i} onClick={() => loadPrebuilt(t)} style={{
+                textAlign: "left", padding: "12px", background: "#fafbfc", border: "1px solid #e5e7eb",
+                borderRadius: "10px", cursor: "pointer", transition: "all 200ms", fontFamily: "inherit",
+              }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#25D366"; e.currentTarget.style.background = "#f0fdf4"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#e5e7eb"; e.currentTarget.style.background = "#fafbfc"; }}>
+                <div style={{ fontWeight: 600, fontSize: "13px", marginBottom: "4px", color: "#111827" }}>{t.name.replace(/_/g, ' ')}</div>
+                <div style={{ color: "#9ca3af", fontSize: "12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.text}</div>
+              </button>
+            ))}
           </div>
-        )}
+        </div>
+      </div>
 
-      </main>
-    </div>
+      {/* Modal */}
+      {showModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(4px)" }}>
+          <div style={{ width: "500px", background: "white", borderRadius: "20px", padding: "32px", boxShadow: "0 24px 48px rgba(0,0,0,0.15)" }}>
+            <h2 style={{ fontSize: "18px", fontWeight: 800, marginBottom: "24px" }}>Submit New Template</h2>
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div>
+                <label style={{ fontSize: "13px", color: "#374151", fontWeight: 600, marginBottom: "6px", display: "block" }}>Template Name (lowercase, underscores)</label>
+                <input required value={newTemplate.name} onChange={e => setNewTemplate({...newTemplate, name: e.target.value.toLowerCase().replace(/[^a-z_]/g, '')})} placeholder="e.g. spring_sale_offer" style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ fontSize: "13px", color: "#374151", fontWeight: 600, marginBottom: "6px", display: "block" }}>Category</label>
+                <select value={newTemplate.category} onChange={e => setNewTemplate({...newTemplate, category: e.target.value})} style={inputStyle}>
+                  <option value="MARKETING">Marketing</option>
+                  <option value="UTILITY">Utility</option>
+                  <option value="AUTHENTICATION">Authentication</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: "13px", color: "#374151", fontWeight: 600, marginBottom: "6px", display: "block" }}>Message Text (use {'{{1}}'}, {'{{2}}'} for variables)</label>
+                <textarea required value={newTemplate.text} onChange={e => setNewTemplate({...newTemplate, text: e.target.value})} rows={4} style={{ ...inputStyle, resize: "vertical" as const }} />
+              </div>
+              <div style={{ display: "flex", gap: "12px", marginTop: "8px" }}>
+                <button type="button" onClick={() => setShowModal(false)} style={{ flex: 1, padding: "12px", background: "white", border: "1px solid #e5e7eb", borderRadius: "10px", color: "#6b7280", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", fontSize: "14px" }}>Cancel</button>
+                <button type="submit" style={{ flex: 1, padding: "12px", background: "#25D366", border: "none", borderRadius: "10px", color: "white", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", fontSize: "14px" }}>Submit to Meta</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

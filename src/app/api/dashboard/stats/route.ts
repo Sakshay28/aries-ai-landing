@@ -14,7 +14,16 @@ import { getTenantId } from '@/lib/auth/getTenantId';
 // Helper: Get tenant_id from authenticated user
 export async function GET(req: NextRequest) {
   const tenantId = await getTenantId();
-  if (!tenantId) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  if (!tenantId) {
+    // Return empty stats for accounts without a tenant (new/test accounts)
+    const emptyStats = {
+      totalLeads: 0, newLeadsToday: 0, activeConversations: 0, confirmedBookings: 0,
+      conversionRate: '0%', messagesThisMonth: 0, messageLimit: 1000,
+      topChannel: 'N/A', peakHour: 'N/A',
+      leadsByStatus: [], leadsByChannel: [], dailyLeads: [],
+    };
+    return NextResponse.json({ success: true, data: emptyStats });
+  }
 
   const rateLimit = await checkRedisRateLimit(`stats:${tenantId}`, 60, 60); // 60 requests per minute
   if (!rateLimit.allowed) {
