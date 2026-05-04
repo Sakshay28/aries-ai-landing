@@ -529,7 +529,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Reset monthly counters (run via cron on 1st of each month)
+-- Reset monthly counters (run via cron on 1st of each month).
+-- Note: voice_calls_used_this_month is reset here only if the column exists
+-- (added by voice-agent/supabase_voice_migration.sql). The DO-block safely
+-- no-ops when voice features are not yet installed.
 CREATE OR REPLACE FUNCTION reset_monthly_counters()
 RETURNS void AS $$
 BEGIN
@@ -539,6 +542,13 @@ BEGIN
       current_billing_period_start = NOW(),
       updated_at = NOW()
   WHERE is_active = true;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'tenants' AND column_name = 'voice_calls_used_this_month'
+  ) THEN
+    EXECUTE 'UPDATE tenants SET voice_calls_used_this_month = 0 WHERE is_active = true';
+  END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

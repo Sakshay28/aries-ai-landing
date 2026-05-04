@@ -1,33 +1,46 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { createBrowserSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
-const G = "#25D366";
+// ═══════════════════════════════════════════════════════════════
+// 🔐 Login — premium split-pane with Google OAuth + email/password
+// Left panel: brand + proof.  Right panel: auth form.
+// Built to feel more polished than AiSensy's login.
+// ═══════════════════════════════════════════════════════════════
 
-export default function LoginPage() {
+const G = "#25D366";
+const GD = "#128C7E";
+
+function LoginInner() {
+  const params = useSearchParams();
+  const urlError = params.get("error");
+  const initialError =
+    urlError === "auth_failed" ? "Google sign-in failed. Please try again."
+    : urlError === "signup_failed" ? "We couldn't create your account. Please try again or contact support."
+    : "";
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [error, setError] = useState(initialError);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
-
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-
       const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-
-      // Session cookies are set by the server — just redirect
+      if (!data.success) throw new Error(data.error || "Invalid credentials");
       window.location.href = "/dashboard";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
@@ -35,209 +48,401 @@ export default function LoginPage() {
     }
   }
 
-  async function handleGoogleLogin() {
-    if (!isSupabaseConfigured) { setError("Supabase not configured yet. Set env vars first."); return; }
+  async function handleGoogle() {
+    if (!isSupabaseConfigured) {
+      setError("Authentication is not configured yet. Set Supabase env vars first.");
+      return;
+    }
+    setGoogleLoading(true);
+    setError("");
     const supabase = createBrowserSupabaseClient();
-    await supabase.auth.signInWithOAuth({
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: `${window.location.origin}/api/auth/callback?next=/dashboard` },
     });
+    if (oauthError) {
+      setError(oauthError.message);
+      setGoogleLoading(false);
+    }
+    // Supabase will redirect us — no further action needed on success.
   }
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      background: "linear-gradient(135deg, #f0fdf4 0%, #ffffff 40%, #f8fafb 100%)",
-      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-      position: "relative",
-      overflow: "hidden",
-    }}>
-      {/* Background decorative elements */}
-      <div style={{
-        position: "absolute",
-        top: "-200px",
-        right: "-200px",
-        width: "600px",
-        height: "600px",
-        borderRadius: "50%",
-        background: "radial-gradient(circle, rgba(37,211,102,0.06) 0%, transparent 70%)",
-        pointerEvents: "none",
-      }} />
-      <div style={{
-        position: "absolute",
-        bottom: "-150px",
-        left: "-150px",
-        width: "500px",
-        height: "500px",
-        borderRadius: "50%",
-        background: "radial-gradient(circle, rgba(37,211,102,0.04) 0%, transparent 70%)",
-        pointerEvents: "none",
-      }} />
+    <div style={styles.root}>
+      {/* ── LEFT PANE: brand + value ──────────────────────────── */}
+      <aside style={styles.left}>
+        <div style={styles.leftInner}>
+          <Link href="/" style={styles.logoWrap}>
+            <img src="/logo.png" alt="Aries AI" style={{ height: 38 }} />
+          </Link>
 
-      <div style={{ position: "relative", zIndex: 2, width: "100%", maxWidth: "420px", padding: "24px" }}>
-        {/* Logo */}
-        <Link href="/" style={{ display: "flex", alignItems: "center", gap: "10px", justifyContent: "center", marginBottom: "40px", textDecoration: "none" }}>
-          <img src="/logo.png" alt="Aries AI" style={{ height: 40 }} />
-        </Link>
+          <div>
+            <h1 style={styles.heroTitle}>
+              Welcome back to <span style={{ color: G }}>Aries AI</span>
+            </h1>
+            <p style={styles.heroSub}>
+              Your WhatsApp + Voice AI control room. Log in to pick up where you left off.
+            </p>
 
-        {/* Card */}
-        <div style={{
-          background: "white",
-          borderRadius: "20px",
-          padding: "40px 36px",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04)",
-          border: "1px solid #e5e7eb",
-        }}>
-          <h1 style={{ fontSize: "26px", fontWeight: 800, marginBottom: "6px", textAlign: "center", color: "#111", letterSpacing: "-0.5px" }}>
-            Welcome back
-          </h1>
-          <p style={{ color: "#6b7280", fontSize: "14px", textAlign: "center", marginBottom: "32px" }}>
-            Log in to your Aries AI dashboard
-          </p>
+            <ul style={styles.featureList}>
+              <Feature icon="💬" title="Live conversations" text="Every WhatsApp chat, one inbox." />
+              <Feature icon="📞" title="AI voice calling" text="Outbound demos in Hindi, English + regional." />
+              <Feature icon="📊" title="Lead scoring" text="Hot, warm, cold — updated in real time." />
+            </ul>
+          </div>
+
+          <div style={styles.trustRow}>
+            <span style={styles.trustDot} />
+            <span style={styles.trustText}>Trusted by Indian D2C, clinics, real estate & hospitality teams</span>
+          </div>
+        </div>
+      </aside>
+
+      {/* ── RIGHT PANE: form ──────────────────────────────────── */}
+      <main style={styles.right}>
+        {/* Top-right signup link */}
+        <div style={styles.topRight}>
+          Not a member yet?{" "}
+          <Link href="/signup" style={{ color: G, fontWeight: 700, textDecoration: "none" }}>
+            Sign up
+          </Link>
+        </div>
+
+        <div style={styles.formCard}>
+          <p style={styles.eyebrow}>Welcome back</p>
+          <h2 style={styles.formTitle}>Log in to Aries AI</h2>
 
           {/* Google OAuth */}
           <button
-            onClick={handleGoogleLogin}
-            style={{
-              width: "100%",
-              marginBottom: "24px",
-              padding: "14px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "10px",
-              background: "#fff",
-              border: "1px solid #e5e7eb",
-              borderRadius: "12px",
-              fontSize: "14px",
-              fontWeight: 600,
-              color: "#374151",
-              cursor: "pointer",
-              transition: "all 200ms ease",
-              fontFamily: "inherit",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = "#f9fafb"; e.currentTarget.style.borderColor = "#d1d5db"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#e5e7eb"; }}
+            type="button"
+            onClick={handleGoogle}
+            disabled={googleLoading}
+            style={{ ...styles.googleBtn, opacity: googleLoading ? 0.7 : 1, cursor: googleLoading ? "wait" : "pointer" }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#f8fafc"; e.currentTarget.style.borderColor = "#cbd5e1"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#e5e7eb"; }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-            Continue with Google
+            <GoogleIcon />
+            <span>{googleLoading ? "Connecting..." : "Continue with Google"}</span>
           </button>
 
-          {/* Divider */}
-          <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "24px" }}>
-            <div style={{ flex: 1, height: "1px", background: "#e5e7eb" }} />
-            <span style={{ fontSize: "12px", color: "#9ca3af", textTransform: "uppercase", letterSpacing: "1px", fontWeight: 600 }}>or</span>
-            <div style={{ flex: 1, height: "1px", background: "#e5e7eb" }} />
+          <div style={styles.dividerRow}>
+            <div style={styles.divider} />
+            <span style={styles.dividerText}>OR</span>
+            <div style={styles.divider} />
           </div>
 
-          {/* Email/Password Form */}
-          <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
-            <div>
-              <label style={{ fontSize: "13px", color: "#374151", fontWeight: 600, marginBottom: "6px", display: "block" }}>
-                Email address
-              </label>
+          <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <Labelled label="Email address">
               <input
                 type="email"
                 placeholder="you@business.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                style={{
-                  width: "100%",
-                  padding: "12px 14px",
-                  background: "#fafbfc",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "10px",
-                  fontSize: "14px",
-                  color: "#111",
-                  outline: "none",
-                  transition: "border-color 200ms ease, box-shadow 200ms ease",
-                  fontFamily: "inherit",
-                }}
-                onFocus={e => { e.currentTarget.style.borderColor = G; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(37,211,102,0.12)`; }}
-                onBlur={e => { e.currentTarget.style.borderColor = "#e5e7eb"; e.currentTarget.style.boxShadow = "none"; }}
+                autoComplete="email"
+                style={styles.input}
+                onFocus={(e) => focusOn(e)}
+                onBlur={(e) => focusOff(e)}
               />
-            </div>
-            <div>
-              <label style={{ fontSize: "13px", color: "#374151", fontWeight: 600, marginBottom: "6px", display: "block" }}>
-                Password
-              </label>
+            </Labelled>
+
+            <Labelled
+              label="Password"
+              right={
+                <button
+                  type="button"
+                  onClick={() => setShowPw((s) => !s)}
+                  style={styles.showPwBtn}
+                >
+                  {showPw ? "Hide" : "Show"}
+                </button>
+              }
+            >
               <input
-                type="password"
+                type={showPw ? "text" : "password"}
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                style={{
-                  width: "100%",
-                  padding: "12px 14px",
-                  background: "#fafbfc",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "10px",
-                  fontSize: "14px",
-                  color: "#111",
-                  outline: "none",
-                  transition: "border-color 200ms ease, box-shadow 200ms ease",
-                  fontFamily: "inherit",
-                }}
-                onFocus={e => { e.currentTarget.style.borderColor = G; e.currentTarget.style.boxShadow = `0 0 0 3px rgba(37,211,102,0.12)`; }}
-                onBlur={e => { e.currentTarget.style.borderColor = "#e5e7eb"; e.currentTarget.style.boxShadow = "none"; }}
+                autoComplete="current-password"
+                style={styles.input}
+                onFocus={(e) => focusOn(e)}
+                onBlur={(e) => focusOff(e)}
               />
-            </div>
+            </Labelled>
 
-            {error && (
-              <div style={{
-                background: "#fef2f2",
-                border: "1px solid #fca5a5",
-                borderRadius: "10px",
-                padding: "10px 14px",
-                fontSize: "13px",
-                color: "#dc2626",
-                fontWeight: 500,
-              }}>{error}</div>
-            )}
+            {error && <div style={styles.errorBox}>{error}</div>}
 
             <button
               type="submit"
               disabled={loading}
               style={{
-                width: "100%",
-                padding: "14px",
-                background: G,
-                color: "white",
-                border: "none",
-                borderRadius: "12px",
-                fontSize: "15px",
-                fontWeight: 700,
-                cursor: loading ? "not-allowed" : "pointer",
-                opacity: loading ? 0.7 : 1,
-                transition: "all 200ms ease",
-                fontFamily: "inherit",
-                boxShadow: "0 4px 14px rgba(37,211,102,0.25)",
+                ...styles.submitBtn,
+                opacity: loading ? 0.75 : 1,
+                cursor: loading ? "wait" : "pointer",
               }}
-              onMouseEnter={e => { if (!loading) { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 8px 24px rgba(37,211,102,0.35)"; }}}
-              onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 4px 14px rgba(37,211,102,0.25)"; }}
+              onMouseEnter={(e) => {
+                if (!loading) {
+                  e.currentTarget.style.transform = "translateY(-1px)";
+                  e.currentTarget.style.boxShadow = "0 10px 28px rgba(37,211,102,0.4)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "0 6px 18px rgba(37,211,102,0.28)";
+              }}
             >
-              {loading ? "Logging in..." : "Log In"}
+              {loading ? "Logging in..." : "Log in"}
             </button>
-          </form>
 
-          <p style={{ textAlign: "center", marginTop: "24px", fontSize: "14px", color: "#6b7280" }}>
-            Don&apos;t have an account?{" "}
-            <Link href="/signup" style={{ color: G, fontWeight: 700, textDecoration: "none" }}>
-              Start free trial
-            </Link>
-          </p>
+            <div style={{ textAlign: "center" }}>
+              <Link href="/forgot-password" style={styles.forgotLink}>
+                Forgot password?
+              </Link>
+            </div>
+          </form>
         </div>
 
-        {/* Footer */}
-        <p style={{ textAlign: "center", marginTop: "24px", fontSize: "12px", color: "#9ca3af" }}>
-          © 2026 Aries AI · WhatsApp Business Automation
+        <p style={styles.legal}>
+          By continuing you agree to our{" "}
+          <Link href="/terms" style={styles.legalLink}>Terms</Link> &{" "}
+          <Link href="/privacy" style={styles.legalLink}>Privacy Policy</Link>.
         </p>
-      </div>
+      </main>
     </div>
   );
 }
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 40 }}>Loading...</div>}>
+      <LoginInner />
+    </Suspense>
+  );
+}
+
+// ─── Subcomponents ─────────────────────────────────────────────────────────
+function Feature({ icon, title, text }: { icon: string; title: string; text: string }) {
+  return (
+    <li style={styles.featureItem}>
+      <div style={styles.featureIcon}>{icon}</div>
+      <div>
+        <div style={styles.featureTitle}>{title}</div>
+        <div style={styles.featureText}>{text}</div>
+      </div>
+    </li>
+  );
+}
+
+function Labelled({
+  label,
+  right,
+  children,
+}: {
+  label: string;
+  right?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <label style={{ display: "block" }}>
+      <div style={styles.labelRow}>
+        <span style={styles.labelText}>{label}</span>
+        {right}
+      </div>
+      {children}
+    </label>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden>
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+    </svg>
+  );
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+function focusOn(e: React.FocusEvent<HTMLInputElement>) {
+  e.currentTarget.style.borderColor = G;
+  e.currentTarget.style.boxShadow = `0 0 0 4px rgba(37,211,102,0.14)`;
+  e.currentTarget.style.background = "#fff";
+}
+function focusOff(e: React.FocusEvent<HTMLInputElement>) {
+  e.currentTarget.style.borderColor = "#e5e7eb";
+  e.currentTarget.style.boxShadow = "none";
+  e.currentTarget.style.background = "#fafbfc";
+}
+
+// ─── Styles ────────────────────────────────────────────────────────────────
+const styles: Record<string, React.CSSProperties> = {
+  root: {
+    display: "flex",
+    minHeight: "100vh",
+    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+    background: "#fff",
+    color: "#111",
+  },
+  left: {
+    flex: "1 1 50%",
+    maxWidth: "55%",
+    background: `linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 40%, #ffffff 100%)`,
+    padding: "48px 56px",
+    display: "flex",
+    alignItems: "center",
+    position: "relative",
+    overflow: "hidden",
+  },
+  leftInner: {
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "space-between",
+    minHeight: "80vh",
+    width: "100%",
+    maxWidth: 480,
+    gap: 48,
+    position: "relative",
+    zIndex: 2,
+  },
+  logoWrap: { display: "inline-flex", alignItems: "center", textDecoration: "none" },
+  heroTitle: {
+    fontSize: 42,
+    fontWeight: 800,
+    lineHeight: 1.15,
+    letterSpacing: "-0.8px",
+    margin: 0,
+    color: "#0f172a",
+  },
+  heroSub: { fontSize: 16, color: "#475569", marginTop: 16, marginBottom: 32, lineHeight: 1.6 },
+  featureList: { listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 14 },
+  featureItem: {
+    display: "flex",
+    gap: 14,
+    alignItems: "flex-start",
+    padding: "14px 16px",
+    background: "rgba(255,255,255,0.7)",
+    borderRadius: 12,
+    border: "1px solid rgba(16,185,129,0.15)",
+    backdropFilter: "blur(6px)",
+  },
+  featureIcon: {
+    width: 36, height: 36, borderRadius: 10,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    background: "#fff",
+    fontSize: 18,
+    flexShrink: 0,
+    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+  },
+  featureTitle: { fontSize: 14, fontWeight: 700, color: "#0f172a" },
+  featureText: { fontSize: 13, color: "#64748b", marginTop: 2 },
+  trustRow: { display: "flex", alignItems: "center", gap: 10 },
+  trustDot: {
+    display: "inline-block",
+    width: 8, height: 8, borderRadius: "50%",
+    background: G,
+    boxShadow: `0 0 0 4px rgba(37,211,102,0.2)`,
+  },
+  trustText: { fontSize: 12, color: "#475569", fontWeight: 500 },
+
+  right: {
+    flex: "1 1 45%",
+    padding: "48px 56px",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  topRight: {
+    position: "absolute",
+    top: 32, right: 48,
+    fontSize: 14, color: "#64748b",
+  },
+  formCard: {
+    width: "100%",
+    maxWidth: 420,
+  },
+  eyebrow: {
+    fontSize: 11, fontWeight: 700, color: GD,
+    textTransform: "uppercase", letterSpacing: 1.5,
+    marginBottom: 6, marginTop: 0,
+  },
+  formTitle: {
+    fontSize: 28,
+    fontWeight: 800,
+    letterSpacing: "-0.5px",
+    margin: 0,
+    marginBottom: 28,
+    color: "#0f172a",
+  },
+  googleBtn: {
+    width: "100%",
+    padding: "13px 16px",
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 12,
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    fontSize: 14,
+    fontWeight: 600,
+    color: "#1f2937",
+    transition: "all 160ms ease",
+    fontFamily: "inherit",
+  },
+  dividerRow: { display: "flex", alignItems: "center", gap: 16, margin: "22px 0" },
+  divider: { flex: 1, height: 1, background: "#e5e7eb" },
+  dividerText: { fontSize: 11, color: "#94a3b8", fontWeight: 700, letterSpacing: 1.5 },
+  labelRow: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+  labelText: { fontSize: 13, color: "#1f2937", fontWeight: 600 },
+  input: {
+    width: "100%",
+    padding: "12px 14px",
+    background: "#fafbfc",
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    fontSize: 14,
+    color: "#0f172a",
+    outline: "none",
+    transition: "border-color 160ms ease, box-shadow 160ms ease, background 160ms ease",
+    fontFamily: "inherit",
+    boxSizing: "border-box",
+  },
+  showPwBtn: {
+    background: "transparent", border: "none", color: GD,
+    fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0,
+  },
+  errorBox: {
+    background: "#fef2f2",
+    border: "1px solid #fecaca",
+    borderRadius: 10,
+    padding: "10px 14px",
+    fontSize: 13,
+    color: "#b91c1c",
+    fontWeight: 500,
+  },
+  submitBtn: {
+    width: "100%",
+    padding: "14px 16px",
+    background: `linear-gradient(135deg, ${G} 0%, ${GD} 100%)`,
+    color: "#fff",
+    border: "none",
+    borderRadius: 12,
+    fontSize: 15,
+    fontWeight: 700,
+    transition: "transform 160ms ease, box-shadow 160ms ease",
+    fontFamily: "inherit",
+    boxShadow: "0 6px 18px rgba(37,211,102,0.28)",
+    letterSpacing: 0.2,
+  },
+  forgotLink: { fontSize: 13, color: "#64748b", textDecoration: "none", fontWeight: 500 },
+  legal: {
+    position: "absolute",
+    bottom: 24,
+    fontSize: 12,
+    color: "#94a3b8",
+    textAlign: "center",
+  },
+  legalLink: { color: "#64748b", textDecoration: "underline" },
+};

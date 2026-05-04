@@ -30,8 +30,8 @@ const nextConfig: NextConfig = {
 };
 
 export default withSentryConfig(nextConfig, {
-  org: "project-bolt",
-  project: "project-bolt",
+  org: process.env.SENTRY_ORG || "aries-ai",
+  project: process.env.SENTRY_PROJECT || "aries-libra-platform",
   silent: !process.env.CI,
   widenClientFileUpload: true,
 });

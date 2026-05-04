@@ -7,6 +7,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { detectBrandFromHost } from '@/lib/brand';
 
 // Routes that require authentication
 const PROTECTED_ROUTES = ['/dashboard', '/admin'];
@@ -16,12 +17,30 @@ const AUTH_ROUTES = ['/login', '/signup'];
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // ═════════════════════════════════════════════════════════
+  // 🌗 Brand detection (Aries vs Libra) — host-based routing
+  // ═════════════════════════════════════════════════════════
+  const host = request.headers.get('host');
+  const brand = detectBrandFromHost(host);
+
+  // Forward brand to all downstream handlers via header
+  const forwardedHeaders = new Headers(request.headers);
+  forwardedHeaders.set('x-brand', brand);
+
+  // Rewrite Libra root requests to the dedicated /libra landing.
+  // (Aries keeps the root path so existing links/SEO are unchanged.)
+  if (brand === 'libra' && pathname === '/') {
+    const url = request.nextUrl.clone();
+    url.pathname = '/libra';
+    return NextResponse.rewrite(url, { request: { headers: forwardedHeaders } });
+  }
+
   // Skip non-protected routes
   const isProtected = PROTECTED_ROUTES.some((route) => pathname.startsWith(route));
   const isAuthRoute = AUTH_ROUTES.some((route) => pathname.startsWith(route));
 
   if (!isProtected && !isAuthRoute) {
-    return NextResponse.next();
+    return NextResponse.next({ request: { headers: forwardedHeaders } });
   }
 
   // Check if Supabase is configured
@@ -84,7 +103,9 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Match all dashboard and admin routes
+    // Brand detection on root (Libra rewrite)
+    '/',
+    // Auth-protected routes
     '/dashboard/:path*',
     '/admin/:path*',
     '/login',

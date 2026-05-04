@@ -20,7 +20,8 @@ const signupSchema = z.object({
   fullName: z.string().min(2, 'Name must be at least 2 characters').max(100),
   businessName: z.string().min(2, 'Business name must be at least 2 characters').max(100),
   businessType: z.string().optional(),
-  plan: z.enum(['starter', 'growth', 'pro', 'enterprise']).optional()
+  plan: z.enum(['starter', 'growth', 'pro', 'enterprise']).optional(),
+  brand: z.enum(['aries', 'libra']).optional()
 });
 
 // ═══════════════════════════════════════
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    const { email, password, fullName, businessName, businessType, plan } = parsedBody;
+    const { email, password, fullName, businessName, businessType, plan, brand } = parsedBody;
 
     // 1. Create auth user
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -81,9 +82,13 @@ export async function POST(req: NextRequest) {
         business_type: businessType || 'Restaurant',
         business_email: email,
         bot_name: 'Assistant',
+        brand: brand || 'aries',
         plan: selectedPlan,
         message_limit: planDetail.messageLimit,
         ai_conversation_limit: planDetail.aiConversationLimit,
+        // Skip the onboarding wall — the new signup form already collects
+        // enough to start using the dashboard. Users refine details in Settings.
+        onboarding_completed: true,
       })
       .select()
       .single();

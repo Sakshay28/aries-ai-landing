@@ -170,19 +170,20 @@ function ShowcaseSection() {
 }
 
 function TrustBar() {
-  const stats = [
-    { n: "500+", l: "Businesses" },
-    { n: "10L+", l: "Messages Sent" },
-    { n: "98%", l: "Uptime" },
-    { n: "4.9★", l: "Avg Rating" },
+  const items = [
+    { icon: "🛡️", title: "Official Meta API", desc: "Direct WhatsApp Cloud API integration" },
+    { icon: "🇮🇳", title: "Built in India", desc: "Designed for Indian businesses & languages" },
+    { icon: "🔐", title: "Bank-Grade Security", desc: "AES-256 encryption & RLS isolation" },
+    { icon: "🎁", title: "14-Day Free Trial", desc: "No credit card required to start" },
   ];
   return (
     <section style={{ background: "#111", padding: "40px 40px" }}>
       <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", justifyContent: "space-around", flexWrap: "wrap", gap: 24 }}>
-        {stats.map(s => (
-          <div key={s.n} style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 36, fontWeight: 900, color: G }}>{s.n}</div>
-            <div style={{ fontSize: 13, color: "#aaa", marginTop: 4 }}>{s.l}</div>
+        {items.map(s => (
+          <div key={s.title} style={{ textAlign: "center", maxWidth: 220 }}>
+            <div style={{ fontSize: 28, marginBottom: 6 }}>{s.icon}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: G }}>{s.title}</div>
+            <div style={{ fontSize: 12, color: "#aaa", marginTop: 4, lineHeight: 1.5 }}>{s.desc}</div>
           </div>
         ))}
       </div>
@@ -630,7 +631,7 @@ function CTA() {
           Ready to Automate Your Business?
         </h2>
         <p style={{ color: "rgba(255,255,255,0.85)", fontSize: 18, marginBottom: 36 }}>
-          Join hundreds of businesses already converting WhatsApp enquiries into revenue — automatically.
+          Be one of the first to turn WhatsApp into your smartest revenue channel — fully automated, 24/7.
         </p>
         <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
           <Link href="/signup" className="btn-anim-white" style={{ background: "#fff", color: G, padding: "18px 40px", borderRadius: 12, fontWeight: 800, fontSize: 17, textDecoration: "none", display: "inline-block" }}>

@@ -1,0 +1,12 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  # Skip Sentry sourcemap upload at build time (no auth token in env)
+  SENTRY_AUTH_TOKEN = ""
+  # Avoid eager service init crashing the static build
+  NEXT_TELEMETRY_DISABLED = "1"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

@@ -285,11 +285,19 @@ export function verifyWebhook(
 // WEBHOOK: Verify Signature
 // ═══════════════════════════════════════
 export function verifySignature(rawBody: string, signature: string, appSecret: string): boolean {
-  if (!appSecret) return true; // Skip in dev
+  // Fail CLOSED: if either secret or signature is missing, reject.
+  // Previously this returned `true` on empty secret, which is a spoofing risk.
+  if (!appSecret || !signature) return false;
 
   const decryptedSecret = decryptToken(appSecret) || appSecret;
-  const expected = crypto.createHmac('sha256', decryptedSecret).update(rawBody).digest('hex');
-  return signature === `sha256=${expected}`;
+  const expected = `sha256=${crypto.createHmac('sha256', decryptedSecret).update(rawBody).digest('hex')}`;
+
+  // Timing-safe comparison to prevent HMAC timing attacks.
+  // Buffer lengths must match before timingSafeEqual, hence the explicit guard.
+  const sigBuf = Buffer.from(signature);
+  const expBuf = Buffer.from(expected);
+  if (sigBuf.length !== expBuf.length) return false;
+  return crypto.timingSafeEqual(sigBuf, expBuf);
 }
 
 // ═══════════════════════════════════════
