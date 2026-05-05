@@ -191,6 +191,75 @@ function TrustBar() {
   );
 }
 
+function BoldStatement() {
+  return (
+    <section style={{
+      padding: "100px 40px",
+      background: "linear-gradient(180deg, #ffffff 0%, #f0fdf4 50%, #ffffff 100%)",
+      textAlign: "center",
+      position: "relative",
+      overflow: "hidden",
+    }}>
+      {/* Subtle glow blob */}
+      <div style={{
+        position: "absolute", top: "50%", left: "50%",
+        transform: "translate(-50%, -50%)",
+        width: 600, height: 300,
+        background: "radial-gradient(ellipse, rgba(37,211,102,0.08) 0%, transparent 70%)",
+        pointerEvents: "none",
+      }} />
+      <div style={{ maxWidth: 860, margin: "0 auto", position: "relative", zIndex: 1 }}>
+        <span style={{
+          display: "inline-block",
+          background: "#dcfce7", color: GD,
+          padding: "6px 18px", borderRadius: 100,
+          fontSize: 12, fontWeight: 700, letterSpacing: "0.08em",
+          textTransform: "uppercase", marginBottom: 28,
+        }}>What Makes Us Different</span>
+        <h2 style={{
+          fontSize: "clamp(36px, 5.5vw, 72px)",
+          fontWeight: 900,
+          lineHeight: 1.05,
+          letterSpacing: "-2px",
+          color: "#0a0a0a",
+          margin: "0 0 24px",
+        }}>
+          AI trained on{" "}
+          <span style={{
+            position: "relative",
+            display: "inline-block",
+          }}>
+            <span style={{ color: G }}>your business.</span>
+          </span>
+          <br />
+          <span style={{ color: "#555", fontWeight: 800 }}>Not anyone else&apos;s.</span>
+        </h2>
+        <p style={{
+          fontSize: "clamp(16px, 1.8vw, 20px)",
+          color: "#666",
+          lineHeight: 1.7,
+          maxWidth: 600,
+          margin: "0 auto 48px",
+        }}>
+          Every business is unique. Aries AI learns your menu, your prices, your FAQs, your tone — and answers like a trained member of your team. 24/7.
+        </p>
+        <div style={{ display: "flex", justifyContent: "center", gap: 40, flexWrap: "wrap" }}>
+          {[
+            { n: "3 min", label: "Average setup time" },
+            { n: "24/7", label: "Always on, never sleeps" },
+            { n: "11+", label: "Indian languages supported" },
+          ].map(({ n, label }) => (
+            <div key={label} style={{ textAlign: "center" }}>
+              <div style={{ fontSize: "clamp(28px, 3vw, 44px)", fontWeight: 900, color: G, letterSpacing: "-1px" }}>{n}</div>
+              <div style={{ fontSize: 14, color: "#888", marginTop: 4, fontWeight: 500 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function Features() {
   const feats = [
     { icon: "🧠", title: "AI That Truly Understands", desc: "Not a rigid chatbot. Real AI that gets 'bhai kal 4 baje table milega?' in Hindi, English, or Hinglish.", color: "#8B5CF6" },
@@ -700,6 +769,7 @@ export default function LandingPage() {
       <Hero />
       <ShowcaseSection />
       <TrustBar />
+      <BoldStatement />
       <Features />
       <Industries />
       <HowItWorks />
