@@ -29,9 +29,14 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withSentryConfig(nextConfig, {
-  org: process.env.SENTRY_ORG || "aries-ai",
-  project: process.env.SENTRY_PROJECT || "aries-libra-platform",
-  silent: !process.env.CI,
-  widenClientFileUpload: true,
-});
+// Only wrap with Sentry when SENTRY_AUTH_TOKEN is available (prevents build failures)
+const finalConfig = process.env.SENTRY_AUTH_TOKEN
+  ? withSentryConfig(nextConfig, {
+      org: process.env.SENTRY_ORG || "aries-ai",
+      project: process.env.SENTRY_PROJECT || "aries-libra-platform",
+      silent: !process.env.CI,
+      widenClientFileUpload: true,
+    })
+  : nextConfig;
+
+export default finalConfig;
