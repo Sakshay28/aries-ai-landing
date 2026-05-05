@@ -224,15 +224,15 @@ function BoldStatement() {
           color: "#0a0a0a",
           margin: "0 0 24px",
         }}>
-          AI trained on{" "}
+          The AI that knows{" "}
           <span style={{
             position: "relative",
             display: "inline-block",
           }}>
-            <span style={{ color: G }}>your business.</span>
+            <span style={{ color: G }}>your business</span>
           </span>
           <br />
-          <span style={{ color: "#555", fontWeight: 800 }}>Not anyone else&apos;s.</span>
+          <span style={{ color: "#555", fontWeight: 800 }}>better than your staff.</span>
         </h2>
         <p style={{
           fontSize: "clamp(16px, 1.8vw, 20px)",
