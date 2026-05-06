@@ -15,8 +15,11 @@ const PREBUILT_TEMPLATES = [
   { name: "general_follow_up", category: "MARKETING", text: "Hey {{1}} 👋 We noticed you were interested in {{2}}. Can we help answer any questions?" },
 ];
 
+interface PrebuiltTemplate { name: string; category: string; text: string; }
+interface WaTemplate { id: string; name: string; category: string; status: string; rejection_reason?: string; }
+
 export default function TemplatesPage() {
-  const [templates, setTemplates] = useState<any[]>([]);
+  const [templates, setTemplates] = useState<WaTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [newTemplate, setNewTemplate] = useState({ name: "", category: "MARKETING", language: "en_US", text: "" });
@@ -41,7 +44,7 @@ export default function TemplatesPage() {
     }
   };
 
-  const loadPrebuilt = (t: any) => {
+  const loadPrebuilt = (t: PrebuiltTemplate) => {
     setNewTemplate({ name: t.name, category: t.category, language: "en_US", text: t.text });
     setShowModal(true);
   };

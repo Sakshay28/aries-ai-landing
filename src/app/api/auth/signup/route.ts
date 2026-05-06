@@ -40,12 +40,14 @@ export async function POST(req: NextRequest) {
       const rawBody = await req.json();
       console.log('📝 Signup attempt:', JSON.stringify(rawBody));
       parsedBody = signupSchema.parse(rawBody);
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Zod v4 uses e.issues; v3 used e.errors — handle both
-      const issues = e.issues ?? e.errors ?? [];
+      type ZodLikeError = { issues?: { path: string[]; message: string }[]; errors?: { path: string[]; message: string }[]; message?: string };
+      const ze = e as ZodLikeError;
+      const issues = ze.issues ?? ze.errors ?? [];
       const firstIssue = issues[0];
       const field = firstIssue?.path?.[0] || 'input';
-      const message = firstIssue?.message || e?.message || 'Invalid input data';
+      const message = firstIssue?.message || ze?.message || 'Invalid input data';
       console.log('❌ Signup validation failed:', field, '-', message);
       return NextResponse.json(
         { success: false, error: message },

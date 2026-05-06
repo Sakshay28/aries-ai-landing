@@ -209,8 +209,11 @@ export async function updateTenant(
   tenantId: string,
   updates: Partial<Tenant>
 ): Promise<Tenant> {
-  // Remove fields that shouldn't be directly updated
-  const { id, created_at, ...safeUpdates } = updates as Record<string, unknown>;
+  // Remove fields that shouldn't be directly updated (id, created_at are immutable)
+  const immutable = new Set(['id', 'created_at']);
+  const safeUpdates = Object.fromEntries(
+    Object.entries(updates as Record<string, unknown>).filter(([k]) => !immutable.has(k))
+  );
 
   const { data, error } = await supabaseAdmin
     .from('tenants')

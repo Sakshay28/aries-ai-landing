@@ -6,10 +6,13 @@ import { sendStaffAlert } from '@/lib/whatsapp/service';
 import { scheduleConversationTimeout } from '@/lib/followup/engine';
 import { checkRedisRateLimit, getRedisClient } from '@/lib/redis/client';
 import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
+import { scheduleFollowUp } from '@/lib/followup/engine';
 import type { Tenant, ConversationContext } from '@/lib/types';
 import * as Sentry from '@sentry/nextjs';
 
-export async function processIncomingIGMessage(igPageId: string, senderId: string, messageText: string, messageId: string) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function processIncomingIGMessage(igPageId: string, senderId: string, messageText: string, _messageId: string) {
   // ── Step 1: Find the tenant ──
   const tenant = await getTenantByIgPageId(igPageId);
   if (!tenant) {
@@ -99,7 +102,7 @@ export async function processIncomingIGMessage(igPageId: string, senderId: strin
   await scheduleConversationTimeout(conversation.id, tenant.id);
 
   if (aiResponse.shouldEscalate) {
-    await handleEscalation(tenant, conversation.id, senderId, aiResponse, updatedContext);
+    await handleEscalation(tenant, conversation.id, senderId, aiResponse);
   }
 
   if (aiResponse.nextStep === 'confirmation' || aiResponse.nextStep === 'completed') {
@@ -186,12 +189,19 @@ async function updateConversation(conversationId: string, nextStep: string, cont
   await supabaseAdmin.from('conversations').update({ current_step: nextStep, context, last_message_at: new Date().toISOString() }).eq('id', conversationId);
 }
 
-async function handleEscalation(tenant: Tenant, conversationId: string, senderId: string, aiResponse: any, context: ConversationContext) {
+async function handleEscalation(
+  tenant: Tenant,
+  conversationId: string,
+  senderId: string,
+  aiResponse: Awaited<ReturnType<typeof processMessageWithAI>>,
+) {
   await supabaseAdmin.from('conversations').update({ escalated: true, escalated_at: new Date().toISOString(), escalation_reason: aiResponse.escalationReason }).eq('id', conversationId);
   await sendStaffAlert(tenant, `🔔 IG ESCALATION\n\n👤 IG User (${senderId})\n⚠️ Reason: ${aiResponse.escalationReason}\n🏢 ${tenant.business_name}`);
 }
 
-async function saveLead(tenant: Tenant, conversation: any, context: ConversationContext, senderId: string) {
+async function saveLead(tenant: Tenant, conversation: Record<string, unknown>, context: ConversationContext, senderId: string) {
+  void tenant; // used for future analytics enrichment
+  void senderId;
   await supabaseAdmin.from('leads').update({
     name: context.name, phone: context.phone, email: context.email,
     enquiry_type: context.enquiry_type, guest_count: context.guest_count,
@@ -200,30 +210,41 @@ async function saveLead(tenant: Tenant, conversation: any, context: Conversation
   }).eq('id', conversation.lead_id);
 }
 
-async function scheduleFollowUps(tenant: Tenant, conversation: any, context: ConversationContext) {
+async function scheduleFollowUps(tenant: Tenant, conversation: Record<string, unknown>, context: ConversationContext) {
   const now = Date.now();
   const leadId = conversation.lead_id as string;
   const convId = conversation.id as string;
   const leadPhone = (context.instagram_id || conversation.sender_id) as string;
   const leadName = context.name || 'Customer';
 
-  const followUpsToCreate = [];
+  type FollowUpEntry = {
+    id: string;
+    tenant_id: string;
+    lead_id: string;
+    conversation_id: string;
+    follow_up_type: string;
+    scheduled_at: string;
+    message: null;
+    ai_generated: boolean;
+    delayMs: number;
+  };
+
+  const followUpsToCreate: FollowUpEntry[] = [];
 
   if (tenant.followup_30min) {
     const delayMs = 30 * 60 * 1000;
-    const id = require('crypto').randomUUID();
+    const id = randomUUID();
     followUpsToCreate.push({ id, tenant_id: tenant.id, lead_id: leadId, conversation_id: convId, follow_up_type: '30min', scheduled_at: new Date(now + delayMs).toISOString(), message: null, ai_generated: true, delayMs });
   }
   if (tenant.followup_24hr) {
     const delayMs = 24 * 60 * 60 * 1000;
-    const id = require('crypto').randomUUID();
+    const id = randomUUID();
     followUpsToCreate.push({ id, tenant_id: tenant.id, lead_id: leadId, conversation_id: convId, follow_up_type: '24hr', scheduled_at: new Date(now + delayMs).toISOString(), message: null, ai_generated: true, delayMs });
   }
 
   if (followUpsToCreate.length === 0) return;
 
-  const { scheduleFollowUp } = await import('@/lib/followup/engine');
-  await supabaseAdmin.from('follow_ups').insert(followUpsToCreate.map(({ delayMs: _d, ...f }) => f));
+  await supabaseAdmin.from('follow_ups').insert(followUpsToCreate.map(({ delayMs: _, ...f }) => f));
   for (const fu of followUpsToCreate) {
     await scheduleFollowUp({ followUpId: fu.id, tenantId: tenant.id, leadId, conversationId: convId, followUpType: fu.follow_up_type, message: null, leadPhone, leadName, delayMs: fu.delayMs });
   }

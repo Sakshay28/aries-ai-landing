@@ -26,8 +26,8 @@ export async function GET() {
     });
 
     return NextResponse.json({ success: true, data: data.data });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Internal server error'; return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
 }
 
@@ -57,8 +57,10 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({ success: true, data });
-  } catch (error: any) {
-    const message = error.response?.data?.error?.message || error.message;
+  } catch (error: unknown) {
+    type AxiosLike = { response?: { data?: { error?: { message?: string } } }; message?: string };
+    const axErr = error as AxiosLike;
+    const message = axErr?.response?.data?.error?.message || axErr?.message || 'Internal server error';
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

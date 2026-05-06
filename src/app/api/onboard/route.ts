@@ -10,6 +10,13 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { PLAN_DETAILS } from '@/lib/types';
 
+// Detect which brand signed up based on request origin or host header
+function detectBrand(req: NextRequest): 'aries' | 'libra' {
+  const origin = req.headers.get('origin') || req.headers.get('referer') || req.headers.get('host') || '';
+  if (origin.includes('libraai.in') || origin.includes('libra')) return 'libra';
+  return 'aries';
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
@@ -39,6 +46,7 @@ export async function POST(req: NextRequest) {
 
     const selectedPlan = plan || 'starter';
     const planDetail = PLAN_DETAILS[selectedPlan as keyof typeof PLAN_DETAILS] || PLAN_DETAILS.starter;
+    const brand = detectBrand(req);
 
     // 1. Create tenant
     const { data: tenant, error: tenantError } = await supabaseAdmin
@@ -51,6 +59,7 @@ export async function POST(req: NextRequest) {
         plan: selectedPlan,
         message_limit: planDetail.messageLimit,
         ai_conversation_limit: planDetail.aiConversationLimit,
+        brand,
       })
       .select()
       .single();

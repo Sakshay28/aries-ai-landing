@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
 
     const body = JSON.parse(rawBody);
     const event = body.event as string;
-    const payload = body.payload as Record<string, any>;
+    const payload = body.payload as Record<string, Record<string, Record<string, unknown>>>;
 
     // Idempotency Check
     const subscriptionId = payload?.subscription?.entity?.id || payload?.payment?.entity?.id;

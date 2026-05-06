@@ -1,0 +1,58 @@
+# ─────────────────────────────────────────────────────────────
+# render.yaml — BullMQ Worker Deployment (Render.com)
+# ─────────────────────────────────────────────────────────────
+# Steps:
+#   1. Push this repo to GitHub.
+#   2. Go to https://dashboard.render.com → New → Blueprint.
+#   3. Connect your GitHub repo — Render will detect this file.
+#   4. Fill in the secret env var values in Render's dashboard.
+#   5. Deploy.
+# ─────────────────────────────────────────────────────────────
+
+services:
+  - type: worker
+    name: aries-bullmq-worker
+    runtime: node
+    buildCommand: npm ci
+    startCommand: npx tsx worker.ts
+    plan: free          # upgrade to starter ($7/mo) for always-on
+    healthCheckPath: /  # worker has no HTTP server unless Bull-Board port is exposed
+
+    envVars:
+      # ── Supabase ──
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false       # fill manually in Render dashboard
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+      # ── Redis (Upstash) ──
+      - key: REDIS_URL
+        sync: false
+
+      # ── AI ──
+      - key: GEMINI_API_KEY
+        sync: false
+
+      # ── Meta / WhatsApp ──
+      - key: META_APP_SECRET
+        sync: false
+      - key: GLOBAL_WEBHOOK_VERIFY_TOKEN
+        sync: false
+
+      # ── App ──
+      - key: NEXT_PUBLIC_APP_URL
+        value: https://ariesai.in
+      - key: NODE_ENV
+        value: production
+
+      # ── Security ──
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+
+      # ── Email (Resend) ──
+      - key: RESEND_API_KEY
+        sync: false

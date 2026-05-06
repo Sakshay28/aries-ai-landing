@@ -10,13 +10,19 @@ const BROADCAST_QUEUE = 'broadcast-jobs';
 let broadcastQueue: Queue | null = null;
 let broadcastWorker: Worker | null = null;
 
+interface TemplateComponent {
+  type: string;
+  parameters?: Array<{ type: string; text?: string; [key: string]: unknown }>;
+  [key: string]: unknown;
+}
+
 interface BroadcastJobData {
   tenantId: string;
   templateName: string;
   language: string;
   broadcastId: string;
   leads: { id: string; name: string; phone: string }[];
-  components: any[];
+  components: TemplateComponent[];
 }
 
 export function initBroadcastEngine() {
@@ -105,9 +111,10 @@ async function processBroadcastJob(data: BroadcastJobData) {
     try {
       await sendTemplateMessage(tenant, lead.phone, templateName, language, personalizedComponents);
       sent++;
-    } catch (error: any) {
+    } catch (error: unknown) {
       failed++;
-      errors.push(`${lead.phone}: ${error.message || 'Unknown error'}`);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      errors.push(`${lead.phone}: ${message}`);
     }
 
     // Per-message delay to stay under Meta's 80 msgs/sec limit

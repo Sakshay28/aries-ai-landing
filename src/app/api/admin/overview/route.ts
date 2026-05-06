@@ -149,7 +149,7 @@ export async function PATCH(req: NextRequest) {
       'business_address', 'business_website', 'bot_name', 'bot_personality', 'is_active'
     ];
     
-    const updates: Record<string, any> = {};
+    const updates: Record<string, unknown> = {};
     for (const field of allowedFields) {
       if (body[field] !== undefined) {
         updates[field] = body[field];

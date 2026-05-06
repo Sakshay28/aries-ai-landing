@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantByPhoneNumberId, getTenantConfig, incrementMessageCount, checkUsageLimits } from '@/lib/tenant/manager';
-import { processMessageWithAI, generateFollowUpMessage } from '@/lib/ai/engine';
+import { processMessageWithAI } from '@/lib/ai/engine';
 import { sendTextMessage, markAsRead, sendStaffAlert, isWhatsAppConfigured, type ParsedWhatsAppMessage } from '@/lib/whatsapp/service';
 import { scheduleFollowUp, scheduleConversationTimeout } from '@/lib/followup/engine';
 import { checkRedisRateLimit, getRedisClient } from '@/lib/redis/client';
@@ -464,7 +464,7 @@ async function scheduleFollowUps(
   context: ConversationContext
 ) {
   const now = Date.now();
-  const tenantConfig = getTenantConfig(tenant);
+  // tenantConfig reserved for future AI-generated follow-up messages
   const leadId = conversation.lead_id as string;
   const convId = conversation.id as string;
   const leadPhone = (context.phone || conversation.sender_id) as string;

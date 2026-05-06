@@ -3,8 +3,24 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 
+interface Invoice {
+  id: string;
+  amount: number;
+  status: string;
+  date: string;
+  pdf_url?: string;
+}
+
+interface TenantBillingState {
+  plan_type: string;
+  plan_status: string;
+  message_limit: number;
+  messages_used: number;
+  invoices: Invoice[];
+}
+
 export default function BillingPage() {
-  const [tenant, setTenant] = useState<any>(null);
+  const [tenant, setTenant] = useState<TenantBillingState | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -71,7 +87,7 @@ export default function BillingPage() {
               <h2 style={{ fontSize: "15px", fontWeight: 700 }}>Invoice History</h2>
             </div>
             {tenant?.invoices && tenant.invoices.length > 0 ? (
-              tenant.invoices.map((inv: any) => (
+              tenant.invoices.map((inv: Invoice) => (
                 <div key={inv.id} style={{ padding: "16px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f3f4f6" }}>
                   <div>
                     <div style={{ fontWeight: 600, fontSize: "14px", textTransform: "capitalize" }}>{tenant.plan_type} Plan</div>

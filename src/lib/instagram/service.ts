@@ -1,5 +1,4 @@
 import type { Tenant } from '@/lib/types';
-import { supabaseAdmin } from '@/lib/supabase/admin';
 import { decryptToken } from '@/lib/utils/crypto';
 
 // ═══════════════════════════════════════════════════════════

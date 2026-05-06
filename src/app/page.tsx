@@ -27,9 +27,9 @@ function Navbar() {
       transition: "all 0.3s",
     }}>
       <div style={{ display: "flex", alignItems: "center" }}>
-        <a href="/" style={{ display: "flex", alignItems: "center", textDecoration: "none" }}>
+        <Link href="/" style={{ display: "flex", alignItems: "center", textDecoration: "none" }}>
           <img src="/logo.png" alt="Aries AI" style={{ height: 40 }} />
-        </a>
+        </Link>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 48 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 32 }}>
@@ -46,40 +46,6 @@ function Navbar() {
   );
 }
 
-function PhoneMockup() {
-  const msgs = [
-    { from: "user", text: "Hi, table for 4 tonight at 8pm?" },
-    { from: "bot", text: "Hi! 😊 Yes, we have availability. May I have your name?" },
-    { from: "user", text: "Rahul Sharma" },
-    { from: "bot", text: "Perfect Rahul! Table for 4 at 8 PM confirmed ✅\nYou'll get a reminder 1 hour before." },
-  ];
-  return (
-    <div style={{ width: 280, background: "#E5DDD5", borderRadius: 24, overflow: "hidden", boxShadow: "0 32px 80px rgba(0,0,0,0.18)", border: "8px solid #111" }}>
-      <div style={{ background: GD, padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🍽️</div>
-        <div>
-          <div style={{ color: "#fff", fontWeight: 700, fontSize: 14 }}>Spice Garden</div>
-          <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 11 }}>online</div>
-        </div>
-      </div>
-      <div style={{ padding: "12px 10px", display: "flex", flexDirection: "column", gap: 8, minHeight: 280 }}>
-        {msgs.map((m, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: m.from === "user" ? "flex-end" : "flex-start" }}>
-            <div style={{
-              background: m.from === "user" ? "#DCF8C6" : "#fff",
-              borderRadius: m.from === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
-              padding: "8px 12px", maxWidth: "80%", fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap",
-              boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
-            }}>{m.text}</div>
-          </div>
-        ))}
-        <div style={{ display: "flex", justifyContent: "flex-start" }}>
-          <div style={{ background: "#fff", borderRadius: "12px 12px 12px 2px", padding: "8px 12px", fontSize: 12, color: "#999" }}>typing...</div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function Hero() {
   return (
