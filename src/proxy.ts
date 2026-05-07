@@ -81,10 +81,15 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  // Get the user session
+  // Use getSession() here — it decodes the JWT from cookies locally without
+  // making a network round-trip to Supabase. getUser() (which verifies server-side)
+  // is used in dashboard layout/server components for actual security checks.
+  // Using getUser() in middleware caused infinite redirect loops when the
+  // Supabase verification call was slow or failed.
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
+  const user = session?.user ?? null;
 
   // Protected route but no session → redirect to login
   // IMPORTANT: carry over any session cookies that getUser() refreshed
