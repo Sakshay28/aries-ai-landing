@@ -15,6 +15,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
     const supabase = createServerClient(supabaseUrl, supabaseKey, {
       cookies: {
         getAll() { return cookieStore.getAll(); },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          } catch {
+            // Ignore — can fail in Server Components (read-only)
+          }
+        },
       },
     });
 

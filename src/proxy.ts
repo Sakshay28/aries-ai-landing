@@ -52,12 +52,11 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Create a Supabase client with cookies from the request.
-  // IMPORTANT: response must be created ONCE before setAll runs, then
-  // all cookies are set on that same object. Re-creating inside the loop
-  // drops previously-written cookies (the root cause of the login loop).
+  // Create a Supabase client with cookies from the request
+  // CANONICAL Supabase SSR pattern — DO NOT recreate `response` inside the loop
+  // (that bug drops all cookies set in earlier iterations).
   let response = NextResponse.next({
-    request: { headers: request.headers },
+    request: { headers: forwardedHeaders },
   });
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
@@ -66,15 +65,15 @@ export async function proxy(request: NextRequest) {
         return request.cookies.getAll();
       },
       setAll(cookiesToSet) {
-        // 1. Mutate the request cookies so downstream reads are consistent.
+        // 1) Mutate request cookies so downstream server components read them
         cookiesToSet.forEach(({ name, value }) => {
           request.cookies.set(name, value);
         });
-        // 2. Rebuild response once (preserves all headers/cookies from
-        //    prior middleware) then append every session cookie onto it.
+        // 2) Recreate the response ONCE with updated cookies
         response = NextResponse.next({
-          request: { headers: request.headers },
+          request: { headers: forwardedHeaders },
         });
+        // 3) Set every cookie on the new response
         cookiesToSet.forEach(({ name, value, options }) => {
           response.cookies.set(name, value, options);
         });
@@ -88,15 +87,27 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   // Protected route but no session → redirect to login
+  // IMPORTANT: carry over any session cookies that getUser() refreshed
+  // onto the redirect response so the browser persists them.
   if (isProtected && !user) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('redirect', pathname);
-    return NextResponse.redirect(loginUrl);
+    const redirectResponse = NextResponse.redirect(loginUrl);
+    // Copy any cookies that were set during getUser() (e.g. token refresh)
+    response.cookies.getAll().forEach((cookie) => {
+      redirectResponse.cookies.set(cookie.name, cookie.value);
+    });
+    return redirectResponse;
   }
 
   // Auth route but already logged in → redirect to dashboard
   if (isAuthRoute && user) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
+    const redirectResponse = NextResponse.redirect(new URL('/dashboard', request.url));
+    // Preserve refreshed session cookies
+    response.cookies.getAll().forEach((cookie) => {
+      redirectResponse.cookies.set(cookie.name, cookie.value);
+    });
+    return redirectResponse;
   }
 
   // Admin routes require platform admin check

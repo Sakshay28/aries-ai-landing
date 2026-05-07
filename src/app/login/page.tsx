@@ -34,18 +34,18 @@ function LoginInner() {
     setLoading(true);
     setError("");
     try {
-      // Use Supabase browser client directly — writes cookies that
-      // both client and server can read (canonical Supabase SSR pattern).
+      // Use Supabase browser client directly — canonical SSR pattern.
       const supabase = createBrowserSupabaseClient();
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
       if (signInError) throw new Error(signInError.message || "Invalid credentials");
-      // Cookie is now set in the browser; navigate to dashboard.
-      window.location.href = "/dashboard";
+      if (!data.session) throw new Error("Login failed — no session returned.");
+      // Cookie is now in the browser; go to dashboard.
+      window.location.replace("/dashboard");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? err.message : "Login failed. Check your email and password.");
       setLoading(false);
     }
   }

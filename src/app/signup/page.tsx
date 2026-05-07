@@ -81,19 +81,21 @@ function SignupInner() {
       const signupData = await signupRes.json();
       if (!signupData.success) throw new Error(signupData.error || "Signup failed");
 
-      // 2) Auto-login so the session cookies land on this device.
-      const loginRes = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+      // 2) Auto-login via the browser client so session cookies land directly
+      //    on this device — no extra server round-trip needed.
+      const supabase = createBrowserSupabaseClient();
+      const { error: loginError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
-      const loginData = await loginRes.json();
-      if (!loginData.success) {
-        throw new Error(
-          "Account created but auto-login failed. Please sign in manually from the login page."
-        );
+      if (loginError) {
+        // Account was created but browser login failed — send them to login page
+        window.location.href = "/login";
+        return;
       }
 
+      // Give the browser a moment to commit cookies before navigating
+      await new Promise((r) => setTimeout(r, 100));
       window.location.href = "/dashboard";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Signup failed");

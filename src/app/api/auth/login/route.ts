@@ -1,12 +1,14 @@
 // ═══════════════════════════════════════════════════════════
-// 🔐 Auth API — Login (Server-Side SSR)
+// 🔐 Auth API — Login
 // ═══════════════════════════════════════════════════════════
-// Uses the SSR Supabase client with NextResponse so session
-// cookies are properly set for the browser.
+// Auth via plain @supabase/supabase-js (returns tokens), then
+// the client uses setSession() to install cookies via the SSR
+// browser client. This avoids any cookie-propagation issues
+// across response boundaries.
 // ═══════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,81 +21,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Create a NextResponse first so we can mutate cookies on it
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let response: NextResponse<any> = NextResponse.json({ success: false, error: 'Pending' });
-
-    const supabase = createServerClient(
+    const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return req.cookies.getAll();
-          },
-          setAll(cookiesToSet) {
-            // Set cookies on the response using NextResponse
-            cookiesToSet.forEach(({ name, value, options }) => {
-              response.cookies.set(name, value, {
-                path: options?.path || '/',
-                maxAge: (options?.maxAge as number) || 34560000,
-                sameSite: (options?.sameSite as 'lax' | 'strict' | 'none') || 'lax',
-                httpOnly: false, // Supabase needs client-side access
-                secure: process.env.NODE_ENV === 'production',
-              });
-            });
-          },
-        },
-      }
+      { auth: { persistSession: false } }
     );
 
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
-    if (error) {
+    if (error || !data.session) {
       return NextResponse.json(
-        { success: false, error: error.message },
+        { success: false, error: error?.message || 'Invalid credentials' },
         { status: 401 }
       );
     }
 
-    // Build success response with the cookies already set
-    response = NextResponse.json({
+    console.log(`✅ Login: ${email}`);
+    return NextResponse.json({
       success: true,
       data: {
         userId: data.user.id,
         email: data.user.email,
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
       },
     });
-
-    // Re-create supabase client to set cookies on the NEW response object
-    const supabase2 = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return req.cookies.getAll();
-          },
-          setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              response.cookies.set(name, value, {
-                path: options?.path || '/',
-                maxAge: (options?.maxAge as number) || 34560000,
-                sameSite: (options?.sameSite as 'lax' | 'strict' | 'none') || 'lax',
-                httpOnly: false,
-                secure: process.env.NODE_ENV === 'production',
-              });
-            });
-          },
-        },
-      }
-    );
-
-    // Re-run sign in to get cookies set on the final response
-    await supabase2.auth.signInWithPassword({ email, password });
-
-    console.log(`✅ Login: ${email} — session cookies set on NextResponse`);
-    return response;
   } catch (err) {
     console.error('❌ Login error:', err);
     return NextResponse.json(
