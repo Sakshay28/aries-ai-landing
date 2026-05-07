@@ -111,7 +111,11 @@ export default function DashboardPage() {
     } catch {} finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { fetchData(); const t = setInterval(fetchData, 30000); return () => clearInterval(t); }, [fetchData]);
+  useEffect(() => {
+    void (async () => { await fetchData(); })();
+    const t = setInterval(() => { void (async () => { await fetchData(); })(); }, 30000);
+    return () => clearInterval(t);
+  }, [fetchData]);
 
   const totalDonut = useMemo(() => DONUT_DATA.reduce((a, b) => a + b.value, 0), []);
 

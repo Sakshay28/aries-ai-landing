@@ -52,7 +52,10 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Create a Supabase client with cookies from the request
+  // Create a Supabase client with cookies from the request.
+  // IMPORTANT: response must be created ONCE before setAll runs, then
+  // all cookies are set on that same object. Re-creating inside the loop
+  // drops previously-written cookies (the root cause of the login loop).
   let response = NextResponse.next({
     request: { headers: request.headers },
   });
@@ -63,11 +66,16 @@ export async function proxy(request: NextRequest) {
         return request.cookies.getAll();
       },
       setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value, options }) => {
+        // 1. Mutate the request cookies so downstream reads are consistent.
+        cookiesToSet.forEach(({ name, value }) => {
           request.cookies.set(name, value);
-          response = NextResponse.next({
-            request: { headers: request.headers },
-          });
+        });
+        // 2. Rebuild response once (preserves all headers/cookies from
+        //    prior middleware) then append every session cookie onto it.
+        response = NextResponse.next({
+          request: { headers: request.headers },
+        });
+        cookiesToSet.forEach(({ name, value, options }) => {
           response.cookies.set(name, value, options);
         });
       },

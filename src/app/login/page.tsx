@@ -34,13 +34,15 @@ function LoginInner() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+      // Use Supabase browser client directly — writes cookies that
+      // both client and server can read (canonical Supabase SSR pattern).
+      const supabase = createBrowserSupabaseClient();
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Invalid credentials");
+      if (signInError) throw new Error(signInError.message || "Invalid credentials");
+      // Cookie is now set in the browser; navigate to dashboard.
       window.location.href = "/dashboard";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");

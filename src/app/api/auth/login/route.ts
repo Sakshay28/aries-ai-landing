@@ -1,12 +1,11 @@
 // ═══════════════════════════════════════════════════════════
 // 🔐 Auth API — Login (Server-Side SSR)
 // ═══════════════════════════════════════════════════════════
-// Uses the SSR Supabase client so session cookies are written
-// directly into the HTTP response — the middleware can then
-// read them on every subsequent request.
+// Uses the SSR Supabase client with NextResponse so session
+// cookies are properly set for the browser.
 // ═══════════════════════════════════════════════════════════
 
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
 export async function POST(req: NextRequest) {
@@ -14,18 +13,15 @@ export async function POST(req: NextRequest) {
     const { email, password } = await req.json();
 
     if (!email || !password) {
-      return Response.json(
+      return NextResponse.json(
         { success: false, error: 'Email and password are required' },
         { status: 400 }
       );
     }
 
-    // We need a mutable headers object to receive Set-Cookie from Supabase
-    const responseHeaders = new Headers();
-    responseHeaders.set('Content-Type', 'application/json');
-
-    // Collect cookies that Supabase wants to set
-    const cookiesToSet: Array<{ name: string; value: string; options: Record<string, unknown> }> = [];
+    // Create a NextResponse first so we can mutate cookies on it
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let response: NextResponse<any> = NextResponse.json({ success: false, error: 'Pending' });
 
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -35,9 +31,17 @@ export async function POST(req: NextRequest) {
           getAll() {
             return req.cookies.getAll();
           },
-          setAll(cookies) {
-            // Collect all cookies to set in the response
-            cookies.forEach((c) => cookiesToSet.push(c));
+          setAll(cookiesToSet) {
+            // Set cookies on the response using NextResponse
+            cookiesToSet.forEach(({ name, value, options }) => {
+              response.cookies.set(name, value, {
+                path: options?.path || '/',
+                maxAge: (options?.maxAge as number) || 34560000,
+                sameSite: (options?.sameSite as 'lax' | 'strict' | 'none') || 'lax',
+                httpOnly: false, // Supabase needs client-side access
+                secure: process.env.NODE_ENV === 'production',
+              });
+            });
           },
         },
       }
@@ -46,14 +50,14 @@ export async function POST(req: NextRequest) {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
-      return Response.json(
+      return NextResponse.json(
         { success: false, error: error.message },
         { status: 401 }
       );
     }
 
-    // Build response body
-    const body = JSON.stringify({
+    // Build success response with the cookies already set
+    response = NextResponse.json({
       success: true,
       data: {
         userId: data.user.id,
@@ -61,35 +65,38 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Build response and add all Supabase session cookies
-    const response = new Response(body, { status: 200, headers: responseHeaders });
+    // Re-create supabase client to set cookies on the NEW response object
+    const supabase2 = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return req.cookies.getAll();
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              response.cookies.set(name, value, {
+                path: options?.path || '/',
+                maxAge: (options?.maxAge as number) || 34560000,
+                sameSite: (options?.sameSite as 'lax' | 'strict' | 'none') || 'lax',
+                httpOnly: false,
+                secure: process.env.NODE_ENV === 'production',
+              });
+            });
+          },
+        },
+      }
+    );
 
-    cookiesToSet.forEach(({ name, value, options }) => {
-      const cookieOptions = options as {
-        maxAge?: number;
-        expires?: Date;
-        path?: string;
-        domain?: string;
-        secure?: boolean;
-        httpOnly?: boolean;
-        sameSite?: 'strict' | 'lax' | 'none';
-      };
+    // Re-run sign in to get cookies set on the final response
+    await supabase2.auth.signInWithPassword({ email, password });
 
-      let cookieStr = `${name}=${encodeURIComponent(value)}`;
-      if (cookieOptions.maxAge) cookieStr += `; Max-Age=${cookieOptions.maxAge}`;
-      if (cookieOptions.path) cookieStr += `; Path=${cookieOptions.path}`;
-      else cookieStr += `; Path=/`;
-      if (cookieOptions.httpOnly) cookieStr += `; HttpOnly`;
-      if (cookieOptions.sameSite) cookieStr += `; SameSite=${cookieOptions.sameSite}`;
-
-      response.headers.append('Set-Cookie', cookieStr);
-    });
-
-    console.log(`✅ Login: ${email} — ${cookiesToSet.length} session cookies set`);
+    console.log(`✅ Login: ${email} — session cookies set on NextResponse`);
     return response;
   } catch (err) {
     console.error('❌ Login error:', err);
-    return Response.json(
+    return NextResponse.json(
       { success: false, error: 'Login failed. Please try again.' },
       { status: 500 }
     );
