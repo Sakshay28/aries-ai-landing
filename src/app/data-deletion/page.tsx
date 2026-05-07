@@ -1,4 +1,11 @@
-"use client";
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'Data Deletion Request — Aries AI',
+  description: 'How to request deletion of your personal data from the Aries AI platform.',
+  robots: { index: true, follow: true },
+};
+
 
 import Link from "next/link";
 
@@ -6,8 +13,8 @@ export default function DataDeletionPage() {
   return (
     <div style={{ fontFamily: "'Inter', sans-serif", background: "#fff", color: "#111", minHeight: "100vh" }}>
       <nav style={{ padding: "0 40px", height: 68, display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #eee" }}>
-        <Link href="/" style={{ display: "flex", alignItems: "center", textDecoration: "none" }}>
-          <img src="/logo.png" alt="Aries AI" style={{ height: 36 }} />
+        <Link href="/" style={{ display: "flex", alignItems: "center", textDecoration: "none", gap: 8 }}>
+          <span style={{ fontSize: 20, fontWeight: 800, color: "#111", letterSpacing: "-0.5px" }}>Aries <span style={{ color: "#25D366" }}>AI</span></span>
         </Link>
         <Link href="/" style={{ color: "#25D366", fontWeight: 600, textDecoration: "none", fontSize: 14 }}>← Back to Home</Link>
       </nav>

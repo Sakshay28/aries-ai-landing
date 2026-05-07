@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+
+# Disallow private/app routes
+Disallow: /dashboard/
+Disallow: /admin/
+Disallow: /api/
+Disallow: /onboard/
+
+Sitemap: https://ariesai.in/sitemap.xml
