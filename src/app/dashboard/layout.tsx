@@ -23,13 +23,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
       redirect('/login');
     } else {
       userEmail = user.email || '';
-      const { data: userData } = await supabase.from('users').select('tenant_id').eq('auth_id', user.id).single();
+      const { data: userData } = await supabase.from('users').select('tenant_id').eq('auth_id', user.id).maybeSingle();
       if (userData?.tenant_id) {
-        const { data: tenant } = await supabase.from('tenants').select('onboarding_completed, wa_token_expired').eq('id', userData.tenant_id).single();
+        const { data: tenant } = await supabase.from('tenants').select('onboarding_completed').eq('id', userData.tenant_id).maybeSingle();
         if (tenant && tenant.onboarding_completed === false) {
           redirect('/onboard');
         }
-        isTokenExpired = !!tenant?.wa_token_expired;
+        isTokenExpired = false;
       }
     }
   }
