@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vercel build output — auto-generated, must not be linted
+    ".vercel/**",
+    // BullMQ worker bundle — CommonJS output, has require() calls
+    "worker.ts",
   ]),
 ]);
 

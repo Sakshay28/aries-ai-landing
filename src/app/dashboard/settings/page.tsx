@@ -103,7 +103,7 @@ export default function BotSettingsPage() {
   }, []);
 
   useEffect(() => {
-    fetchConfig();
+    void (async () => { await fetchConfig(); })();
   }, [fetchConfig]);
 
   async function handleSave() {

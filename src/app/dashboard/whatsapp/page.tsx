@@ -51,7 +51,7 @@ export default function WhatsAppPage() {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { fetchStatus(); }, [fetchStatus]);
+  useEffect(() => { void (async () => { await fetchStatus(); })(); }, [fetchStatus]);
 
   useEffect(() => {
     if (!META_APP_ID) return;

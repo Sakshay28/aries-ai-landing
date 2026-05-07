@@ -48,7 +48,7 @@ export default function AnalyticsPage() {
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { void (async () => { await fetchData(); })(); }, [fetchData]);
 
   if (loading && !stats) {
     return <div style={{ padding: "48px", textAlign: "center", color: "#9ca3af" }}>⏳ Loading Analytics...</div>;

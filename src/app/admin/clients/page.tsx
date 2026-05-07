@@ -56,7 +56,7 @@ export default function AdminClientsPage() {
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { void (async () => { await fetchData(); })(); }, [fetchData]);
 
   const toggleActive = async (t: AdminTenant) => {
     setActionLoading(t.id);

@@ -68,8 +68,12 @@ export default function ConversationsPage() {
     finally { setLoadingMsgs(false); }
   }, []);
 
-  useEffect(() => { loadConversations(); const t = setInterval(loadConversations, 15000); return () => clearInterval(t); }, [loadConversations]);
-  useEffect(() => { if (selectedId) loadMessages(selectedId); }, [selectedId, loadMessages]);
+  useEffect(() => {
+    void (async () => { await loadConversations(); })();
+    const t = setInterval(() => { void (async () => { await loadConversations(); })(); }, 15000);
+    return () => clearInterval(t);
+  }, [loadConversations]);
+  useEffect(() => { if (selectedId) void (async () => { await loadMessages(selectedId); })(); }, [selectedId, loadMessages]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   const toggleBot = async (conv: Conversation) => {
@@ -249,7 +253,7 @@ export default function ConversationsPage() {
             ) : (
               <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, background: "#f3f4f6", borderRadius: 22, padding: "10px 16px", fontSize: 13, color: "#9ca3af" }}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                AI Bot is active — click "Take Over" to reply manually
+                AI Bot is active — click &quot;Take Over&quot; to reply manually
               </div>
             )}
           </div>

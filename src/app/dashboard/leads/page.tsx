@@ -3,8 +3,18 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 
+interface Lead {
+  id: string;
+  name?: string;
+  phone?: string;
+  lead_status: string;
+  lead_score: number;
+  channel?: string;
+  last_message_at: string;
+}
+
 export default function LeadsPage() {
-  const [leads, setLeads] = useState<any[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
 

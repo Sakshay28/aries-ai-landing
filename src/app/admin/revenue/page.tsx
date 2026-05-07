@@ -35,7 +35,7 @@ export default function AdminRevenuePage() {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { void (async () => { await fetchData(); })(); }, [fetchData]);
 
   const planData = (stats?.tenantsByPlan || []).map(p => ({ ...p, revenue: (PLAN_PRICES[p.plan] || 0) * p.count, color: PLAN_COLORS[p.plan] || "#b2bec3" }));
   const totalMRR = stats?.mrr || 0;

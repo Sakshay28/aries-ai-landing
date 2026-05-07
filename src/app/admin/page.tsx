@@ -100,7 +100,7 @@ export default function AdminDashboardPage() {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    void (async () => { await fetchData(); })();
   }, [fetchData]);
 
   const totalMRR = stats?.mrr || 0;

@@ -38,7 +38,7 @@ export default function AdminAnalyticsPage() {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { void (async () => { await fetchData(); })(); }, [fetchData]);
 
   // Derived metrics
   const planData = (stats?.tenantsByPlan || []).map(p => ({ plan: p.plan.charAt(0).toUpperCase() + p.plan.slice(1), count: p.count }));

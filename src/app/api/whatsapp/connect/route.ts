@@ -75,13 +75,13 @@ export async function POST(req: NextRequest) {
           { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 10000 }
         );
 
-        const phones = phonesRes.data.data || [];
+        const phones = phonesRes.data.data || [] as { id: string }[];
         if (!phoneNumberId && phones.length > 0) {
           phoneNumberId = phones[0].id;
         }
 
         // Verify the provided phoneNumberId belongs to this WABA
-        if (phoneNumberId && phones.some((p: any) => p.id === phoneNumberId)) {
+        if (phoneNumberId && phones.some((p: { id: string }) => p.id === phoneNumberId)) {
           validPhone = true;
         }
       } catch (phoneErr) {

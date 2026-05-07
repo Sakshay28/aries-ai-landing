@@ -69,9 +69,9 @@ export default function VoicePage() {
   }, []);
 
   useEffect(() => {
-    fetchAll();
+    void (async () => { await fetchAll(); })();
     // Live calls poll every 5s; logs refresh every 30s.
-    const liveInterval = setInterval(fetchAll, 5000);
+    const liveInterval = setInterval(() => { void (async () => { await fetchAll(); })(); }, 5000);
     return () => clearInterval(liveInterval);
   }, [fetchAll]);
 

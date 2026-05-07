@@ -26,7 +26,7 @@ export default function BroadcastPage() {
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { fetchStats(); }, [fetchStats]);
+  useEffect(() => { void (async () => { await fetchStats(); })(); }, [fetchStats]);
 
   async function handleSend() {
     if (!templateName.trim()) { setError("Template name is required."); return; }

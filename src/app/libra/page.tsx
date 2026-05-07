@@ -31,14 +31,14 @@ function Navbar() {
       display: "flex", alignItems: "center", justifyContent: "space-between",
       transition: "all 0.3s",
     }}>
-      <a href="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
+      <Link href="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
         <div style={{
           width: 36, height: 36, borderRadius: 10, background: GRADIENT,
           display: "flex", alignItems: "center", justifyContent: "center",
           color: "#fff", fontWeight: 800, fontSize: 18,
         }}>L</div>
         <span style={{ fontSize: 20, fontWeight: 800, color: "#111" }}>Libra AI</span>
-      </a>
+      </Link>
       <div style={{ display: "flex", alignItems: "center", gap: 40 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
           {["Features", "Use Cases", "Pricing", "Contact"].map(item => (
