@@ -2,8 +2,8 @@ import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Speed up Vercel builds — lint & typecheck run separately
-  eslint: { ignoreDuringBuilds: true },
+  // typescript.ignoreBuildErrors is still valid in Next.js 16
+  // eslint key was removed in Next.js 16 — use eslint.config.mjs instead
   typescript: { ignoreBuildErrors: true },
   async headers() {
     return [{
