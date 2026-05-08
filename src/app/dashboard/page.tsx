@@ -12,7 +12,6 @@ import {
   Terminal,
 } from 'lucide-react';
 import { PerformanceChart } from './_components/PerformanceChart';
-import { RightRail } from './_components/RightRail';
 
 const STATS = [
   {
@@ -80,9 +79,7 @@ const statusDot: Record<'In progress' | 'On hold' | 'Done', string> = {
 
 export default function DashboardPage() {
   return (
-    <div className="flex">
-      {/* Center column */}
-      <main className="min-w-0 flex-1 px-10 py-7">
+    <div className="flex-1 px-10 py-7">
         {/* Header */}
         <header className="flex items-start justify-between">
           <div>
@@ -184,11 +181,7 @@ export default function DashboardPage() {
           </ul>
         </section>
 
-        <div className="h-6" />
-      </main>
-
-      {/* Right rail */}
-      <RightRail />
+      <div className="h-6" />
     </div>
   );
 }

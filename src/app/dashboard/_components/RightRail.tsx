@@ -25,7 +25,7 @@ function FigmaIcon({ size = 16 }: { size?: number }) {
 
 export function RightRail() {
   return (
-    <aside className="hidden w-[320px] shrink-0 border-l border-[#EEF0F4] bg-white px-5 py-6 xl:flex xl:flex-col">
+    <aside className="sticky top-0 z-20 hidden h-screen w-[320px] shrink-0 flex-col overflow-y-auto border-l border-[#EEF0F4] bg-white px-5 py-6 xl:flex">
       {/* Profile card */}
       <div className="rounded-2xl bg-[#F2F3F7] p-5">
         <div className="flex flex-col items-center">
