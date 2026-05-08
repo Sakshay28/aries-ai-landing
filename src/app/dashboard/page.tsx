@@ -1,138 +1,308 @@
-import { StatCard } from './_components/StatCard';
+"use client";
 
-const ICONS = {
-  users: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-    </svg>
-  ),
-  msg: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  ),
-  flow: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="6" cy="6" r="3" />
-      <circle cx="18" cy="18" r="3" />
-      <path d="M9 6h7a3 3 0 0 1 3 3v6" />
-    </svg>
-  ),
-  rupee: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M6 3h12" />
-      <path d="M6 8h12" />
-      <path d="M6 13l8.5 8" />
-      <path d="M6 13h3a5 5 0 0 0 0-10" />
-    </svg>
-  ),
-};
+import {
+  Calendar,
+  ChevronDown,
+  Download,
+  MessageCircle,
+  Megaphone,
+  Upload,
+  Zap,
+  FileText,
+  Plug,
+  Send,
+  Eye,
+  MessageSquare,
+  Users,
+  MoreHorizontal,
+  ArrowUpRight,
+} from 'lucide-react';
 
-const RECENT = [
-  { name: 'Priya Sharma', channel: 'WhatsApp', time: '2 min ago', status: 'New lead', tone: 'emerald' },
-  { name: 'Rohan Mehta', channel: 'Instagram', time: '14 min ago', status: 'Replied', tone: 'sky' },
-  { name: 'Anjali Verma', channel: 'WhatsApp', time: '1 hr ago', status: 'Qualified', tone: 'violet' },
-  { name: 'Karan Singh', channel: 'WhatsApp', time: '3 hr ago', status: 'Follow-up', tone: 'amber' },
+import { CountUp } from './_components/CountUp';
+import { PerformanceChart } from './_components/PerformanceChart';
+import { RightRail } from './_components/RightRail';
+
+const QUICK_ACTIONS = [
+  {
+    label: 'Live Chat',
+    line1: '12 open',
+    line2: '4 unassigned',
+    line2Class: 'text-orange-500',
+    icon: MessageCircle,
+    iconBg: 'bg-emerald-50',
+    iconColor: 'text-[#12B76A]',
+    extra: (
+      <div className="mt-2 flex items-center gap-1">
+        <span className="h-1.5 w-1.5 rounded-full bg-[#12B76A]" />
+        <span className="h-1.5 w-1.5 rounded-full bg-[#12B76A]" />
+        <span className="h-1.5 w-1.5 rounded-full bg-[#F79009]" />
+      </div>
+    ),
+  },
+  {
+    label: 'Broadcast',
+    line1: 'Send to segment',
+    line2: 'Bulk & targeted',
+    line2Class: 'text-[#667085]',
+    icon: Megaphone,
+    iconBg: 'bg-violet-50',
+    iconColor: 'text-[#7C3AED]',
+  },
+  {
+    label: 'Import Contacts',
+    line1: 'CSV / Excel / API',
+    line2: '12,840 in store',
+    line2Class: 'text-[#667085]',
+    icon: Upload,
+    iconBg: 'bg-zinc-100',
+    iconColor: 'text-[#475467]',
+  },
+  {
+    label: 'Automations',
+    line1: '7 active flows',
+    line2: '3 drafts',
+    line2Class: 'text-emerald-600',
+    icon: Zap,
+    iconBg: 'bg-emerald-50',
+    iconColor: 'text-[#12B76A]',
+  },
+  {
+    label: 'Templates',
+    line1: 'Create · Approve · Send',
+    line2: '24 approved',
+    line2Class: 'text-[#667085]',
+    icon: FileText,
+    iconBg: 'bg-blue-50',
+    iconColor: 'text-[#2E90FA]',
+  },
+  {
+    label: 'Integrations',
+    line1: 'CRM · Shopify · Zapier',
+    line2: '5 connected',
+    line2Class: 'text-[#667085]',
+    icon: Plug,
+    iconBg: 'bg-indigo-50',
+    iconColor: 'text-indigo-600',
+  },
 ];
 
-const toneClass: Record<string, string> = {
-  emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  sky: 'bg-sky-50 text-sky-700 ring-sky-200',
-  violet: 'bg-violet-50 text-violet-700 ring-violet-200',
-  amber: 'bg-amber-50 text-amber-700 ring-amber-200',
+const STATS = [
+  {
+    label: 'Messages Sent',
+    value: 48291,
+    formatter: (n: number) => Math.round(n).toLocaleString('en-IN'),
+    deltaText: '18.2%',
+    deltaDir: 'up' as const,
+    deltaHint: 'vs last week',
+    icon: Send,
+    iconBg: 'bg-emerald-50',
+    iconColor: 'text-[#12B76A]',
+  },
+  {
+    label: 'Open Rate',
+    value: 71.4,
+    formatter: (n: number) => `${n.toFixed(1)}%`,
+    deltaText: '4.1%',
+    deltaDir: 'up' as const,
+    deltaHint: 'vs last week',
+    icon: Eye,
+    iconBg: 'bg-violet-50',
+    iconColor: 'text-[#7C3AED]',
+  },
+  {
+    label: 'Active Chats (live)',
+    value: 38,
+    formatter: (n: number) => Math.round(n).toString(),
+    deltaText: '2',
+    deltaDir: 'down' as const,
+    deltaHint: 'from yesterday',
+    icon: MessageSquare,
+    iconBg: 'bg-orange-50',
+    iconColor: 'text-[#F79009]',
+    pulse: true,
+  },
+  {
+    label: 'Total Contacts',
+    value: 12840,
+    formatter: (n: number) => Math.round(n).toLocaleString('en-IN'),
+    deltaText: '+142',
+    deltaDir: 'up' as const,
+    deltaHint: 'new this week',
+    icon: Users,
+    iconBg: 'bg-blue-50',
+    iconColor: 'text-[#2E90FA]',
+  },
+];
+
+type BroadcastStatus = 'Delivered' | 'Partial' | 'Scheduled' | 'Failed';
+
+const BROADCASTS: { name: string; segment: string; sent: string; readPct: string; status: BroadcastStatus }[] = [
+  { name: 'Diwali Sale Offer', segment: 'All Customers', sent: '2,841', readPct: '68%', status: 'Delivered' },
+  { name: 'Restock Alert', segment: 'Tagged: Buyers', sent: '1,204', readPct: '74%', status: 'Delivered' },
+  { name: 'Feedback Request', segment: 'Inactive Users', sent: '890', readPct: '41%', status: 'Partial' },
+  { name: 'New Feature Drop', segment: 'Premium Clients', sent: '430', readPct: '82%', status: 'Scheduled' },
+];
+
+const statusClass: Record<BroadcastStatus, string> = {
+  Delivered: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  Partial: 'bg-orange-50 text-orange-700 ring-orange-200',
+  Scheduled: 'bg-blue-50 text-blue-700 ring-blue-200',
+  Failed: 'bg-red-50 text-red-700 ring-red-200',
 };
 
 export default function DashboardPage() {
   return (
-    <div className="space-y-6">
-      {/* KPI grid */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total Leads" value="1,284" delta="8.2%" trend="up" hint="vs last week" icon={ICONS.users} />
-        <StatCard label="Conversations" value="3,672" delta="12.4%" trend="up" hint="vs last week" icon={ICONS.msg} />
-        <StatCard label="Active Workflows" value="14" delta="2" trend="up" hint="new this week" icon={ICONS.flow} />
-        <StatCard label="Revenue" value="₹2.41L" delta="3.1%" trend="down" hint="vs last week" icon={ICONS.rupee} />
-      </div>
-
-      {/* Two-column: activity + quick actions */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Recent activity */}
-        <div className="rounded-2xl border border-zinc-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] lg:col-span-2">
-          <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4">
-            <div>
-              <h3 className="text-sm font-semibold tracking-tight text-zinc-900">Recent activity</h3>
-              <p className="text-xs text-zinc-500">Latest leads across channels</p>
+    <div className="flex">
+      {/* Center column */}
+      <main className="min-w-0 flex-1 px-8 py-6">
+        {/* Header row */}
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-[28px] font-bold tracking-tight text-[#101828]">
+              Good morning, Sakshay <span className="ml-1">👋</span>
+            </h1>
+            <p className="mt-0.5 text-[14px] text-[#667085]">
+              Here&apos;s what&apos;s happening with your automations today.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 rounded-full border border-[#EAECF0] bg-white px-3 py-1.5 text-[12px] text-[#475467]">
+              <Calendar size={13} className="text-[#98A2B3]" />
+              08 May 2026
             </div>
-            <button className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50">
-              View all
+            <button className="flex items-center gap-1.5 rounded-full border border-[#EAECF0] bg-white px-3 py-1.5 text-[12px] font-medium text-[#475467] hover:bg-zinc-50">
+              Last 7 days <ChevronDown size={13} className="text-[#98A2B3]" />
+            </button>
+            <button className="flex items-center gap-1.5 rounded-lg border border-[#EAECF0] bg-white px-3 py-1.5 text-[12px] font-medium text-[#475467] hover:bg-zinc-50">
+              <Download size={13} /> Export
             </button>
           </div>
-          <ul className="divide-y divide-zinc-100">
-            {RECENT.map((r) => (
-              <li key={r.name} className="flex items-center gap-4 px-5 py-3.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-zinc-100 to-zinc-200 text-xs font-semibold text-zinc-700">
-                  {r.name.split(' ').map((p) => p[0]).join('')}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-zinc-900">{r.name}</div>
-                  <div className="text-xs text-zinc-500">{r.channel} · {r.time}</div>
-                </div>
-                <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset ${toneClass[r.tone]}`}>
-                  {r.status}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
+        </header>
 
         {/* Quick actions */}
-        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <h3 className="text-sm font-semibold tracking-tight text-zinc-900">Quick actions</h3>
-          <p className="text-xs text-zinc-500">Common operator tasks</p>
-          <div className="mt-4 space-y-2">
-            {[
-              { label: 'Send broadcast', desc: 'WhatsApp / Instagram', href: '/dashboard/broadcast' },
-              { label: 'Create template', desc: 'Reply with structure', href: '/dashboard/templates' },
-              { label: 'Connect WhatsApp', desc: 'Gupshup BSP', href: '/dashboard/whatsapp' },
-              { label: 'View leads', desc: 'Pipeline & filters', href: '/dashboard/leads' },
-            ].map((a) => (
-              <a
-                key={a.href}
-                href={a.href}
-                className="group flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm hover:border-zinc-300 hover:bg-zinc-50"
-              >
-                <div>
-                  <div className="font-medium text-zinc-900">{a.label}</div>
-                  <div className="text-xs text-zinc-500">{a.desc}</div>
-                </div>
-                <span className="text-zinc-400 group-hover:text-zinc-700">→</span>
-              </a>
-            ))}
+        <div className="mt-5 -mx-1 overflow-x-auto pb-1">
+          <div className="flex gap-3 px-1">
+            {QUICK_ACTIONS.map((a) => {
+              const Ic = a.icon;
+              return (
+                <button
+                  key={a.label}
+                  className="group flex w-[200px] shrink-0 items-start gap-3 rounded-xl border border-[#EAECF0] bg-white px-4 py-3 text-left transition hover:border-[#D0D5DD] hover:shadow-[0_4px_12px_-4px_rgba(16,24,40,0.08)]"
+                >
+                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${a.iconBg}`}>
+                    <Ic size={16} className={a.iconColor} strokeWidth={2} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[12.5px] font-semibold text-[#101828]">{a.label}</div>
+                    <div className="text-[11px] font-medium text-[#101828]">{a.line1}</div>
+                    <div className={`text-[10.5px] ${a.line2Class}`}>{a.line2}</div>
+                    {a.extra}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
-      </div>
 
-      {/* Channel performance */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {[
-          { name: 'WhatsApp', value: '2,841', share: 78, color: 'bg-emerald-500' },
-          { name: 'Instagram', value: '831', share: 22, color: 'bg-violet-500' },
-        ].map((c) => (
-          <div key={c.name} className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-            <div className="flex items-baseline justify-between">
-              <h3 className="text-sm font-semibold tracking-tight text-zinc-900">{c.name}</h3>
-              <span className="text-2xl font-semibold tracking-tight text-zinc-900">{c.value}</span>
+        {/* Stat cards */}
+        <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {STATS.map((s) => {
+            const Ic = s.icon;
+            const deltaUp = s.deltaDir === 'up';
+            return (
+              <div
+                key={s.label}
+                className="group rounded-2xl border border-[#EAECF0] bg-white p-5 shadow-[0_1px_3px_rgba(16,24,40,0.06),0_1px_2px_rgba(16,24,40,0.04)] transition hover:-translate-y-0.5 hover:shadow-[0_8px_24px_-12px_rgba(16,24,40,0.18)]"
+              >
+                <div className="flex items-start justify-between">
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${s.iconBg}`}>
+                    <Ic size={17} className={s.iconColor} strokeWidth={2} />
+                  </div>
+                  {s.pulse ? (
+                    <span className="relative mt-1 flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#12B76A] opacity-70" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-[#12B76A]" />
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <CountUp
+                    end={s.value}
+                    format={s.formatter}
+                    className="font-mono text-[32px] font-semibold leading-none tracking-tight text-[#101828]"
+                  />
+                </div>
+                <div className="mt-1.5 text-[12.5px] text-[#667085]">{s.label}</div>
+                <div className="mt-3 flex items-center gap-1.5 text-[11.5px]">
+                  <span className={`font-semibold ${deltaUp ? 'text-emerald-600' : 'text-rose-500'}`}>
+                    {deltaUp ? '▲' : '▼'} {s.deltaText}
+                  </span>
+                  <span className="text-[#98A2B3]">{s.deltaHint}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Performance chart */}
+        <div className="mt-5">
+          <PerformanceChart />
+        </div>
+
+        {/* Recent broadcasts */}
+        <div className="mt-5 rounded-2xl border border-[#EAECF0] bg-white shadow-[0_1px_3px_rgba(16,24,40,0.06),0_1px_2px_rgba(16,24,40,0.04)]">
+          <div className="flex items-center justify-between border-b border-[#EAECF0] px-5 py-4">
+            <div className="flex items-center gap-3">
+              <h3 className="text-[15px] font-semibold tracking-tight text-[#101828]">Recent Broadcasts</h3>
+              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10.5px] font-semibold text-[#475467]">
+                Done <span className="font-mono">4 / 6</span>
+              </span>
             </div>
-            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-zinc-100">
-              <div className={`h-full ${c.color} rounded-full transition-all`} style={{ width: `${c.share}%` }} />
-            </div>
-            <div className="mt-2 flex items-center justify-between text-xs text-zinc-500">
-              <span>{c.share}% of conversations</span>
-              <span className="text-emerald-600 font-semibold">↑ 6.4%</span>
-            </div>
+            <a href="/dashboard/broadcast" className="flex items-center gap-1 text-[12px] font-semibold text-[#12B76A] hover:text-[#0E9E5C]">
+              View all <ArrowUpRight size={13} />
+            </a>
           </div>
-        ))}
-      </div>
+          <div className="px-2 py-1">
+            <div className="grid grid-cols-[1.6fr_1.2fr_0.8fr_0.6fr_0.9fr_0.4fr] gap-4 px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wider text-[#98A2B3]">
+              <div>Broadcast Name</div>
+              <div>Segment</div>
+              <div>Sent</div>
+              <div>Read</div>
+              <div>Status</div>
+              <div></div>
+            </div>
+            <ul className="divide-y divide-[#EAECF0]">
+              {BROADCASTS.map((b) => (
+                <li
+                  key={b.name}
+                  className="grid grid-cols-[1.6fr_1.2fr_0.8fr_0.6fr_0.9fr_0.4fr] items-center gap-4 px-3 py-3.5 transition-colors hover:bg-zinc-50"
+                >
+                  <div className="text-[13px] font-semibold text-[#101828]">{b.name}</div>
+                  <div className="text-[12.5px] text-[#667085]">{b.segment}</div>
+                  <div className="font-mono text-[12.5px] text-[#101828]">{b.sent}</div>
+                  <div className="font-mono text-[12.5px] font-semibold text-[#101828]">{b.readPct}</div>
+                  <div>
+                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10.5px] font-semibold ring-1 ring-inset ${statusClass[b.status]}`}>
+                      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
+                      {b.status}
+                    </span>
+                  </div>
+                  <div className="flex justify-end">
+                    <button className="flex h-7 w-7 items-center justify-center rounded-md text-[#98A2B3] hover:bg-white hover:text-[#101828]">
+                      <MoreHorizontal size={15} />
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="h-6" />
+      </main>
+
+      {/* Right rail (xl+ only) */}
+      <RightRail />
     </div>
   );
 }
