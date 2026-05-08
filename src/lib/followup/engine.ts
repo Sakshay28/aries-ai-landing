@@ -9,24 +9,12 @@
 // database-polling approach (less reliable but functional).
 // ═══════════════════════════════════════════════════════════
 
-import { Queue, Worker, type Job } from 'bullmq';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantById, getTenantConfig } from '@/lib/tenant/manager';
 import { sendTextMessage, sendTemplateMessage, isWhatsAppConfigured } from '@/lib/whatsapp/service';
 import { generateFollowUpMessage } from '@/lib/ai/engine';
-import { getRedisClient } from '@/lib/redis/client';
 import type { Tenant } from '@/lib/types';
 import * as Sentry from '@sentry/nextjs';
-
-// ── Queue & Worker Names ──
-const FOLLOWUP_QUEUE = 'follow-ups';
-const CONVERSATION_TIMEOUT_QUEUE = 'conversation-timeouts';
-
-// ── Queue Instances ──
-let followUpQueue: Queue | null = null;
-let timeoutQueue: Queue | null = null;
-let followUpWorker: Worker | null = null;
-let timeoutWorker: Worker | null = null;
 
 // ── Fallback scheduler ──
 let fallbackInterval: ReturnType<typeof setInterval> | null = null;
@@ -56,83 +44,8 @@ interface TimeoutJobData {
 // ═══════════════════════════════════════
 
 export function initFollowUpEngine() {
-  const redis = getRedisClient();
-
-  if (redis) {
-    initBullMQ(redis);
-    console.log('⏰ Follow-up engine started (BullMQ + Redis)');
-  } else {
-    initFallbackScheduler();
-    console.log('⏰ Follow-up engine started (database polling fallback)');
-  }
-}
-
-function initBullMQ(connection: ReturnType<typeof getRedisClient>) {
-  if (!connection) return;
-
-  // ── Follow-Up Queue ──
-  followUpQueue = new Queue(FOLLOWUP_QUEUE, { connection });
-
-  followUpWorker = new Worker(
-    FOLLOWUP_QUEUE,
-    async (job: Job<FollowUpJobData>) => {
-      await processFollowUpJob(job.data);
-    },
-    {
-      connection,
-      concurrency: 5,
-      limiter: {
-        max: 10,
-        duration: 1000, // Max 10 follow-ups per second
-      },
-      lockDuration: 30000,
-      stalledInterval: 30000,
-      maxStalledCount: 1,
-    }
-  );
-
-  followUpWorker.on('completed', (job) => {
-    console.log(`✅ Follow-up job completed: ${job.id}`);
-  });
-
-  followUpWorker.on('failed', async (job, err) => {
-    console.error(`❌ Follow-up job failed: ${job?.id}`, err.message);
-    Sentry.captureException(err);
-    if (job?.data?.tenantId) {
-      try {
-        await supabaseAdmin.from('analytics_events').insert({
-          tenant_id: job.data.tenantId,
-          event_type: 'queue_job_failed',
-          channel: 'system',
-          metadata: { job_id: job?.id, queue: FOLLOWUP_QUEUE, error: err.message },
-        });
-      } catch (e: unknown) {
-        console.error('Failed to log queue error:', e);
-      }
-    }
-  });
-
-  // ── Conversation Timeout Queue ──
-  timeoutQueue = new Queue(CONVERSATION_TIMEOUT_QUEUE, { connection });
-
-  timeoutWorker = new Worker(
-    CONVERSATION_TIMEOUT_QUEUE,
-    async (job: Job<TimeoutJobData>) => {
-      await processConversationTimeout(job.data);
-    },
-    { 
-      connection, 
-      concurrency: 10,
-      lockDuration: 30000,
-      stalledInterval: 30000,
-      maxStalledCount: 1,
-    }
-  );
-
-  timeoutWorker.on('failed', (job, err) => {
-    console.error(`❌ Timeout job failed: ${job?.id}`, err.message);
-    Sentry.captureException(err);
-  });
+  initFallbackScheduler();
+  console.log('⏰ Follow-up engine started (database polling)');
 }
 
 function initFallbackScheduler() {
@@ -142,12 +55,10 @@ function initFallbackScheduler() {
   fallbackInterval = setInterval(async () => {
     try {
       const sent = await processPendingFollowUps();
-      if (sent > 0) console.log(`⏰ Fallback: Processed ${sent} follow-ups`);
-
-      // Also check conversation timeouts
+      if (sent > 0) console.log(`⏰ Processed ${sent} follow-ups`);
       await processStaleConversations();
     } catch (err) {
-      console.error('❌ Fallback scheduler error:', err);
+      console.error('❌ Scheduler error:', err);
     }
   }, 60 * 1000);
 }
@@ -167,34 +78,8 @@ export async function scheduleFollowUp(data: {
   leadName: string;
   delayMs: number;
 }): Promise<void> {
-  if (followUpQueue) {
-    // BullMQ: Add delayed job — survives server restart
-    await followUpQueue.add(
-      `followup:${data.followUpType}:${data.leadId}`,
-      {
-        followUpId: data.followUpId,
-        tenantId: data.tenantId,
-        leadId: data.leadId,
-        conversationId: data.conversationId,
-        followUpType: data.followUpType,
-        message: data.message,
-        leadPhone: data.leadPhone,
-        leadName: data.leadName,
-      },
-      {
-        delay: data.delayMs,
-        jobId: data.followUpId, // Prevents duplicate enqueue for the same follow-up
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 5000 },
-        removeOnComplete: 100, // Keep last 100 completed jobs
-        removeOnFail: 50,
-      }
-    );
-    console.log(`⏰ BullMQ: Scheduled ${data.followUpType} follow-up for ${data.leadName} (delay: ${Math.round(data.delayMs / 60000)}min)`);
-  } else {
-    // Fallback: Just save to database — the poller will pick it up
-    console.log(`⏰ DB: Follow-up ${data.followUpType} for ${data.leadName} saved (polling will handle)`);
-  }
+  // DB-based scheduling — the poller picks up pending follow-ups
+  console.log(`⏰ Follow-up ${data.followUpType} for ${data.leadName} saved (polling will handle)`);
 }
 
 // ═══════════════════════════════════════
@@ -202,27 +87,11 @@ export async function scheduleFollowUp(data: {
 // ═══════════════════════════════════════
 
 export async function scheduleConversationTimeout(
-  conversationId: string,
-  tenantId: string,
-  delayMs: number = 24 * 60 * 60 * 1000 // 24 hours default
+  _conversationId: string,
+  _tenantId: string,
+  _delayMs: number = 24 * 60 * 60 * 1000
 ): Promise<void> {
-  if (timeoutQueue) {
-    // Remove any existing timeout for this conversation
-    const jobId = `timeout:${conversationId}`;
-    const existing = await timeoutQueue.getJob(jobId);
-    if (existing) await existing.remove();
-
-    await timeoutQueue.add(
-      jobId,
-      { conversationId, tenantId },
-      {
-        delay: delayMs,
-        jobId, // Ensure only one timeout per conversation
-        attempts: 2,
-        removeOnComplete: true,
-      }
-    );
-  }
+  // Handled by processStaleConversations polling
 }
 
 // ═══════════════════════════════════════
@@ -457,20 +326,6 @@ export async function cancelLeadFollowUps(leadId: string): Promise<void> {
     .update({ status: 'cancelled' })
     .eq('lead_id', leadId)
     .eq('status', 'pending');
-
-  // Also remove from BullMQ if available
-  if (followUpQueue) {
-    try {
-      const jobs = await followUpQueue.getDelayed();
-      for (const job of jobs) {
-        if (job.data.leadId === leadId) {
-          await job.remove();
-        }
-      }
-    } catch {
-      // Non-critical
-    }
-  }
 }
 
 export async function cancelTenantFollowUps(tenantId: string): Promise<void> {
@@ -486,10 +341,6 @@ export async function cancelTenantFollowUps(tenantId: string): Promise<void> {
 // ═══════════════════════════════════════
 
 export async function shutdownFollowUpEngine(): Promise<void> {
-  if (followUpWorker) await followUpWorker.close();
-  if (timeoutWorker) await timeoutWorker.close();
-  if (followUpQueue) await followUpQueue.close();
-  if (timeoutQueue) await timeoutQueue.close();
   if (fallbackInterval) clearInterval(fallbackInterval);
   console.log('⏰ Follow-up engine shut down');
 }

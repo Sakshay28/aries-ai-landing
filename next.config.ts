@@ -18,17 +18,7 @@ const nextConfig: NextConfig = {
     }];
   },
   async rewrites() {
-    const workerUrl = process.env.WORKER_URL || 'http://localhost:3001';
-    return [
-      {
-        source: '/admin/queue/:path*',
-        destination: `${workerUrl}/admin/queue/:path*`, // Proxy to Bull-Board worker
-      },
-      {
-        source: '/admin/queue',
-        destination: `${workerUrl}/admin/queue`, // Handle the base route
-      }
-    ];
+    return [];
   },
 };
 

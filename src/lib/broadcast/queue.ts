@@ -1,14 +1,11 @@
-import { Queue, Worker, type Job } from 'bullmq';
-import { getRedisClient } from '@/lib/redis/client';
+// ═══════════════════════════════════════════════════════════
+// Broadcast Queue — Direct processing (BullMQ in worker service)
+// ═══════════════════════════════════════════════════════════
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantById } from '@/lib/tenant/manager';
 import { sendTemplateMessage } from '@/lib/whatsapp/service';
 import { sleep } from '@/lib/utils/safety';
 import * as Sentry from '@sentry/nextjs';
-
-const BROADCAST_QUEUE = 'broadcast-jobs';
-let broadcastQueue: Queue | null = null;
-let broadcastWorker: Worker | null = null;
 
 interface TemplateComponent {
   type: string;
@@ -26,65 +23,15 @@ interface BroadcastJobData {
 }
 
 export function initBroadcastEngine() {
-  const redis = getRedisClient();
-  if (!redis) {
-    console.warn('⚠️ Redis not available, broadcast engine cannot start.');
-    return;
-  }
-
-  broadcastQueue = new Queue(BROADCAST_QUEUE, { connection: redis });
-
-  broadcastWorker = new Worker(
-    BROADCAST_QUEUE,
-    async (job: Job<BroadcastJobData>) => {
-      await processBroadcastJob(job.data);
-    },
-    { 
-      connection: redis, 
-      concurrency: 1, // One broadcast at a time globally — safe for 100 tenants
-      lockDuration: 30000,
-      stalledInterval: 30000,
-      maxStalledCount: 1,
-    }
-  );
-
-  broadcastWorker.on('completed', (job) => {
-    console.log(`✅ Broadcast job completed: ${job.id}`);
-  });
-
-  broadcastWorker.on('failed', async (job, err) => {
-    console.error(`❌ Broadcast job failed: ${job?.id}`, err.message);
-    Sentry.captureException(err);
-    if (job?.data?.tenantId) {
-      try {
-        await supabaseAdmin.from('analytics_events').insert({
-          tenant_id: job.data.tenantId,
-          event_type: 'broadcast_failed',
-          metadata: { broadcast_id: job.data.broadcastId, error: err.message },
-        });
-      } catch (e: unknown) {
-        console.error('Failed to log broadcast error:', e);
-      }
-    }
-  });
-
-  console.log('📢 Broadcast queue engine started (BullMQ + Redis)');
+  // No-op on Vercel — worker handles queues
 }
 
 export async function enqueueBroadcast(data: BroadcastJobData): Promise<void> {
-  const redis = getRedisClient();
-  if (!redis) {
-    throw new Error('Redis is required for broadcast. Set REDIS_URL or UPSTASH_REDIS_URL.');
-  }
-  const producerQueue = new Queue(BROADCAST_QUEUE, { connection: redis });
-  try {
-    await producerQueue.add('send-broadcast', data, {
-      removeOnComplete: 10,
-      removeOnFail: 100,
-    });
-  } finally {
-    await producerQueue.close();
-  }
+  // Process directly on Vercel (no Redis/BullMQ)
+  processBroadcastJob(data).catch((err) => {
+    console.error('❌ Broadcast failed:', err);
+    Sentry.captureException(err);
+  });
 }
 
 async function processBroadcastJob(data: BroadcastJobData) {
@@ -141,7 +88,5 @@ async function processBroadcastJob(data: BroadcastJobData) {
 }
 
 export async function shutdownBroadcastEngine() {
-  if (broadcastWorker) await broadcastWorker.close();
-  if (broadcastQueue) await broadcastQueue.close();
-  console.log('📢 Broadcast engine shut down');
+  // No-op on Vercel
 }
