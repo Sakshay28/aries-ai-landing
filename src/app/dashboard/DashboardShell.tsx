@@ -1,137 +1,309 @@
-"use client";
+'use client';
 
-import { usePathname, useRouter } from 'next/navigation';
-import Link from 'next/link';
 import {
-  Home,
-  LayoutGrid,
-  CheckSquare,
-  Users,
+  LayoutDashboard,
+  Grid2x2,
+  TrendingUp,
+  BadgeDollarSign,
+  Wallet,
+  BookOpen,
   Settings,
-  Plus,
-  Info,
-  LogOut,
+  ChevronRight,
+  CircleHelp,
+  MonitorSmartphone,
+  MessageCircle,
+  MessageSquareDot,
+  CircleCheck,
+  Clock,
+  CreditCard,
+  BadgeCheck,
+  Archive,
 } from 'lucide-react';
-import { RightRail } from './_components/RightRail';
 
-type NavItem = {
+export function DashboardShell(_props: { children?: React.ReactNode }) {
+  void _props;
+  return (
+    <div className="flex h-screen bg-indigo-50">
+      {/* SIDEBAR */}
+      <Sidebar />
+
+      {/* MAIN CONTENT */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* BANNER */}
+        <Banner />
+
+        {/* PAGE CONTENT */}
+        <div className="flex-1 overflow-auto">
+          <div className="p-8">
+            {/* HEADER - Help Icon + Avatar */}
+            <div className="flex justify-end items-center gap-3 mb-8">
+              <div className="w-9 h-9 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-50">
+                <CircleHelp size={18} />
+              </div>
+              <div className="w-10 h-10 rounded-full bg-violet-600 flex items-center justify-center text-white font-bold text-sm">
+                A
+              </div>
+            </div>
+
+            {/* PAGE TITLE */}
+            <h1 className="text-3xl font-bold text-gray-900 mb-8">Dashboard</h1>
+
+            {/* STATS GRID - 4 COLUMNS */}
+            <div className="grid grid-cols-4 gap-5 mb-10">
+              <StatCard
+                label="WABAs"
+                value="2"
+                time="All Time"
+                icon={<MonitorSmartphone size={16} />}
+              />
+              <StatCard
+                label="Total conversations"
+                value="0"
+                time="All Time"
+                icon={<MessageCircle size={16} />}
+              />
+              <StatCard
+                label="Total Paid Messages"
+                value="0"
+                time="All Time"
+                icon={<MessageSquareDot size={16} />}
+              />
+              <StatCard
+                label="New live apps"
+                value="0"
+                time="Current Month"
+                icon={<CircleCheck size={16} />}
+              />
+              <StatCard
+                label="New sandbox apps"
+                value="2"
+                time="Current Month"
+                icon={<Clock size={16} />}
+              />
+              <StatCard
+                label="Total Commission ($)"
+                value="0"
+                time="All Time"
+                icon={<CreditCard size={16} />}
+              />
+              <StatCard
+                label="Commission Paid ($)"
+                value="0"
+                time="All Time"
+                icon={<BadgeCheck size={16} />}
+              />
+              <StatCard
+                label="Commission Pending ($)"
+                value="0"
+                time="All Time"
+                icon={<Archive size={16} />}
+              />
+            </div>
+
+            {/* APP PERFORMANCE SECTION */}
+            <div>
+              <h2 className="text-lg font-bold text-gray-900 mb-5">App performance</h2>
+
+              <div className="flex gap-5">
+                {/* LEFT PANEL - 60% */}
+                <div className="flex-[1.6] bg-white rounded-xl border border-gray-200 p-6 min-h-80">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-4">
+                    Total messaging volume
+                  </h3>
+                  <div className="h-64 flex items-center justify-center">
+                    <span className="text-sm text-gray-400">No data to show</span>
+                  </div>
+                </div>
+
+                {/* RIGHT PANEL - 40% */}
+                <div className="flex-1 bg-white rounded-xl border border-gray-200 p-6 min-h-80">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-sm font-semibold text-gray-700">
+                      Top 10 apps by messaging volume
+                    </h3>
+                    <button className="border border-gray-200 rounded px-3 py-1.5 text-xs text-gray-600 bg-white hover:bg-gray-50 transition-colors">
+                      Current M... ▾
+                    </button>
+                  </div>
+
+                  {/* TABLE */}
+                  <div className="space-y-2">
+                    {/* TABLE HEADER */}
+                    <div className="grid grid-cols-2 gap-4 bg-indigo-50 px-4 py-3 rounded-lg">
+                      <div className="text-xs font-semibold text-indigo-700">App Name</div>
+                      <div className="text-xs font-semibold text-indigo-700 text-right">
+                        Message volume
+                      </div>
+                    </div>
+
+                    {/* EMPTY STATE */}
+                    <div className="py-12 text-center">
+                      <span className="text-sm text-gray-400">
+                        There are no records matching your request
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * STAT CARD COMPONENT
+ */
+function StatCard({
+  label,
+  value,
+  time,
+  icon,
+}: {
   label: string;
-  href: string;
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
-  addable?: boolean;
-};
+  value: string;
+  time: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5 hover:border-gray-300 transition-colors">
+      {/* TOP ROW: Label + Icon */}
+      <div className="flex justify-between items-start mb-4">
+        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          {label}
+        </span>
+        <div className="w-9 h-9 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 flex-shrink-0">
+          {icon}
+        </div>
+      </div>
 
-const NAV: NavItem[] = [
-  { label: 'Home', href: '/dashboard', icon: Home },
-  { label: 'Projects', href: '/dashboard/leads', icon: LayoutGrid, addable: true },
-  { label: 'Tasks', href: '/dashboard/workflows', icon: CheckSquare, addable: true },
-  { label: 'Team', href: '/dashboard/conversations', icon: Users },
-  { label: 'Settings', href: '/dashboard/settings', icon: Settings },
-];
+      {/* BOTTOM ROW: Value + Time */}
+      <div className="flex justify-between items-end">
+        <span className="text-3xl font-bold text-gray-900">{value}</span>
+        <span className="text-xs text-gray-400">{time}</span>
+      </div>
+    </div>
+  );
+}
 
+/**
+ * SIDEBAR COMPONENT
+ */
+function Sidebar() {
+  return (
+    <aside className="w-56 shrink-0 bg-white border-r border-gray-200 flex flex-col justify-between p-6">
+      {/* TOP SECTION */}
+      <div>
+        {/* LOGO */}
+        <div className="flex items-center gap-2 mb-8">
+          <LogoMark />
+          <div className="text-gray-900 font-bold text-xl leading-tight">
+            <div>Aries</div>
+            <div className="text-indigo-600 -mt-1">AI</div>
+          </div>
+        </div>
+
+        {/* NAV ITEMS */}
+        <nav className="flex flex-col gap-2">
+          <NavItem
+            label="Dashboard"
+            icon={<LayoutDashboard size={16} />}
+            active={true}
+          />
+          <NavItem label="Apps" icon={<Grid2x2 size={16} />} active={false} />
+          <NavItem
+            label="Analytics"
+            icon={<TrendingUp size={16} />}
+            active={false}
+            hasChevron={true}
+          />
+          <NavItem
+            label="Commission"
+            icon={<BadgeDollarSign size={16} />}
+            active={false}
+          />
+          <NavItem label="Wallet" icon={<Wallet size={16} />} active={false} />
+          <NavItem
+            label="Resources"
+            icon={<BookOpen size={16} />}
+            active={false}
+            hasChevron={true}
+          />
+          <NavItem
+            label="Settings"
+            icon={<Settings size={16} />}
+            active={false}
+          />
+        </nav>
+      </div>
+
+      {/* BOTTOM AVATAR */}
+      <div className="w-9 h-9 rounded-full bg-violet-600 flex items-center justify-center text-white font-bold text-sm cursor-pointer hover:bg-violet-700 transition-colors">
+        A
+      </div>
+    </aside>
+  );
+}
+
+/**
+ * NAV ITEM COMPONENT
+ */
+function NavItem({
+  label,
+  icon,
+  active = false,
+  hasChevron = false,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  active?: boolean;
+  hasChevron?: boolean;
+}) {
+  return (
+    <div
+      className={[
+        'flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-sm font-medium transition-colors',
+        active ? 'bg-indigo-100 text-indigo-600' : 'text-gray-700 hover:bg-gray-50',
+      ].join(' ')}
+    >
+      <span className={active ? 'text-indigo-600' : 'text-gray-400'}>{icon}</span>
+      <span className="flex-1">{label}</span>
+      {hasChevron && (
+        <ChevronRight
+          size={16}
+          className={active ? 'text-indigo-600' : 'text-gray-400'}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * LOGO MARK - Two overlapping indigo squares
+ */
 function LogoMark() {
   return (
-    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden>
-      <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" transform="rotate(-12 8 8)" fill="#101828" />
-      <rect x="6" y="6" width="11" height="11" rx="1.5" transform="rotate(20 11.5 11.5)" fill="#101828" />
+    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <rect x="4" y="4" width="14" height="14" rx="2" fill="#6366F1" />
+      <rect x="14" y="14" width="14" height="14" rx="2" fill="#6366F1" opacity="0.6" />
     </svg>
   );
 }
 
-export function DashboardShell({
-  children,
-}: {
-  children: React.ReactNode;
-  userEmail?: string;
-}) {
-  const pathname = usePathname();
-  const router = useRouter();
-
-  const isActive = (href: string) =>
-    href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(href);
-
-  const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
-    router.push('/login');
-  };
-
+/**
+ * BANNER COMPONENT
+ */
+function Banner() {
   return (
-    <div className="flex min-h-screen bg-[#F5F6FA] text-[#101828] antialiased">
-      {/* ── Left sidebar ────────────────────────────────────────── */}
-      <aside className="sticky top-0 z-30 hidden h-screen w-[220px] shrink-0 flex-col border-r border-[#EEF0F4] bg-white px-5 py-6 md:flex">
-        <Link href="/dashboard" className="flex items-center gap-2.5 pb-8">
-          <LogoMark />
-          <span className="text-[20px] font-bold tracking-tight text-[#101828]">logip</span>
-        </Link>
-
-        <nav className="flex flex-col gap-1.5">
-          {NAV.map((item) => {
-            const Ic = item.icon;
-            const active = isActive(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={[
-                  'group flex items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] transition',
-                  active
-                    ? 'bg-[#1A1A2E] text-white font-semibold'
-                    : 'text-[#667085] hover:bg-zinc-50 hover:text-[#101828]',
-                ].join(' ')}
-              >
-                <Ic
-                  size={18}
-                  strokeWidth={1.8}
-                  className={active ? 'text-white' : 'text-[#98A2B3] group-hover:text-[#475467]'}
-                />
-                <span className="flex-1">{item.label}</span>
-                {item.addable ? (
-                  <span
-                    className={[
-                      'flex h-5 w-5 items-center justify-center rounded-md',
-                      active ? 'bg-white/10 text-white' : 'bg-zinc-100 text-[#667085]',
-                    ].join(' ')}
-                  >
-                    <Plus size={12} strokeWidth={2.4} />
-                  </span>
-                ) : null}
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div className="flex-1" />
-
-        <div className="rounded-2xl bg-[#F2F3F7] p-4">
-          <div className="text-[13px] font-bold text-[#101828]">Upgrade to Pro</div>
-          <div className="mt-1 text-[11.5px] leading-snug text-[#667085]">
-            Get 1 month free and unlock
-          </div>
-          <button className="mt-3 w-full rounded-full bg-[#9DBFF9] px-4 py-2 text-[12.5px] font-semibold text-[#0B2A66] transition hover:bg-[#8BB1F5]">
-            Upgrade
-          </button>
-        </div>
-
-        <div className="mt-4 flex flex-col gap-1">
-          <button className="flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] text-[#667085] transition hover:bg-zinc-50 hover:text-[#101828]">
-            <Info size={16} strokeWidth={1.8} className="text-[#98A2B3]" />
-            <span>Help &amp; information</span>
-          </button>
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] text-[#667085] transition hover:bg-zinc-50 hover:text-[#101828]"
-          >
-            <LogOut size={16} strokeWidth={1.8} className="text-[#98A2B3]" />
-            <span>Log out</span>
-          </button>
-        </div>
-      </aside>
-
-      {/* ── Main content slot (children expand here) ───────────── */}
-      <main className="flex min-w-0 flex-1 flex-col">{children}</main>
-
-      {/* ── Right rail (sticky, xl+) ───────────────────────────── */}
-      <RightRail />
+    <div className="w-full h-12 bg-purple-50 border-b border-gray-200 flex items-center justify-center px-4">
+      <span className="text-sm text-violet-800 text-center">
+        Aries AI clients can now add new WhatsApp numbers and resume WABA onboarding w.e.f 12th May 2025.{' '}
+        <a href="#" className="underline text-violet-600 hover:text-violet-700 font-medium">
+          Read guide
+        </a>
+      </span>
     </div>
   );
 }

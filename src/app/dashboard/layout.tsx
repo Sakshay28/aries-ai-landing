@@ -37,5 +37,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
     }
   }
 
-  return <DashboardShell userEmail={userEmail}>{children}</DashboardShell>;
+  void userEmail;
+  return <DashboardShell>{children}</DashboardShell>;
 }
