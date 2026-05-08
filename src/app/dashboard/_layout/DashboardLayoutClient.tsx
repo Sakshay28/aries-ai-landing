@@ -15,12 +15,9 @@ export default function DashboardLayoutClient({
 }) {
   return (
     <SidebarProvider>
-      <div className="flex min-h-screen w-full bg-gray-50">
-        {/* Sidebar — flex item on lg+, fixed drawer on mobile */}
-        <AppSidebar />
+      <div className="flex min-h-screen w-full bg-gray-50 text-gray-900">
+        <AppSidebar userEmail={userEmail} />
         <Backdrop />
-
-        {/* Main column */}
         <div className="flex min-w-0 flex-1 flex-col">
           <AppHeader userEmail={userEmail} />
           <main className="flex-1 overflow-x-hidden">
