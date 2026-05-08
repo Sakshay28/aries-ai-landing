@@ -1,5 +1,1 @@
-import { DashboardShell } from '@/app/dashboard/DashboardShell';
-
-export default function PreviewPage() {
-  return <DashboardShell />;
-}
+export { default } from "../dashboard/page";
