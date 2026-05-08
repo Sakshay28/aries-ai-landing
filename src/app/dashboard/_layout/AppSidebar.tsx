@@ -19,7 +19,6 @@ import {
   CreditCard,
   Settings,
   HelpCircle,
-  MoreHorizontal,
 } from "lucide-react";
 import { useSidebar } from "./SidebarContext";
 
@@ -62,8 +61,14 @@ function LogoMark() {
 
 export default function AppSidebar() {
   const pathname = usePathname();
-  const { isExpanded, isHovered, isMobileOpen, setIsHovered, openSubmenu, toggleSubmenu } =
-    useSidebar();
+  const {
+    isExpanded,
+    isHovered,
+    isMobileOpen,
+    setIsHovered,
+    openSubmenu,
+    toggleSubmenu,
+  } = useSidebar();
 
   const showLabels = isExpanded || isHovered || isMobileOpen;
 
@@ -72,7 +77,6 @@ export default function AppSidebar() {
 
   const submenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [submenuHeights, setSubmenuHeights] = useState<Record<string, number>>({});
-
   useEffect(() => {
     if (!openSubmenu) return;
     const el = submenuRefs.current[openSubmenu];
@@ -95,12 +99,14 @@ export default function AppSidebar() {
                   anySubActive || open
                     ? "bg-indigo-50 text-indigo-600"
                     : "text-gray-700 hover:bg-gray-50",
-                  !showLabels ? "lg:justify-center" : "",
+                  !showLabels ? "justify-center" : "",
                 ].join(" ")}
               >
                 <span
                   className={
-                    anySubActive || open ? "text-indigo-600" : "text-gray-400 group-hover:text-gray-600"
+                    anySubActive || open
+                      ? "text-indigo-600"
+                      : "text-gray-400 group-hover:text-gray-600"
                   }
                 >
                   {nav.icon}
@@ -154,10 +160,11 @@ export default function AppSidebar() {
           <li key={nav.name}>
             <Link
               href={nav.path ?? "#"}
+              title={!showLabels ? nav.name : undefined}
               className={[
                 "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
                 active ? "bg-indigo-50 text-indigo-600" : "text-gray-700 hover:bg-gray-50",
-                !showLabels ? "lg:justify-center" : "",
+                !showLabels ? "justify-center" : "",
               ].join(" ")}
             >
               <span
@@ -175,22 +182,57 @@ export default function AppSidebar() {
     </ul>
   );
 
+  // Width as inline style — never gets purged, never has lg/breakpoint surprises
+  const desktopWidth = showLabels ? 260 : 80;
+
   return (
-    <aside
-      onMouseEnter={() => !isExpanded && setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      className={[
-        "fixed top-0 left-0 z-50 flex h-screen flex-col border-r border-gray-200 bg-white transition-all duration-300 ease-in-out",
-        showLabels ? "w-[260px]" : "w-[80px]",
-        isMobileOpen ? "translate-x-0" : "-translate-x-full",
-        "lg:translate-x-0",
-      ].join(" ")}
-    >
-      {/* Logo */}
+    <>
+      {/* Desktop sidebar — flex item, no fixed positioning */}
+      <aside
+        onMouseEnter={() => !isExpanded && setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        style={{ width: desktopWidth }}
+        className="hidden shrink-0 flex-col border-r border-gray-200 bg-white transition-[width] duration-300 ease-in-out lg:flex"
+      >
+        <SidebarBody
+          showLabels={showLabels}
+          mainContent={renderItems(mainNav, "main")}
+          manageContent={renderItems(manageNav, "manage")}
+        />
+      </aside>
+
+      {/* Mobile drawer — fixed, slides in */}
+      <aside
+        className={[
+          "fixed inset-y-0 left-0 z-50 flex w-[260px] flex-col border-r border-gray-200 bg-white transition-transform duration-300 ease-in-out lg:hidden",
+          isMobileOpen ? "translate-x-0" : "-translate-x-full",
+        ].join(" ")}
+      >
+        <SidebarBody
+          showLabels
+          mainContent={renderItems(mainNav, "main")}
+          manageContent={renderItems(manageNav, "manage")}
+        />
+      </aside>
+    </>
+  );
+}
+
+function SidebarBody({
+  showLabels,
+  mainContent,
+  manageContent,
+}: {
+  showLabels: boolean;
+  mainContent: ReactNode;
+  manageContent: ReactNode;
+}) {
+  return (
+    <>
       <div
         className={[
           "flex items-center gap-2 px-6 py-6",
-          !showLabels ? "lg:justify-center lg:px-0" : "",
+          !showLabels ? "justify-center px-0" : "",
         ].join(" ")}
       >
         <LogoMark />
@@ -201,34 +243,27 @@ export default function AppSidebar() {
         )}
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-4 pb-4">
-        {showLabels && (
+      <nav className="flex-1 overflow-y-auto px-4 pb-6">
+        {showLabels ? (
           <h3 className="mb-3 px-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
             Menu
           </h3>
+        ) : (
+          <div className="mx-auto mb-3 h-px w-6 bg-gray-200" />
         )}
-        {!showLabels && (
-          <div className="mb-2 flex justify-center text-gray-400">
-            <MoreHorizontal size={16} />
-          </div>
-        )}
-        {renderItems(mainNav, "main")}
+        {mainContent}
 
         <div className="mt-8">
-          {showLabels && (
+          {showLabels ? (
             <h3 className="mb-3 px-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
               Manage
             </h3>
+          ) : (
+            <div className="mx-auto mb-3 h-px w-6 bg-gray-200" />
           )}
-          {!showLabels && (
-            <div className="mb-2 flex justify-center text-gray-400">
-              <MoreHorizontal size={16} />
-            </div>
-          )}
-          {renderItems(manageNav, "manage")}
+          {manageContent}
         </div>
       </nav>
-    </aside>
+    </>
   );
 }

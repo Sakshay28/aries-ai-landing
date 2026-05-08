@@ -4,26 +4,7 @@ import type { ReactNode } from "react";
 import AppHeader from "./AppHeader";
 import AppSidebar from "./AppSidebar";
 import Backdrop from "./Backdrop";
-import { SidebarProvider, useSidebar } from "./SidebarContext";
-
-function Shell({ children, userEmail }: { children: ReactNode; userEmail?: string }) {
-  const { isExpanded, isHovered } = useSidebar();
-  const expanded = isExpanded || isHovered;
-  const mainMargin = expanded ? "lg:ml-[260px]" : "lg:ml-[80px]";
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <AppSidebar />
-      <Backdrop />
-      <div className={`flex min-h-screen flex-col transition-all duration-300 ease-in-out ${mainMargin}`}>
-        <AppHeader userEmail={userEmail} />
-        <main className="flex-1 w-full overflow-x-hidden">
-          <div className="w-full p-4 md:p-6 lg:p-8">{children}</div>
-        </main>
-      </div>
-    </div>
-  );
-}
+import { SidebarProvider } from "./SidebarContext";
 
 export default function DashboardLayoutClient({
   children,
@@ -34,7 +15,19 @@ export default function DashboardLayoutClient({
 }) {
   return (
     <SidebarProvider>
-      <Shell userEmail={userEmail}>{children}</Shell>
+      <div className="flex min-h-screen w-full bg-gray-50">
+        {/* Sidebar — flex item on lg+, fixed drawer on mobile */}
+        <AppSidebar />
+        <Backdrop />
+
+        {/* Main column */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <AppHeader userEmail={userEmail} />
+          <main className="flex-1 overflow-x-hidden">
+            <div className="w-full p-4 md:p-6 lg:p-8">{children}</div>
+          </main>
+        </div>
+      </div>
     </SidebarProvider>
   );
 }
