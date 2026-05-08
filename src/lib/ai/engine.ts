@@ -11,7 +11,7 @@
 
 import { GoogleGenAI } from '@google/genai';
 import type { ConversationContext } from '@/lib/types';
-import * as Sentry from '@sentry/nextjs';
+import * as Sentry from '@/lib/sentry-stub';
 import { withTimeout } from '@/lib/utils/safety';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 

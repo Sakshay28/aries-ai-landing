@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { randomUUID } from 'crypto';
 import { scheduleFollowUp } from '@/lib/followup/engine';
 import type { Tenant, ConversationContext } from '@/lib/types';
-import * as Sentry from '@sentry/nextjs';
+import * as Sentry from '@/lib/sentry-stub';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function processIncomingIGMessage(igPageId: string, senderId: string, messageText: string, _messageId: string) {

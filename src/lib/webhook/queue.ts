@@ -4,7 +4,7 @@
 import { processIncomingMessage } from '@/lib/whatsapp/processor';
 import { processIncomingIGMessage } from '@/lib/instagram/processor';
 import type { ParsedWhatsAppMessage } from '@/lib/whatsapp/service';
-import * as Sentry from '@sentry/nextjs';
+import * as Sentry from '@/lib/sentry-stub';
 
 export function initWebhookEngine() {
   // No-op on Vercel — worker handles queues

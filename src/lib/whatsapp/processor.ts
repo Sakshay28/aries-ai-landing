@@ -6,7 +6,7 @@ import { scheduleFollowUp, scheduleConversationTimeout } from '@/lib/followup/en
 import { checkRedisRateLimit, getRedisClient } from '@/lib/redis/client';
 import { v4 as uuidv4 } from 'uuid';
 import type { Tenant, ConversationContext } from '@/lib/types';
-import * as Sentry from '@sentry/nextjs';
+import * as Sentry from '@/lib/sentry-stub';
 
 // ═══════════════════════════════════════
 // Off-Hours Check

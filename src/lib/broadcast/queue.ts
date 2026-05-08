@@ -5,7 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantById } from '@/lib/tenant/manager';
 import { sendTemplateMessage } from '@/lib/whatsapp/service';
 import { sleep } from '@/lib/utils/safety';
-import * as Sentry from '@sentry/nextjs';
+import * as Sentry from '@/lib/sentry-stub';
 
 interface TemplateComponent {
   type: string;

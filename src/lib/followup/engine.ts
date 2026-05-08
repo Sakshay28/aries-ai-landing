@@ -14,7 +14,7 @@ import { getTenantById, getTenantConfig } from '@/lib/tenant/manager';
 import { sendTextMessage, sendTemplateMessage, isWhatsAppConfigured } from '@/lib/whatsapp/service';
 import { generateFollowUpMessage } from '@/lib/ai/engine';
 import type { Tenant } from '@/lib/types';
-import * as Sentry from '@sentry/nextjs';
+import * as Sentry from '@/lib/sentry-stub';
 
 // ── Fallback scheduler ──
 let fallbackInterval: ReturnType<typeof setInterval> | null = null;

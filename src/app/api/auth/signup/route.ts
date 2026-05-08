@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
       } catch (cleanupErr) {
         // Log orphan state — manual cleanup may be needed
         console.error('❌ Signup rollback failed — orphan tenant/user may exist:', cleanupErr);
-        const Sentry = await import('@sentry/nextjs');
+        const Sentry = await import('@/lib/sentry-stub');
         Sentry.captureException(cleanupErr, {
           extra: { context: 'signup_rollback_failure', authUserId: authUser.id, tenantId: tenant.id },
         });

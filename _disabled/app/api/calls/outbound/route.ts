@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { checkRedisRateLimit } from '@/lib/redis/client';
 import { getTenantFromCookies } from '@/lib/auth/getTenantFromCookies';
-import * as Sentry from '@sentry/nextjs';
+import * as Sentry from '@/lib/sentry-stub';
 
 const VOICE_SERVER_URL = process.env.VOICE_AGENT_SERVER_URL || 'http://localhost:8080';
 

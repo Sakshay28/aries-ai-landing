@@ -6,7 +6,7 @@ import { enqueueWebhookMessage } from '@/lib/webhook/queue';
 import { checkRedisRateLimit } from '@/lib/redis/client';
 
 export const maxDuration = 60;
-import * as Sentry from '@sentry/nextjs';
+import * as Sentry from '@/lib/sentry-stub';
 
 // ═══════════════════════════════════════
 // GET: Webhook Verification
