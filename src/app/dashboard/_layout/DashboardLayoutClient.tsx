@@ -5,6 +5,7 @@ import AppHeader from "./AppHeader";
 import AppSidebar from "./AppSidebar";
 import Backdrop from "./Backdrop";
 import { SidebarProvider } from "./SidebarContext";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function DashboardLayoutClient({
   children,
@@ -15,12 +16,13 @@ export default function DashboardLayoutClient({
 }) {
   return (
     <SidebarProvider>
-      <div className="flex min-h-screen w-full bg-gray-50 text-gray-900">
+      <div className="flex min-h-screen w-full bg-background text-foreground overflow-hidden">
         <AppSidebar userEmail={userEmail} />
         <Backdrop />
-        <div className="flex min-w-0 flex-1 flex-col">
+        <ThemeToggle />
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <AppHeader userEmail={userEmail} />
-          <main className="flex-1 overflow-x-hidden">
+          <main className="flex-1 overflow-auto">
             <div className="w-full p-4 md:p-6 lg:p-8">{children}</div>
           </main>
         </div>

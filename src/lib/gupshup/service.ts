@@ -1,0 +1,369 @@
+// ═══════════════════════════════════════════════════════════
+// 📲 Gupshup WhatsApp API Service — Multi-Tenant
+// ═══════════════════════════════════════════════════════════
+// All functions take tenant credentials as parameters so the
+// code is always per-tenant, never global.
+// API endpoint: https://api.gupshup.io/wa/api/v1/
+// Auth: Bearer {API_KEY}
+// Phone numbers must NOT have + prefix (e.g., "919876543210")
+// ═══════════════════════════════════════════════════════════
+
+const GUPSHUP_BASE = 'https://api.gupshup.io/wa/api/v1';
+
+// ── Internal: clean phone number for Gupshup ──
+function cleanPhone(phone: string): string {
+  return phone.replace(/[\s+\-()]/g, '');
+}
+
+// ── Internal: build auth headers ──
+function headers(apiKey: string): Record<string, string> {
+  return {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+  };
+}
+
+// ── Internal types ──
+export type GupshupMediaType = 'image' | 'video' | 'audio' | 'file';
+
+export interface GupshupSendResult {
+  messageId: string;
+  status: string;
+}
+
+// ═══════════════════════════════════════
+// SEND: Text Message
+// ═══════════════════════════════════════
+export async function sendTextMessage(
+  apiKey: string,
+  phoneNumber: string,      // Your Gupshup sender number (e.g. "919876543210")
+  destination: string,      // Customer phone number
+  text: string
+): Promise<GupshupSendResult> {
+  if (!apiKey || !phoneNumber || !destination || !text) {
+    throw new Error('Gupshup sendTextMessage: missing required parameters');
+  }
+
+  const body = {
+    channel: 'whatsapp',
+    source: cleanPhone(phoneNumber),
+    destination: cleanPhone(destination),
+    message: {
+      type: 'text',
+      text,
+    },
+  };
+
+  let res: Response;
+  try {
+    res = await fetch(`${GUPSHUP_BASE}/messages`, {
+      method: 'POST',
+      headers: headers(apiKey),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch (err) {
+    throw new Error(`Gupshup network error: ${(err as Error).message}`);
+  }
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText);
+    // Do NOT log apiKey or full response — could contain sensitive data
+    throw new Error(`Gupshup error ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  return {
+    messageId: data.id || data.messageId || '',
+    status: data.status || 'sent',
+  };
+}
+
+// ═══════════════════════════════════════
+// SEND: Template Message (HSM)
+// ═══════════════════════════════════════
+export async function sendTemplateMessage(
+  apiKey: string,
+  phoneNumber: string,
+  destination: string,
+  templateName: string,
+  variables: string[] = [],
+  languageCode = 'en'
+): Promise<GupshupSendResult> {
+  if (!apiKey || !phoneNumber || !destination || !templateName) {
+    throw new Error('Gupshup sendTemplateMessage: missing required parameters');
+  }
+
+  const body = {
+    channel: 'whatsapp',
+    source: cleanPhone(phoneNumber),
+    destination: cleanPhone(destination),
+    message: {
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+        ...(variables.length > 0 && { bodyValues: variables }),
+      },
+    },
+  };
+
+  let res: Response;
+  try {
+    res = await fetch(`${GUPSHUP_BASE}/messages`, {
+      method: 'POST',
+      headers: headers(apiKey),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch (err) {
+    throw new Error(`Gupshup network error: ${(err as Error).message}`);
+  }
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText);
+    throw new Error(`Gupshup template error ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  return {
+    messageId: data.id || data.messageId || '',
+    status: data.status || 'sent',
+  };
+}
+
+// ═══════════════════════════════════════
+// SEND: Media Message (image/video/audio/file)
+// ═══════════════════════════════════════
+export async function sendMediaMessage(
+  apiKey: string,
+  phoneNumber: string,
+  destination: string,
+  mediaType: GupshupMediaType,
+  url: string,
+  caption?: string
+): Promise<GupshupSendResult> {
+  if (!apiKey || !phoneNumber || !destination || !url) {
+    throw new Error('Gupshup sendMediaMessage: missing required parameters');
+  }
+
+  const mediaPayload: Record<string, string> = { url };
+  if (caption && mediaType === 'image') {
+    mediaPayload.caption = caption;
+  }
+
+  const body = {
+    channel: 'whatsapp',
+    source: cleanPhone(phoneNumber),
+    destination: cleanPhone(destination),
+    message: {
+      type: mediaType,
+      [mediaType]: mediaPayload,
+    },
+  };
+
+  let res: Response;
+  try {
+    res = await fetch(`${GUPSHUP_BASE}/messages`, {
+      method: 'POST',
+      headers: headers(apiKey),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000), // Larger timeout for media
+    });
+  } catch (err) {
+    throw new Error(`Gupshup network error: ${(err as Error).message}`);
+  }
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText);
+    throw new Error(`Gupshup media error ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  return {
+    messageId: data.id || data.messageId || '',
+    status: data.status || 'sent',
+  };
+}
+
+// ═══════════════════════════════════════
+// TEST: Connection Verification
+// ═══════════════════════════════════════
+// Sends a message to self — Gupshup uses this to verify credentials.
+export async function testConnection(
+  apiKey: string,
+  phoneNumber: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!apiKey || !phoneNumber) {
+    return { success: false, error: 'API key and phone number are required' };
+  }
+
+  try {
+    const res = await fetch(`${GUPSHUP_BASE}/messages`, {
+      method: 'POST',
+      headers: headers(apiKey),
+      body: JSON.stringify({
+        channel: 'whatsapp',
+        source: cleanPhone(phoneNumber),
+        destination: cleanPhone(phoneNumber), // Send to self
+        message: {
+          type: 'text',
+          text: '✅ Aries AI connection test successful.',
+        },
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (res.ok) {
+      return { success: true };
+    }
+
+    // 4xx means credentials are wrong or phone number is invalid
+    const errText = await res.text().catch(() => '');
+    return {
+      success: false,
+      error: `Connection failed (${res.status}). Check your API key and phone number.`,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: `Network error: ${(err as Error).message}`,
+    };
+  }
+}
+
+// ═══════════════════════════════════════
+// GET: Opted-In Contacts
+// ═══════════════════════════════════════
+export async function getOptedContacts(apiKey: string): Promise<string[]> {
+  if (!apiKey) return [];
+
+  try {
+    const res = await fetch(`${GUPSHUP_BASE}/contacts/opted`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Gupshup contacts error: ${res.status}`);
+    }
+
+    const data = await res.json();
+    return data.contacts || [];
+  } catch (err) {
+    console.error('❌ Gupshup getOptedContacts error:', (err as Error).message);
+    return [];
+  }
+}
+
+// ═══════════════════════════════════════
+// HELPERS: Webhook Parsing
+// ═══════════════════════════════════════
+export interface ParsedGupshupMessage {
+  messageId: string;
+  fromPhone: string;       // Customer phone number (e.g. "919876543210")
+  appPhone: string;        // Your Gupshup sender phone (from "app" field)
+  type: string;            // "text" | "image" | "audio" | "video" | "file" | "location"
+  text: string;            // Extracted message text / caption
+  timestamp: number;
+  isStatusUpdate: boolean;
+  status?: string;         // "sent" | "delivered" | "read" | "failed"
+  mediaUrl?: string;
+}
+
+export function parseGupshupWebhook(body: Record<string, unknown>): ParsedGupshupMessage | null {
+  const eventType = body.type as string;
+  const app = (body.app as string) || '';
+  const timestamp = (body.timestamp as number) || Date.now();
+  const payload = body.payload as Record<string, unknown>;
+
+  if (!payload) return null;
+
+  // Status update event
+  if (eventType === 'message-status') {
+    return {
+      messageId: (payload.id as string) || '',
+      fromPhone: (payload.source as string) || '',
+      appPhone: app,
+      type: 'status_update',
+      text: '',
+      timestamp,
+      isStatusUpdate: true,
+      status: (payload.status as string) || '',
+    };
+  }
+
+  // Incoming message event
+  if (eventType === 'message') {
+    const msgType = (payload.type as string) || 'text';
+    let text = '';
+    let mediaUrl: string | undefined;
+
+    if (msgType === 'text') {
+      text = (payload.text as string) || '';
+    } else if (['image', 'video', 'audio', 'file'].includes(msgType)) {
+      const mediaObj = payload[msgType] as Record<string, string> | undefined;
+      mediaUrl = mediaObj?.url || (payload.url as string) || '';
+      text = mediaObj?.caption || `[${msgType}]`;
+    } else if (msgType === 'location') {
+      const loc = payload.location as Record<string, number> | undefined;
+      text = loc ? `📍 Location: ${loc.latitude}, ${loc.longitude}` : '📍 Location shared';
+    } else {
+      text = `[${msgType}]`;
+    }
+
+    return {
+      messageId: (payload.id as string) || '',
+      fromPhone: (payload.source as string) || '',
+      appPhone: app,
+      type: msgType,
+      text,
+      timestamp,
+      isStatusUpdate: false,
+      ...(mediaUrl && { mediaUrl }),
+    };
+  }
+
+  return null;
+}
+
+// ═══════════════════════════════════════
+// UTILITY: Is Gupshup configured?
+// ═══════════════════════════════════════
+export function isGupshupConfigured(tenant: {
+  gupshup_api_key?: string | null;
+  gupshup_phone_number?: string | null;
+}): boolean {
+  return !!(tenant.gupshup_api_key && tenant.gupshup_phone_number);
+}
+
+// ═══════════════════════════════════════
+// STAFF ALERTS
+// ═══════════════════════════════════════
+export async function sendStaffAlert(
+  tenant: {
+    gupshup_api_key?: string | null;
+    gupshup_phone_number?: string | null;
+    staff_phone?: string | null;
+    manager_phone?: string | null;
+  },
+  text: string
+): Promise<void> {
+  if (!isGupshupConfigured(tenant)) return;
+  if (!tenant.staff_phone && !tenant.manager_phone) return;
+
+  const phones = [tenant.staff_phone, tenant.manager_phone].filter(Boolean) as string[];
+  for (const phone of phones) {
+    try {
+      await sendTextMessage(
+        tenant.gupshup_api_key as string,
+        tenant.gupshup_phone_number as string,
+        phone,
+        `🔔 STAFF ALERT:\n\n${text}`
+      );
+    } catch (err) {
+      console.error(`Failed to send staff alert to ${phone}:`, err);
+    }
+  }
+}

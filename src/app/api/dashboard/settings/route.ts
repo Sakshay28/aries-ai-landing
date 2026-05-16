@@ -23,7 +23,8 @@ export async function GET() {
       staff_phone, staff_name, manager_phone,
       followup_30min, followup_3hr, followup_24hr, followup_7day,
       escalation_timeout_mins, hot_keywords, warm_keywords,
-      custom_faqs, off_hours_message, off_hours_capture_lead
+      custom_faqs, off_hours_message, off_hours_capture_lead,
+      gupshup_api_key, gupshup_phone_number, gupshup_app_name
     `)
     .eq('id', tenantId)
     .single();
@@ -53,6 +54,7 @@ export async function PATCH(req: NextRequest) {
     'followup_30min', 'followup_3hr', 'followup_24hr', 'followup_7day',
     'escalation_timeout_mins', 'hot_keywords', 'warm_keywords',
     'custom_faqs', 'off_hours_message', 'off_hours_capture_lead',
+    'gupshup_api_key', 'gupshup_phone_number', 'gupshup_app_name'
   ];
 
   const updates: Record<string, unknown> = {};

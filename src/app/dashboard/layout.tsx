@@ -34,7 +34,7 @@ export default async function DashboardLayout({
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) redirect("/login");
-    userEmail = user.email || "";
+    userEmail = user?.email || "";
 
     const { data: userData } = await supabase
       .from("users")

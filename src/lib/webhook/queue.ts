@@ -1,20 +1,10 @@
 // ═══════════════════════════════════════════════════════════
-// Webhook Queue — Synchronous fallback (BullMQ in worker service)
+// Webhook Queue — Synchronous fallback
 // ═══════════════════════════════════════════════════════════
-import { processIncomingMessage } from '@/lib/whatsapp/processor';
 import { processIncomingIGMessage } from '@/lib/instagram/processor';
-import type { ParsedWhatsAppMessage } from '@/lib/whatsapp/service';
-import * as Sentry from '@/lib/sentry-stub';
 
 export function initWebhookEngine() {
-  // No-op on Vercel — worker handles queues
-}
-
-export async function enqueueWebhookMessage(msg: ParsedWhatsAppMessage) {
-  processIncomingMessage(msg).catch((err) => {
-    console.error(err);
-    Sentry.captureException(err);
-  });
+  // No-op on Vercel
 }
 
 export async function enqueueIGWebhookMessage(data: { igPageId: string, senderId: string, messageText: string, messageId: string }) {

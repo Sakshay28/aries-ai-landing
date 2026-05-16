@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { type LucideIcon } from "lucide-react";
 import {
   LayoutDashboard,
-  Sparkles,
   MessageSquare,
+  Megaphone,
   Users,
   Workflow,
-  BarChart3,
+  Network,
+  FileText,
   Puzzle,
   ChevronLeft,
   ChevronRight,
@@ -25,20 +27,46 @@ type NavItem = {
   label: string;
   icon: LucideIcon;
   href: string;
-  badge?: string;
+  badge?: React.ReactNode;
 };
 
 const navigationItems: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
-  { label: "AI Agents", icon: Sparkles, href: "/dashboard/voice", badge: "3" },
-  { label: "Conversations", icon: MessageSquare, href: "/dashboard/conversations", badge: "12" },
-  { label: "Leads", icon: Users, href: "/dashboard/leads" },
-  { label: "Workflows", icon: Workflow, href: "/dashboard/workflows" },
-  { label: "Analytics", icon: BarChart3, href: "/dashboard/analytics" },
+  { 
+    label: "Live Chat", 
+    icon: MessageSquare, 
+    href: "/dashboard/chat", 
+    badge: (
+      <div className="flex items-center gap-1.5">
+        <div className="w-1.5 h-1.5 rounded-full bg-sidebar-foreground/30" />
+        <span className="text-[10px] tracking-wide text-sidebar-foreground/50">12 / 3</span>
+      </div>
+    ) 
+  },
+  { 
+    label: "AI Flows", 
+    icon: Network, 
+    href: "/dashboard/flows",
+    badge: (
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] tracking-wide text-sidebar-foreground/50">Active</span>
+      </div>
+    ) 
+  },
+  { label: "Broadcast", icon: Megaphone, href: "/dashboard/broadcast" },
+  { label: "Contacts", icon: Users, href: "/dashboard/contacts" },
+  { 
+    label: "Automations", 
+    icon: Workflow, 
+    href: "/dashboard/automations",
+    badge: <span className="text-[10px] tracking-wide text-sidebar-foreground/50">4</span>
+  },
+  { label: "Templates", icon: FileText, href: "/dashboard/templates" },
   { label: "Integrations", icon: Puzzle, href: "/dashboard/integrations" },
 ];
 
 const bottomItems: NavItem[] = [
+  { label: "Team", icon: Users, href: "/dashboard/team" },
   { label: "Billing", icon: CreditCard, href: "/dashboard/billing" },
   { label: "Settings", icon: Settings, href: "/dashboard/settings" },
 ];
@@ -69,7 +97,8 @@ export default function AppSidebar({ userEmail }: { userEmail?: string }) {
       {/* Mobile — fixed drawer */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-gray-200 bg-white transition-transform duration-300 ease-in-out lg:hidden",
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-sidebar-border bg-sidebar transition-transform duration-300 ease-in-out lg:hidden",
+          "shadow-[inset_-1px_0_rgba(255,255,255,0.4)] dark:shadow-[4px_0_24px_-4px_rgba(0,0,0,0.8)]",
           isMobileOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -98,7 +127,7 @@ function DesktopSidebar(props: {
   return (
     <aside
       style={{ width: props.isOpen ? 256 : 80 }}
-      className="hidden shrink-0 flex-col border-r border-gray-200 bg-white transition-[width] duration-300 ease-in-out lg:flex"
+      className="hidden shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-in-out lg:flex relative z-20 shadow-[inset_-1px_0_rgba(255,255,255,0.4)] dark:shadow-[4px_0_24px_-4px_rgba(0,0,0,0.8)]"
     >
       <SidebarBody
         isOpen={props.isOpen}
@@ -130,20 +159,20 @@ function SidebarBody({
   return (
     <>
       {/* Header */}
-      <div className="flex h-16 items-center justify-between border-b border-gray-200 px-4">
+      <div className="flex h-[72px] items-center justify-between border-b border-sidebar-border px-4">
         {isOpen && (
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 shadow-sm">
-              <Zap className="h-5 w-5 text-white" />
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white overflow-hidden shadow-[0_2px_10px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_10px_rgba(0,0,0,0.5)]">
+              <Image src="/logo.png" alt="Aries AI Logo" width={32} height={32} className="object-cover" />
             </div>
-            <span className="text-sm font-bold tracking-tight text-gray-900">Aries</span>
+            <span className="text-[15px] font-bold tracking-tight text-sidebar-accent-foreground">Aries AI</span>
           </div>
         )}
         <Button
           variant="ghost"
           size="icon"
           onClick={onToggle}
-          className="h-8 w-8 text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+          className="h-8 w-8 text-sidebar-foreground hover:bg-black/5 dark:hover:bg-white/5 hover:text-sidebar-accent-foreground"
           aria-label="Toggle sidebar"
         >
           {isOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -151,14 +180,14 @@ function SidebarBody({
       </div>
 
       {/* Primary nav */}
-      <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-5">
         {navigationItems.map((item) => (
           <NavButton key={item.label} item={item} isOpen={isOpen} isActive={isActive(item.href)} />
         ))}
       </nav>
 
       {/* Bottom nav */}
-      <div className="space-y-1 border-t border-gray-200 p-2">
+      <div className="space-y-1 border-t border-sidebar-border p-3">
         {bottomItems.map((item) => (
           <NavButton key={item.label} item={item} isOpen={isOpen} isActive={isActive(item.href)} />
         ))}
@@ -166,14 +195,14 @@ function SidebarBody({
 
       {/* Profile */}
       {isOpen && (
-        <div className="border-t border-gray-200 p-3">
+        <div className="border-t border-sidebar-border p-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-700">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/5 dark:bg-white/10 text-[13px] font-semibold text-sidebar-accent-foreground shadow-sm">
               {initials}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-gray-900">{displayName}</p>
-              <p className="truncate text-xs text-gray-500">{userEmail || "preview@aries.ai"}</p>
+              <p className="truncate text-sm font-semibold text-sidebar-accent-foreground">{displayName}</p>
+              <p className="truncate text-xs text-sidebar-foreground">{userEmail || "preview@aries.ai"}</p>
             </div>
           </div>
         </div>
@@ -196,23 +225,23 @@ function NavButton({
     <Link
       href={item.href}
       className={cn(
-        "group relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+        "group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-all duration-200",
         isActive
-          ? "bg-indigo-50 text-indigo-700"
-          : "text-gray-700 hover:bg-gray-100 hover:text-gray-900",
+          ? "bg-white/80 dark:bg-white/10 text-sidebar-accent-foreground border border-black/5 dark:border-white/5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.2)]"
+          : "text-sidebar-foreground border border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:text-sidebar-accent-foreground",
         !isOpen && "justify-center",
       )}
       title={!isOpen ? item.label : undefined}
     >
-      <Icon className={cn("h-5 w-5 shrink-0", isActive ? "text-indigo-600" : "text-gray-500")} />
+      <Icon className={cn("h-4 w-4 shrink-0 transition-colors", isActive ? "text-[#06B6D4]" : "text-sidebar-foreground group-hover:text-sidebar-accent-foreground")} />
       {isOpen && (
         <>
           <span className="flex-1 text-left">{item.label}</span>
           {item.badge && (
             <span
               className={cn(
-                "inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full px-1.5 text-xs font-semibold",
-                isActive ? "bg-indigo-600 text-white" : "bg-indigo-600 text-white",
+                "inline-flex h-5 items-center justify-center rounded-full px-2 text-[10px] font-semibold border border-sidebar-border",
+                "bg-black/5 dark:bg-white/5 text-sidebar-foreground",
               )}
             >
               {item.badge}
@@ -221,7 +250,7 @@ function NavButton({
         </>
       )}
       {!isOpen && item.badge && (
-        <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-indigo-600" />
+        <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-sidebar-primary" />
       )}
     </Link>
   );

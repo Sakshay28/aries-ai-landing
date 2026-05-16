@@ -1,35 +1,24 @@
-import { ActiveWorkflows } from "./ActiveWorkflows";
-import { AgentPerformance } from "./AgentPerformance";
-import { ConversationOverview } from "./ConversationOverview";
-import { HeroSection } from "./HeroSection";
-import { ResponseMetrics } from "./ResponseMetrics";
-import { TeamActivity } from "./TeamActivity";
-import { UnresolvedConversations } from "./UnresolvedConversations";
+import { GreetingSection } from "./GreetingSection";
+import { DashboardMetrics } from "./DashboardMetrics";
+import { QuickActions } from "./QuickActions";
+import { RecentChats } from "./RecentChats";
 
 export function DashboardContent() {
   return (
-    <div className="-mx-4 -my-4 md:-mx-6 md:-my-6 lg:-mx-8 lg:-my-8">
-      <HeroSection />
-
-      <div className="space-y-6 px-6 py-8 md:space-y-8">
-        {/* KPI row */}
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-          <ConversationOverview />
-          <ActiveWorkflows />
-          <UnresolvedConversations />
+    <div className="bg-background min-h-full">
+      <div className="px-2 md:px-6 max-w-6xl mx-auto space-y-10">
+        <GreetingSection />
+        
+        <DashboardMetrics />
+        
+        <div className="space-y-4">
+          <h2 className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase">Quick Actions</h2>
+          <QuickActions />
         </div>
 
-        {/* Metrics + Activity */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <ResponseMetrics />
-          </div>
-          <TeamActivity />
-        </div>
-
-        {/* Agent performance */}
-        <div>
-          <AgentPerformance />
+        <div className="space-y-4">
+          <h2 className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase">Recent Chats</h2>
+          <RecentChats />
         </div>
       </div>
     </div>
