@@ -64,9 +64,13 @@ function PersonalityCard({
   selected: boolean;
   onClick: () => void;
 }) {
+  const [isHovered, setIsHovered] = useState(false);
+
   return (
     <button
       onClick={onClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       style={{
         width: "100%",
         padding: "14px 16px",
@@ -80,6 +84,7 @@ function PersonalityCard({
         gap: 14,
         transition: "all 0.18s ease",
         fontFamily: "inherit",
+        position: "relative",
       }}
     >
       <div style={{
@@ -90,14 +95,18 @@ function PersonalityCard({
       }}>
         {selected && <div style={{ width: 10, height: 10, borderRadius: "50%", background: G }} />}
       </div>
-      <div style={{ flex: 1 }}>
+      <div style={{ flex: 1, transition: "all 0.3s ease" }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 2 }}>{option.label}</div>
-        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>{option.desc}</div>
-        {selected && (
-          <div style={{ fontSize: 12, color: GD, fontWeight: 500, fontStyle: "italic", background: "rgba(255,255,255,0.6)", padding: "4px 8px", borderRadius: 6, display: "inline-block" }}>
-            Example: {option.example}
-          </div>
-        )}
+        <div style={{ fontSize: 12, color: "#64748b", transition: "all 0.2s ease", opacity: isHovered ? 0 : 1, height: isHovered ? 0 : 'auto', overflow: 'hidden' }}>{option.desc}</div>
+        
+        {/* Hover Example State */}
+        <div style={{ 
+          fontSize: 12, color: GD, fontWeight: 500, fontStyle: "italic", 
+          opacity: isHovered ? 1 : 0, height: isHovered ? 'auto' : 0, overflow: 'hidden',
+          transition: "all 0.2s ease"
+        }}>
+          Example: {option.example}
+        </div>
       </div>
     </button>
   );

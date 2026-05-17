@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
         requested_wa_number: whatsapp_number_requested,
         business_description,
       },
-    }).catch(() => {}); // Non-critical
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {
