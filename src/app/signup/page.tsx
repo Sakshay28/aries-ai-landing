@@ -44,10 +44,10 @@ function SignupInner() {
     setGoogleLoading(true);
     setError("");
     const supabase = createBrowserSupabaseClient();
+    const origin = window.location.origin;
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      // The callback auto-provisions the tenant and drops straight into /dashboard.
-      options: { redirectTo: `${window.location.origin}/api/auth/callback?next=/dashboard` },
+      options: { redirectTo: `${origin}/api/auth/callback?next=/dashboard` },
     });
     if (oauthError) {
       setError(oauthError.message);
@@ -96,7 +96,8 @@ function SignupInner() {
 
       // Give the browser a moment to commit cookies before navigating
       await new Promise((r) => setTimeout(r, 100));
-      window.location.href = "/dashboard";
+      // New users go to onboarding wizard to set up their business
+      window.location.href = "/onboard";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Signup failed");
       setLoading(false);

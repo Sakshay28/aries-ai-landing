@@ -88,9 +88,8 @@ export async function POST(req: NextRequest) {
         plan: selectedPlan,
         message_limit: planDetail.messageLimit,
         ai_conversation_limit: planDetail.aiConversationLimit,
-        // Skip the onboarding wall — the new signup form already collects
-        // enough to start using the dashboard. Users refine details in Settings.
-        onboarding_completed: true,
+        // Onboarding wizard will set this to true after collecting business details
+        onboarding_completed: false,
       })
       .select()
       .single();
