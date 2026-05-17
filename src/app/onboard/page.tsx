@@ -107,6 +107,7 @@ function OnboardContent() {
   // Step 1
   const [businessName, setBusinessName] = useState("");
   const [businessType, setBusinessType] = useState(BUSINESS_TYPES[0]);
+  const [businessDescription, setBusinessDescription] = useState("");
   const [businessPhone, setBusinessPhone] = useState("");
 
   // Step 2
@@ -158,6 +159,7 @@ function OnboardContent() {
           bot_personality: personality,
           welcome_message: welcomeMsg.trim() || null,
           whatsapp_number_requested: waPhone.trim() || null,
+          business_description: businessDescription.trim() || null,
         }),
       });
       const data = await res.json();
@@ -275,13 +277,31 @@ function OnboardContent() {
                     <select
                       style={{ ...styles.input, appearance: "none", paddingRight: 36 }}
                       value={businessType}
-                      onChange={e => setBusinessType(e.target.value)}
+                      onChange={e => {
+                        setBusinessType(e.target.value);
+                        if (e.target.value !== "Other") setBusinessDescription("");
+                      }}
                     >
                       {BUSINESS_TYPES.map(t => <option key={t}>{t}</option>)}
                     </select>
                     <svg style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="16" height="16" fill="none" stroke="#94a3b8" strokeWidth="2" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
                   </div>
                 </Field>
+
+                {businessType === "Other" && (
+                  <Field label="What is your business about? (Knowledge base)">
+                    <textarea
+                      style={{ ...styles.input, minHeight: 80, resize: "vertical", lineHeight: 1.55 }}
+                      value={businessDescription}
+                      onChange={e => setBusinessDescription(e.target.value)}
+                      placeholder="e.g. We are a D2C brand selling organic skincare products..."
+                      onFocus={focusOn as any} onBlur={focusOff as any}
+                    />
+                    <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 6, marginBottom: 0 }}>
+                      This helps your AI understand your products/services so it can answer questions better.
+                    </p>
+                  </Field>
+                )}
 
                 <Field label="Business Phone (optional)">
                   <input

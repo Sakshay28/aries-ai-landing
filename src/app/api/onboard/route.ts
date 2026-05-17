@@ -18,6 +18,7 @@ export async function POST(req: NextRequest) {
       bot_personality,
       welcome_message,
       whatsapp_number_requested,
+      business_description,
     } = body;
 
     if (!business_name?.trim()) {
@@ -39,12 +40,8 @@ export async function POST(req: NextRequest) {
         business_type: business_type || 'Other',
         business_phone: business_phone || null,
         bot_name: bot_name.trim(),
-        bot_personality: bot_personality || 'Friendly and approachable',
+        bot_personality: (bot_personality || 'Friendly and approachable') + (business_description ? `\n\nBusiness Context: ${business_description}` : ''),
         welcome_message: finalWelcome,
-        // Store WhatsApp number request (admin will provision manually)
-        gupshup_phone_number: whatsapp_number_requested
-          ? whatsapp_number_requested.replace(/[\s+\-()]/g, '')
-          : null,
         onboarding_completed: true,
         updated_at: new Date().toISOString(),
       })
@@ -64,6 +61,8 @@ export async function POST(req: NextRequest) {
         business_type,
         bot_name: bot_name.trim(),
         whatsapp_requested: !!whatsapp_number_requested,
+        requested_wa_number: whatsapp_number_requested,
+        business_description,
       },
     }).catch(() => {}); // Non-critical
 
