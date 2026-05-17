@@ -103,8 +103,10 @@ export default function ChatSidebar() {
     const supabase = supabaseRef.current;
     const channel = supabase
       .channel("chat-sidebar-convos")
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => {
-        load();
+      .on("postgres_changes", { event: "*", schema: "public" }, (payload) => {
+        if (payload.table?.startsWith('messages') || payload.table === 'conversations') {
+          load();
+        }
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };

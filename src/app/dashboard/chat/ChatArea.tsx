@@ -76,10 +76,11 @@ export default function ChatArea() {
         {
           event: "INSERT",
           schema: "public",
-          table: "messages",
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
+          // Verify it's a message row (partitions might have dynamic names like messages_2026_05_17)
+          if (!payload.new || !('content' in payload.new)) return;
           setMessages((prev) => {
             const exists = prev.some((m) => m.id === payload.new.id);
             if (exists) return prev;
