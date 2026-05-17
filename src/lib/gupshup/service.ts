@@ -264,6 +264,7 @@ export interface ParsedGupshupMessage {
   messageId: string;
   fromPhone: string;       // Customer phone number (e.g. "919876543210")
   appPhone: string;        // Your Gupshup sender phone (from "app" field)
+  appName: string;         // Gupshup app name (from body.app)
   type: string;            // "text" | "image" | "audio" | "video" | "file" | "location"
   text: string;            // Extracted message text / caption
   timestamp: number;
@@ -280,17 +281,20 @@ export function parseGupshupWebhook(body: Record<string, unknown>): ParsedGupshu
 
   if (!payload) return null;
 
-  // Status update event
-  if (eventType === 'message-status') {
+  console.log('🔍 Gupshup eventType:', eventType, '| app:', app, '| payload keys:', Object.keys(payload));
+
+  // Status update event — Gupshup v2 uses "message-event"
+  if (eventType === 'message-event' || eventType === 'message-status') {
     return {
       messageId: (payload.id as string) || '',
-      fromPhone: (payload.source as string) || '',
+      fromPhone: (payload.destination as string) || (payload.source as string) || '',
       appPhone: app,
+      appName: app,
       type: 'status_update',
       text: '',
       timestamp,
       isStatusUpdate: true,
-      status: (payload.status as string) || '',
+      status: (payload.type as string) || (payload.status as string) || '',
     };
   }
 
@@ -301,14 +305,17 @@ export function parseGupshupWebhook(body: Record<string, unknown>): ParsedGupshu
     let mediaUrl: string | undefined;
 
     if (msgType === 'text') {
+      // Gupshup v2: text is at payload.payload.text
       const innerPayload = payload.payload as Record<string, unknown> | undefined;
       text = (innerPayload?.text as string) || (payload.text as string) || '';
     } else if (['image', 'video', 'audio', 'file'].includes(msgType)) {
-      const mediaObj = payload[msgType] as Record<string, string> | undefined;
+      const innerPayload = payload.payload as Record<string, unknown> | undefined;
+      const mediaObj = (innerPayload || payload[msgType]) as Record<string, string> | undefined;
       mediaUrl = mediaObj?.url || (payload.url as string) || '';
       text = mediaObj?.caption || `[${msgType}]`;
     } else if (msgType === 'location') {
-      const loc = payload.location as Record<string, number> | undefined;
+      const innerPayload = payload.payload as Record<string, unknown> | undefined;
+      const loc = (innerPayload || payload.location) as Record<string, number> | undefined;
       text = loc ? `📍 Location: ${loc.latitude}, ${loc.longitude}` : '📍 Location shared';
     } else {
       text = `[${msgType}]`;
@@ -317,7 +324,8 @@ export function parseGupshupWebhook(body: Record<string, unknown>): ParsedGupshu
     return {
       messageId: (payload.id as string) || '',
       fromPhone: (payload.source as string) || '',
-      appPhone: app,
+      appPhone: app,   // app name — used for tenant lookup by gupshup_app_name
+      appName: app,
       type: msgType,
       text,
       timestamp,
@@ -326,6 +334,7 @@ export function parseGupshupWebhook(body: Record<string, unknown>): ParsedGupshu
     };
   }
 
+  console.log('⚠️ Gupshup: unrecognised event type:', eventType);
   return null;
 }
 

@@ -116,18 +116,39 @@ async function handleIncomingMessage(
     return;
   }
 
-  // ── Resolve tenant by Gupshup phone number ──
-  const { data: tenant, error: tenantErr } = await supabaseAdmin
+  // ── Resolve tenant by Gupshup app name (v2 format doesn't include destination phone) ──
+  console.log(`🔍 Looking up tenant for app: ${msg.appName} | phone fallback: ${msg.appPhone}`);
+
+  // Try by app name first, then by phone number as fallback
+  let tenant: Record<string, unknown> | null = null;
+
+  const { data: tenantByApp } = await supabaseAdmin
     .from('tenants')
     .select('*')
-    .eq('gupshup_phone_number', msg.appPhone)
+    .eq('gupshup_app_name', msg.appName)
     .eq('is_active', true)
     .single();
 
-  if (tenantErr || !tenant) {
-    console.error(`❌ Gupshup: no tenant found for phone ${msg.appPhone}`);
+  if (tenantByApp) {
+    tenant = tenantByApp;
+  } else {
+    // Fallback: try by phone number
+    const { data: tenantByPhone } = await supabaseAdmin
+      .from('tenants')
+      .select('*')
+      .eq('gupshup_phone_number', msg.appPhone)
+      .eq('is_active', true)
+      .single();
+    tenant = tenantByPhone;
+  }
+
+  if (!tenant) {
+    console.error(`❌ Gupshup: no tenant found for app "${msg.appName}" or phone "${msg.appPhone}"`);
     return;
   }
+
+  console.log(`✅ Gupshup: tenant found: ${tenant.id}`);
+
 
   // ── Resolve or create Lead (contact) ──
   const cleanPhone = msg.fromPhone.replace(/\D/g, '');
