@@ -392,5 +392,3 @@ async function handleStatusUpdate(
 
   console.log(`📬 Gupshup status update: ${msg.messageId} → ${mappedStatus}`);
 }
-
-}
