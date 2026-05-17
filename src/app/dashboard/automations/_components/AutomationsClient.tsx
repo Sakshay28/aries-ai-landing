@@ -1,234 +1,193 @@
 "use client";
 
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import React from 'react';
 import { 
-  Plus, Activity, LayoutTemplate, Clock, ShieldCheck, Zap, 
-  Settings2, ChevronRight, CheckCircle2, AlertCircle, Bot
+  Plus, Activity, ArrowRight, Play, Pause, BarChart2, Edit2, PlayCircle, ShieldAlert
 } from 'lucide-react';
 import { cn } from "@/lib/utils";
 
 // --- MOCK DATA ---
-type AutomationState = 'Active' | 'Paused' | 'Draft' | 'Learning';
-
 interface Automation {
   id: string;
   name: string;
   triggerSource: string;
   aiSummary: string;
-  status: AutomationState;
-  executionsToday: number;
+  status: 'Active' | 'Learning' | 'Paused';
+  customersReached: number;
   successRate: number;
-  lastTriggered: string;
 }
 
 const mockAutomations: Automation[] = [
   {
     id: 'a-1',
-    name: 'Pricing Recovery Orchestration',
-    triggerSource: 'Abandoned Pricing Intent',
-    aiSummary: 'Autonomously re-engages users who abandon pricing conversations after 2 hours.',
+    name: 'Recover Lost Leads',
+    triggerSource: 'When someone asks about pricing but leaves',
+    aiSummary: 'Automatically texts them a gentle reminder after 2 hours to see if they need help.',
     status: 'Active',
-    executionsToday: 124,
+    customersReached: 124,
     successRate: 92,
-    lastTriggered: '2m ago',
   },
   {
     id: 'a-2',
-    name: 'Lead Qualification Engine',
-    triggerSource: 'First Contact',
-    aiSummary: 'Qualifies inbound leads and hands off VIPs to sales instantly.',
+    name: 'Identify Serious Buyers',
+    triggerSource: 'When a new person messages you',
+    aiSummary: 'Asks a few polite questions to see what they want, and alerts you if they are ready to buy.',
     status: 'Learning',
-    executionsToday: 845,
+    customersReached: 845,
     successRate: 88,
-    lastTriggered: 'Just now',
   },
   {
     id: 'a-3',
-    name: 'Broadcast Follow-up',
-    triggerSource: 'Link Clicked',
-    aiSummary: 'Detects users who clicked a broadcast link but did not reply within 24h.',
+    name: 'Follow Up Interested Customers',
+    triggerSource: 'When they click a link you sent',
+    aiSummary: 'Checks in the next day to ask if they liked what they saw.',
     status: 'Active',
-    executionsToday: 42,
+    customersReached: 42,
     successRate: 76,
-    lastTriggered: '1h ago',
   },
   {
     id: 'a-4',
-    name: 'Support Escalation Protocol',
-    triggerSource: 'Sentiment: Frustrated',
-    aiSummary: 'Instantly escalates frustrated users to a human agent with conversation context.',
+    name: 'Alert Human Support',
+    triggerSource: 'When a customer seems frustrated',
+    aiSummary: 'Immediately pauses the AI and pings your phone so you can jump in and help.',
     status: 'Active',
-    executionsToday: 18,
+    customersReached: 18,
     successRate: 100,
-    lastTriggered: '15m ago',
   }
 ];
 
 export function AutomationsClient() {
-  const [hoveredCard, setHoveredCard] = useState<string | null>(null);
-
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-hidden">
       
       {/* TOP HEADER */}
-      <header className="h-14 border-b border-border/40 flex items-center justify-between px-6 shrink-0 bg-background/95 backdrop-blur-sm z-20 sticky top-0">
-        <div className="flex items-center gap-3">
-          <h1 className="text-[14px] font-medium tracking-tight text-foreground flex items-center gap-2">
-            Automations
-          </h1>
-        </div>
+      <header className="h-14 flex items-center justify-between px-6 shrink-0 bg-background z-20 sticky top-0">
+        <h1 className="text-[16px] font-semibold tracking-tight text-foreground">
+          Automations
+        </h1>
 
         <div className="flex items-center gap-2">
-          <button className="h-8 px-3 text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors flex items-center">
-            <Activity className="w-3.5 h-3.5 mr-2 opacity-70" />
-            Activity
+          <button className="h-9 px-4 text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors flex items-center">
+            <Activity className="w-4 h-4 mr-2 opacity-70" />
+            History
           </button>
-          <button className="h-8 px-3 text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors flex items-center">
-            <LayoutTemplate className="w-3.5 h-3.5 mr-2 opacity-70" />
-            Templates
-          </button>
-          <div className="w-px h-4 bg-border mx-1"></div>
-          <button className="h-8 px-4 bg-foreground text-background hover:bg-foreground/90 rounded-md text-[13px] font-medium transition-colors shadow-sm flex items-center">
-            <Plus className="w-3.5 h-3.5 mr-1.5" />
-            Create
+          <button className="h-9 px-4 bg-foreground text-background hover:bg-foreground/90 rounded-lg text-[13px] font-medium transition-transform active:scale-95 flex items-center shadow-sm">
+            <Plus className="w-4 h-4 mr-1.5" />
+            New Automation
           </button>
         </div>
       </header>
 
-      {/* MAIN CONTENT CANVAS */}
+      {/* MAIN CONTENT */}
       <div className="flex-1 overflow-auto p-6 md:p-8 custom-scrollbar">
-        <div className="max-w-5xl mx-auto space-y-10">
+        <div className="max-w-4xl mx-auto space-y-12">
           
-          {/* HERO METRICS */}
-          <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-5 rounded-xl bg-card border border-border/50 shadow-sm flex flex-col">
-              <div className="flex items-center gap-2 mb-4 text-muted-foreground">
-                <Zap className="w-4 h-4" />
-                <span className="text-[12px] font-medium">Conversations Automated</span>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-semibold tracking-tight text-foreground">12,450</span>
-                <span className="text-[12px] font-medium text-emerald-600 dark:text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                  Today
-                </span>
-              </div>
-            </div>
+          {/* HEADER COPY */}
+          <div>
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground mb-2">
+              Let AI do the follow-ups.
+            </h2>
+            <p className="text-[15px] text-muted-foreground leading-relaxed">
+              Your AI assistant is currently managing conversations and making sure no customer is left behind.
+            </p>
+          </div>
 
-            <div className="p-5 rounded-xl bg-card border border-border/50 shadow-sm flex flex-col">
-              <div className="flex items-center gap-2 mb-4 text-muted-foreground">
-                <ShieldCheck className="w-4 h-4" />
-                <span className="text-[12px] font-medium">Recovery Rate</span>
-              </div>
-              <div className="flex items-baseline gap-1">
-                <span className="text-3xl font-semibold tracking-tight text-foreground">84%</span>
-              </div>
-            </div>
-
-            <div className="p-5 rounded-xl bg-card border border-border/50 shadow-sm flex flex-col">
-              <div className="flex items-center gap-2 mb-4 text-muted-foreground">
-                <Clock className="w-4 h-4" />
-                <span className="text-[12px] font-medium">Hours Saved</span>
-              </div>
-              <div className="flex items-baseline gap-1">
-                <span className="text-3xl font-semibold tracking-tight text-foreground">142h</span>
-              </div>
-            </div>
-          </section>
-
-          {/* AI INSIGHT */}
-          <section className="rounded-xl bg-muted/30 border border-border/50 p-5 flex flex-col sm:flex-row gap-5 items-start sm:items-center justify-between">
-            <div className="flex gap-4">
-              <div className="w-10 h-10 rounded-lg bg-background border border-border flex items-center justify-center shrink-0 shadow-sm">
-                <Bot className="w-5 h-5 text-foreground opacity-80" />
-              </div>
-              <div>
-                <h3 className="text-[14px] font-semibold tracking-tight text-foreground mb-1">
-                  Pattern Detected: Enterprise Pricing
+          {/* AI SUGGESTION - Soft Card */}
+          <section className="group relative rounded-2xl bg-muted/40 p-6 sm:p-8 hover:bg-muted/60 transition-colors cursor-pointer">
+            <div className="flex flex-col sm:flex-row gap-6 items-start sm:items-center justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="flex h-2 w-2 rounded-full bg-blue-500 animate-pulse"></span>
+                  <span className="text-[12px] font-semibold tracking-wide text-blue-600 dark:text-blue-400 uppercase">Suggestion</span>
+                </div>
+                <h3 className="text-[18px] font-medium tracking-tight text-foreground">
+                  Create a "Pricing Clarification" rule
                 </h3>
-                <p className="text-[13px] text-muted-foreground leading-relaxed max-w-2xl">
-                  28% of broadcast responders ask about enterprise pricing. Generating a specific "Pricing Clarification" orchestration flow could recover an estimated 40 leads this week.
+                <p className="text-[14px] text-muted-foreground leading-relaxed max-w-xl">
+                  28% of your customers ask about bulk pricing but don't buy. An automated quick reply could recover an estimated 40 sales this week.
                 </p>
               </div>
+              <button className="shrink-0 h-10 px-5 bg-white dark:bg-black border border-border/50 group-hover:border-border text-foreground text-[14px] font-medium rounded-lg shadow-sm hover:shadow transition-all flex items-center">
+                Turn this on
+                <ArrowRight className="w-4 h-4 ml-2 opacity-60 group-hover:translate-x-0.5 transition-transform" />
+              </button>
             </div>
-            <button className="shrink-0 h-9 px-4 bg-background border border-border hover:bg-muted text-foreground text-[13px] font-medium rounded-md shadow-sm transition-colors flex items-center">
-              Generate Flow
-              <ChevronRight className="w-3.5 h-3.5 ml-1.5 opacity-60" />
-            </button>
           </section>
 
-          {/* ACTIVE ORCHESTRATIONS */}
-          <section className="space-y-4">
-            <div className="flex items-center justify-between px-1">
-              <h2 className="text-[13px] font-medium text-foreground tracking-tight">Active Orchestrations</h2>
+          {/* ACTIVE AUTOMATIONS */}
+          <section>
+            <div className="mb-6">
+              <h3 className="text-[14px] font-medium text-foreground tracking-tight">Your Active Rules</h3>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {mockAutomations.map((automation, i) => (
+            <div className="space-y-4">
+              {mockAutomations.map((automation) => (
                 <div
                   key={automation.id}
-                  onMouseEnter={() => setHoveredCard(automation.id)}
-                  onMouseLeave={() => setHoveredCard(null)}
-                  className="group relative bg-card border border-border/50 hover:border-border rounded-xl p-5 transition-all shadow-sm hover:shadow-md cursor-pointer flex flex-col h-full"
+                  className="group relative bg-background border border-border/40 hover:border-border/80 rounded-2xl p-6 transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:hover:shadow-[0_8px_30px_rgb(255,255,255,0.02)]"
                 >
-                  {/* Header Row */}
-                  <div className="flex items-start justify-between mb-3">
-                    <h3 className="text-[14px] font-semibold text-foreground tracking-tight pr-8">{automation.name}</h3>
+                  <div className="flex flex-col sm:flex-row gap-6 justify-between items-start">
                     
-                    <div className={cn(
-                      "shrink-0 flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border",
-                      automation.status === 'Active' ? "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-500 border-emerald-200 dark:border-emerald-500/20" :
-                      automation.status === 'Learning' ? "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-500 border-amber-200 dark:border-amber-500/20" :
-                      "bg-muted text-muted-foreground border-border"
-                    )}>
-                      {automation.status}
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground font-medium mb-3">
-                    Trigger: <span className="text-foreground">{automation.triggerSource}</span>
-                  </div>
-
-                  {/* Summary */}
-                  <p className="text-[13px] text-muted-foreground leading-relaxed mb-6">
-                    {automation.aiSummary}
-                  </p>
-
-                  {/* Metrics Row */}
-                  <div className="mt-auto pt-4 border-t border-border/40 grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-[11px] text-muted-foreground font-medium mb-1">Executions Today</div>
-                      <div className="text-[13px] font-semibold text-foreground">{automation.executionsToday.toLocaleString()}</div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-muted-foreground font-medium mb-1">Success Rate</div>
-                      <div className="text-[13px] font-semibold text-foreground flex items-center gap-1">
-                        {automation.successRate}%
-                        {automation.successRate > 90 && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
+                    {/* Left: Info */}
+                    <div className="space-y-3 flex-1">
+                      <div className="flex items-center gap-3">
+                        <h4 className="text-[16px] font-medium text-foreground tracking-tight">{automation.name}</h4>
+                        <span className={cn(
+                          "px-2.5 py-0.5 rounded-full text-[11px] font-medium",
+                          automation.status === 'Active' ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-500" :
+                          "bg-amber-500/10 text-amber-600 dark:text-amber-500"
+                        )}>
+                          {automation.status}
+                        </span>
                       </div>
-                    </div>
-                  </div>
+                      
+                      <div className="text-[13px] font-medium text-muted-foreground flex items-center gap-2">
+                        <span className="uppercase text-[11px] tracking-wider text-muted-foreground/60">When:</span>
+                        {automation.triggerSource}
+                      </div>
 
-                  {/* Hover Actions */}
-                  <div className={cn(
-                    "absolute right-4 top-4 flex items-center gap-1 transition-opacity bg-background border border-border shadow-sm rounded-md p-1",
-                    hoveredCard === automation.id ? 'opacity-100' : 'opacity-0 pointer-events-none'
-                  )}>
-                    <button className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors" title="Settings">
-                      <Settings2 className="w-3.5 h-3.5" />
-                    </button>
-                    <div className="w-px h-3 bg-border mx-1"></div>
-                    <button className="px-2 py-1 text-foreground hover:bg-muted text-[11px] font-medium rounded-md transition-colors">
-                      Edit
-                    </button>
+                      <p className="text-[14px] text-muted-foreground/80 leading-relaxed max-w-xl">
+                        {automation.aiSummary}
+                      </p>
+                    </div>
+
+                    {/* Right: Outcomes & Hover Actions */}
+                    <div className="flex flex-col items-end gap-4 shrink-0 sm:min-w-[140px]">
+                      
+                      {/* Stats (Visible by default, fades out on hover) */}
+                      <div className="flex flex-col items-end gap-3 group-hover:opacity-0 group-hover:pointer-events-none transition-opacity duration-200 absolute sm:relative right-6 top-6 sm:right-auto sm:top-auto">
+                        <div className="text-right">
+                          <div className="text-[20px] font-semibold tracking-tight text-foreground">{automation.customersReached}</div>
+                          <div className="text-[12px] text-muted-foreground">Customers Reached</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[20px] font-semibold tracking-tight text-foreground">{automation.successRate}%</div>
+                          <div className="text-[12px] text-muted-foreground">Recovered</div>
+                        </div>
+                      </div>
+
+                      {/* Actions (Hidden by default, fades in on hover) */}
+                      <div className="absolute right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 group-hover:translate-x-0 translate-x-4 transition-all duration-300 flex items-center gap-2">
+                        <button className="flex items-center gap-2 h-9 px-3 bg-muted hover:bg-muted/80 text-foreground text-[13px] font-medium rounded-lg transition-colors" title="Edit">
+                          <Edit2 className="w-3.5 h-3.5" />
+                          Edit
+                        </button>
+                        <button className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors" title="View Analytics">
+                          <BarChart2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors" title="Pause">
+                          <Pause className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
           </section>
           
-          {/* Bottom spacing for scrolling */}
-          <div className="h-8"></div>
+          <div className="h-12"></div>
         </div>
       </div>
     </div>
