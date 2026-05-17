@@ -55,11 +55,7 @@ export async function GET(req: NextRequest) {
   const { data: { user }, error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error || !user) {
-    console.error("OAuth exchange failed:", error, "User:", user);
-    try {
-      const fs = require('fs');
-      fs.writeFileSync('auth_error_log.json', JSON.stringify({ error, user, url: req.url }, null, 2));
-    } catch(e) {}
+    console.error('OAuth exchange failed:', error, 'User:', user);
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
   }
 
@@ -108,11 +104,11 @@ export async function GET(req: NextRequest) {
         business_name: businessName,
         business_type: 'Other',
         business_email: user.email,
-        bot_name: 'Assistant',
+        bot_name: 'Aria',
         plan: 'starter',
         message_limit: planDetail.messageLimit,
         ai_conversation_limit: planDetail.aiConversationLimit,
-        onboarding_completed: true,
+        onboarding_completed: false, // wizard will set this to true
       })
       .select()
       .single();
@@ -145,7 +141,8 @@ export async function GET(req: NextRequest) {
     });
 
     console.log(`🎉 New OAuth signup: ${businessName} (${user.email})`);
-    return redirectWithCookies(`${origin}/dashboard`);
+    // Send new users to onboarding wizard, not dashboard
+    return redirectWithCookies(`${origin}/onboard`);
   } catch (err) {
     console.error('❌ OAuth callback error:', err);
     return NextResponse.redirect(`${origin}/login?error=signup_failed`);

@@ -1,110 +1,75 @@
-// ═══════════════════════════════════════════════════════════
-// 🚀 Onboard API — Create Tenant for OAuth Users
-// ═══════════════════════════════════════════════════════════
-// When a user signs up via Google OAuth, they don't have a
-// tenant yet. This route creates the tenant and user record.
-// ═══════════════════════════════════════════════════════════
-
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { PLAN_DETAILS } from '@/lib/types';
-
-// Detect which brand signed up based on request origin or host header
-function detectBrand(req: NextRequest): 'aries' | 'libra' {
-  const origin = req.headers.get('origin') || req.headers.get('referer') || req.headers.get('host') || '';
-  if (origin.includes('libraai.in') || origin.includes('libra')) return 'libra';
-  return 'aries';
-}
+import { getTenantId } from '@/lib/auth/getTenantId';
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createServerSupabaseClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
+    const tenantId = await getTenantId();
+    if (!tenantId) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Check if user already exists in the users table
-    const { data: existingUser } = await supabaseAdmin
-      .from('users')
-      .select('tenant_id')
-      .eq('auth_id', user.id)
-      .single();
-
-    if (existingUser) {
-      return NextResponse.json({ success: true, tenantId: existingUser.tenant_id, message: 'Already onboarded' });
-    }
-
     const body = await req.json();
-    const { businessName, businessType, plan } = body;
+    const {
+      business_name,
+      business_type,
+      business_phone,
+      bot_name,
+      bot_personality,
+      welcome_message,
+      whatsapp_number_requested,
+    } = body;
 
-    if (!businessName) {
-      return NextResponse.json({ success: false, error: 'businessName is required' }, { status: 400 });
+    if (!business_name?.trim()) {
+      return NextResponse.json({ success: false, error: 'Business name is required.' }, { status: 400 });
+    }
+    if (!bot_name?.trim()) {
+      return NextResponse.json({ success: false, error: 'Bot name is required.' }, { status: 400 });
     }
 
-    const selectedPlan = plan || 'starter';
-    const planDetail = PLAN_DETAILS[selectedPlan as keyof typeof PLAN_DETAILS] || PLAN_DETAILS.starter;
-    const brand = detectBrand(req);
+    // Build welcome message if not provided
+    const finalWelcome = welcome_message?.trim() ||
+      `Hey! 👋 Welcome to ${business_name.trim()}! How can I help you today?`;
 
-    // 1. Create tenant
-    const { data: tenant, error: tenantError } = await supabaseAdmin
+    // Save to tenants table
+    const { error } = await supabaseAdmin
       .from('tenants')
-      .insert({
-        business_name: businessName,
-        business_type: businessType || 'Restaurant',
-        business_email: user.email,
-        bot_name: 'Assistant',
-        plan: selectedPlan,
-        message_limit: planDetail.messageLimit,
-        ai_conversation_limit: planDetail.aiConversationLimit,
-        brand,
+      .update({
+        business_name: business_name.trim(),
+        business_type: business_type || 'Other',
+        business_phone: business_phone || null,
+        bot_name: bot_name.trim(),
+        bot_personality: bot_personality || 'Friendly and approachable',
+        welcome_message: finalWelcome,
+        // Store WhatsApp number request (admin will provision manually)
+        gupshup_phone_number: whatsapp_number_requested
+          ? whatsapp_number_requested.replace(/[\s+\-()]/g, '')
+          : null,
+        onboarding_completed: true,
+        updated_at: new Date().toISOString(),
       })
-      .select()
-      .single();
+      .eq('id', tenantId);
 
-    if (tenantError) {
-      throw tenantError;
+    if (error) {
+      console.error('Onboard save error:', error);
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    // 2. Create user record
-    const { error: userError } = await supabaseAdmin
-      .from('users')
-      .insert({
-        tenant_id: tenant.id,
-        auth_id: user.id,
-        email: user.email,
-        full_name: user.user_metadata?.full_name || 'User',
-        role: 'owner',
-        is_platform_admin: user.email === process.env.PLATFORM_ADMIN_EMAIL,
-      });
-
-    if (userError) {
-      // Rollback tenant creation
-      await supabaseAdmin.from('tenants').delete().eq('id', tenant.id);
-      throw userError;
-    }
-
-    // 3. Log event
+    // Fire analytics event
     await supabaseAdmin.from('analytics_events').insert({
-      tenant_id: tenant.id,
-      event_type: 'user_onboarded',
-      metadata: { email: user.email, plan: selectedPlan },
-    });
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        userId: user.id,
-        tenantId: tenant.id,
+      tenant_id: tenantId,
+      event_type: 'onboarding_completed',
+      metadata: {
+        business_name: business_name.trim(),
+        business_type,
+        bot_name: bot_name.trim(),
+        whatsapp_requested: !!whatsapp_number_requested,
       },
-    });
+    }).catch(() => {}); // Non-critical
+
+    return NextResponse.json({ success: true });
   } catch (err) {
-    console.error('❌ Onboard error:', err);
-    return NextResponse.json(
-      { success: false, error: 'Onboarding failed' },
-      { status: 500 }
-    );
+    console.error('Onboard API error:', err);
+    return NextResponse.json({ success: false, error: 'Internal server error.' }, { status: 500 });
   }
 }
