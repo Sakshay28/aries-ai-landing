@@ -22,11 +22,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
   }
 
-  // Build a Supabase SSR client that can write cookies onto the response.
-  // We track cookies written by exchangeCodeForSession so we can copy them
-  // onto the final redirect response.
   const cookieStore = await cookies();
-  const pendingCookies: Array<{ name: string; value: string; options?: Record<string, unknown> }> = [];
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -37,16 +33,14 @@ export async function GET(req: NextRequest) {
           return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
-          // Accumulate for later application to the redirect response
-          pendingCookies.length = 0;
-          cookiesToSet.forEach((c) => {
-            pendingCookies.push(c);
-            try {
-              cookieStore.set(c.name, c.value, c.options);
-            } catch {
-              // May fail in read-only context
-            }
-          });
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          } catch {
+            // The `set` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing user sessions.
+          }
         },
       },
     }
@@ -59,21 +53,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
   }
 
-  // Helper: create a redirect that carries over session cookies
-  function redirectWithCookies(url: string) {
-    const res = NextResponse.redirect(url);
-    pendingCookies.forEach(({ name, value, options }) => {
-      res.cookies.set(name, value, {
-        path: (options?.path as string) || '/',
-        maxAge: (options?.maxAge as number) || 34560000,
-        sameSite: (options?.sameSite as 'lax' | 'strict' | 'none') || 'lax',
-        httpOnly: false,
-        secure: process.env.NODE_ENV === 'production',
-      });
-    });
-    return res;
-  }
-
   // Check if user already has a tenant
   const { data: existingUser } = await supabaseAdmin
     .from('users')
@@ -83,7 +62,7 @@ export async function GET(req: NextRequest) {
 
   if (existingUser) {
     // Returning user — go straight to where they were heading.
-    return redirectWithCookies(`${origin}${next}`);
+    return NextResponse.redirect(`${origin}${next}`);
   }
 
   // New OAuth user — auto-provision tenant + user with sensible defaults.
@@ -142,7 +121,7 @@ export async function GET(req: NextRequest) {
 
     console.log(`🎉 New OAuth signup: ${businessName} (${user.email})`);
     // Send new users to onboarding wizard, not dashboard
-    return redirectWithCookies(`${origin}/onboard`);
+    return NextResponse.redirect(`${origin}/onboard`);
   } catch (err) {
     console.error('❌ OAuth callback error:', err);
     return NextResponse.redirect(`${origin}/login?error=signup_failed`);
