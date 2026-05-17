@@ -102,10 +102,10 @@ export function AutomationsClient() {
                   <span className="text-[12px] font-semibold tracking-wide text-blue-600 dark:text-blue-400 uppercase">Suggestion</span>
                 </div>
                 <h3 className="text-[18px] font-medium tracking-tight text-foreground">
-                  Create an "After-Hours Auto Reply"
+                  Turn on "Smart Review Collection"
                 </h3>
                 <p className="text-[14px] text-muted-foreground leading-relaxed max-w-xl">
-                  Customers often message you outside of business hours. An automated reply letting them know when you'll be back sets expectations and keeps them engaged.
+                  Automatically ask for a Google review 2 days after a chat—but <strong>only</strong> if the AI detects the customer was happy. Protect your rating while growing reviews on autopilot.
                 </p>
               </div>
               <button onClick={() => toast.success("Drafting automation...")} className="shrink-0 h-10 px-5 bg-white dark:bg-black border border-border/50 group-hover:border-border text-foreground text-[14px] font-medium rounded-lg shadow-sm hover:shadow transition-all flex items-center">
