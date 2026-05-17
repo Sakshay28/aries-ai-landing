@@ -136,5 +136,8 @@ export const config = {
     '/admin/:path*',
     '/login',
     '/signup',
+    // API routes that need session refresh
+    '/api/dashboard/:path*',
+    '/api/webhooks/:path*',
   ],
 };

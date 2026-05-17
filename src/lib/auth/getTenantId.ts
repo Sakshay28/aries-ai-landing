@@ -1,6 +1,5 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import { cacheGet, cacheSet } from '@/lib/redis/client';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export async function getTenantId(): Promise<string | null> {
@@ -11,44 +10,49 @@ export async function getTenantId(): Promise<string | null> {
 
     if (!supabaseUrl || !supabaseKey) return null;
 
-    // Get the authenticated user from the session cookie
     const supabase = createServerClient(supabaseUrl, supabaseKey, {
       cookies: {
         getAll() { return cookieStore.getAll(); },
+        setAll() {}, // no-op in API routes
       },
     });
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      console.log('getTenantId: no authenticated user');
-      return null;
+    // Try getUser() first (validates token server-side), fallback to getSession()
+    let userId: string | null = null;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      userId = user?.id ?? null;
+    } catch {
+      // getUser can fail on network issues — fall back to local session decode
+      const { data: { session } } = await supabase.auth.getSession();
+      userId = session?.user?.id ?? null;
     }
 
-    const cacheKey = `user_tenant:${user.id}`;
-    const cached = await cacheGet(cacheKey);
-    if (cached) return cached;
+    if (!userId) {
+      console.log('getTenantId: no authenticated user found in session');
+      return null;
+    }
 
     // Use supabaseAdmin to bypass RLS on the users table
     const { data: userData, error } = await supabaseAdmin
       .from('users')
       .select('tenant_id')
-      .eq('auth_id', user.id)
+      .eq('auth_id', userId)
       .single();
 
     if (error) {
-      console.error('getTenantId: users lookup error:', error.message, 'for auth_id:', user.id);
+      console.error('getTenantId: DB error for auth_id:', userId, error.message);
       return null;
     }
 
-    if (userData?.tenant_id) {
-      await cacheSet(cacheKey, userData.tenant_id, 3600); // 1 hour TTL
-      return userData.tenant_id;
+    if (!userData?.tenant_id) {
+      console.error('getTenantId: no tenant row for auth_id:', userId);
+      return null;
     }
 
-    console.error('getTenantId: no tenant linked for auth_id:', user.id);
-    return null;
+    return userData.tenant_id;
   } catch (err) {
-    console.error('getTenantId: exception:', err);
+    console.error('getTenantId: unexpected error:', err);
     return null;
   }
 }
