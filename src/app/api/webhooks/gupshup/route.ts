@@ -71,11 +71,14 @@ export async function POST(req: NextRequest) {
 
   // Return 200 immediately — process asynchronously
   // Using void to fire-and-forget without awaiting
-  void processWebhookAsync(parsed).catch(err => {
+  try {
+    await processWebhookAsync(parsed);
+  } catch (err) {
     console.error('❌ Gupshup webhook processing error:', err);
-  });
+    return NextResponse.json({ ok: false, error: (err as Error).message }, { status: 500 });
+  }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, msg: 'processed' });
 }
 
 // ── Validate that Gupshup can reach this endpoint ──

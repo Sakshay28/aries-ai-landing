@@ -15,11 +15,12 @@ function cleanPhone(phone: string): string {
   return phone.replace(/[\s+\-()]/g, '');
 }
 
-// ── Internal: build auth headers ──
+// ── Internal: build auth headers (Gupshup requires x-www-form-urlencoded) ──
 function headers(apiKey: string): Record<string, string> {
   return {
-    'Authorization': `Bearer ${apiKey}`,
-    'Content-Type': 'application/json',
+    'apikey': apiKey,
+    'Cache-Control': 'no-cache',
+    'Content-Type': 'application/x-www-form-urlencoded',
   };
 }
 
@@ -44,22 +45,19 @@ export async function sendTextMessage(
     throw new Error('Gupshup sendTextMessage: missing required parameters');
   }
 
-  const body = {
+  const params = new URLSearchParams({
     channel: 'whatsapp',
     source: cleanPhone(phoneNumber),
     destination: cleanPhone(destination),
-    message: {
-      type: 'text',
-      text,
-    },
-  };
+    message: JSON.stringify({ type: 'text', text }),
+  });
 
   let res: Response;
   try {
-    res = await fetch(`${GUPSHUP_BASE}/messages`, {
+    res = await fetch(`${GUPSHUP_BASE}/msg`, {
       method: 'POST',
       headers: headers(apiKey),
-      body: JSON.stringify(body),
+      body: params.toString(),
       signal: AbortSignal.timeout(10000),
     });
   } catch (err) {
@@ -94,26 +92,26 @@ export async function sendTemplateMessage(
     throw new Error('Gupshup sendTemplateMessage: missing required parameters');
   }
 
-  const body = {
+  const params = new URLSearchParams({
     channel: 'whatsapp',
     source: cleanPhone(phoneNumber),
     destination: cleanPhone(destination),
-    message: {
+    message: JSON.stringify({
       type: 'template',
       template: {
         name: templateName,
         language: { code: languageCode },
         ...(variables.length > 0 && { bodyValues: variables }),
       },
-    },
-  };
+    }),
+  });
 
   let res: Response;
   try {
-    res = await fetch(`${GUPSHUP_BASE}/messages`, {
+    res = await fetch(`${GUPSHUP_BASE}/msg`, {
       method: 'POST',
       headers: headers(apiKey),
-      body: JSON.stringify(body),
+      body: params.toString(),
       signal: AbortSignal.timeout(10000),
     });
   } catch (err) {
@@ -152,22 +150,22 @@ export async function sendMediaMessage(
     mediaPayload.caption = caption;
   }
 
-  const body = {
+  const params = new URLSearchParams({
     channel: 'whatsapp',
     source: cleanPhone(phoneNumber),
     destination: cleanPhone(destination),
-    message: {
+    message: JSON.stringify({
       type: mediaType,
       [mediaType]: mediaPayload,
-    },
-  };
+    }),
+  });
 
   let res: Response;
   try {
-    res = await fetch(`${GUPSHUP_BASE}/messages`, {
+    res = await fetch(`${GUPSHUP_BASE}/msg`, {
       method: 'POST',
       headers: headers(apiKey),
-      body: JSON.stringify(body),
+      body: params.toString(),
       signal: AbortSignal.timeout(15000), // Larger timeout for media
     });
   } catch (err) {
@@ -199,18 +197,20 @@ export async function testConnection(
   }
 
   try {
-    const res = await fetch(`${GUPSHUP_BASE}/messages`, {
+    const params = new URLSearchParams({
+      channel: 'whatsapp',
+      source: cleanPhone(phoneNumber),
+      destination: cleanPhone(phoneNumber), // Send to self
+      message: JSON.stringify({
+        type: 'text',
+        text: '✅ Aries AI connection test successful.',
+      }),
+    });
+
+    const res = await fetch(`${GUPSHUP_BASE}/msg`, {
       method: 'POST',
       headers: headers(apiKey),
-      body: JSON.stringify({
-        channel: 'whatsapp',
-        source: cleanPhone(phoneNumber),
-        destination: cleanPhone(phoneNumber), // Send to self
-        message: {
-          type: 'text',
-          text: '✅ Aries AI connection test successful.',
-        },
-      }),
+      body: params.toString(),
       signal: AbortSignal.timeout(8000),
     });
 
