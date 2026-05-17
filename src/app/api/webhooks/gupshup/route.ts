@@ -369,6 +369,9 @@ async function handleIncomingMessage(
 async function handleStatusUpdate(
   msg: NonNullable<ReturnType<typeof parseGupshupWebhook>>
 ) {
+  // Log the full raw status so we can see Meta error codes (131026, 131047 etc.)
+  console.log('📬 Gupshup STATUS RAW:', JSON.stringify(msg).slice(0, 800));
+
   if (!msg.messageId || !msg.status) return;
 
   const statusMap: Record<string, string> = {
@@ -376,6 +379,8 @@ async function handleStatusUpdate(
     delivered: 'delivered',
     read: 'read',
     failed: 'failed',
+    enqueued: 'sent',
+    processing: 'sent',
   };
 
   const mappedStatus = statusMap[msg.status] || msg.status;
@@ -385,5 +390,7 @@ async function handleStatusUpdate(
     .update({ status: mappedStatus })
     .eq('wa_message_id', msg.messageId);
 
-  console.log(`📬 Gupshup status: ${msg.messageId} → ${mappedStatus}`);
+  console.log(`📬 Gupshup status update: ${msg.messageId} → ${mappedStatus}`);
+}
+
 }

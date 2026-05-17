@@ -3,6 +3,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { sendTextMessage } from '@/lib/gupshup/service';
+import { sendInstagramMessage } from '@/lib/instagram/service';
 
 export async function POST(req: NextRequest) {
   try {
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest) {
     // Verify conversation belongs to this tenant and get the recipient phone
     const { data: conv, error: convErr } = await supabase
       .from('conversations')
-      .select('id, sender_id, tenant_id, leads(phone)')
+      .select('id, sender_id, tenant_id, channel, leads(phone)')
       .eq('id', conversationId)
       .eq('tenant_id', tenantId)
       .single();
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
         direction: 'outbound',
         content: message.trim(),
         message_type: 'text',
-        channel: 'whatsapp',
+        channel: conv.channel || 'whatsapp',
         sender_id: null,
         status: 'pending',
         ai_generated: false,
@@ -71,30 +72,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Failed to store message' }, { status: 500 });
     }
 
-    // Send via Gupshup WhatsApp API
-    let waMessageId: string | null = null;
+    // Send via respective channel API
+    let externalMessageId: string | null = null;
     try {
-      const waResult = await sendTextMessage(
-        tenant.gupshup_api_key,
-        tenant.gupshup_phone_number,
-        recipientPhone,
-        message.trim()
-      );
-      waMessageId = waResult.messageId;
-    } catch (waErr) {
-      console.error('Gupshup send failed:', waErr);
-      // Update message status to failed
+      if (conv.channel === 'instagram_dm') {
+        // Send via Instagram
+        await sendInstagramMessage(tenant, recipientPhone, message.trim());
+        externalMessageId = "ig_" + Date.now().toString(); // Mock ID for IG since it doesn't return one directly in all cases
+      } else {
+        // Default to Gupshup WhatsApp
+        const waResult = await sendTextMessage(
+          tenant.gupshup_api_key,
+          tenant.gupshup_phone_number,
+          recipientPhone,
+          message.trim()
+        );
+        externalMessageId = waResult.messageId;
+      }
+    } catch (apiErr) {
+      console.error('API send failed:', apiErr);
       await supabaseAdmin
         .from('messages')
         .update({ status: 'failed' })
         .eq('id', insertedMsg.id);
-      return NextResponse.json({ success: false, error: 'WhatsApp delivery failed' }, { status: 502 });
+      return NextResponse.json({ success: false, error: 'Message delivery failed' }, { status: 502 });
     }
 
-    // Update message with WhatsApp message ID and sent status
+    // Update message status
     await supabaseAdmin
       .from('messages')
-      .update({ status: 'sent', wa_message_id: waMessageId })
+      .update({ status: 'sent', wa_message_id: externalMessageId })
       .eq('id', insertedMsg.id);
 
     // Update conversation's last_message_at

@@ -46,12 +46,14 @@ export function BroadcastPanel({
   return (
     <AnimatePresence>
       <motion.div 
+        key="overlay"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         onClick={onClose}
         className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40"
       />
       
       <motion.div
+        key="panel"
         initial={{ x: '100%', opacity: 0.5 }} animate={{ x: 0, opacity: 1 }} exit={{ x: '100%', opacity: 0.5 }}
         transition={{ type: 'spring', damping: 25, stiffness: 200 }}
         className="fixed inset-y-0 right-0 w-full md:w-[600px] bg-card border-l border-border shadow-2xl z-50 flex flex-col"

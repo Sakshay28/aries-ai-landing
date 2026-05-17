@@ -72,35 +72,28 @@ export default function ChatSidebar() {
   const supabaseRef = useRef(createBrowserSupabaseClient());
 
   const load = useCallback(async () => {
-    const supabase = supabaseRef.current;
-    const { data } = await supabase
-      .from("conversations")
-      .select("id, last_message_at, is_active, bot_paused, leads(name, phone)")
-      .order("last_message_at", { ascending: false, nullsFirst: false })
-      .limit(50);
+    try {
+      const res = await fetch("/api/dashboard/chat/conversations");
+      const data = await res.json();
+      
+      if (!data.success) {
+        console.error("ChatSidebar fetch error:", data.error);
+        setLoading(false);
+        return;
+      }
 
-    if (!data) { setLoading(false); return; }
+      const withPreviews = data.conversations;
+      setConvos(withPreviews);
+      setFiltered(withPreviews);
+      setLoading(false);
 
-    // Fetch preview message for each conversation
-    const withPreviews = await Promise.all(
-      data.map(async (c) => {
-        const { data: msgs } = await supabase
-          .from("messages")
-          .select("content")
-          .eq("conversation_id", c.id)
-          .order("created_at", { ascending: false })
-          .limit(1);
-        return { ...c, last_message_preview: msgs?.[0]?.content ?? null } as ChatConversation;
-      })
-    );
-
-    setConvos(withPreviews);
-    setFiltered(withPreviews);
-    setLoading(false);
-
-    // Auto-select first if nothing selected
-    if (!activeId && withPreviews.length > 0) {
-      router.push(`/dashboard/chat?conversationId=${withPreviews[0].id}`);
+      // Auto-select first if nothing selected
+      if (!activeId && withPreviews.length > 0) {
+        router.push(`/dashboard/chat?conversationId=${withPreviews[0].id}`);
+      }
+    } catch (err) {
+      console.error("ChatSidebar exception:", err);
+      setLoading(false);
     }
   }, [activeId, router]);
 

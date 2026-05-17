@@ -6,6 +6,8 @@ import { Search, Filter, MoreHorizontal, User, Phone, Mail, Clock, ShieldCheck, 
 import type { Lead } from '@/lib/types';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
+import { useRouter } from 'next/navigation';
+import { MessageCircle, MessageSquare } from 'lucide-react';
 
 const STATUS_COLUMNS = [
   { id: 'new', label: 'New', color: 'bg-blue-500', icon: Clock },
@@ -20,6 +22,7 @@ export function LeadsClient() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const supabase = createBrowserSupabaseClient();
+  const router = useRouter();
 
   const fetchLeads = async () => {
     try {
@@ -137,19 +140,31 @@ export function LeadsClient() {
                           <div className="font-medium text-sm text-foreground truncate pr-4">
                             {lead.name || 'Unknown Contact'}
                           </div>
-                          <div className="relative">
-                            <button className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground p-1">
-                              <MoreHorizontal className="w-4 h-4" />
-                            </button>
+                          <div className="flex gap-2 items-center">
+                            {lead.channel === 'whatsapp' ? (
+                              <MessageCircle className="w-4 h-4 text-emerald-500" title="WhatsApp" />
+                            ) : lead.channel?.includes('instagram') ? (
+                              <MessageSquare className="w-4 h-4 text-pink-500" title="Instagram" />
+                            ) : null}
                           </div>
                         </div>
 
-                        <div className="space-y-2 mb-4">
+                        <div 
+                          className="space-y-2 mb-4" 
+                          onClick={() => {
+                            const convId = (lead as any).conversations?.[0]?.id;
+                            if (convId) {
+                              router.push(`/dashboard/chat?conversationId=${convId}`);
+                            } else {
+                              toast.error("No active chat for this lead.");
+                            }
+                          }}
+                        >
                           <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <Phone className="w-3.5 h-3.5" /> {lead.phone || 'No phone'}
                           </div>
                           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Clock className="w-3.5 h-3.5" /> Last active: {new Date(lead.last_message_at).toLocaleDateString()}
+                            <Clock className="w-3.5 h-3.5" /> Last active: {new Date(lead.updated_at || lead.created_at || Date.now()).toLocaleDateString()}
                           </div>
                         </div>
 

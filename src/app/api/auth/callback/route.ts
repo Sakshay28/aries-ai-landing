@@ -55,6 +55,11 @@ export async function GET(req: NextRequest) {
   const { data: { user }, error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error || !user) {
+    console.error("OAuth exchange failed:", error, "User:", user);
+    try {
+      const fs = require('fs');
+      fs.writeFileSync('auth_error_log.json', JSON.stringify({ error, user, url: req.url }, null, 2));
+    } catch(e) {}
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
   }
 

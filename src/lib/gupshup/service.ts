@@ -48,6 +48,7 @@ export async function sendTextMessage(
   const params = new URLSearchParams({
     channel: 'whatsapp',
     source: cleanPhone(phoneNumber),
+    'src.name': 'ariesaidemo',
     destination: cleanPhone(destination),
     message: JSON.stringify({ type: 'text', text }),
   });
@@ -95,6 +96,7 @@ export async function sendTemplateMessage(
   const params = new URLSearchParams({
     channel: 'whatsapp',
     source: cleanPhone(phoneNumber),
+    'src.name': 'ariesaidemo',
     destination: cleanPhone(destination),
     message: JSON.stringify({
       type: 'template',
@@ -153,6 +155,7 @@ export async function sendMediaMessage(
   const params = new URLSearchParams({
     channel: 'whatsapp',
     source: cleanPhone(phoneNumber),
+    'src.name': 'ariesaidemo',
     destination: cleanPhone(destination),
     message: JSON.stringify({
       type: mediaType,
@@ -200,6 +203,7 @@ export async function testConnection(
     const params = new URLSearchParams({
       channel: 'whatsapp',
       source: cleanPhone(phoneNumber),
+      'src.name': 'ariesaidemo',
       destination: cleanPhone(phoneNumber), // Send to self
       message: JSON.stringify({
         type: 'text',

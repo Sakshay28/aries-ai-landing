@@ -44,37 +44,28 @@ export default function ChatArea() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  // Load conversation metadata
-  useEffect(() => {
-    if (!conversationId) return;
-    const supabase = supabaseRef.current;
-    supabase
-      .from("conversations")
-      .select("id, is_active, bot_paused, sender_name, leads(name, phone)")
-      .eq("id", conversationId)
-      .single()
-      .then(({ data }) => {
-        if (data) setConversationMeta(data as ConversationMeta);
-      });
-  }, [conversationId]);
-
-  // Load messages for selected conversation
+  // Load conversation and messages securely via backend API
   useEffect(() => {
     if (!conversationId) return;
     const supabase = supabaseRef.current;
     setLoadingMessages(true);
     setMessages([]);
 
-    supabase
-      .from("messages")
-      .select("*")
-      .eq("conversation_id", conversationId)
-      .order("created_at", { ascending: true })
-      .limit(50)
-      .then(({ data }) => {
-        if (data) setMessages(data as Message[]);
+    fetch(`/api/dashboard/chat/conversation?id=${conversationId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          setConversationMeta(data.conversation as ConversationMeta);
+          setMessages(data.messages as Message[]);
+        } else {
+          console.error("Failed to fetch conversation:", data.error);
+        }
         setLoadingMessages(false);
         setTimeout(scrollToBottom, 100);
+      })
+      .catch((err) => {
+        console.error("Error fetching chat:", err);
+        setLoadingMessages(false);
       });
 
     // Realtime: subscribe to new messages for this conversation
