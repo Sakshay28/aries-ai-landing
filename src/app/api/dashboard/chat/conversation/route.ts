@@ -45,3 +45,40 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const tenantId = await getTenantId();
+    if (!tenantId) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'ID required' }, { status: 400 });
+    }
+
+    const body = await req.json();
+    const { bot_paused } = body;
+
+    if (typeof bot_paused !== 'boolean') {
+      return NextResponse.json({ success: false, error: 'bot_paused must be a boolean' }, { status: 400 });
+    }
+
+    const { error } = await supabaseAdmin
+      .from("conversations")
+      .update({ bot_paused })
+      .eq("id", id)
+      .eq("tenant_id", tenantId);
+
+    if (error) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, bot_paused });
+  } catch (error: any) {
+    console.error('Conversation PATCH error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}

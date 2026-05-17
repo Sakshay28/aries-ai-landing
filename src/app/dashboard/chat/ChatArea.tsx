@@ -34,6 +34,7 @@ export default function ChatArea() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [conversationMeta, setConversationMeta] = useState<ConversationMeta | null>(null);
+  const [togglingMode, setTogglingMode] = useState(false);
   const searchParams = useSearchParams();
   const conversationId = searchParams.get("conversationId");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -138,7 +139,31 @@ export default function ChatArea() {
   const displayName = conversationMeta?.leads?.name
     || conversationMeta?.leads?.phone
     || conversationMeta?.sender_name
-    || "Unknown";
+    || conversationId?.slice(0, 8);
+
+  const toggleHumanMode = async () => {
+    if (!conversationId || !conversationMeta) return;
+    const newPaused = !conversationMeta.bot_paused;
+    setTogglingMode(true);
+    try {
+      const res = await fetch(`/api/dashboard/chat/conversation?id=${conversationId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bot_paused: newPaused }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setConversationMeta(prev => prev ? { ...prev, bot_paused: newPaused } : null);
+        toast.success(newPaused ? '🙋 Human mode ON — AI is paused' : '🤖 AI is back in control');
+      } else {
+        toast.error('Failed to switch mode');
+      }
+    } catch {
+      toast.error('Network error — try again');
+    } finally {
+      setTogglingMode(false);
+    }
+  };
 
   const initial = displayName.charAt(0).toUpperCase();
   const isActive = conversationMeta?.is_active;
@@ -205,6 +230,28 @@ export default function ChatArea() {
         </motion.div>
 
         <div className="flex items-center gap-0.5 sm:gap-1">
+          {/* Human / AI Mode Toggle — most important button */}
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={toggleHumanMode}
+            disabled={togglingMode}
+            className={cn(
+              "flex items-center gap-1.5 h-8 px-3 rounded-full text-[12px] font-semibold transition-all mr-2 border",
+              conversationMeta?.bot_paused
+                ? "bg-amber-500/10 text-amber-600 border-amber-500/30 hover:bg-amber-500/20"
+                : "bg-cyan-500/10 text-cyan-600 border-cyan-500/30 hover:bg-cyan-500/20"
+            )}
+          >
+            {togglingMode ? (
+              <div className="w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
+            ) : conversationMeta?.bot_paused ? (
+              <><Bot className="w-3.5 h-3.5" /> Hand to AI</>
+            ) : (
+              <><User className="w-3.5 h-3.5" /> Take Over</>
+            )}
+          </motion.button>
+
           <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full transition-colors hidden sm:flex">
             <Video className="w-[18px] h-[18px]" />
           </motion.button>
