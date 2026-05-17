@@ -107,6 +107,10 @@ export default function ChatArea() {
         body: JSON.stringify({ conversationId, message: text }),
       });
       if (!res.ok) throw new Error("Failed to send");
+      setInputMsg("");
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
     } catch {
       toast.error("Message failed to send. Please try again.");
       setInputMsg(text);
@@ -303,10 +307,10 @@ export default function ChatArea() {
       <div className="p-3 bg-background/95 backdrop-blur-md border-t border-border/40 relative z-20">
         <div className="flex items-end gap-2 bg-muted/40 border border-border/40 rounded-2xl p-1.5 focus-within:ring-1 focus-within:ring-emerald-500/30 focus-within:bg-background transition-all duration-300 shadow-sm">
           <div className="flex items-center gap-1 pb-1 px-1">
-            <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full transition-colors">
+            <motion.button onClick={() => toast("Emoji picker coming soon")} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full transition-colors">
               <Smile className="w-[20px] h-[20px]" />
             </motion.button>
-            <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full transition-colors">
+            <motion.button onClick={() => toast("Attachments coming soon")} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full transition-colors">
               <Paperclip className="w-[20px] h-[20px]" />
             </motion.button>
           </div>
@@ -323,12 +327,13 @@ export default function ChatArea() {
           />
 
           <div className="flex items-center gap-1 pb-1 px-1">
-            <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-emerald-500 hover:text-emerald-600 dark:hover:bg-emerald-500/10 rounded-full transition-colors" title="AI Assist">
+            <motion.button onClick={() => toast("AI Co-pilot coming soon")} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-emerald-500 hover:text-emerald-600 dark:hover:bg-emerald-500/10 rounded-full transition-colors" title="AI Assist">
               <Sparkles className="w-[20px] h-[20px]" />
             </motion.button>
             <AnimatePresence>
               {!inputMsg && (
                 <motion.button
+                  onClick={() => toast("Voice notes coming soon")}
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.8 }}
