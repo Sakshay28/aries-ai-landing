@@ -30,6 +30,11 @@ export interface Tenant {
   wa_webhook_verified: boolean;
   wa_token_expired: boolean;
 
+  // Gupshup (active WhatsApp BSP — replaces direct Meta Cloud API fields above)
+  gupshup_api_key: string | null;
+  gupshup_phone_number: string | null;
+  gupshup_app_name: string | null;
+
   // Instagram
   ig_access_token: string | null;
   ig_page_id: string | null;

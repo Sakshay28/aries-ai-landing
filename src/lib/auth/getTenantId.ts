@@ -1,8 +1,12 @@
+import { cache } from 'react';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
-export async function getTenantId(): Promise<string | null> {
+// cache() deduplicates this function within a single server-request lifecycle.
+// Every dashboard route that calls getTenantId() in the same render will share
+// one auth.getUser() call + one DB query instead of each making their own.
+export const getTenantId = cache(async (): Promise<string | null> => {
   try {
     const cookieStore = await cookies();
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -55,4 +59,4 @@ export async function getTenantId(): Promise<string | null> {
     console.error('getTenantId: unexpected error:', err);
     return null;
   }
-}
+});

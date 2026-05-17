@@ -91,7 +91,21 @@ const FILTER_DEFS = [
   { id: 'escalated', label: 'Human Escalated', icon: AlertCircle, status: 'cold' },
 ];
 
-type ImportStep = 'hidden' | 'source' | 'mapping' | 'duplicates' | 'progress';
+type ImportStep = 'hidden' | 'source' | 'csv' | 'mapping' | 'duplicates' | 'progress' | 'done';
+
+interface ImportReportRow {
+  index: number;
+  status: 'imported' | 'skipped_duplicate' | 'skipped_invalid';
+  reason?: string;
+  phone?: string;
+}
+
+interface ImportResult {
+  imported: number;
+  skipped: number;
+  total?: number;
+  report: ImportReportRow[];
+}
 
 export function ContactsClient() {
   const [activeFilter, setActiveFilter] = useState('all');
@@ -106,8 +120,29 @@ export function ContactsClient() {
   const [filterCounts, setFilterCounts] = useState<Record<string, number>>({});
   const [profileTimeline, setProfileTimeline] = useState<TimelineEvent[]>([]);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [profileConvId, setProfileConvId] = useState<string | null>(null);
+  const [escalating, setEscalating] = useState(false);
+  const [escalated, setEscalated] = useState(false);
+  const [attachFlowFeedback, setAttachFlowFeedback] = useState(false);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const supabaseRef = useRef(createBrowserSupabaseClient());
+
+  // ── Add Contact modal state ───────────────────────────────
+  const [addContactOpen, setAddContactOpen] = useState(false);
+  const [addSubmitting, setAddSubmitting] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addForm, setAddForm] = useState({ name: '', phone: '', email: '', notes: '' });
+
+  // ── CSV import state ──────────────────────────────────────
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvUploading, setCsvUploading] = useState(false);
+  const [csvError, setCsvError] = useState<string | null>(null);
+  const [csvResult, setCsvResult] = useState<ImportResult | null>(null);
+
+  const resetAddForm = () => {
+    setAddForm({ name: '', phone: '', email: '', notes: '' });
+    setAddError(null);
+  };
 
   const fetchContacts = useCallback(async (search = '') => {
     setLoading(true);
@@ -162,7 +197,9 @@ export function ContactsClient() {
       .limit(1)
       .single();
 
-    if (!conv) { setProfileTimeline([]); setProfileLoading(false); return; }
+    if (!conv) { setProfileTimeline([]); setProfileConvId(null); setProfileLoading(false); return; }
+    setProfileConvId(conv.id);
+    setEscalated(false);
 
     const { data: msgs } = await supabase
       .from('messages')
@@ -184,8 +221,28 @@ export function ContactsClient() {
   useEffect(() => { fetchContacts(); fetchFilterCounts(); }, [fetchContacts, fetchFilterCounts]);
 
   useEffect(() => {
-    if (selectedContactId) loadProfileTimeline(selectedContactId);
+    if (selectedContactId) {
+      setProfileConvId(null);
+      setEscalated(false);
+      setAttachFlowFeedback(false);
+      loadProfileTimeline(selectedContactId);
+    }
   }, [selectedContactId, loadProfileTimeline]);
+
+  const handleEscalate = async () => {
+    if (!profileConvId || escalating || escalated) return;
+    setEscalating(true);
+    try {
+      await fetch(`/api/dashboard/conversations/${profileConvId}/pause`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bot_paused: true }),
+      });
+      setEscalated(true);
+    } finally {
+      setEscalating(false);
+    }
+  };
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -211,7 +268,86 @@ export function ContactsClient() {
     else setSelectedContactIds(new Set(contacts.map(c => c.id)));
   };
 
-  const closeImportModal = () => setImportStep('hidden');
+  const closeImportModal = () => {
+    setImportStep('hidden');
+    setCsvFile(null);
+    setCsvError(null);
+    setCsvResult(null);
+  };
+
+  // ── Add Contact submit ────────────────────────────────────
+  const handleAddContact = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddError(null);
+
+    if (!addForm.phone.trim()) {
+      setAddError('Phone number is required.');
+      return;
+    }
+
+    setAddSubmitting(true);
+    try {
+      const res = await fetch('/api/dashboard/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: addForm.name.trim() || null,
+          phone: addForm.phone.trim(),
+          email: addForm.email.trim() || null,
+          notes: addForm.notes.trim() || null,
+          channel: 'manual',
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        setAddError(json.error || 'Failed to create contact.');
+        return;
+      }
+      // Refresh both list and counts
+      await Promise.all([fetchContacts(searchQuery), fetchFilterCounts()]);
+      setAddContactOpen(false);
+      resetAddForm();
+    } catch (err) {
+      console.error('Add contact failed:', err);
+      setAddError('Network error. Please try again.');
+    } finally {
+      setAddSubmitting(false);
+    }
+  };
+
+  // ── CSV Upload submit ─────────────────────────────────────
+  const handleCsvUpload = async () => {
+    if (!csvFile) {
+      setCsvError('Please choose a CSV file.');
+      return;
+    }
+    setCsvError(null);
+    setCsvUploading(true);
+    setImportStep('progress');
+    try {
+      const form = new FormData();
+      form.append('file', csvFile);
+      const res = await fetch('/api/dashboard/contacts/import', {
+        method: 'POST',
+        body: form,
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        setCsvError(json.error || 'Import failed.');
+        setImportStep('csv');
+        return;
+      }
+      setCsvResult(json.data as ImportResult);
+      setImportStep('done');
+      await Promise.all([fetchContacts(searchQuery), fetchFilterCounts()]);
+    } catch (err) {
+      console.error('CSV import failed:', err);
+      setCsvError('Network error. Please try again.');
+      setImportStep('csv');
+    } finally {
+      setCsvUploading(false);
+    }
+  };
 
   // --- IMPORT MODAL RENDERER ---
   const renderImportModal = () => {
@@ -249,19 +385,20 @@ export function ContactsClient() {
                 <h3 className="text-sm font-semibold text-foreground">Choose Import Source</h3>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {[
-                    { name: 'CSV Upload', icon: FileSpreadsheet, desc: 'Map columns to fields' },
-                    { name: 'HubSpot', icon: Database, desc: 'Two-way sync' },
-                    { name: 'Salesforce', icon: Database, desc: 'Two-way sync' },
-                    { name: 'Google Contacts', icon: Users, desc: 'One-time import' },
-                    { name: 'WhatsApp Sync', icon: MessageSquare, desc: 'Auto-create from chat' },
-                    { name: 'Zapier', icon: Workflow, desc: 'Trigger via API' },
+                    { name: 'CSV Upload', icon: FileSpreadsheet, desc: 'Upload a .csv file', enabled: true, target: 'csv' as ImportStep },
+                    { name: 'HubSpot', icon: Database, desc: 'Coming soon', enabled: false },
+                    { name: 'Salesforce', icon: Database, desc: 'Coming soon', enabled: false },
+                    { name: 'Google Contacts', icon: Users, desc: 'Coming soon', enabled: false },
+                    { name: 'WhatsApp Sync', icon: MessageSquare, desc: 'Coming soon', enabled: false },
+                    { name: 'Zapier', icon: Workflow, desc: 'Coming soon', enabled: false },
                   ].map(source => (
                     <button 
                       key={source.name}
-                      onClick={() => setImportStep('mapping')}
-                      className="flex flex-col items-center text-center p-5 rounded-xl border border-border bg-background hover:border-indigo-500/50 hover:bg-indigo-50/50 dark:hover:bg-indigo-500/10 transition-all group"
+                      onClick={() => source.enabled && source.target && setImportStep(source.target)}
+                      disabled={!source.enabled}
+                      className={`flex flex-col items-center text-center p-5 rounded-xl border border-border bg-background transition-all group ${source.enabled ? 'hover:border-indigo-500/50 hover:bg-indigo-50/50 dark:hover:bg-indigo-500/10 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
                     >
-                      <div className="w-12 h-12 rounded-full bg-secondary flex items-center justify-center mb-4 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-500/20 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                      <div className={`w-12 h-12 rounded-full bg-secondary flex items-center justify-center mb-4 transition-colors ${source.enabled ? 'group-hover:bg-indigo-100 dark:group-hover:bg-indigo-500/20 group-hover:text-indigo-600 dark:group-hover:text-indigo-400' : ''}`}>
                         <source.icon className="w-5 h-5" />
                       </div>
                       <span className="text-[14px] font-semibold text-foreground">{source.name}</span>
@@ -336,25 +473,110 @@ export function ContactsClient() {
               </div>
             )}
 
+            {importStep === 'csv' && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Upload CSV File</h3>
+                  <p className="text-[13px] text-muted-foreground mt-1">
+                    Required column: <span className="font-mono text-foreground">phone</span>. Optional: <span className="font-mono text-foreground">name</span>, <span className="font-mono text-foreground">email</span>, <span className="font-mono text-foreground">notes</span>, <span className="font-mono text-foreground">source</span>. Max 5,000 rows / 10 MB.
+                  </p>
+                </div>
+
+                <label
+                  htmlFor="contacts-csv-input"
+                  className="flex flex-col items-center justify-center w-full p-10 rounded-xl border-2 border-dashed border-border hover:border-indigo-500/50 bg-background hover:bg-indigo-50/30 dark:hover:bg-indigo-500/5 cursor-pointer transition-colors text-center"
+                >
+                  <UploadCloud className="w-8 h-8 text-muted-foreground/70 mb-3" />
+                  <span className="text-[14px] font-semibold text-foreground">
+                    {csvFile ? csvFile.name : 'Click to choose a .csv file'}
+                  </span>
+                  <span className="text-[12px] text-muted-foreground mt-1">
+                    {csvFile
+                      ? `${(csvFile.size / 1024).toFixed(1)} KB — click to change`
+                      : 'or drag & drop'}
+                  </span>
+                  <input
+                    id="contacts-csv-input"
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] ?? null;
+                      setCsvFile(f);
+                      setCsvError(null);
+                    }}
+                  />
+                </label>
+
+                {csvError && (
+                  <div className="p-3 rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-[13px] text-red-700 dark:text-red-300">
+                    {csvError}
+                  </div>
+                )}
+              </div>
+            )}
+
             {importStep === 'progress' && (
               <div className="space-y-6 py-6 text-center flex flex-col items-center">
                 <div className="w-16 h-16 rounded-full border-4 border-indigo-100 border-t-indigo-600 animate-spin mb-4"></div>
                 <h3 className="text-lg font-semibold text-foreground">Importing Contacts...</h3>
-                
-                <div className="w-full max-w-sm mt-6 text-left space-y-3 bg-secondary/30 p-4 rounded-xl border border-border">
-                  <div className="flex items-center gap-2 text-[13px] font-medium text-foreground/80">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Synced Sarah Jenkins
+                <p className="text-[13px] text-muted-foreground max-w-sm">
+                  Parsing rows, validating phone numbers, and de-duplicating against your existing contacts.
+                </p>
+              </div>
+            )}
+
+            {importStep === 'done' && csvResult && (
+              <div className="space-y-6">
+                <div className="flex flex-col items-center text-center py-2">
+                  <div className="w-14 h-14 rounded-full bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 flex items-center justify-center mb-3">
+                    <CheckCircle2 className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
                   </div>
-                  <div className="flex items-center gap-2 text-[13px] font-medium text-foreground/80">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Merged 12 duplicates
+                  <h3 className="text-lg font-semibold text-foreground">Import Complete</h3>
+                  <p className="text-[13px] text-muted-foreground mt-1">
+                    {csvResult.imported} imported, {csvResult.skipped} skipped
+                    {typeof csvResult.total === 'number' ? ` (of ${csvResult.total} rows)` : ''}.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="p-4 rounded-xl bg-emerald-50/60 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20">
+                    <div className="text-[10px] font-bold tracking-widest uppercase text-emerald-700 dark:text-emerald-400">Imported</div>
+                    <div className="text-2xl font-bold text-emerald-900 dark:text-emerald-100 mt-1">{csvResult.imported}</div>
                   </div>
-                  <div className="flex items-center gap-2 text-[13px] font-medium text-foreground/80">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Tagged 'Enterprise' contacts
+                  <div className="p-4 rounded-xl bg-amber-50/60 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20">
+                    <div className="text-[10px] font-bold tracking-widest uppercase text-amber-700 dark:text-amber-400">Skipped</div>
+                    <div className="text-2xl font-bold text-amber-900 dark:text-amber-100 mt-1">{csvResult.skipped}</div>
                   </div>
-                  <div className="flex items-center gap-2 text-[13px] font-medium text-foreground/80 animate-pulse">
-                    <RefreshCcw className="w-4 h-4 text-indigo-500 animate-spin" /> Enriching AI profiles...
+                  <div className="p-4 rounded-xl bg-secondary/40 border border-border">
+                    <div className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">Total Rows</div>
+                    <div className="text-2xl font-bold text-foreground mt-1">{csvResult.total ?? csvResult.imported + csvResult.skipped}</div>
                   </div>
                 </div>
+
+                {csvResult.report.some((r) => r.status !== 'imported') && (
+                  <div className="border border-border rounded-xl overflow-hidden">
+                    <div className="grid grid-cols-3 text-[11px] uppercase tracking-widest font-bold text-muted-foreground bg-secondary/50 p-3 border-b border-border">
+                      <div>Row</div>
+                      <div>Status</div>
+                      <div>Reason</div>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto custom-scrollbar">
+                      {csvResult.report
+                        .filter((r) => r.status !== 'imported')
+                        .slice(0, 50)
+                        .map((r, i) => (
+                          <div key={i} className="grid grid-cols-3 items-center p-3 border-b border-border last:border-0 bg-background text-[13px]">
+                            <div className="text-muted-foreground font-mono">{r.index || '—'}</div>
+                            <div className={`font-medium ${r.status === 'skipped_duplicate' ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>
+                              {r.status.replace('skipped_', '')}
+                            </div>
+                            <div className="text-muted-foreground truncate">{r.reason || '—'}</div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -363,10 +585,17 @@ export function ContactsClient() {
             {importStep === 'progress' ? (
               <div className="text-[13px] font-medium text-muted-foreground">This might take a minute...</div>
             ) : (
-              <button onClick={closeImportModal} className="text-[13px] font-medium text-muted-foreground hover:text-foreground">Cancel</button>
+              <button onClick={closeImportModal} className="text-[13px] font-medium text-muted-foreground hover:text-foreground">
+                {importStep === 'done' ? 'Close' : 'Cancel'}
+              </button>
             )}
             
             <div className="flex gap-3">
+              {importStep === 'csv' && (
+                <button onClick={() => { setCsvFile(null); setCsvError(null); setImportStep('source'); }} className="h-9 px-4 text-[13px] font-medium text-foreground bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
+                  Back
+                </button>
+              )}
               {importStep === 'mapping' && (
                 <button onClick={() => setImportStep('source')} className="h-9 px-4 text-[13px] font-medium text-foreground bg-secondary hover:bg-secondary/80 rounded-lg transition-colors">
                   Back
@@ -378,6 +607,15 @@ export function ContactsClient() {
                 </button>
               )}
               
+              {importStep === 'csv' && (
+                <button
+                  onClick={handleCsvUpload}
+                  disabled={!csvFile || csvUploading}
+                  className="h-9 px-6 text-[13px] font-medium text-primary-foreground bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-sm transition-colors"
+                >
+                  {csvUploading ? 'Uploading...' : 'Start Import'}
+                </button>
+              )}
               {importStep === 'mapping' && (
                 <button onClick={() => setImportStep('duplicates')} className="h-9 px-6 text-[13px] font-medium text-primary-foreground bg-primary hover:bg-primary/90 rounded-lg shadow-sm transition-colors">
                   Next Step
@@ -388,7 +626,7 @@ export function ContactsClient() {
                   Start Import
                 </button>
               )}
-              {importStep === 'progress' && (
+              {importStep === 'done' && (
                 <button onClick={closeImportModal} className="h-9 px-6 text-[13px] font-medium text-primary-foreground bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors">
                   Done
                 </button>
@@ -437,21 +675,7 @@ export function ContactsClient() {
           </div>
         </div>
 
-        {/* Dynamic Segment Card */}
-        <div className="mt-auto space-y-4">
-          <div className="p-4 rounded-xl bg-indigo-50/50 dark:bg-indigo-500/5 border border-indigo-100 dark:border-indigo-500/10 transition-colors hover:bg-indigo-50/80 dark:hover:bg-indigo-500/10">
-            <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 mb-2">
-              <BrainCircuit className="w-4 h-4" />
-              <span className="text-xs font-semibold tracking-tight">Dynamic Segment</span>
-            </div>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              AI detected 12 new leads asking about <span className="font-medium text-foreground">pricing</span> in the last hour.
-            </p>
-            <button className="mt-3 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors">
-              Review Segment →
-            </button>
-          </div>
-        </div>
+        {/* Dynamic Segment Card — hidden until segment data is wired up. */}
       </div>
 
       {/* Center Area - Contact Stream */}
@@ -484,7 +708,10 @@ export function ContactsClient() {
             >
               <DownloadCloud className="w-4 h-4 text-muted-foreground" /> Import
             </button>
-            <button className="h-9 px-4 text-[13px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.1)] transition-colors flex items-center">
+            <button
+              onClick={() => { resetAddForm(); setAddContactOpen(true); }}
+              className="h-9 px-4 text-[13px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.1)] transition-colors flex items-center"
+            >
               <Plus className="w-3.5 h-3.5 mr-1.5" />
               Add Contact
             </button>
@@ -802,11 +1029,32 @@ export function ContactsClient() {
               </button>
             </div>
             <div className="flex flex-wrap items-center gap-3 sm:gap-5 mt-4 px-2">
-              <button className="text-[12px] font-semibold text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
-                <Network className="w-3.5 h-3.5" /> Attach Flow
-              </button>
-              <button className="text-[12px] font-semibold text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
-                <AlertCircle className="w-3.5 h-3.5" /> Escalate to Human
+              <div className="relative">
+                <button
+                  onClick={() => { setAttachFlowFeedback(true); setTimeout(() => setAttachFlowFeedback(false), 2500); }}
+                  className="text-[12px] font-semibold text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors"
+                >
+                  <Network className="w-3.5 h-3.5" /> Attach Flow
+                </button>
+                {attachFlowFeedback && (
+                  <div className="absolute bottom-full left-0 mb-2 px-2.5 py-1.5 bg-foreground text-background text-[11px] font-medium rounded-lg whitespace-nowrap shadow-lg">
+                    Flow builder coming soon
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={handleEscalate}
+                disabled={escalating || escalated || !profileConvId}
+                className={`text-[12px] font-semibold flex items-center gap-1.5 transition-colors ${
+                  escalated
+                    ? 'text-emerald-600 dark:text-emerald-400 cursor-default'
+                    : escalating
+                    ? 'text-muted-foreground/50 cursor-not-allowed'
+                    : 'text-muted-foreground hover:text-foreground cursor-pointer'
+                }`}
+              >
+                <AlertCircle className="w-3.5 h-3.5" />
+                {escalated ? 'Escalated — AI paused' : escalating ? 'Escalating...' : 'Escalate to Human'}
               </button>
             </div>
           </div>
@@ -859,16 +1107,8 @@ export function ContactsClient() {
               <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold flex items-center gap-1.5">
                 <BrainCircuit className="w-3.5 h-3.5" /> Persistent Memory
               </div>
-              <div className="space-y-2">
-                <div className="text-[12px] bg-card border border-border/60 p-2.5 rounded-lg text-muted-foreground font-medium shadow-sm">
-                  <span className="text-foreground font-semibold">Budget:</span> Enterprise tier ($2k+/mo)
-                </div>
-                <div className="text-[12px] bg-card border border-border/60 p-2.5 rounded-lg text-muted-foreground font-medium shadow-sm">
-                  <span className="text-foreground font-semibold">Tech Stack:</span> Stripe, Next.js
-                </div>
-                <div className="text-[12px] bg-card border border-border/60 p-2.5 rounded-lg text-muted-foreground font-medium shadow-sm">
-                  <span className="text-foreground font-semibold">Primary Goal:</span> Support automation
-                </div>
+              <div className="text-[12px] bg-card border border-dashed border-border/60 p-3 rounded-lg text-muted-foreground italic">
+                No memory captured yet. Aria will extract budget, goals and other attributes as the conversation progresses.
               </div>
             </div>
           </div>
@@ -905,6 +1145,115 @@ export function ContactsClient() {
 
       <AnimatePresence>
         {importStep !== 'hidden' && renderImportModal()}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {addContactOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center px-4">
+            <motion.div
+              key="add-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !addSubmitting && setAddContactOpen(false)}
+              className="absolute inset-0 bg-background/80 backdrop-blur-sm"
+            />
+            <motion.div
+              key="add-panel"
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative w-full max-w-md bg-card border border-border shadow-2xl rounded-2xl overflow-hidden flex flex-col max-h-[85vh]"
+            >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-background/50 backdrop-blur-md shrink-0">
+                <div>
+                  <h2 className="text-lg font-semibold tracking-tight text-foreground">Add Contact</h2>
+                  <p className="text-[13px] text-muted-foreground mt-0.5">Manually add a single contact to your CRM.</p>
+                </div>
+                <button
+                  onClick={() => !addSubmitting && setAddContactOpen(false)}
+                  className="p-2 text-muted-foreground hover:bg-secondary rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddContact} className="flex flex-col flex-1 overflow-hidden">
+                <div className="p-6 md:p-8 overflow-y-auto flex-1 custom-scrollbar space-y-5">
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold tracking-widest uppercase text-muted-foreground">Phone Number *</label>
+                    <input
+                      type="tel"
+                      required
+                      autoFocus
+                      placeholder="+91 98765 43210"
+                      value={addForm.phone}
+                      onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })}
+                      className="w-full h-10 px-3 bg-background border border-border rounded-lg text-[13px] focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                    />
+                    <p className="text-[11px] text-muted-foreground">10–15 digits. Country code optional.</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold tracking-widest uppercase text-muted-foreground">Name</label>
+                    <input
+                      type="text"
+                      placeholder="Priya Sharma"
+                      value={addForm.name}
+                      onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
+                      className="w-full h-10 px-3 bg-background border border-border rounded-lg text-[13px] focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold tracking-widest uppercase text-muted-foreground">Email</label>
+                    <input
+                      type="email"
+                      placeholder="priya@example.com"
+                      value={addForm.email}
+                      onChange={(e) => setAddForm({ ...addForm, email: e.target.value })}
+                      className="w-full h-10 px-3 bg-background border border-border rounded-lg text-[13px] focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold tracking-widest uppercase text-muted-foreground">Notes</label>
+                    <textarea
+                      rows={3}
+                      placeholder="Any context about this contact..."
+                      value={addForm.notes}
+                      onChange={(e) => setAddForm({ ...addForm, notes: e.target.value })}
+                      className="w-full px-3 py-2 bg-background border border-border rounded-lg text-[13px] focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 transition-all resize-none"
+                    />
+                  </div>
+
+                  {addError && (
+                    <div className="p-3 rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-[13px] text-red-700 dark:text-red-300">
+                      {addError}
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-5 border-t border-border bg-background/50 backdrop-blur-md flex justify-between items-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => !addSubmitting && setAddContactOpen(false)}
+                    className="text-[13px] font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={addSubmitting}
+                    className="h-9 px-6 text-[13px] font-medium text-primary-foreground bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-sm transition-colors"
+                  >
+                    {addSubmitting ? 'Saving...' : 'Save Contact'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
     </div>
   );

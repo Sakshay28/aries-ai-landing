@@ -65,10 +65,22 @@ export async function middleware(request: NextRequest) {
         return request.cookies.getAll();
       },
       setAll(cookiesToSet) {
+        // SECURITY: harden every auth cookie the SSR client writes.
+        // We override httpOnly/secure/sameSite regardless of what
+        // Supabase passes through `options` so the session JWT is
+        // never exposed to client-side JavaScript.
+        const harden = (options: Record<string, unknown> | undefined) => ({
+          ...(options ?? {}),
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax' as const,
+          path: ((options as { path?: string } | undefined)?.path) ?? '/',
+        });
+
         // 1) Mutate request cookies so downstream server components read them
         cookiesToSet.forEach(({ name, value, options }) => {
           // @ts-ignore
-          request.cookies.set({ name, value, ...options });
+          request.cookies.set({ name, value, ...harden(options) });
         });
         // 2) Recreate the response ONCE with updated cookies
         response = NextResponse.next({
@@ -77,7 +89,7 @@ export async function middleware(request: NextRequest) {
         // 3) Set every cookie on the new response
         cookiesToSet.forEach(({ name, value, options }) => {
           // @ts-ignore
-          response.cookies.set({ name, value, ...options });
+          response.cookies.set({ name, value, ...harden(options) });
         });
       },
     },
@@ -96,24 +108,33 @@ export async function middleware(request: NextRequest) {
   // Protected route but no session → redirect to login
   // IMPORTANT: carry over any session cookies that getUser() refreshed
   // onto the redirect response so the browser persists them.
+  // Helper: copy every cookie from `response` onto `target`, preserving
+  // the security flags we hardened above. Without this, a redirect
+  // would write back the cookie with default flags (httpOnly: false),
+  // re-exposing the JWT to JS until the next page load.
+  const copyHardenedCookies = (target: NextResponse) => {
+    response.cookies.getAll().forEach((cookie) => {
+      target.cookies.set(cookie.name, cookie.value, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+      });
+    });
+  };
+
   if (isProtected && !user) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('redirect', pathname);
     const redirectResponse = NextResponse.redirect(loginUrl);
-    // Copy any cookies that were set during getUser() (e.g. token refresh)
-    response.cookies.getAll().forEach((cookie) => {
-      redirectResponse.cookies.set(cookie.name, cookie.value);
-    });
+    copyHardenedCookies(redirectResponse);
     return redirectResponse;
   }
 
   // Auth route but already logged in → redirect to dashboard
   if (isAuthRoute && user) {
     const redirectResponse = NextResponse.redirect(new URL('/dashboard', request.url));
-    // Preserve refreshed session cookies
-    response.cookies.getAll().forEach((cookie) => {
-      redirectResponse.cookies.set(cookie.name, cookie.value);
-    });
+    copyHardenedCookies(redirectResponse);
     return redirectResponse;
   }
 

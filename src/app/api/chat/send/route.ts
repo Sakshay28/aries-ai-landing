@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { sendTextMessage } from '@/lib/gupshup/service';
 import { sendInstagramMessage } from '@/lib/instagram/service';
+import { decryptToken } from '@/lib/utils/crypto';
 
 export async function POST(req: NextRequest) {
   try {
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
     // Get tenant credentials (admin client needed for gupshup keys)
     const { data: tenant, error: tenantErr } = await supabaseAdmin
       .from('tenants')
-      .select('gupshup_api_key, gupshup_phone_number')
+      .select('gupshup_api_key, gupshup_phone_number, gupshup_app_name')
       .eq('id', tenantId)
       .single();
 
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Tenant not found' }, { status: 404 });
     }
 
-    if (!tenant.gupshup_api_key || !tenant.gupshup_phone_number) {
+    if (!tenant.gupshup_api_key || !tenant.gupshup_phone_number || !tenant.gupshup_app_name) {
       return NextResponse.json({ success: false, error: 'Gupshup is not configured in Settings' }, { status: 400 });
     }
 
@@ -82,10 +83,11 @@ export async function POST(req: NextRequest) {
       } else {
         // Default to Gupshup WhatsApp
         const waResult = await sendTextMessage(
-          tenant.gupshup_api_key,
+          decryptToken(tenant.gupshup_api_key) as string,
           tenant.gupshup_phone_number,
           recipientPhone,
-          message.trim()
+          message.trim(),
+          tenant.gupshup_app_name
         );
         externalMessageId = waResult.messageId;
       }

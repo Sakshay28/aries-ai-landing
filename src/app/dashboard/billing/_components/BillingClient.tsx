@@ -95,15 +95,9 @@ export function BillingClient() {
             <h3 className="text-lg font-semibold mb-6 flex items-center gap-2">
               <CreditCard className="w-5 h-5 text-muted-foreground" /> Payment Method
             </h3>
-            <div className="flex items-center justify-between p-4 border border-border rounded-xl bg-secondary/30">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-8 bg-foreground/5 rounded flex items-center justify-center text-xs font-bold font-mono">VISA</div>
-                <div>
-                  <p className="text-sm font-medium">•••• •••• •••• 4242</p>
-                  <p className="text-xs text-muted-foreground">Expires 12/26</p>
-                </div>
-              </div>
-              <button className="text-sm font-medium text-indigo-500 hover:text-indigo-600">Edit</button>
+            <div className="flex items-center justify-between p-4 border border-dashed border-border rounded-xl bg-secondary/20">
+              <p className="text-sm text-muted-foreground">No payment method on file.</p>
+              <button className="text-sm font-medium text-indigo-500 hover:text-indigo-600 transition-colors">Add card</button>
             </div>
           </div>
 
@@ -111,19 +105,8 @@ export function BillingClient() {
             <h3 className="text-lg font-semibold mb-6 flex items-center gap-2">
               <FileText className="w-5 h-5 text-muted-foreground" /> Billing History
             </h3>
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
-                  <div>
-                    <p className="text-sm font-medium">Invoice #INV-{1020 - i}</p>
-                    <p className="text-xs text-muted-foreground">May {10 - i}, 2026</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-semibold">$99.00</span>
-                    <button className="p-1 text-muted-foreground hover:text-foreground"><Download className="w-4 h-4" /></button>
-                  </div>
-                </div>
-              ))}
+            <div className="py-6 text-center">
+              <p className="text-sm text-muted-foreground">No invoices yet. They will appear here once your subscription is active.</p>
             </div>
           </div>
         </div>

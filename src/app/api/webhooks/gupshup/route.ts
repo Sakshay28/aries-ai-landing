@@ -6,15 +6,31 @@
 // All heavy lifting (AI, DB writes, sending) is async.
 // ═══════════════════════════════════════════════════════════
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { isDuplicateMessage } from '@/lib/redis/client';
 import { parseGupshupWebhook, sendTextMessage } from '@/lib/gupshup/service';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantConfig } from '@/lib/tenant/manager';
+import { decryptToken } from '@/lib/utils/crypto';
 
 // ── Return 200 immediately — Gupshup requires < 5s response ──
 export async function POST(req: NextRequest) {
+  // ── P2-2: Shared-secret verification ─────────────────────────────
+  // Set GUPSHUP_WEBHOOK_SECRET in Vercel env. Append ?token=<secret> to the
+  // webhook URL you register in the Gupshup dashboard. If the env var is not
+  // set we skip the check (safe for dev/testing).
+  const webhookSecret = process.env.GUPSHUP_WEBHOOK_SECRET;
+  if (webhookSecret) {
+    const token =
+      req.nextUrl.searchParams.get('token') ??
+      req.headers.get('x-gupshup-token');
+    if (token !== webhookSecret) {
+      // Return 200 so Gupshup doesn't retry; we just discard the forged payload.
+      return NextResponse.json({ ok: true });
+    }
+  }
+
   let body: Record<string, unknown>;
 
   const contentType = req.headers.get('content-type') || '';
@@ -69,16 +85,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // Return 200 immediately — process asynchronously
-  // Using void to fire-and-forget without awaiting
-  try {
-    await processWebhookAsync(parsed);
-  } catch (err) {
-    console.error('❌ Gupshup webhook processing error:', err);
-    return NextResponse.json({ ok: false, error: (err as Error).message }, { status: 500 });
-  }
+  // ── P2-1: True fire-and-forget via after() ───────────────────────
+  // after() runs the callback AFTER the response is flushed to Gupshup.
+  // This guarantees < 5s response time regardless of AI/DB latency.
+  after(async () => {
+    try {
+      await processWebhookAsync(parsed);
+    } catch (err) {
+      console.error('❌ Gupshup webhook processing error:', err);
+    }
+  });
 
-  return NextResponse.json({ ok: true, msg: 'processed' });
+  return NextResponse.json({ ok: true });
 }
 
 // ── Validate that Gupshup can reach this endpoint ──
@@ -237,19 +255,29 @@ async function handleIncomingMessage(
     return;
   }
 
-  // ── Insert inbound message ──
-  await supabaseAdmin.from('messages').insert({
-    tenant_id: tenant.id,
-    conversation_id: conversation.id,
-    direction: 'inbound',
-    content: msg.text,
-    message_type: msg.type === 'text' ? 'text' : 'image',
-    channel: 'whatsapp',
-    sender_id: cleanPhone,
-    status: 'delivered',
-    ai_generated: false,
-    wa_message_id: msg.messageId,
-  });
+  // ── P2-3: Insert inbound message — upsert to survive duplicate delivery ──
+  // ON CONFLICT on wa_message_id is a DB-level dedup that handles the race
+  // window that exists even after the Redis/DB pre-check above.
+  const { error: insertErr } = await supabaseAdmin.from('messages').upsert(
+    {
+      tenant_id: tenant.id,
+      conversation_id: conversation.id,
+      direction: 'inbound',
+      content: msg.text,
+      message_type: msg.type === 'text' ? 'text' : 'image',
+      channel: 'whatsapp',
+      sender_id: cleanPhone,
+      status: 'delivered',
+      ai_generated: false,
+      wa_message_id: msg.messageId,
+    },
+    { onConflict: 'wa_message_id', ignoreDuplicates: true }
+  );
+  if (insertErr) {
+    // Most likely a duplicate — bail out to avoid sending a second AI reply.
+    console.error('❌ Message insert/upsert failed (likely duplicate):', insertErr.message);
+    return;
+  }
 
   // ── Update conversation message count ──
   try {
@@ -262,6 +290,14 @@ async function handleIncomingMessage(
   // ── Skip AI if bot is paused or conversation is escalated ──
   if (conversation.bot_paused || conversation.escalated) {
     console.log(`🔇 Gupshup: bot paused for conversation ${conversation.id}, skipping AI`);
+    return;
+  }
+
+  // ── P2-4: AI cost cap — skip Gemini if tenant is over their monthly limit ──
+  const aiLimit = (tenant.ai_conversation_limit as number) ?? 1000;
+  const aiUsed = (tenant.ai_conversations_this_month as number) ?? 0;
+  if (aiUsed >= aiLimit) {
+    console.log(`⚠️ Tenant ${tenant.id} hit AI limit (${aiUsed}/${aiLimit}). Skipping AI reply.`);
     return;
   }
 
@@ -305,10 +341,11 @@ async function handleIncomingMessage(
   let gupshupMsgId: string | null = null;
   try {
     const result = await sendTextMessage(
-      tenant.gupshup_api_key as string,
+      decryptToken(tenant.gupshup_api_key as string) as string,
       tenant.gupshup_phone_number as string,
       cleanPhone,
-      aiResponse.reply
+      aiResponse.reply,
+      tenant.gupshup_app_name as string
     );
     gupshupMsgId = result.messageId;
   } catch (sendErr) {

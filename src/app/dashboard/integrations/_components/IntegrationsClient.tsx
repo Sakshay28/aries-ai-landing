@@ -10,7 +10,7 @@ const INTEGRATIONS = [
     name: 'Shopify',
     description: 'Sync customer data, order history, and trigger abandoned cart flows.',
     icon: ShoppingBag,
-    status: 'connected',
+    status: 'available',
     color: 'text-[#95BF47]',
     bgColor: 'bg-[#95BF47]/10'
   },

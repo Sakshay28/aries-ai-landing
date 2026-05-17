@@ -14,6 +14,7 @@ import { getTenantById, getTenantConfig } from '@/lib/tenant/manager';
 import { sendTextMessage, sendTemplateMessage, isGupshupConfigured } from '@/lib/gupshup/service';
 import { generateFollowUpMessage } from '@/lib/ai/engine';
 import type { Tenant } from '@/lib/types';
+import { decryptToken } from '@/lib/utils/crypto';
 import * as Sentry from '@/lib/sentry-stub';
 
 // ── Fallback scheduler ──
@@ -151,7 +152,13 @@ async function processFollowUpJob(data: FollowUpJobData): Promise<void> {
   if (hoursSinceCreated > 24) {
     await sendFollowUpWithTemplate(tenant, leadPhone, followUpType, leadName);
   } else {
-    await sendTextMessage(tenant.gupshup_api_key as string, tenant.gupshup_phone_number as string, leadPhone, message);
+    await sendTextMessage(
+      decryptToken(tenant.gupshup_api_key as string) as string,
+      tenant.gupshup_phone_number as string,
+      leadPhone,
+      message,
+      tenant.gupshup_app_name as string
+    );
   }
 
   // Mark as sent
@@ -261,7 +268,13 @@ export async function processPendingFollowUps(): Promise<number> {
       if (hoursSinceScheduled > 24) {
         await sendFollowUpWithTemplate(tenant, lead.phone, followUp.follow_up_type, lead.name);
       } else {
-        await sendTextMessage(tenant.gupshup_api_key as string, tenant.gupshup_phone_number as string, lead.phone, message);
+        await sendTextMessage(
+          decryptToken(tenant.gupshup_api_key as string) as string,
+          tenant.gupshup_phone_number as string,
+          lead.phone,
+          message,
+          tenant.gupshup_app_name as string
+        );
       }
 
       await supabaseAdmin
@@ -368,7 +381,15 @@ async function sendFollowUpWithTemplate(
   name: string
 ) {
   try {
-    await sendTemplateMessage(tenant.gupshup_api_key as string, tenant.gupshup_phone_number as string, phone, 'follow_up_reminder', [name || 'there'], 'en');
+    await sendTemplateMessage(
+      decryptToken(tenant.gupshup_api_key as string) as string,
+      tenant.gupshup_phone_number as string,
+      phone,
+      'follow_up_reminder',
+      [name || 'there'],
+      'en',
+      tenant.gupshup_app_name as string
+    );
   } catch {
     console.warn(`⚠️ [${tenant.business_name}] Template message failed for ${followUpType}, skipping`);
   }

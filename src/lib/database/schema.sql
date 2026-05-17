@@ -413,6 +413,13 @@ CREATE TRIGGER tr_bookings_updated BEFORE UPDATE ON bookings FOR EACH ROW EXECUT
 -- ═══════════════════════════════════════
 -- This ensures Client A can NEVER see Client B's data,
 -- even if there's a bug in the application code.
+--
+-- IMPORTANT: All policies use the SECURITY DEFINER helper
+-- `public.get_current_tenant_id()` (defined just below). It runs
+-- with the function owner's privileges and BYPASSES RLS, which
+-- prevents the infinite-recursion that occurs when a policy on
+-- table T contains a subquery against table T (or against `users`,
+-- which itself has a policy that re-queries `users`).
 
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
@@ -424,73 +431,78 @@ ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE shopify_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE analytics_events ENABLE ROW LEVEL SECURITY;
 
--- Service role bypasses RLS (for webhooks and admin)
--- Client-side queries go through RLS automatically
+-- Service role bypasses RLS (used by webhooks/admin/server routes).
+-- Client-side queries (browser anon key) go through RLS automatically.
 
--- Users can only see their own tenant's data
-CREATE POLICY "Users see own tenant" ON users
-  FOR ALL USING (
-    auth.uid() = auth_id
-    OR tenant_id IN (SELECT tenant_id FROM users WHERE auth_id = auth.uid())
-  );
+-- ── Helper: tenant_id for the current authenticated user ──
+-- SECURITY DEFINER + STABLE so it can be safely referenced from RLS
+-- policies without triggering recursive RLS evaluation on `users`.
+CREATE OR REPLACE FUNCTION public.get_current_tenant_id()
+RETURNS UUID
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT tenant_id FROM public.users WHERE auth_id = auth.uid() LIMIT 1;
+$$;
+
+-- Lock down EXECUTE so only authenticated callers can use the helper.
+REVOKE ALL ON FUNCTION public.get_current_tenant_id() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_current_tenant_id() TO authenticated, service_role;
+
+-- Users: a user can only see/modify their own row. No tenant-wide
+-- visibility here to avoid recursion. Team-level visibility (e.g. an
+-- owner viewing teammates) is handled via a SECURITY DEFINER RPC, not RLS.
+CREATE POLICY "Users see own row" ON users
+  FOR ALL USING (auth.uid() = auth_id)
+  WITH CHECK (auth.uid() = auth_id);
 
 -- Leads scoped to tenant
 CREATE POLICY "Leads scoped to tenant" ON leads
-  FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM users WHERE auth_id = auth.uid())
-  );
+  FOR ALL USING (tenant_id = public.get_current_tenant_id())
+  WITH CHECK (tenant_id = public.get_current_tenant_id());
 
 -- Conversations scoped to tenant
 CREATE POLICY "Conversations scoped to tenant" ON conversations
-  FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM users WHERE auth_id = auth.uid())
-  );
+  FOR ALL USING (tenant_id = public.get_current_tenant_id())
+  WITH CHECK (tenant_id = public.get_current_tenant_id());
 
 -- Messages scoped to tenant
 CREATE POLICY "Messages scoped to tenant" ON messages
-  FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM users WHERE auth_id = auth.uid())
-  );
+  FOR ALL USING (tenant_id = public.get_current_tenant_id())
+  WITH CHECK (tenant_id = public.get_current_tenant_id());
 
 -- Follow-ups scoped to tenant
 CREATE POLICY "Follow-ups scoped to tenant" ON follow_ups
-  FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM users WHERE auth_id = auth.uid())
-  );
+  FOR ALL USING (tenant_id = public.get_current_tenant_id())
+  WITH CHECK (tenant_id = public.get_current_tenant_id());
 
 -- Bookings scoped to tenant
 CREATE POLICY "Bookings scoped to tenant" ON bookings
-  FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM users WHERE auth_id = auth.uid())
-  );
+  FOR ALL USING (tenant_id = public.get_current_tenant_id())
+  WITH CHECK (tenant_id = public.get_current_tenant_id());
 
 -- Shopify events scoped to tenant
 CREATE POLICY "Shopify events scoped to tenant" ON shopify_events
-  FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM users WHERE auth_id = auth.uid())
-  );
+  FOR ALL USING (tenant_id = public.get_current_tenant_id())
+  WITH CHECK (tenant_id = public.get_current_tenant_id());
 
 -- Analytics scoped to tenant
 CREATE POLICY "Analytics scoped to tenant" ON analytics_events
-  FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM users WHERE auth_id = auth.uid())
-  );
+  FOR ALL USING (tenant_id = public.get_current_tenant_id())
+  WITH CHECK (tenant_id = public.get_current_tenant_id());
 
 -- Tenants: users can see their own tenant
 CREATE POLICY "Tenant owners see own tenant" ON tenants
-  FOR ALL USING (
-    id IN (SELECT tenant_id FROM users WHERE auth_id = auth.uid())
-  );
+  FOR ALL USING (id = public.get_current_tenant_id())
+  WITH CHECK (id = public.get_current_tenant_id());
 
 -- ═══════════════════════════════════════
 -- 13. HELPER FUNCTIONS
 -- ═══════════════════════════════════════
-
--- Get tenant ID for current authenticated user
-CREATE OR REPLACE FUNCTION get_current_tenant_id()
-RETURNS UUID AS $$
-  SELECT tenant_id FROM users WHERE auth_id = auth.uid() LIMIT 1;
-$$ LANGUAGE sql SECURITY DEFINER;
+-- Note: get_current_tenant_id() is defined in section 12 above
+-- because RLS policies depend on it.
 
 -- Increment message counter for a tenant
 CREATE OR REPLACE FUNCTION increment_message_count(t_id UUID)

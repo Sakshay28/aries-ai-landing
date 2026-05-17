@@ -24,7 +24,13 @@ export async function POST() {
           setAll(cookiesToSet) {
             try {
               cookiesToSet.forEach(({ name, value, options }) => {
-                cookieStore.set(name, value, options);
+                cookieStore.set(name, value, {
+                  ...options,
+                  httpOnly: true,
+                  secure: process.env.NODE_ENV === 'production',
+                  sameSite: 'lax',
+                  path: (options as { path?: string } | undefined)?.path ?? '/',
+                });
               });
             } catch {
               // Ignore — can fail in Server Components (read-only)

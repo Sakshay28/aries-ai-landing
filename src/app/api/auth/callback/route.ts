@@ -35,7 +35,17 @@ export async function GET(req: NextRequest) {
         setAll(cookiesToSet) {
           try {
             cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
+              // SECURITY: force httpOnly + secure + lax sameSite on every
+              // auth cookie so an XSS payload cannot read the session JWT
+              // via document.cookie. We deliberately ignore any conflicting
+              // values Supabase may pass through `options`.
+              cookieStore.set(name, value, {
+                ...options,
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'lax',
+                path: (options as { path?: string } | undefined)?.path ?? '/',
+              });
             });
           } catch {
             // The `set` method was called from a Server Component.

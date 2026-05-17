@@ -1,6 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
+import { decryptToken } from '@/lib/utils/crypto';
+import { sendTemplateMessage } from '@/lib/gupshup/service';
+
+const BATCH_DELAY_MS = 200;  // 5 msg/s — safe for all Gupshup plans
+const MAX_RECIPIENTS = 500;  // guard against Vercel 5-min timeout
 
 export async function POST(req: NextRequest) {
   try {
@@ -33,11 +38,11 @@ export async function POST(req: NextRequest) {
     // Get tenant config
     const { data: tenant } = await supabaseAdmin
       .from('tenants')
-      .select('gupshup_api_key, gupshup_phone_number')
+      .select('gupshup_api_key, gupshup_phone_number, gupshup_app_name')
       .eq('id', tenantId)
       .single();
 
-    if (!tenant?.gupshup_api_key || !tenant?.gupshup_phone_number) {
+    if (!tenant?.gupshup_api_key || !tenant?.gupshup_phone_number || !tenant?.gupshup_app_name) {
       return NextResponse.json({ success: false, error: 'Gupshup is not configured in Settings' }, { status: 400 });
     }
 
@@ -47,11 +52,8 @@ export async function POST(req: NextRequest) {
       .update({ status: 'sending' })
       .eq('id', campaignId);
 
-    // Run the actual send in the background to avoid blocking the response
-    // (Vercel has timeouts, so for production you would use a queue like BullMQ or Vercel Inngest)
-    // Here we use a simple async fire-and-forget for the demo
-    
-    processCampaign(tenantId, campaignId, campaign, tenant).catch(console.error);
+    // after() runs after the 200 is flushed — true fire-and-forget.
+    after(() => processCampaign(tenantId, campaignId, campaign, tenant));
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -60,86 +62,73 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function processCampaign(tenantId: string, campaignId: string, campaign: any, tenant: any) {
+async function processCampaign(
+  tenantId: string,
+  campaignId: string,
+  campaign: Record<string, unknown>,
+  tenant: Record<string, unknown>
+) {
   try {
-    // 1. Fetch leads for the audience
-    // For now, it sends to all leads that have a phone number
+    const decryptedApiKey = decryptToken(tenant.gupshup_api_key as string) as string;
+
     const { data: leads, error } = await supabaseAdmin
       .from('leads')
       .select('id, phone')
       .eq('tenant_id', tenantId)
-      .not('phone', 'is', null);
+      .not('phone', 'is', null)
+      .limit(MAX_RECIPIENTS);
 
     if (error || !leads || leads.length === 0) {
-      await supabaseAdmin.from('broadcast_campaigns').update({ status: 'failed' }).eq('id', campaignId);
+      await supabaseAdmin
+        .from('broadcast_campaigns')
+        .update({ status: 'failed' })
+        .eq('id', campaignId);
       return;
     }
-
-    // We can filter based on campaign.audience_filter here if needed in the future
 
     let sent = 0;
     let failed = 0;
 
-    // Send messages iteratively
     for (const lead of leads) {
       try {
-        // Here we format the request to Gupshup.
-        // Important: Gupshup requires the message payload to be URLSearchParams, not JSON.
-        const params = new URLSearchParams({
-          channel: 'whatsapp',
-          source: tenant.gupshup_phone_number,
-          destination: lead.phone,
-          'src.name': 'ariesaidemo', // Using the app name as standard for Gupshup Enterprise template messaging if needed
-          template: JSON.stringify({
-            id: campaign.template_name,
-            params: []
-          }),
-        });
+        const result = await sendTemplateMessage(
+          decryptedApiKey,
+          tenant.gupshup_phone_number as string,
+          lead.phone,
+          campaign.template_name as string,
+          [],
+          'en',
+          tenant.gupshup_app_name as string
+        );
 
-        const res = await fetch('https://api.gupshup.io/wa/api/v1/template/msg', {
-          method: 'POST',
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'apikey': tenant.gupshup_api_key,
-          },
-          body: params.toString()
+        sent++;
+        await supabaseAdmin.from('broadcast_messages').insert({
+          tenant_id: tenantId,
+          campaign_id: campaignId,
+          lead_id: lead.id,
+          recipient_phone: lead.phone,
+          wa_message_id: result.messageId,
+          status: 'sent',
         });
-
-        const json = await res.json();
-        
-        if (json.status === 'submitted') {
-          sent++;
-          // Log to broadcast_messages
-          await supabaseAdmin.from('broadcast_messages').insert({
-            tenant_id: tenantId,
-            campaign_id: campaignId,
-            lead_id: lead.id,
-            recipient_phone: lead.phone,
-            wa_message_id: json.messageId,
-            status: 'sent'
-          });
-        } else {
-          failed++;
-        }
       } catch (e) {
         failed++;
-        console.error("Failed to send template to", lead.phone, e);
+        console.error(`Broadcast: failed to send to ${lead.phone}:`, (e as Error).message);
       }
 
-      // Small delay to prevent hitting rate limits
-      await new Promise(r => setTimeout(r, 100));
+      // 200 ms between sends = 5 msg/s (safe for all Gupshup plans)
+      await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
     }
 
-    // Update campaign final status
-    await supabaseAdmin.from('broadcast_campaigns').update({
-      status: 'completed',
-      sent_count: sent,
-      failed_count: failed
-    }).eq('id', campaignId);
+    await supabaseAdmin
+      .from('broadcast_campaigns')
+      .update({ status: 'completed', sent_count: sent, failed_count: failed })
+      .eq('id', campaignId);
 
   } catch (error) {
-    console.error("Error processing campaign in background:", error);
-    await supabaseAdmin.from('broadcast_campaigns').update({ status: 'failed' }).eq('id', campaignId);
+    console.error('Broadcast: campaign processing failed:', error);
+    await supabaseAdmin
+      .from('broadcast_campaigns')
+      .update({ status: 'failed' })
+      .eq('id', campaignId);
   }
 }

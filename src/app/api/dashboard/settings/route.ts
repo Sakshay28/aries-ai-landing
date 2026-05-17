@@ -7,6 +7,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { invalidateCache } from '@/lib/tenant/manager';
 import { getTenantId } from '@/lib/auth/getTenantId';
+import { encryptToken, decryptToken } from '@/lib/utils/crypto';
 
 export async function GET() {
   const tenantId = await getTenantId();
@@ -31,6 +32,14 @@ export async function GET() {
 
   if (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+
+  // Decrypt the gupshup_api_key before returning to the dashboard owner.
+  // The tenant owner is allowed to see their own key (so the Settings UI can
+  // re-display it as a masked password input). decryptToken is a no-op on
+  // legacy plaintext values.
+  if (data && data.gupshup_api_key) {
+    data.gupshup_api_key = decryptToken(data.gupshup_api_key as string);
   }
 
   return NextResponse.json({ success: true, data });
@@ -61,6 +70,20 @@ export async function PATCH(req: NextRequest) {
   for (const key of allowedFields) {
     if (body[key] !== undefined) {
       updates[key] = body[key];
+    }
+  }
+
+  // Encrypt sensitive fields at rest. encryptToken is idempotent — it skips
+  // values already prefixed with `enc:v1:`, so re-saving a previously-encrypted
+  // value (e.g. user opens settings and clicks Save without retyping the key)
+  // will not double-encrypt.
+  if (typeof updates.gupshup_api_key === 'string') {
+    if (!updates.gupshup_api_key.trim()) {
+      // Empty string means "don't change" — drop it from updates so we keep
+      // the existing encrypted value in the DB.
+      delete updates.gupshup_api_key;
+    } else {
+      updates.gupshup_api_key = encryptToken(updates.gupshup_api_key as string);
     }
   }
 
