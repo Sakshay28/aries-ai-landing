@@ -208,8 +208,8 @@ export default function SettingsPage() {
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   const testGupshupConnection = async () => {
-    if (!settings.gupshup_api_key || !settings.gupshup_phone_number) {
-      toast.error('Enter your Gupshup API Key and Phone Number first');
+    if (!settings.gupshup_api_key || !settings.gupshup_phone_number || !settings.gupshup_app_name) {
+      toast.error('Enter your WhatsApp API Key, Phone Number and App Name first');
       return;
     }
     setTestingConnection(true);
@@ -221,6 +221,7 @@ export default function SettingsPage() {
         body: JSON.stringify({
           apiKey: settings.gupshup_api_key,
           phoneNumber: settings.gupshup_phone_number,
+          appName: settings.gupshup_app_name,
         }),
       });
       const data = await res.json();
@@ -367,10 +368,10 @@ export default function SettingsPage() {
         </motion.div>
       )}
 
-      {/* Tab: WhatsApp (Gupshup) */}
+      {/* Tab: WhatsApp */}
       {activeTab === 'whatsapp' && (
         <motion.div key="whatsapp" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
-          <SectionCard title="Gupshup WhatsApp Credentials" icon={MessageSquare}>
+          <SectionCard title="WhatsApp Business Credentials" icon={MessageSquare}>
             {/* Connection status badge */}
             <div className="flex items-center gap-3 mb-2">
               <div
@@ -388,18 +389,18 @@ export default function SettingsPage() {
                 {connectionStatus === 'success' ? 'Connected' : connectionStatus === 'error' ? 'Connection Failed' : 'Not Tested'}
               </div>
               <a
-                href="https://www.gupshup.io/whatsapp/dashboard"
+                href="https://business.facebook.com/wa/manage/home/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-xs font-medium underline"
                 style={{ color: 'var(--muted-foreground)' }}
               >
-                Open Gupshup Dashboard →
+                Open Meta Business Manager →
               </a>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <Field label="Gupshup API Key">
+              <Field label="WhatsApp API Key">
                 <div className="relative">
                   <input
                     type="password"
@@ -411,14 +412,14 @@ export default function SettingsPage() {
                   />
                 </div>
               </Field>
-              <Field label="Gupshup Phone Number (no + prefix)">
+              <Field label="WhatsApp Phone Number (no + prefix)">
                 <Input
                   value={settings.gupshup_phone_number}
                   onChange={v => update('gupshup_phone_number', v)}
                   placeholder="919876543210"
                 />
               </Field>
-              <Field label="Gupshup App Name">
+              <Field label="WhatsApp App ID">
                 <Input
                   value={settings.gupshup_app_name}
                   onChange={v => update('gupshup_app_name', v)}
@@ -451,14 +452,14 @@ export default function SettingsPage() {
 
           {/* Setup Guide for new users */}
           {!settings.gupshup_api_key && (
-            <SectionCard title="How to Connect Gupshup" icon={MessageSquare}>
+            <SectionCard title="How to Connect WhatsApp API" icon={MessageSquare}>
               <ol className="space-y-4 text-sm">
                 {[
-                  { step: '1', text: 'Go to ', link: 'https://www.gupshup.io/whatsapp/dashboard', linkText: 'gupshup.io/whatsapp/dashboard' },
-                  { step: '2', text: 'Create an app, add your phone number, and complete the go-live process' },
-                  { step: '3', text: 'Copy your API Key, Phone Number (without +), and App Name' },
+                  { step: '1', text: 'Go to ', link: 'https://business.facebook.com/wa/manage/home/', linkText: 'Meta Business Manager' },
+                  { step: '2', text: 'Create an app, add your phone number, and complete the Meta verification process' },
+                  { step: '3', text: 'Copy your API Key, Phone Number (without +), and App ID' },
                   { step: '4', text: 'Paste them above, click "Test Connection", then save' },
-                  { step: '5', text: `Set your webhook URL in Gupshup: ${typeof window !== 'undefined' ? window.location.origin : 'https://yoursite.com'}/api/webhooks/gupshup` },
+                  { step: '5', text: `Set your webhook URL in Meta: ${typeof window !== 'undefined' ? window.location.origin : 'https://yoursite.com'}/api/webhooks/whatsapp` },
                 ].map(item => (
                   <li key={item.step} className="flex items-start gap-3">
                     <span
@@ -483,7 +484,7 @@ export default function SettingsPage() {
                 style={{ background: 'var(--secondary)', border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}
               >
                 Webhook URL: <span style={{ color: 'var(--foreground)' }}>
-                  {typeof window !== 'undefined' ? window.location.origin : 'https://yoursite.com'}/api/webhooks/gupshup
+                  {typeof window !== 'undefined' ? window.location.origin : 'https://yoursite.com'}/api/webhooks/whatsapp
                 </span>
               </div>
             </SectionCard>

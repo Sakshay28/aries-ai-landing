@@ -90,7 +90,7 @@ export function BroadcastPanel({
               </div>
               
               <div className="space-y-4">
-                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Gupshup Template Name</label>
+                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Meta Template Name</label>
                 <input 
                   type="text" 
                   value={editTemplate}
@@ -98,7 +98,7 @@ export function BroadcastPanel({
                   placeholder="e.g. welcome_offer_01"
                   className="w-full h-10 px-4 bg-background border border-border rounded-lg text-[14px] focus:border-indigo-500 outline-none" 
                 />
-                <p className="text-xs text-muted-foreground mt-1">Must exactly match the approved template name in your Gupshup Dashboard.</p>
+                <p className="text-xs text-muted-foreground mt-1">Must exactly match the approved template name in your Meta Business Manager.</p>
               </div>
 
               <div className="space-y-4">
