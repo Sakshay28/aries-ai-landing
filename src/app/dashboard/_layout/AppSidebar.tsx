@@ -56,7 +56,7 @@ const navigationItems: NavItem[] = [
   { label: "Broadcast", icon: Megaphone, href: "/dashboard/broadcast" },
   { label: "Contacts", icon: Users, href: "/dashboard/contacts" },
   { 
-    label: "Playbooks", 
+    label: "Smart Rules", 
     icon: Workflow, 
     href: "/dashboard/automations",
     badge: <span className="text-[10px] tracking-wide text-sidebar-foreground/50">4</span>
