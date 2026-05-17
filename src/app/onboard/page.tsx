@@ -27,10 +27,10 @@ const BUSINESS_TYPES = [
 ];
 
 const PERSONALITIES = [
-  { value: "Professional and formal", label: "Professional & Formal", desc: "Polished, precise, enterprise-grade tone" },
-  { value: "Friendly and approachable", label: "Friendly & Warm", desc: "Conversational, personable, customer-first" },
-  { value: "Casual and fun", label: "Casual & Fun", desc: "Relaxed, emoji-friendly, youthful energy" },
-  { value: "Elegant and exclusive", label: "Elegant & Luxurious", desc: "Premium feel, refined language, high-end brand" },
+  { value: "Professional and formal", label: "Professional & Formal", desc: "Polished, precise, enterprise-grade tone", example: '"Hello, how may I assist you today?"' },
+  { value: "Friendly and approachable", label: "Friendly & Warm", desc: "Conversational, personable, customer-first", example: '"Hey there! 👋 How can I help?"' },
+  { value: "Casual and fun", label: "Casual & Fun", desc: "Relaxed, emoji-friendly, youthful energy", example: '"Yo! What\'s up? 😎 Need some help?"' },
+  { value: "Elegant and exclusive", label: "Elegant & Luxurious", desc: "Premium feel, refined language, high-end brand", example: '"Welcome. It is our pleasure to serve you."' },
 ];
 
 function StepIndicator({ current, total }: { current: number; total: number }) {
@@ -90,9 +90,14 @@ function PersonalityCard({
       }}>
         {selected && <div style={{ width: 10, height: 10, borderRadius: "50%", background: G }} />}
       </div>
-      <div>
+      <div style={{ flex: 1 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 2 }}>{option.label}</div>
-        <div style={{ fontSize: 12, color: "#64748b" }}>{option.desc}</div>
+        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>{option.desc}</div>
+        {selected && (
+          <div style={{ fontSize: 12, color: GD, fontWeight: 500, fontStyle: "italic", background: "rgba(255,255,255,0.6)", padding: "4px 8px", borderRadius: 6, display: "inline-block" }}>
+            Example: {option.example}
+          </div>
+        )}
       </div>
     </button>
   );
@@ -289,7 +294,7 @@ function OnboardContent() {
                 </Field>
 
                 {businessType === "Other" && (
-                  <Field label="What is your business about? (Knowledge base)">
+                  <Field label="What is your business about?">
                     <textarea
                       style={{ ...styles.input, minHeight: 80, resize: "vertical", lineHeight: 1.55 }}
                       value={businessDescription}
