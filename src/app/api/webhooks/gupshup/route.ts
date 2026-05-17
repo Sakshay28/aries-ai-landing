@@ -16,10 +16,41 @@ import { getTenantConfig } from '@/lib/tenant/manager';
 // ── Return 200 immediately — Gupshup requires < 5s response ──
 export async function POST(req: NextRequest) {
   let body: Record<string, unknown>;
+
+  const contentType = req.headers.get('content-type') || '';
+
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Invalid JSON' }, { status: 400 });
+    if (contentType.includes('application/json')) {
+      body = await req.json();
+    } else if (contentType.includes('application/x-www-form-urlencoded') || contentType.includes('multipart/form-data')) {
+      // Gupshup v2 sends form-encoded data
+      const text = await req.text();
+      console.log('📩 Gupshup raw form body:', text.slice(0, 1000));
+      const params = new URLSearchParams(text);
+      const rawPayload: Record<string, unknown> = {};
+      params.forEach((value, key) => {
+        // Try to parse JSON values (Gupshup nests JSON strings in form fields)
+        try { rawPayload[key] = JSON.parse(value); } catch { rawPayload[key] = value; }
+      });
+      body = rawPayload;
+    } else {
+      // Try JSON as fallback, then form
+      const text = await req.text();
+      console.log('📩 Gupshup raw body (unknown content-type):', contentType, text.slice(0, 1000));
+      try {
+        body = JSON.parse(text);
+      } catch {
+        const params = new URLSearchParams(text);
+        const rawPayload: Record<string, unknown> = {};
+        params.forEach((value, key) => {
+          try { rawPayload[key] = JSON.parse(value); } catch { rawPayload[key] = value; }
+        });
+        body = rawPayload;
+      }
+    }
+  } catch (err) {
+    console.error('❌ Gupshup: failed to parse request body:', err);
+    return NextResponse.json({ ok: true }); // Always return 200 to Gupshup
   }
 
   // Log full payload to diagnose parsing issues
