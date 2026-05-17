@@ -262,11 +262,15 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       });
-      if (!res.ok) throw new Error('Save failed');
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(`Save failed (${res.status}): ${data.error || 'unknown error'}`);
+        return;
+      }
       toast.success('Settings saved successfully');
       setDirty(false);
-    } catch {
-      toast.error('Failed to save settings. Please try again.');
+    } catch (err) {
+      toast.error(`Save error: ${(err as Error).message}`);
     } finally {
       setSaving(false);
     }
