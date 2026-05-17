@@ -249,11 +249,12 @@ async function handleIncomingMessage(
   });
 
   // ── Update conversation message count ──
-  await supabaseAdmin.rpc('increment_message_count_conv', {
-    conv_id: conversation.id
-  }).catch(() => {
+  try {
+    await supabaseAdmin.rpc('increment_message_count_conv', { conv_id: conversation.id });
+  } catch {
     // Non-critical — proceed without incrementing
-  });
+  }
+
 
   // ── Skip AI if bot is paused or conversation is escalated ──
   if (conversation.bot_paused || conversation.escalated) {
