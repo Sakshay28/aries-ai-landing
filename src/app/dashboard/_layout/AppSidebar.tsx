@@ -126,8 +126,8 @@ function DesktopSidebar(props: {
 }) {
   return (
     <aside
-      style={{ width: props.isOpen ? 256 : 80 }}
-      className="hidden shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-in-out lg:flex relative z-20 shadow-[inset_-1px_0_rgba(255,255,255,0.4)] dark:shadow-[4px_0_24px_-4px_rgba(0,0,0,0.8)]"
+      style={{ width: props.isOpen ? 220 : 64 }}
+      className="hidden shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-in-out lg:flex relative z-20"
     >
       <SidebarBody
         isOpen={props.isOpen}
@@ -159,20 +159,20 @@ function SidebarBody({
   return (
     <>
       {/* Header */}
-      <div className="flex h-[72px] items-center justify-between border-b border-sidebar-border px-4">
+      <div className="flex h-14 items-center justify-between px-4">
         {isOpen && (
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white overflow-hidden shadow-[0_2px_10px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_10px_rgba(0,0,0,0.5)]">
-              <Image src="/logo.png" alt="Aries AI Logo" width={32} height={32} className="object-cover" />
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-white overflow-hidden shadow-sm">
+              <Image src="/logo.png" alt="Aries AI Logo" width={24} height={24} className="object-cover" />
             </div>
-            <span className="text-[15px] font-bold tracking-tight text-sidebar-accent-foreground">Aries AI</span>
+            <span className="text-[14px] font-semibold tracking-tight text-sidebar-foreground">Aries AI</span>
           </div>
         )}
         <Button
           variant="ghost"
           size="icon"
           onClick={onToggle}
-          className="h-8 w-8 text-sidebar-foreground hover:bg-black/5 dark:hover:bg-white/5 hover:text-sidebar-accent-foreground"
+          className="h-7 w-7 text-sidebar-foreground hover:bg-black/5 dark:hover:bg-white/5 hover:text-sidebar-accent-foreground"
           aria-label="Toggle sidebar"
         >
           {isOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -225,15 +225,15 @@ function NavButton({
     <Link
       href={item.href}
       className={cn(
-        "group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-all duration-200",
+        "group relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-[13px] font-medium transition-colors",
         isActive
-          ? "bg-white/80 dark:bg-white/10 text-sidebar-accent-foreground border border-black/5 dark:border-white/5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.2)]"
-          : "text-sidebar-foreground border border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:text-sidebar-accent-foreground",
+          ? "bg-black/5 dark:bg-white/5 text-sidebar-accent-foreground"
+          : "text-sidebar-foreground/80 hover:bg-black/5 dark:hover:bg-white/5 hover:text-sidebar-accent-foreground",
         !isOpen && "justify-center",
       )}
       title={!isOpen ? item.label : undefined}
     >
-      <Icon className={cn("h-4 w-4 shrink-0 transition-colors", isActive ? "text-[#06B6D4]" : "text-sidebar-foreground group-hover:text-sidebar-accent-foreground")} />
+      <Icon className={cn("h-4 w-4 shrink-0 transition-colors", isActive ? "text-sidebar-accent-foreground" : "text-sidebar-foreground/60 group-hover:text-sidebar-foreground/80")} />
       {isOpen && (
         <>
           <span className="flex-1 text-left">{item.label}</span>
