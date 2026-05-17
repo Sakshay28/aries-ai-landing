@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { 
   Plus, Activity, ArrowRight, Play, Pause, BarChart2, Edit2, PlayCircle, ShieldAlert, X, Save
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { cn } from "@/lib/utils";
 
 // --- MOCK DATA ---
@@ -58,6 +59,7 @@ const mockRules: Rule[] = [
 ];
 
 export function AutomationsClient() {
+  const router = useRouter();
   const [rules, setRules] = useState<Rule[]>(mockRules);
   const [editingRule, setEditingRule] = useState<Rule | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -116,7 +118,7 @@ export function AutomationsClient() {
         </h1>
 
         <div className="flex items-center gap-2">
-          <button onClick={() => toast("History coming soon")} className="h-9 px-4 text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors flex items-center">
+          <button onClick={() => router.push('/dashboard/logs')} className="h-9 px-4 text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors flex items-center">
             <Activity className="w-4 h-4 mr-2 opacity-70" />
             History
           </button>
@@ -236,7 +238,7 @@ export function AutomationsClient() {
                           <Edit2 className="w-3.5 h-3.5" />
                           Edit
                         </button>
-                        <button onClick={() => toast("Analytics coming soon")} className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors" title="View Analytics">
+                        <button onClick={() => router.push('/dashboard/analytics')} className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors" title="View Analytics">
                           <BarChart2 className="w-3.5 h-3.5" />
                         </button>
                         <button onClick={() => handleTogglePause(rule.id, rule.status)} className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors" title={rule.status === 'Paused' ? 'Resume' : 'Pause'}>
