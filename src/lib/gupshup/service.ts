@@ -301,7 +301,8 @@ export function parseGupshupWebhook(body: Record<string, unknown>): ParsedGupshu
     let mediaUrl: string | undefined;
 
     if (msgType === 'text') {
-      text = (payload.text as string) || '';
+      const innerPayload = payload.payload as Record<string, unknown> | undefined;
+      text = (innerPayload?.text as string) || (payload.text as string) || '';
     } else if (['image', 'video', 'audio', 'file'].includes(msgType)) {
       const mediaObj = payload[msgType] as Record<string, string> | undefined;
       mediaUrl = mediaObj?.url || (payload.url as string) || '';
