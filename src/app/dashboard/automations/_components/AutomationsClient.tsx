@@ -58,11 +58,57 @@ const mockRules: Rule[] = [
   }
 ];
 
+const mockSuggestions = [
+  {
+    title: 'Turn on "Smart Review Collection"',
+    description: 'Automatically ask for a Google review 2 days after a chat—but only if the AI detects the customer was happy.',
+    ruleTemplate: {
+      name: 'Smart Review Collection',
+      triggerSource: 'When customer sentiment is deeply positive after a resolved chat',
+      aiSummary: 'Wait 48 hours, then send a polite request with a link to our Google My Business page.'
+    }
+  },
+  {
+    title: 'Create an "Abandoned Cart" Rule',
+    description: 'If a customer asks about a product or pricing but goes silent for 24 hours, gently remind them and offer assistance.',
+    ruleTemplate: {
+      name: 'Abandoned Cart Follow-up',
+      triggerSource: 'When a customer asks about pricing/products but does not reply for 24h',
+      aiSummary: 'Send a gentle follow-up asking if they need any more information or help deciding.'
+    }
+  },
+  {
+    title: 'Enable "VIP Customer Recognition"',
+    description: 'Automatically flag and send a personalized welcome back message to any customer who has messaged you before.',
+    ruleTemplate: {
+      name: 'VIP Customer Recognition',
+      triggerSource: 'When a recognized returning customer sends a new message',
+      aiSummary: 'Acknowledge that they are a returning customer and prioritize their message in your inbox.'
+    }
+  },
+  {
+    title: 'Turn on "After-Hours Auto Reply"',
+    description: 'Customers often message outside of business hours. Instantly set expectations by letting them know when you will be back.',
+    ruleTemplate: {
+      name: 'After-Hours Auto Reply',
+      triggerSource: 'When a customer messages between 7 PM and 8 AM',
+      aiSummary: 'Reply instantly stating our business hours and that we will respond first thing in the morning.'
+    }
+  }
+];
+
 export function AutomationsClient() {
   const router = useRouter();
   const [rules, setRules] = useState<Rule[]>(mockRules);
   const [editingRule, setEditingRule] = useState<Rule | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(mockSuggestions[0]);
+
+  // Rotate suggestion based on the current day of the year so it changes automatically
+  React.useEffect(() => {
+    const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 1000 / 60 / 60 / 24);
+    setActiveSuggestion(mockSuggestions[dayOfYear % mockSuggestions.length]);
+  }, []);
 
   const handleEdit = (rule: Rule) => {
     setEditingRule(rule);
@@ -158,19 +204,19 @@ export function AutomationsClient() {
                   <span className="text-[12px] font-semibold tracking-wide text-blue-600 dark:text-blue-400 uppercase">Suggestion</span>
                 </div>
                 <h3 className="text-[18px] font-medium tracking-tight text-foreground">
-                  Turn on "Smart Review Collection"
+                  {activeSuggestion.title}
                 </h3>
                 <p className="text-[14px] text-muted-foreground leading-relaxed max-w-xl">
-                  Automatically ask for a Google review 2 days after a chat—but <strong>only</strong> if the AI detects the customer was happy. Protect your rating while growing reviews on autopilot.
+                  {activeSuggestion.description}
                 </p>
               </div>
               <button 
                 onClick={() => {
                   setEditingRule({
                     id: `a-${Date.now()}`,
-                    name: 'Smart Review Collection',
-                    triggerSource: 'When customer sentiment is deeply positive after a resolved chat',
-                    aiSummary: 'Wait 48 hours, then send a polite request with a link to our Google My Business page.',
+                    name: activeSuggestion.ruleTemplate.name,
+                    triggerSource: activeSuggestion.ruleTemplate.triggerSource,
+                    aiSummary: activeSuggestion.ruleTemplate.aiSummary,
                     status: 'Learning',
                     customersReached: 0,
                     actionsTaken: 0,
