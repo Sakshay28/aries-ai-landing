@@ -22,13 +22,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Invalid JSON' }, { status: 400 });
   }
 
+  // Log full payload to diagnose parsing issues
+  console.log('📩 Gupshup raw payload:', JSON.stringify(body).slice(0, 1000));
+
   // Validate required structure
   if (!body.type || !body.payload) {
+    console.log('⚠️ Gupshup: missing type or payload, body keys:', Object.keys(body));
     return NextResponse.json({ ok: true }); // Accept silently — could be a Gupshup ping
   }
 
   // Parse webhook payload
   const parsed = parseGupshupWebhook(body);
+  console.log('🔍 Gupshup parsed result:', JSON.stringify(parsed).slice(0, 500));
   if (!parsed) {
     return NextResponse.json({ ok: true });
   }
