@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { toast } from 'sonner';
 import { 
-  Plus, Activity, ArrowRight, Play, Pause, BarChart2, Edit2, PlayCircle, ShieldAlert, X, Save
+  Plus, Activity, ArrowRight, Play, Pause, BarChart2, Edit2, PlayCircle, ShieldAlert, X, Save, Trash2
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { cn } from "@/lib/utils";
@@ -94,6 +94,12 @@ export function AutomationsClient() {
     });
     
     toast.success("Rule saved successfully");
+    setIsDrawerOpen(false);
+  };
+
+  const handleDelete = (id: string) => {
+    setRules(prev => prev.filter(r => r.id !== id));
+    toast.success("Rule deleted permanently");
     setIsDrawerOpen(false);
   };
 
@@ -244,6 +250,10 @@ export function AutomationsClient() {
                         <button onClick={() => handleTogglePause(rule.id, rule.status)} className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors" title={rule.status === 'Paused' ? 'Resume' : 'Pause'}>
                           {rule.status === 'Paused' ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
                         </button>
+                        <div className="w-px h-4 bg-border mx-1"></div>
+                        <button onClick={() => handleDelete(rule.id)} className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-red-500/10 text-muted-foreground hover:text-red-500 rounded-lg transition-colors" title="Delete">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
 
                     </div>
@@ -315,20 +325,33 @@ export function AutomationsClient() {
             </div>
 
             {/* Drawer Footer */}
-            <div className="p-6 border-t border-border flex items-center justify-end gap-3 bg-muted/20 shrink-0">
-              <button 
-                onClick={() => setIsDrawerOpen(false)}
-                className="h-10 px-4 text-[13px] font-medium text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={handleSave}
-                className="h-10 px-5 bg-foreground text-background hover:bg-foreground/90 rounded-lg text-[13px] font-medium transition-transform active:scale-95 flex items-center shadow-sm"
-              >
-                <Save className="w-4 h-4 mr-2" />
-                Save Rule
-              </button>
+            <div className="p-6 border-t border-border flex items-center justify-between bg-muted/20 shrink-0">
+              {editingRule?.id && rules.some(r => r.id === editingRule.id) ? (
+                <button 
+                  onClick={() => handleDelete(editingRule.id)}
+                  className="h-10 px-4 text-[13px] font-medium text-red-500 hover:text-red-600 hover:bg-red-500/10 rounded-lg transition-colors flex items-center"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete
+                </button>
+              ) : (
+                <div></div>
+              )}
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setIsDrawerOpen(false)}
+                  className="h-10 px-4 text-[13px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleSave}
+                  className="h-10 px-5 bg-foreground text-background hover:bg-foreground/90 rounded-lg text-[13px] font-medium transition-transform active:scale-95 flex items-center shadow-sm"
+                >
+                  <Save className="w-4 h-4 mr-2" />
+                  Save Rule
+                </button>
+              </div>
             </div>
 
           </div>
