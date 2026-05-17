@@ -1,6 +1,7 @@
 "use client";
 
 import React from 'react';
+import { toast } from 'sonner';
 import { 
   Plus, Activity, ArrowRight, Play, Pause, BarChart2, Edit2, PlayCircle, ShieldAlert
 } from 'lucide-react';
@@ -67,11 +68,11 @@ export function AutomationsClient() {
         </h1>
 
         <div className="flex items-center gap-2">
-          <button className="h-9 px-4 text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors flex items-center">
+          <button onClick={() => toast("History coming soon")} className="h-9 px-4 text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors flex items-center">
             <Activity className="w-4 h-4 mr-2 opacity-70" />
             History
           </button>
-          <button className="h-9 px-4 bg-foreground text-background hover:bg-foreground/90 rounded-lg text-[13px] font-medium transition-transform active:scale-95 flex items-center shadow-sm">
+          <button onClick={() => toast("Automation Builder coming soon")} className="h-9 px-4 bg-foreground text-background hover:bg-foreground/90 rounded-lg text-[13px] font-medium transition-transform active:scale-95 flex items-center shadow-sm">
             <Plus className="w-4 h-4 mr-1.5" />
             New Automation
           </button>
@@ -101,13 +102,13 @@ export function AutomationsClient() {
                   <span className="text-[12px] font-semibold tracking-wide text-blue-600 dark:text-blue-400 uppercase">Suggestion</span>
                 </div>
                 <h3 className="text-[18px] font-medium tracking-tight text-foreground">
-                  Create a "Pricing Clarification" rule
+                  Create an "After-Hours Auto Reply"
                 </h3>
                 <p className="text-[14px] text-muted-foreground leading-relaxed max-w-xl">
-                  28% of your customers ask about bulk pricing but don't buy. An automated quick reply could recover an estimated 40 sales this week.
+                  Customers often message you outside of business hours. An automated reply letting them know when you'll be back sets expectations and keeps them engaged.
                 </p>
               </div>
-              <button className="shrink-0 h-10 px-5 bg-white dark:bg-black border border-border/50 group-hover:border-border text-foreground text-[14px] font-medium rounded-lg shadow-sm hover:shadow transition-all flex items-center">
+              <button onClick={() => toast.success("Drafting automation...")} className="shrink-0 h-10 px-5 bg-white dark:bg-black border border-border/50 group-hover:border-border text-foreground text-[14px] font-medium rounded-lg shadow-sm hover:shadow transition-all flex items-center">
                 Turn this on
                 <ArrowRight className="w-4 h-4 ml-2 opacity-60 group-hover:translate-x-0.5 transition-transform" />
               </button>
@@ -168,14 +169,14 @@ export function AutomationsClient() {
 
                       {/* Actions (Hidden by default, fades in on hover) */}
                       <div className="absolute right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 group-hover:translate-x-0 translate-x-4 transition-all duration-300 flex items-center gap-2">
-                        <button className="flex items-center gap-2 h-9 px-3 bg-muted hover:bg-muted/80 text-foreground text-[13px] font-medium rounded-lg transition-colors" title="Edit">
+                        <button onClick={() => toast("Editing coming soon")} className="flex items-center gap-2 h-9 px-3 bg-muted hover:bg-muted/80 text-foreground text-[13px] font-medium rounded-lg transition-colors" title="Edit">
                           <Edit2 className="w-3.5 h-3.5" />
                           Edit
                         </button>
-                        <button className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors" title="View Analytics">
+                        <button onClick={() => toast("Analytics coming soon")} className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors" title="View Analytics">
                           <BarChart2 className="w-3.5 h-3.5" />
                         </button>
-                        <button className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors" title="Pause">
+                        <button onClick={() => toast.success("Automation paused")} className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors" title="Pause">
                           <Pause className="w-3.5 h-3.5" />
                         </button>
                       </div>
