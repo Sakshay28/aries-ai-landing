@@ -7,13 +7,21 @@
 // the flow finished without sending anything.
 //
 // Supported node types (mirrors FlowSidebar node IDs):
-//   trigger / keyword_trigger  — entry, checks keyword match
-//   standard / send_*          — send text message
-//   condition / condition_check — branch on keyword match
-//   handoff                    — pause bot (escalate to human)
-//   delay / wait               — sleep N seconds (max 5s in serverless)
-//   tag_lead (tag)             — update lead_status / tag
-//   end                        — stop execution
+//   trigger / keyword_trigger   — entry, checks keyword / first_message / all_messages
+//   standard / send_*           — send a text message (supports {{variable}} interpolation)
+//   condition / condition_check — branch: evaluates ctx.variables.{field} or keyword fallback
+//   handoff                     — pause bot, escalate to human agent
+//   delay / wait                — sleep N seconds (max 5s in serverless)
+//   tag / tag_lead              — update lead_status in DB
+//   webhook                     — real HTTP GET/POST/PUT, JSON response stored in ctx.variables
+//   interruption                — Gemini AI intent extraction → stores intent/entities in ctx.variables
+//   knowledge                   — search tenant knowledge_docs, stores best snippet in ctx.variables
+//   memory                      — persist ctx.variables back to leads + conversations tables
+//   format                      — stringify knowledge_result or webhook_response into formatted_message
+//   extract                     — regex entity extraction (email/phone/name) into ctx.variables
+//   ai_reply                    — call Gemini and send its response as a WhatsApp message
+//   wait_for_reply              — pause execution, resume on next inbound message (variables persisted)
+//   end                         — stop execution
 // ═══════════════════════════════════════════════════════════
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
@@ -364,6 +372,174 @@ async function executeNode(
     return { nextId: getNextNode(node.id, null, edges) };
   }
 
+  // ── Webhook — real HTTP call, stores JSON response in variables ──
+  if (type === 'webhook') {
+    const method = ((node.data?.method as string) || 'GET').toUpperCase();
+    const rawUrl = (node.data?.url as string) || '';
+    const url = interpolate(rawUrl, ctx);
+    if (!url || !url.startsWith('http')) {
+      console.error(`Flow engine: webhook node ${node.id} has invalid url: "${url}"`);
+      return { nextId: getNextNode(node.id, 'error', edges) };
+    }
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 10_000);
+      const init: RequestInit = {
+        method,
+        headers: { 'Content-Type': 'application/json', 'X-Aries-Tenant': ctx.tenantId },
+        signal: controller.signal,
+      };
+      if (method !== 'GET') {
+        init.body = JSON.stringify({
+          phone: ctx.phone,
+          message: ctx.messageText,
+          lead_id: ctx.leadId,
+          ...ctx.variables,
+        });
+      }
+      const res = await fetch(url, init);
+      clearTimeout(tid);
+      if (res.ok) {
+        const ct = res.headers.get('content-type') || '';
+        const data: unknown = ct.includes('application/json') ? await res.json() : await res.text();
+        ctx.variables[`${node.id}_response`] = data;
+        ctx.variables.webhook_response = data; // convenient shorthand for last webhook
+        // Flatten top-level object keys directly into variables for easy condition checks
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+          Object.assign(ctx.variables, data as Record<string, unknown>);
+        }
+        return { nextId: getNextNode(node.id, 'success', edges) };
+      }
+      ctx.variables[`${node.id}_error`] = res.status;
+      return { nextId: getNextNode(node.id, 'error', edges) };
+    } catch (e) {
+      console.error(`Flow engine: webhook ${node.id} failed:`, (e as Error).message);
+      ctx.variables[`${node.id}_error`] = (e as Error).message;
+      return { nextId: getNextNode(node.id, 'error', edges) };
+    }
+  }
+
+  // ── Interruption — AI intent extraction into variables ───
+  if (type === 'interruption') {
+    try {
+      const { data: tenantRow } = await supabaseAdmin
+        .from('tenants').select('*').eq('id', ctx.tenantId).single();
+      if (tenantRow) {
+        const tenantConfig: TenantAIConfig = {
+          ...getTenantConfig(tenantRow as unknown as Tenant),
+          isFirstMessage: false,
+        };
+        const aiResp = await processMessageWithAI(
+          ctx.messageText, [], {}, tenantConfig, ctx.tenantId
+        );
+        if (aiResp) {
+          ctx.variables.ai_intent     = aiResp.intent;
+          ctx.variables.ai_sentiment  = aiResp.sentiment;
+          ctx.variables.ai_confidence = aiResp.confidence;
+          if (aiResp.extractedData) {
+            Object.entries(aiResp.extractedData).forEach(([k, v]) => {
+              if (v && v !== 'null') ctx.variables[k] = v;
+            });
+          }
+          return { nextId: getNextNode(node.id, 'success', edges) };
+        }
+      }
+    } catch (e) {
+      console.error('Flow engine: interruption node failed:', (e as Error).message);
+    }
+    return { nextId: getNextNode(node.id, 'fallback', edges) };
+  }
+
+  // ── Knowledge — search tenant's knowledge docs ──────────
+  if (type === 'knowledge') {
+    try {
+      const { data: docs } = await supabaseAdmin
+        .from('knowledge_docs')
+        .select('filename, content_text')
+        .eq('tenant_id', ctx.tenantId)
+        .neq('content_text', '');
+      if (docs && docs.length > 0) {
+        const lowerMsg = ctx.messageText.toLowerCase();
+        const words = lowerMsg.split(/\s+/).filter(w => w.length > 3);
+        const scored = docs
+          .map(doc => ({
+            ...doc,
+            score: words.reduce((s, w) => s + (doc.content_text.toLowerCase().includes(w) ? 1 : 0), 0),
+          }))
+          .sort((a, b) => b.score - a.score);
+        const best = scored[0];
+        if (best.score > 0) {
+          const contentLower = best.content_text.toLowerCase();
+          const kw = words.find(w => contentLower.includes(w));
+          const idx = kw ? contentLower.indexOf(kw) : 0;
+          const snippet = best.content_text.slice(Math.max(0, idx - 100), idx + 400).trim();
+          ctx.variables.knowledge_result = snippet;
+          ctx.variables.knowledge_source = best.filename;
+        } else {
+          ctx.variables.knowledge_result = '';
+        }
+      }
+    } catch (e) {
+      console.error('Flow engine: knowledge node failed:', (e as Error).message);
+    }
+    return { nextId: getNextNode(node.id, null, edges) };
+  }
+
+  // ── Memory — persist variables to lead + conversation ───
+  if (type === 'memory') {
+    if (ctx.leadId) {
+      const updates: Record<string, unknown> = {};
+      if (ctx.variables.name)  updates.name  = ctx.variables.name;
+      if (ctx.variables.email) updates.email = ctx.variables.email;
+      if (Object.keys(updates).length > 0) {
+        try {
+          await supabaseAdmin.from('leads').update(updates).eq('id', ctx.leadId);
+        } catch (e) {
+          console.error('Flow engine: memory node lead update failed:', e);
+        }
+      }
+    }
+    try {
+      await supabaseAdmin
+        .from('conversations')
+        .update({ context: ctx.variables })
+        .eq('id', ctx.conversationId);
+    } catch (e) {
+      console.error('Flow engine: memory node conversation update failed:', e);
+    }
+    return { nextId: getNextNode(node.id, null, edges) };
+  }
+
+  // ── Format — stringify variables into a WhatsApp message ─
+  if (type === 'format') {
+    if (ctx.variables.knowledge_result) {
+      ctx.variables.formatted_message = `${ctx.variables.knowledge_result}`;
+    } else if (ctx.variables.webhook_response) {
+      const data = ctx.variables.webhook_response;
+      if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
+        const lines = Object.entries(data as Record<string, unknown>)
+          .filter(([, v]) => v != null)
+          .map(([k, v]) => `• *${k.replace(/_/g, ' ')}*: ${v}`)
+          .slice(0, 10);
+        ctx.variables.formatted_message = lines.join('\n');
+      } else {
+        ctx.variables.formatted_message = String(data);
+      }
+    }
+    return { nextId: getNextNode(node.id, null, edges) };
+  }
+
+  // ── Extract — regex entity extraction from message ───────
+  if (type === 'extract') {
+    const emailMatch = ctx.messageText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+    const phoneMatch = ctx.messageText.match(/(\+?91[\-\s]?)?[6-9]\d{9}/);
+    const nameMatch  = ctx.messageText.match(/(?:my name is|i am|i'm|this is)\s+([A-Z][a-zA-Z\s]{1,30})/i);
+    if (emailMatch) ctx.variables.email          = emailMatch[0];
+    if (phoneMatch) ctx.variables.extracted_phone = phoneMatch[0];
+    if (nameMatch)  ctx.variables.name            = nameMatch[1].trim();
+    return { nextId: getNextNode(node.id, null, edges) };
+  }
+
   // ── AI Reply — call Gemini, send its response ───────────
   if (type === 'ai_reply') {
     try {
@@ -409,13 +585,12 @@ async function executeNode(
   if (type === 'wait_for_reply') {
     const nextNodeId = getNextNode(node.id, null, edges);
     if (nextNodeId) {
-      // Store the next step in conversation context so the next inbound message resumes here
       await supabaseAdmin
         .from('conversations')
-        .update({ context: { ...({} as Record<string, unknown>), pending_flow_node: nextNodeId } })
+        .update({ context: { ...ctx.variables, pending_flow_node: nextNodeId } })
         .eq('id', ctx.conversationId);
     }
-    return { stop: true }; // Stop execution until next message arrives
+    return { stop: true }; // Stop execution until next inbound message resumes here
   }
 
   // ── End ──────────────────────────────────────────────────

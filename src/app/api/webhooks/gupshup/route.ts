@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { isDuplicateMessage, getRedisClient } from '@/lib/redis/client';
+import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { parseGupshupWebhook, sendTextMessage } from '@/lib/gupshup/service';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantConfig } from '@/lib/tenant/manager';
@@ -404,7 +405,7 @@ async function handleIncomingMessage(
   const isFirstMessageForAI = storedMsgCount === 0 && history.length === 0;
 
   // Load active smart rules + knowledge docs in parallel (non-blocking)
-  const [{ data: smartRulesRows }, { data: knowledgeRows }] = await Promise.all([
+  const [{ data: smartRulesRows }, { data: knowledgeRows }, { data: agentRows }] = await Promise.all([
     supabaseAdmin
       .from('smart_rules')
       .select('name, trigger_source, ai_summary')
@@ -415,13 +416,31 @@ async function handleIncomingMessage(
       .select('filename, content_text')
       .eq('tenant_id', tenant.id)
       .neq('content_text', ''),
+    supabaseAdmin
+      .from('agent_configs')
+      .select('agent_name, routing_keywords, bot_name, bot_personality, system_prompt')
+      .eq('tenant_id', tenant.id)
+      .eq('is_active', true),
   ]);
 
+  // ── Multi-agent routing: pick agent whose keywords match the message ──
+  const lowerMsgText = msg.text?.toLowerCase() ?? '';
+  type AgentRow = { agent_name: string; routing_keywords: string[]; bot_name?: string; bot_personality?: string; system_prompt?: string };
+  const matchedAgent = (agentRows as AgentRow[] | null)?.find(agent =>
+    agent.routing_keywords?.some((kw: string) => lowerMsgText.includes(kw.toLowerCase()))
+  ) ?? null;
+
+  const baseConfig = getTenantConfig(tenant as unknown as Parameters<typeof getTenantConfig>[0]);
   const tenantConfig = {
-    ...getTenantConfig(tenant as unknown as Parameters<typeof getTenantConfig>[0]),
+    ...baseConfig,
     isFirstMessage: isFirstMessageForAI,
     smartRules: (smartRulesRows || []) as Array<{ name: string; trigger_source: string; ai_summary: string }>,
     knowledgeDocs: (knowledgeRows || []) as Array<{ filename: string; content_text: string }>,
+    // Agent overrides (only non-empty values replace base config)
+    ...(matchedAgent ? {
+      botName:        matchedAgent.bot_name        || baseConfig.botName,
+      botPersonality: matchedAgent.bot_personality || baseConfig.botPersonality,
+    } : {}),
   };
   const context = (conversation.context as Record<string, unknown>) || {};
 
@@ -440,6 +459,23 @@ async function handleIncomingMessage(
   }
 
   if (!aiResponse?.reply) return;
+
+  // ── Razorpay Payment Link injection ──
+  if (aiResponse.extractedData?.requestPayment === 'true') {
+    const amount = parseFloat(aiResponse.extractedData?.paymentAmount || '0');
+    if (amount > 0) {
+      const link = await createPaymentLink({
+        amount,
+        description: `Payment for ${(tenant as { business_name?: string }).business_name || 'booking'}`,
+        customerName:  aiResponse.extractedData?.name    || undefined,
+        customerPhone: cleanPhone,
+        customerEmail: aiResponse.extractedData?.email   || undefined,
+      }).catch(() => null);
+      if (link) {
+        aiResponse.reply = `${aiResponse.reply}\n\n💳 Pay here: ${link}`;
+      }
+    }
+  }
 
   // ── Send AI reply via Gupshup ──
   let gupshupMsgId: string | null = null;

@@ -19,6 +19,8 @@ import {
   Settings,
   Zap,
   Bot,
+  UserCog,
+  Library,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -85,7 +87,7 @@ const navigationItems: NavItem[] = [
     href: "/dashboard/automations",
     badge: <SmartRulesBadge />,
   },
-  { label: "Knowledge Base", icon: FileText, href: "/dashboard/knowledge" },
+  { label: "Knowledge Base", icon: Library, href: "/dashboard/knowledge" },
   { label: "Templates", icon: FileText, href: "/dashboard/templates" },
   { label: "Integrations", icon: Puzzle, href: "/dashboard/integrations" },
 ];
@@ -93,6 +95,7 @@ const navigationItems: NavItem[] = [
 const bottomItems: NavItem[] = [
   { label: "Team", icon: Users, href: "/dashboard/team" },
   { label: "Billing", icon: CreditCard, href: "/dashboard/billing" },
+  { label: "Business Profile", icon: UserCog, href: "/dashboard/settings/profile" },
   { label: "Settings", icon: Settings, href: "/dashboard/settings" },
 ];
 

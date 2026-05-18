@@ -47,6 +47,8 @@ export interface ExtractedData {
   eventType?: string;
   companyName?: string;
   specialRequests?: string;
+  requestPayment?: string;   // "true" when customer is ready to pay
+  paymentAmount?: string;    // numeric string in INR e.g. "5000"
 }
 
 export type Intent =
@@ -134,7 +136,9 @@ You must respond with ONLY a JSON object (no markdown, no backticks) in this exa
     "occasion": null,
     "eventType": null,
     "companyName": null,
-    "specialRequests": null
+    "specialRequests": null,
+    "requestPayment": null,
+    "paymentAmount": null
   },
   "nextStep": "what info to collect next: greeting, ask_intent, ask_guests, ask_date, ask_occasion, ask_name, ask_phone, ask_email, confirmation, completed, escalated",
   "confidence": 0.95
