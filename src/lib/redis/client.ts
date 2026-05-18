@@ -12,7 +12,17 @@
 // The worker service (separate repo/container) handles BullMQ + Redis.
 // This stub always returns null, triggering built-in fallback paths.
 
-export function getRedisClient(): null {
+export interface RedisClient {
+  ping(): Promise<string>;
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string, ...args: unknown[]): Promise<unknown>;
+  del(...keys: string[]): Promise<number>;
+  keys(pattern: string): Promise<string[]>;
+  incr(key: string): Promise<number>;
+  expire(key: string, seconds: number): Promise<number>;
+}
+
+export function getRedisClient(): RedisClient | null {
   return null;
 }
 

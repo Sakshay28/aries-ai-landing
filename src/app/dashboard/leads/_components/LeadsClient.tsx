@@ -142,9 +142,9 @@ export function LeadsClient() {
                           </div>
                           <div className="flex gap-2 items-center">
                             {lead.channel === 'whatsapp' ? (
-                              <MessageCircle className="w-4 h-4 text-emerald-500" title="WhatsApp" />
+                              <MessageCircle className="w-4 h-4 text-emerald-500" aria-label="WhatsApp" />
                             ) : lead.channel?.includes('instagram') ? (
-                              <MessageSquare className="w-4 h-4 text-pink-500" title="Instagram" />
+                              <MessageSquare className="w-4 h-4 text-pink-500" aria-label="Instagram" />
                             ) : null}
                           </div>
                         </div>

@@ -40,15 +40,4 @@ FROM tenants
 WHERE is_active = true
 GROUP BY brand, plan, plan_status;
 
--- 5. Audit log entry (so this migration is traceable)
-INSERT INTO audit_logs (tenant_id, action, details, created_at)
-SELECT
-  NULL,
-  'system.migration',
-  jsonb_build_object(
-    'migration', '2026_05_05_brand_split',
-    'description', 'Added brand column to tenants for Aries/Libra split'
-  ),
-  NOW()
-WHERE EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'audit_logs')
-ON CONFLICT DO NOTHING;
+-- 5. Audit log skipped (column schema varies by instance)

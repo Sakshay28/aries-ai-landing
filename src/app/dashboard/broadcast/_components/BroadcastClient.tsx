@@ -260,7 +260,29 @@ export function BroadcastClient() {
 
         <div className="flex-1 overflow-auto p-6 lg:p-8 z-10 custom-scrollbar">
           <div className="bg-card border border-border/60 rounded-[28px] p-8 max-w-[1400px] mx-auto min-h-[calc(100vh-140px)]">
-            
+
+            {/* Aggregate Analytics Banner */}
+            {campaigns.length > 0 && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                {[
+                  { label: 'Total Sent', value: campaigns.reduce((s, c) => s + (c.sent_count || 0), 0), icon: Send, color: 'text-indigo-500', bg: 'bg-indigo-500/8' },
+                  { label: 'Delivered', value: campaigns.reduce((s, c) => s + (c.delivered_count || 0), 0), icon: Activity, color: 'text-emerald-500', bg: 'bg-emerald-500/8' },
+                  { label: 'Read', value: campaigns.reduce((s, c) => s + (c.read_count || 0), 0), icon: BarChart3, color: 'text-blue-500', bg: 'bg-blue-500/8' },
+                  { label: 'Replied', value: campaigns.reduce((s, c) => s + 0, 0), icon: Zap, color: 'text-amber-500', bg: 'bg-amber-500/8' },
+                ].map(({ label, value, icon: Icon, color, bg }) => (
+                  <div key={label} className={`flex items-center gap-4 p-5 rounded-2xl border border-border/60 ${bg}`}>
+                    <div className={`p-2.5 rounded-xl bg-background/60 ${color}`}>
+                      <Icon className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{label}</p>
+                      <p className="text-[24px] font-semibold text-foreground leading-none mt-0.5">{value.toLocaleString()}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="flex items-center justify-between mb-8">
               <div className="text-[13px] font-medium text-muted-foreground">
                 Showing <span className="text-foreground font-semibold">{filteredCampaigns.length}</span> campaigns
@@ -307,21 +329,21 @@ export function BroadcastClient() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-6 md:gap-8 xl:border-l border-border/50 shrink-0 xl:pl-8">
-                      <div className="flex flex-col gap-1 w-24">
-                        <span className="text-[11px] uppercase tracking-widest font-bold text-muted-foreground flex items-center gap-1.5">
-                          <Users className="w-3.5 h-3.5 opacity-70" /> Audience
-                        </span>
-                        <span className="text-[24px] font-semibold text-foreground/90">{campaign.audience_count}</span>
-                      </div>
-                      <div className="flex flex-col gap-1 w-24">
-                        <span className="text-[11px] uppercase tracking-widest font-bold text-muted-foreground flex items-center gap-1.5">
-                          <Activity className="w-3.5 h-3.5 opacity-70" /> Sent
-                        </span>
-                        <span className="text-[24px] font-semibold text-foreground/90">
-                          {campaign.audience_count > 0 ? Math.round((campaign.sent_count / campaign.audience_count) * 100) : 0}%
-                        </span>
-                      </div>
+                    <div className="flex items-center gap-5 md:gap-6 xl:border-l border-border/50 shrink-0 xl:pl-8">
+                      {[
+                        { label: 'Audience', value: campaign.audience_count, icon: Users },
+                        { label: 'Sent', value: campaign.sent_count, icon: Send },
+                        { label: 'Delivered', value: campaign.delivered_count, icon: Activity },
+                        { label: 'Read', value: campaign.read_count, icon: BarChart3 },
+                        { label: 'Failed', value: campaign.failed_count, icon: X },
+                      ].map(({ label, value, icon: Icon }) => (
+                        <div key={label} className="flex flex-col gap-1 w-16 xl:w-20">
+                          <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground flex items-center gap-1">
+                            <Icon className="w-3 h-3 opacity-70" /> {label}
+                          </span>
+                          <span className="text-[20px] font-semibold text-foreground/90">{value ?? 0}</span>
+                        </div>
+                      ))}
                     </div>
 
                     <div className="absolute right-6 top-6 xl:top-1/2 xl:-translate-y-1/2 opacity-0 group-hover:opacity-100 transition-all flex items-center gap-1.5 bg-background/80 backdrop-blur-xl px-2 py-1.5 rounded-lg border border-border z-20">

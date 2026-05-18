@@ -1,9 +1,19 @@
 "use client";
 
-import { ShoppingCart, Calendar, Home, BookOpen, Users, UtensilsCrossed, Coins, Heart, Zap, Loader2, LayoutTemplate } from "lucide-react";
+import { ShoppingCart, Calendar, Home, BookOpen, Users, UtensilsCrossed, Coins, Heart, Zap, Loader2, LayoutTemplate, CheckCircle2, Edit3, Trash2, PauseCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import Link from "next/link";
 import { BUSINESS_TYPE_CONFIG } from "./config";
+
+interface SavedFlow {
+  id: string;
+  name: string;
+  trigger_type: string;
+  trigger_keywords: string[];
+  is_active: boolean;
+  updated_at: string;
+}
 
 const iconMap: Record<string, any> = {
   ecommerce: ShoppingCart,
@@ -20,6 +30,33 @@ const iconMap: Record<string, any> = {
 export default function FlowsDashboardPage() {
   const router = useRouter();
   const [loadingType, setLoadingType] = useState<string | null>(null);
+  const [savedFlows, setSavedFlows] = useState<SavedFlow[]>([]);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/dashboard/flows')
+      .then(r => r.json())
+      .then(j => { if (j.success) setSavedFlows(j.data); })
+      .catch(() => {});
+  }, []);
+
+  const handleToggleActive = async (flow: SavedFlow) => {
+    const updated = { is_active: !flow.is_active };
+    await fetch(`/api/dashboard/flows/${flow.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated),
+    });
+    setSavedFlows(prev => prev.map(f => f.id === flow.id ? { ...f, is_active: !f.is_active } : f));
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this flow?')) return;
+    setDeletingId(id);
+    await fetch(`/api/dashboard/flows/${id}`, { method: 'DELETE' });
+    setSavedFlows(prev => prev.filter(f => f.id !== id));
+    setDeletingId(null);
+  };
 
   const handleSelect = (typeId: string) => {
     setLoadingType(typeId);
@@ -52,7 +89,59 @@ export default function FlowsDashboardPage() {
 
       {/* Main Content */}
       <div className="flex-1 px-8 md:px-12 py-12 max-w-6xl w-full animate-in fade-in duration-500 ease-out">
-        
+
+        {/* ── My Flows section ─────────────────────────────── */}
+        {savedFlows.length > 0 && (
+          <div className="mb-14">
+            <h2 className="text-[13px] font-bold tracking-widest text-white/40 uppercase mb-5">My Flows</h2>
+            <div className="flex flex-col gap-2">
+              {savedFlows.map(flow => (
+                <div key={flow.id} className="flex items-center justify-between bg-[#111111] border border-white/[0.05] rounded-xl px-5 py-4 group hover:border-white/[0.09] transition-colors">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${flow.is_active ? 'bg-[#12B76A]' : 'bg-white/20'}`} />
+                    <div>
+                      <p className="text-[14px] font-medium text-white/90">{flow.name}</p>
+                      <p className="text-[11px] text-white/35 mt-0.5 capitalize">
+                        {flow.trigger_type.replace('_', ' ')}
+                        {flow.trigger_keywords?.length > 0 && ` · ${flow.trigger_keywords.slice(0, 3).join(', ')}`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase ${
+                      flow.is_active
+                        ? 'bg-[#12B76A]/10 text-[#12B76A] border border-[#12B76A]/20'
+                        : 'bg-white/5 text-white/30 border border-white/10'
+                    }`}>
+                      {flow.is_active ? 'Live' : 'Draft'}
+                    </span>
+                    <button
+                      onClick={() => handleToggleActive(flow)}
+                      title={flow.is_active ? 'Pause flow' : 'Activate flow'}
+                      className="p-1.5 rounded hover:bg-white/5 text-white/30 hover:text-white/70 transition-colors"
+                    >
+                      {flow.is_active ? <PauseCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+                    </button>
+                    <Link
+                      href={`/dashboard/flows/editor/${flow.id}`}
+                      className="p-1.5 rounded hover:bg-white/5 text-white/30 hover:text-white/70 transition-colors"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </Link>
+                    <button
+                      onClick={() => handleDelete(flow.id)}
+                      disabled={deletingId === flow.id}
+                      className="p-1.5 rounded hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-colors disabled:opacity-50"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="mb-14">
           <h1 className="font-sans text-[28px] md:text-[34px] font-semibold text-white/90 mb-3 tracking-tight">
             Create Flow

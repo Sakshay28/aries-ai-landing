@@ -79,7 +79,7 @@ export function RecentChats() {
           return {
             ...c,
             last_message_text: msgs?.[0]?.content ?? null,
-          } as Conversation;
+          } as unknown as Conversation;
         })
       );
 

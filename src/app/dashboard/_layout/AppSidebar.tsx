@@ -22,6 +22,19 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useSidebar } from "./SidebarContext";
+import { useEffect, useState } from "react";
+
+function SmartRulesBadge() {
+  const [count, setCount] = useState<number | null>(null);
+  useEffect(() => {
+    fetch('/api/dashboard/automations')
+      .then(r => r.json())
+      .then(d => setCount((d.rules as unknown[])?.filter((r: unknown) => (r as { status: string }).status === 'active').length ?? 0))
+      .catch(() => {});
+  }, []);
+  if (count === null || count === 0) return null;
+  return <span className="text-[10px] tracking-wide text-sidebar-foreground/50">{count}</span>;
+}
 
 type NavItem = {
   label: string;
@@ -59,7 +72,7 @@ const navigationItems: NavItem[] = [
     label: "Smart Rules", 
     icon: Workflow, 
     href: "/dashboard/automations",
-    badge: <span className="text-[10px] tracking-wide text-sidebar-foreground/50">4</span>
+    badge: <SmartRulesBadge />,
   },
   { label: "Templates", icon: FileText, href: "/dashboard/templates" },
   { label: "Integrations", icon: Puzzle, href: "/dashboard/integrations" },

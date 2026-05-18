@@ -21,7 +21,7 @@ export default function DashboardLayoutClient({
         <Backdrop />
         <ThemeToggle />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <AppHeader userEmail={userEmail} />
+          <AppHeader />
           <main className="flex-1 overflow-auto">
             <div className="w-full p-4 md:p-6 lg:p-8">{children}</div>
           </main>

@@ -190,7 +190,7 @@ export default function FlowCanvas() {
         multiSelectionKeyCode={["Meta", "Shift"]}
         selectionOnDrag={false}
         panOnScroll={true}
-        panOnScrollMode="free"
+        panOnScrollMode={"free" as import('@xyflow/react').PanOnScrollMode}
         zoomOnScroll={false}
         panOnDrag={true}
         fitView

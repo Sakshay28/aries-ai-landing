@@ -37,6 +37,8 @@ interface SettingsData {
   gupshup_api_key: string;
   gupshup_phone_number: string;
   gupshup_app_name: string;
+  // Outbound webhook
+  outbound_webhook_url: string;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -49,6 +51,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   off_hours_message: '', off_hours_capture_lead: true,
   // Gupshup
   gupshup_api_key: '', gupshup_phone_number: '', gupshup_app_name: '',
+  outbound_webhook_url: '',
 };
 
 const TABS = [
@@ -61,7 +64,7 @@ const TABS = [
 ];
 
 function SectionCard({ title, icon: Icon, children }: {
-  title: string; icon: React.ComponentType<{ className?: string }>; children: React.ReactNode;
+  title: string; icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>; children: React.ReactNode;
 }) {
   return (
     <div
@@ -448,6 +451,22 @@ export default function SettingsPage() {
                 Sends a test message to your own phone to verify the connection.
               </p>
             </div>
+          </SectionCard>
+
+          {/* Outbound Webhook */}
+          <SectionCard title="Outbound Webhook (Zapier / Make / Custom)" icon={Zap}>
+            <Field label="Webhook URL">
+              <Input
+                value={settings.outbound_webhook_url || ''}
+                onChange={v => update('outbound_webhook_url', v)}
+                placeholder="https://hooks.zapier.com/hooks/catch/..."
+              />
+            </Field>
+            <p className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
+              Every inbound WhatsApp message will be POSTed to this URL as JSON —
+              including phone, message text, conversation ID, and timestamp.
+              Compatible with Zapier, Make, n8n, or any custom HTTP endpoint.
+            </p>
           </SectionCard>
 
           {/* Setup Guide for new users */}

@@ -13,6 +13,8 @@ import { parseGupshupWebhook, sendTextMessage } from '@/lib/gupshup/service';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantConfig } from '@/lib/tenant/manager';
 import { decryptToken } from '@/lib/utils/crypto';
+import { runFlowsForMessage } from '@/lib/flows/engine';
+import { fireIntegrations } from '@/lib/integrations/runner';
 
 // ── Return 200 immediately — Gupshup requires < 5s response ──
 export async function POST(req: NextRequest) {
@@ -205,6 +207,20 @@ async function handleIncomingMessage(
       .select()
       .single();
     lead = newLead;
+    // Fire integrations for new lead event (non-blocking)
+    if (newLead) {
+      fireIntegrations({
+        type: 'new_lead',
+        tenantId: tenant.id as string,
+        lead: {
+          name: (newLead.name as string) || '',
+          phone: cleanPhone,
+          email: (newLead.email as string) || '',
+          lead_status: 'new',
+          source: 'whatsapp',
+        },
+      }).catch(e => console.error('Integration runner (new_lead):', (e as Error).message));
+    }
   }
 
   // ── Resolve or create Conversation ──
@@ -287,6 +303,23 @@ async function handleIncomingMessage(
   }
 
 
+  // ── Fire outbound webhook (non-blocking) ──
+  const outboundUrl = (tenant as Record<string, unknown>).outbound_webhook_url as string | undefined;
+  if (outboundUrl) {
+    fetch(outboundUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: 'inbound_message',
+        tenant_id: tenant.id,
+        phone: cleanPhone,
+        message: msg.text,
+        conversation_id: conversation.id,
+        timestamp: new Date().toISOString(),
+      }),
+    }).catch(e => console.error('Outbound webhook error:', (e as Error).message));
+  }
+
   // ── Skip AI if bot is paused or conversation is escalated ──
   if (conversation.bot_paused || conversation.escalated) {
     console.log(`🔇 Gupshup: bot paused for conversation ${conversation.id}, skipping AI`);
@@ -299,6 +332,29 @@ async function handleIncomingMessage(
   if (aiUsed >= aiLimit) {
     console.log(`⚠️ Tenant ${tenant.id} hit AI limit (${aiUsed}/${aiLimit}). Skipping AI reply.`);
     return;
+  }
+
+  // isFirstMessage: conversation.message_count is 0 when just created (before RPC increment)
+  // or 1 right after the first increment — both mean "no prior AI exchange existed"
+  const isFirstMessage = ((conversation.message_count as number) ?? 0) <= 1;
+
+  // ── Flow engine — run active flows before Gemini ──
+  // If a flow handles the message (sends a reply), skip the AI call entirely.
+  try {
+    const flowHandled = await runFlowsForMessage(
+      tenant.id as string,
+      msg.text,
+      cleanPhone,
+      conversation.id as string,
+      (lead?.id ?? null) as string | null,
+      isFirstMessage
+    );
+    if (flowHandled) {
+      console.log(`✅ Flow engine handled message for conversation ${conversation.id}, skipping AI`);
+      return;
+    }
+  } catch (flowErr) {
+    console.error('❌ Flow engine error (falling back to AI):', (flowErr as Error).message);
   }
 
   // ── Get recent conversation history for context ──
@@ -318,7 +374,21 @@ async function handleIncomingMessage(
     }));
 
   // ── Call AI engine ──
-  const tenantConfig = getTenantConfig(tenant as Parameters<typeof getTenantConfig>[0]);
+  // Refine isFirstMessage using actual history — more accurate than message_count
+  const isFirstMessageForAI = history.length === 0;
+
+  // Load active smart rules (non-blocking — defaults to [] on error)
+  const { data: smartRulesRows } = await supabaseAdmin
+    .from('smart_rules')
+    .select('name, trigger_source, ai_summary')
+    .eq('tenant_id', tenant.id)
+    .eq('status', 'active');
+
+  const tenantConfig = {
+    ...getTenantConfig(tenant as unknown as Parameters<typeof getTenantConfig>[0]),
+    isFirstMessage: isFirstMessageForAI,
+    smartRules: (smartRulesRows || []) as Array<{ name: string; trigger_source: string; ai_summary: string }>,
+  };
   const context = (conversation.context as Record<string, unknown>) || {};
 
   let aiResponse: Awaited<ReturnType<typeof processMessageWithAI>>;
@@ -328,7 +398,7 @@ async function handleIncomingMessage(
       history,
       context,
       tenantConfig,
-      tenant.id
+      tenant.id as string
     );
   } catch (err) {
     console.error('❌ Gupshup: AI engine error:', err);

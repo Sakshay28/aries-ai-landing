@@ -8,39 +8,61 @@ import FlowSimulator from "../../_components/FlowSimulator";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useFlowStore } from "../../store";
 import { Toaster, toast } from "sonner";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { BUSINESS_TYPE_CONFIG } from "../../config";
 import { getPrebuiltFlow } from "../../prebuiltFlows";
 
 export default function FlowEditorPage() {
-  const { selectedNodeId, isSimulating, setIsSimulating, isPublishing, isSaving, publishFlow, loadTemplate } = useFlowStore();
+  const { selectedNodeId, isSimulating, setIsSimulating, isPublishing, isSaving, publishFlow, loadTemplate, loadFlow, saveFlow, flowId: storeFlowId } = useFlowStore();
   const params = useParams();
   const searchParams = useSearchParams();
-  const flowId = params.id as string;
+  const router = useRouter();
+  const routeId = params.id as string;
   const businessType = searchParams?.get('type') || 'blank';
+  const [flowName, setFlowName] = useState('Untitled Flow');
   
   const config = BUSINESS_TYPE_CONFIG[businessType] || BUSINESS_TYPE_CONFIG['blank'];
 
   const handlePublish = async () => {
-    await publishFlow();
-    toast.success("Flow published successfully", {
-      description: "Changes are now live across all channels.",
-    });
+    try {
+      await publishFlow();
+      const id = useFlowStore.getState().flowId;
+      if (id && routeId === 'new') {
+        router.replace(`/dashboard/flows/editor/${id}?type=${businessType}`);
+      }
+      toast.success('Flow published — now live', {
+        description: 'Incoming WhatsApp messages will trigger this flow.',
+      });
+    } catch {
+      toast.error('Failed to publish flow');
+    }
+  };
+
+  const handleSave = async () => {
+    const id = await saveFlow(flowName);
+    if (id && routeId === 'new') {
+      router.replace(`/dashboard/flows/editor/${id}?type=${businessType}`);
+    }
+    toast.success('Flow saved');
   };
 
   useEffect(() => {
-    // Load prebuilt flow on mount based on template/business type
-    // In a real app, you would fetch by flowId, but for now we generate based on the template
-    const isBlank = flowId === 'new' && businessType === 'blank';
-    if (!isBlank) {
-      const { nodes, edges } = getPrebuiltFlow(flowId, businessType);
-      loadTemplate(nodes, edges);
+    if (routeId !== 'new') {
+      // Load existing flow from DB
+      loadFlow(routeId);
     } else {
-      loadTemplate([], []);
+      // Fresh editor — load prebuilt template if applicable
+      const isBlank = businessType === 'blank';
+      if (!isBlank) {
+        const { nodes, edges } = getPrebuiltFlow(routeId, businessType);
+        loadTemplate(nodes, edges);
+      } else {
+        loadTemplate([], []);
+      }
     }
-  }, [flowId, businessType, loadTemplate]);
+  }, [routeId, businessType, loadTemplate, loadFlow]);
 
   return (
     <ReactFlowProvider>
@@ -65,7 +87,12 @@ export default function FlowEditorPage() {
               {config.name}
             </Link>
             <span className="text-gray-500">/</span>
-            <span className="text-white font-medium">{flowId === 'new' ? 'Draft' : flowId}</span>
+            <input
+              value={flowName}
+              onChange={e => setFlowName(e.target.value)}
+              className="bg-transparent text-white font-medium text-[13px] focus:outline-none border-b border-transparent focus:border-white/20 transition-colors px-1"
+              placeholder="Untitled Flow"
+            />
           </div>
 
           <div className="flex items-center gap-4">
@@ -92,6 +119,13 @@ export default function FlowEditorPage() {
               {isSimulating ? <><X className="w-4 h-4" /> Exit Simulation</> : <><Play className="w-4 h-4" /> Simulate</>}
             </button>
 
+            <button
+              onClick={handleSave}
+              disabled={isSaving}
+              className="h-8 px-3 rounded-md border border-white/10 hover:bg-white/5 text-[13px] font-medium text-white/80 transition-colors disabled:opacity-50"
+            >
+              {isSaving ? 'Saving...' : 'Save'}
+            </button>
             <button 
               onClick={handlePublish}
               disabled={isPublishing}

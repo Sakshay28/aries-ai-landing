@@ -1,90 +1,361 @@
 "use client";
 
-import React from 'react';
-import { motion } from 'framer-motion';
-import { Plug, ShoppingBag, Database, Webhook, CheckCircle2, ArrowRight, CreditCard, Truck, FileSpreadsheet, Briefcase } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { CheckCircle2, ArrowRight, CreditCard, Truck, FileSpreadsheet, Briefcase, Webhook, X, Loader2, AlertCircle, ExternalLink, Unplug, CalendarCheck } from 'lucide-react';
+import { toast } from 'sonner';
 
-const INTEGRATIONS = [
+// ── Integration definitions ──────────────────────────────────
+interface FieldDef {
+  key: string;
+  label: string;
+  type: 'text' | 'password' | 'url' | 'select';
+  placeholder: string;
+  required: boolean;
+  hint?: string;
+  options?: { value: string; label: string }[];
+}
+
+interface IntegrationDef {
+  id: string;
+  name: string;
+  description: string;
+  icon: React.ElementType;
+  color: string;
+  bgColor: string;
+  docsUrl?: string;
+  fields: FieldDef[];
+  eventBadges: string[];
+}
+
+const INTEGRATIONS: IntegrationDef[] = [
   {
     id: 'razorpay',
     name: 'Razorpay',
-    description: 'Auto-generate payment links and track payment status via WhatsApp.',
+    description: 'Auto-generate payment links and send them to customers via WhatsApp.',
     icon: CreditCard,
-    status: 'available',
     color: 'text-[#3395FF]',
-    bgColor: 'bg-[#3395FF]/10'
+    bgColor: 'bg-[#3395FF]/10',
+    docsUrl: 'https://razorpay.com/docs/payments/payment-links/api/',
+    eventBadges: ['Payment requests'],
+    fields: [
+      { key: 'key_id', label: 'Key ID', type: 'text', placeholder: 'rzp_live_...', required: true, hint: 'Dashboard → Settings → API Keys' },
+      { key: 'key_secret', label: 'Key Secret', type: 'password', placeholder: '••••••••••••••••', required: true, hint: 'Copy immediately — shown only once' },
+    ],
   },
   {
     id: 'shiprocket',
     name: 'Shiprocket',
-    description: 'Send automated shipping updates and tracking links to customers.',
+    description: 'Send automated shipping updates and order tracking links to customers.',
     icon: Truck,
-    status: 'available',
     color: 'text-[#2D9CDB]',
-    bgColor: 'bg-[#2D9CDB]/10'
+    bgColor: 'bg-[#2D9CDB]/10',
+    docsUrl: 'https://apidocs.shiprocket.in/',
+    eventBadges: ['Booking confirmed', 'Order updates'],
+    fields: [
+      { key: 'email', label: 'Email', type: 'text', placeholder: 'you@company.com', required: true },
+      { key: 'password', label: 'Password', type: 'password', placeholder: '••••••••', required: true, hint: 'Your Shiprocket login password' },
+    ],
   },
   {
     id: 'zohocrm',
     name: 'Zoho CRM',
-    description: 'Two-way sync for leads, contacts, and WhatsApp conversations.',
+    description: 'Auto-create leads in Zoho CRM whenever a new contact messages you on WhatsApp.',
     icon: Briefcase,
-    status: 'available',
     color: 'text-[#F0483E]',
-    bgColor: 'bg-[#F0483E]/10'
+    bgColor: 'bg-[#F0483E]/10',
+    docsUrl: 'https://www.zoho.com/crm/developer/docs/api/v2/',
+    eventBadges: ['New lead'],
+    fields: [
+      { key: 'access_token', label: 'OAuth Access Token', type: 'password', placeholder: '1000.xxxxxx...', required: true, hint: 'Generate via Zoho API Console → Self Client → Scope: ZohoCRM.modules.leads.CREATE' },
+      { key: 'domain', label: 'Zoho Region', type: 'select', placeholder: '', required: true, options: [{ value: 'com', label: 'Global (.com)' }, { value: 'in', label: 'India (.in)' }, { value: 'eu', label: 'Europe (.eu)' }, { value: 'com.au', label: 'Australia (.com.au)' }] },
+    ],
   },
   {
     id: 'googlesheets',
     name: 'Google Sheets',
-    description: 'Instantly log new leads, bookings, and customer details into a spreadsheet.',
+    description: 'Log every new lead and booking into a Google Sheet automatically.',
     icon: FileSpreadsheet,
-    status: 'available',
     color: 'text-[#0F9D58]',
-    bgColor: 'bg-[#0F9D58]/10'
+    bgColor: 'bg-[#0F9D58]/10',
+    docsUrl: 'https://zapier.com/apps/google-sheets/integrations',
+    eventBadges: ['New lead'],
+    fields: [
+      { key: 'webhook_url', label: 'Webhook URL', type: 'url', placeholder: 'https://hooks.zapier.com/hooks/catch/...', required: true, hint: 'Create a Zapier/Make scenario: Webhook → Google Sheets "Add Row". Paste the trigger URL here.' },
+    ],
+  },
+  {
+    id: 'googlecalendar',
+    name: 'Google Calendar',
+    description: 'AI checks availability and books appointments directly into your Google Calendar during WhatsApp conversations.',
+    icon: CalendarCheck,
+    color: 'text-[#4285F4]',
+    bgColor: 'bg-[#4285F4]/10',
+    docsUrl: 'https://developers.google.com/calendar/api/guides/overview',
+    eventBadges: ['Booking confirmed', 'Auto-sync'],
+    fields: [
+      { key: 'calendar_id', label: 'Calendar ID', type: 'text', placeholder: 'you@gmail.com', required: true, hint: 'Google Calendar → Settings → Calendar ID (usually your Gmail address)' },
+      { key: 'webhook_url', label: 'Zapier/Make Webhook', type: 'url', placeholder: 'https://hooks.zapier.com/hooks/catch/...', required: true, hint: 'Create a Zapier scenario: Webhook → Google Calendar "Create Detailed Event". Paste the trigger URL here.' },
+      { key: 'timezone', label: 'Timezone', type: 'select', placeholder: '', required: true, options: [{ value: 'Asia/Kolkata', label: 'India (IST)' }, { value: 'Asia/Dubai', label: 'UAE (GST)' }, { value: 'UTC', label: 'UTC' }] },
+    ],
   },
   {
     id: 'webhooks',
     name: 'Custom Webhooks',
-    description: 'Send event payloads to Zapier, Make, or your custom endpoints.',
+    description: 'Forward every event to Zapier, Make, or your own backend endpoint.',
     icon: Webhook,
-    status: 'available',
     color: 'text-indigo-500',
-    bgColor: 'bg-indigo-500/10'
-  }
+    bgColor: 'bg-indigo-500/10',
+    docsUrl: 'https://zapier.com/apps/webhook/integrations',
+    eventBadges: ['All events'],
+    fields: [
+      { key: 'webhook_url', label: 'Endpoint URL', type: 'url', placeholder: 'https://hooks.zapier.com/hooks/catch/...', required: true },
+      { key: 'events', label: 'Fire on events', type: 'select', placeholder: '', required: false, options: [{ value: 'new_lead,booking_confirmed,payment_requested', label: 'All events' }, { value: 'new_lead', label: 'New lead only' }, { value: 'booking_confirmed', label: 'Bookings only' }] },
+    ],
+  },
 ];
 
+// ── Types ────────────────────────────────────────────────────
+interface ConnectedIntegration {
+  integration_id: string;
+  is_active: boolean;
+  connected_at: string;
+  config: Record<string, string>;
+}
+
+// ── Modal ────────────────────────────────────────────────────
+function IntegrationModal({
+  integration,
+  existing,
+  onClose,
+  onSaved,
+}: {
+  integration: IntegrationDef;
+  existing: ConnectedIntegration | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const Icon = integration.icon;
+  const [form, setForm] = useState<Record<string, string>>(() => {
+    const defaults: Record<string, string> = {};
+    integration.fields.forEach(f => { defaults[f.key] = existing?.config[f.key] || ''; });
+    return defaults;
+  });
+  const [saving, setSaving] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  const handleSave = async () => {
+    const missing = integration.fields.filter(f => f.required && !form[f.key]?.trim());
+    if (missing.length > 0) {
+      toast.error(`Please fill in: ${missing.map(f => f.label).join(', ')}`);
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/dashboard/integrations', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ integration_id: integration.id, config: form }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      toast.success(`${integration.name} connected successfully`);
+      onSaved();
+    } catch (e) {
+      toast.error((e as Error).message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    setDisconnecting(true);
+    try {
+      await fetch(`/api/dashboard/integrations?id=${integration.id}`, { method: 'DELETE' });
+      toast.success(`${integration.name} disconnected`);
+      onSaved();
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.97, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.97, y: 8 }}
+        className="relative z-10 w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-border">
+          <div className="flex items-center gap-3">
+            <div className={`p-2.5 rounded-xl ${integration.bgColor} ${integration.color}`}>
+              <Icon className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold text-foreground">{integration.name}</h2>
+              {existing && (
+                <p className="text-xs text-emerald-500 flex items-center gap-1 mt-0.5">
+                  <CheckCircle2 className="w-3 h-3" /> Connected
+                </p>
+              )}
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5 space-y-4">
+          <p className="text-sm text-muted-foreground">{integration.description}</p>
+
+          {integration.fields.map(field => (
+            <div key={field.key} className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{field.label}</label>
+              {field.type === 'select' ? (
+                <select
+                  value={form[field.key] || field.options?.[0]?.value || ''}
+                  onChange={e => setForm(f => ({ ...f, [field.key]: e.target.value }))}
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-indigo-500/50 transition-colors"
+                >
+                  {field.options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              ) : (
+                <input
+                  type={field.type}
+                  value={form[field.key] || ''}
+                  onChange={e => setForm(f => ({ ...f, [field.key]: e.target.value }))}
+                  placeholder={existing?.config[field.key] === '••••••••' ? '••••••••  (saved)' : field.placeholder}
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                />
+              )}
+              {field.hint && (
+                <p className="text-[11px] text-muted-foreground/70 flex items-start gap-1">
+                  <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" /> {field.hint}
+                </p>
+              )}
+            </div>
+          ))}
+
+          {integration.docsUrl && (
+            <a href={integration.docsUrl} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs text-indigo-500 hover:text-indigo-400 transition-colors">
+              <ExternalLink className="w-3 h-3" /> Setup guide
+            </a>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-6 pb-6 gap-3">
+          {existing ? (
+            <button
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+              className="flex items-center gap-1.5 text-sm text-red-500 hover:text-red-400 transition-colors disabled:opacity-50"
+            >
+              {disconnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Unplug className="w-3.5 h-3.5" />}
+              Disconnect
+            </button>
+          ) : <div />}
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground">
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-5 py-2 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition-colors disabled:opacity-60 flex items-center gap-2"
+            >
+              {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              {existing ? 'Update' : 'Connect'}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+// ── Main page ────────────────────────────────────────────────
 export function IntegrationsClient() {
+  const [connected, setConnected] = useState<ConnectedIntegration[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeModal, setActiveModal] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/dashboard/integrations');
+      const data = await res.json();
+      setConnected(data.integrations || []);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const getConnected = (id: string) => connected.find(c => c.integration_id === id) ?? null;
+
+  const handleSaved = () => {
+    setActiveModal(null);
+    load();
+  };
+
+  const activeIntegration = INTEGRATIONS.find(i => i.id === activeModal);
+
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-auto p-6 lg:p-8 custom-scrollbar">
       <div className="max-w-[1000px] mx-auto w-full space-y-8">
-        
+
         <header className="space-y-2">
           <h1 className="text-2xl font-semibold tracking-tight">Integrations</h1>
           <p className="text-muted-foreground text-sm max-w-2xl">
             Connect Aries AI to your existing tools to create seamless automated workflows.
           </p>
+          {!loading && connected.length > 0 && (
+            <p className="text-xs text-emerald-500 font-medium">
+              {connected.length} integration{connected.length > 1 ? 's' : ''} active
+            </p>
+          )}
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {INTEGRATIONS.map((integration) => {
+          {INTEGRATIONS.map((integration, i) => {
             const Icon = integration.icon;
+            const conn = getConnected(integration.id);
             return (
-              <motion.div 
+              <motion.div
                 key={integration.id}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-6 rounded-2xl bg-card border border-border shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex flex-col h-full hover:border-border/80 transition-colors"
+                transition={{ delay: i * 0.05 }}
+                className={`p-6 rounded-2xl bg-card border transition-all ${conn ? 'border-emerald-500/30 shadow-[0_0_0_1px_rgba(16,185,129,0.1)]' : 'border-border hover:border-border/80'} shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex flex-col h-full`}
               >
                 <div className="flex items-start justify-between mb-4">
                   <div className={`p-3 rounded-xl ${integration.bgColor} ${integration.color}`}>
                     <Icon className="w-6 h-6" />
                   </div>
-                  
-                  {integration.status === 'connected' ? (
-                    <div className="px-2 py-1 text-[10px] font-bold tracking-wider rounded-md border bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20 flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> CONNECTED
+
+                  {conn ? (
+                    <div className="flex items-center gap-2">
+                      <div className="px-2 py-1 text-[10px] font-bold tracking-wider rounded-md border bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> CONNECTED
+                      </div>
+                      <button
+                        onClick={() => setActiveModal(integration.id)}
+                        className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        Edit
+                      </button>
                     </div>
                   ) : (
-                    <button className="text-sm font-medium text-indigo-500 hover:text-indigo-600 transition-colors flex items-center gap-1">
+                    <button
+                      onClick={() => setActiveModal(integration.id)}
+                      className="text-sm font-medium text-indigo-500 hover:text-indigo-600 transition-colors flex items-center gap-1"
+                    >
                       Connect <ArrowRight className="w-3 h-3" />
                     </button>
                   )}
@@ -92,9 +363,16 @@ export function IntegrationsClient() {
 
                 <div className="mt-auto">
                   <h3 className="text-lg font-semibold text-foreground mb-1">{integration.name}</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
+                  <p className="text-sm text-muted-foreground leading-relaxed mb-3">
                     {integration.description}
                   </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {integration.eventBadges.map(badge => (
+                      <span key={badge} className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border font-medium">
+                        {badge}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </motion.div>
             );
@@ -102,6 +380,17 @@ export function IntegrationsClient() {
         </div>
 
       </div>
+
+      <AnimatePresence>
+        {activeModal && activeIntegration && (
+          <IntegrationModal
+            integration={activeIntegration}
+            existing={getConnected(activeModal)}
+            onClose={() => setActiveModal(null)}
+            onSaved={handleSaved}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

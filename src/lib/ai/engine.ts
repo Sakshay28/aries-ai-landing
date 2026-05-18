@@ -73,6 +73,11 @@ export type Sentiment = 'positive' | 'neutral' | 'negative' | 'angry';
 // SYSTEM PROMPT — The AI's Personality
 // ═══════════════════════════════════════
 function buildSystemPrompt(tenantConfig: TenantAIConfig): string {
+  const isFirst = tenantConfig.isFirstMessage ?? true;
+  const conversationState = isFirst
+    ? `This is the FIRST message from this customer. Greet them warmly.${tenantConfig.welcomeMessage ? ` Use this as your opening: "${tenantConfig.welcomeMessage}"` : ''}`
+    : 'This is an ONGOING conversation. The customer has already been greeted. DO NOT say Hi/Hello/Welcome again — respond directly to what they just said.';
+
   return `You are ${tenantConfig.botName}, an AI assistant for ${tenantConfig.businessName} (${tenantConfig.businessType}).
 
 PERSONALITY: ${tenantConfig.botPersonality}. You speak naturally, use emojis sparingly, and keep responses SHORT (2-4 sentences max). You understand Hindi, Hinglish, and English.
@@ -89,15 +94,21 @@ ${tenantConfig.customFaqs && tenantConfig.customFaqs.length > 0 ? `
 CUSTOM FAQ (use these to answer common questions):
 ${tenantConfig.customFaqs.map((faq: { question: string; answer: string }) => `Q: ${faq.question}\nA: ${faq.answer}`).join('\n\n')}` : ''}
 
+CONVERSATION STATE: ${conversationState}
+
 YOUR JOB:
-1. Greet customers warmly
+1. ${isFirst ? 'Greet the customer warmly (first contact only)' : 'Continue helping — no re-introduction needed'}
 2. Understand what they want (table booking, event, enquiry, etc.)
 3. Collect required info naturally through conversation (guests, date, name, phone)
 4. Confirm the booking and alert staff
 5. Answer general questions about the business
 
+${tenantConfig.smartRules && tenantConfig.smartRules.length > 0 ? `SMART RULES (always follow these alongside your core job):
+${tenantConfig.smartRules.map((r, i) => `${i + 1}. [${r.name}] When: ${r.trigger_source} → ${r.ai_summary}`).join('\n')}` : ''}
+
 RULES:
 - NEVER make up information you don't have
+- NEVER start with a greeting if this is not the first message in the conversation
 - If someone is angry or asks for a human, say you're connecting them to the team
 - Keep responses under 300 characters for WhatsApp readability
 - Be helpful but don't be pushy
@@ -135,9 +146,12 @@ export interface TenantAIConfig {
   phone: string;
   address: string;
   website: string;
+  welcomeMessage?: string;
   welcomeOffer: string;
   usps: string[];
   staffName: string;
+  isFirstMessage?: boolean;
+  smartRules?: Array<{ name: string; trigger_source: string; ai_summary: string }>;
   // Fix #7: Custom FAQs
   customFaqs?: Array<{ question: string; answer: string }>;
 }

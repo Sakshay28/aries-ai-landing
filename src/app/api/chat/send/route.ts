@@ -49,7 +49,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Determine recipient phone number
-    const recipientPhone = (conv.leads as { phone: string | null } | null)?.phone || conv.sender_id;
+    const leadsData = conv.leads as unknown as { phone: string | null } | { phone: string | null }[] | null;
+    const leadPhone = Array.isArray(leadsData) ? leadsData[0]?.phone : leadsData?.phone;
+    const recipientPhone = leadPhone || conv.sender_id;
 
     // Insert the outbound message into the messages table first
     const { data: insertedMsg, error: insertErr } = await supabaseAdmin
@@ -78,7 +80,7 @@ export async function POST(req: NextRequest) {
     try {
       if (conv.channel === 'instagram_dm') {
         // Send via Instagram
-        await sendInstagramMessage(tenant, recipientPhone, message.trim());
+        await sendInstagramMessage(tenant as unknown as Parameters<typeof sendInstagramMessage>[0], recipientPhone, message.trim());
         externalMessageId = "ig_" + Date.now().toString(); // Mock ID for IG since it doesn't return one directly in all cases
       } else {
         // Default to Gupshup WhatsApp

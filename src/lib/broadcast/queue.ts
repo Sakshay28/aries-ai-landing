@@ -3,7 +3,8 @@
 // ═══════════════════════════════════════════════════════════
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantById } from '@/lib/tenant/manager';
-import { sendTemplateMessage } from '@/lib/whatsapp/service';
+import { sendTemplateMessage } from '@/lib/gupshup/service';
+import { decryptToken } from '@/lib/utils/crypto';
 import { sleep } from '@/lib/utils/safety';
 import * as Sentry from '@/lib/sentry-stub';
 
@@ -56,7 +57,19 @@ async function processBroadcastJob(data: BroadcastJobData) {
         ];
 
     try {
-      await sendTemplateMessage(tenant, lead.phone, templateName, language, personalizedComponents);
+      const apiKey = decryptToken(tenant.gupshup_api_key as string) as string;
+      const variables = (personalizedComponents[0]?.parameters || [])
+        .filter((p: { type: string; text?: string }) => p.type === 'text' && p.text)
+        .map((p: { type: string; text?: string }) => p.text as string);
+      await sendTemplateMessage(
+        apiKey,
+        tenant.gupshup_phone_number as string,
+        lead.phone,
+        templateName,
+        variables,
+        language,
+        tenant.gupshup_app_name as string
+      );
       sent++;
     } catch (error: unknown) {
       failed++;

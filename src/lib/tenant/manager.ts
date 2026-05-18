@@ -345,6 +345,7 @@ export function getTenantConfig(tenant: Tenant) {
     phone: tenant.business_phone || '',
     address: tenant.business_address || '',
     website: tenant.business_website || '',
+    welcomeMessage: tenant.welcome_message || '',
     welcomeOffer: tenant.welcome_offer || '',
     usps: tenant.usps || [],
     staffName: tenant.staff_name || 'our team',
