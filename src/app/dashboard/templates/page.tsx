@@ -42,8 +42,10 @@ export default function TemplatesPage() {
   const [bodyText, setBodyText] = useState('');
   const [footerText, setFooterText] = useState('');
   const [headerText, setHeaderText] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
+  const fetchTemplates = () => {
+    setLoadingTemplates(true);
     fetch('/api/dashboard/templates')
       .then(r => r.json())
       .then(j => {
@@ -55,6 +57,10 @@ export default function TemplatesPage() {
       })
       .catch(() => setTemplateError('network'))
       .finally(() => setLoadingTemplates(false));
+  };
+
+  useEffect(() => {
+    fetchTemplates();
   }, []);
 
   const copyToClipboard = (text: string) => {
@@ -71,6 +77,48 @@ export default function TemplatesPage() {
     setBodyText('');
     setFooterText('');
     setHeaderText('');
+    setTemplateError(null);
+  };
+
+  const handleSubmit = async () => {
+    if (!sanitizedName || !bodyText) {
+      setTemplateError("Name and Body are required.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setTemplateError(null);
+
+    const components = [];
+    if (headerText) components.push({ type: 'HEADER', format: 'TEXT', text: headerText });
+    if (bodyText) components.push({ type: 'BODY', text: bodyText });
+    if (footerText) components.push({ type: 'FOOTER', text: footerText });
+
+    const payload = {
+      name: sanitizedName,
+      category,
+      language,
+      components,
+    };
+
+    try {
+      const res = await fetch('/api/dashboard/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setTemplateError(data.error || "Failed to submit template.");
+      } else {
+        handleClose();
+        fetchTemplates(); // Refresh list
+      }
+    } catch (err) {
+      setTemplateError("Network error. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Sanitize template name to lowercase + underscores only
@@ -310,21 +358,27 @@ export default function TemplatesPage() {
                     </div>
 
                     {/* Submit button */}
-                    <div className="pt-2 flex gap-3">
-                      <button
-                        onClick={handleClose}
-                        className="flex-1 py-2.5 rounded-xl border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                      >
-                        Cancel
-                      </button>
-                      <a
-                        href="https://business.facebook.com/wa/manage/message-templates/"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2"
-                      >
-                        Submit via Meta <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
+                    <div className="pt-2 flex flex-col gap-3">
+                      {templateError && (
+                        <p className="text-[13px] text-red-500 bg-red-500/10 p-3 rounded-lg border border-red-500/20">{templateError}</p>
+                      )}
+                      <div className="flex gap-3">
+                        <button
+                          onClick={handleClose}
+                          disabled={isSubmitting}
+                          className="flex-1 py-2.5 rounded-xl border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleSubmit}
+                          disabled={isSubmitting || !sanitizedName || !bodyText}
+                          className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                        >
+                          {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                          {isSubmitting ? 'Submitting...' : 'Submit to Meta'}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
