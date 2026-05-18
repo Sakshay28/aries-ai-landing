@@ -21,6 +21,8 @@ interface SettingsData {
   welcome_message: string;
   welcome_offer: string;
   usps: string[];
+  core_services: string;
+  industry: string;
   staff_phone: string;
   staff_name: string;
   manager_phone: string;
@@ -44,8 +46,8 @@ interface SettingsData {
 const DEFAULT_SETTINGS: SettingsData = {
   business_name: '', business_type: '', business_phone: '',
   business_address: '', business_website: '', business_email: '',
-  bot_name: '', bot_personality: '', welcome_message: '', welcome_offer: '',
-  usps: [], staff_phone: '', staff_name: '', manager_phone: '',
+  bot_name: '', bot_personality: 'sales_pro', welcome_message: '', welcome_offer: '',
+  usps: [], core_services: '', industry: 'retail', staff_phone: '', staff_name: '', manager_phone: '',
   followup_30min: true, followup_3hr: true, followup_24hr: true, followup_7day: false,
   escalation_timeout_mins: 5, hot_keywords: [], warm_keywords: [],
   off_hours_message: '', off_hours_capture_lead: true,
@@ -367,6 +369,37 @@ export default function SettingsPage() {
                 <Input value={settings.business_address || ''} onChange={v => update('business_address', v)} placeholder="123 Main St, City" />
               </Field>
             </div>
+            
+            <div className="mt-5 pt-5 border-t" style={{ borderColor: 'var(--border)' }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-5">
+                <Field label="Industry">
+                  <select 
+                    value={settings.industry || 'retail'} 
+                    onChange={e => update('industry', e.target.value)}
+                    className="w-full h-10 px-3 rounded-xl text-sm outline-none transition-all"
+                    style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                  >
+                    <option value="retail">Retail / E-commerce (Customers)</option>
+                    <option value="salon">Salon / Spa (Guests)</option>
+                    <option value="medical">Clinic / Medical (Patients)</option>
+                    <option value="real_estate">Real Estate (Clients)</option>
+                    <option value="restaurant">Restaurant / Cafe (Diners)</option>
+                    <option value="custom">Other / Custom</option>
+                  </select>
+                </Field>
+              </div>
+              <Field label="Core Offerings & Services">
+                <Textarea 
+                  value={settings.core_services || ''} 
+                  onChange={v => update('core_services', v)} 
+                  placeholder="e.g., We offer residential plumbing services including leak repair, pipe installation, and emergency maintenance. Our base call-out fee is $50..." 
+                  rows={4} 
+                />
+              </Field>
+              <p className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
+                Teach the AI about what you sell and how you sell it. The more details you provide, the better it can sell for you.
+              </p>
+            </div>
           </SectionCard>
         </motion.div>
       )}
@@ -520,8 +553,20 @@ export default function SettingsPage() {
               <Field label="Bot Name">
                 <Input value={settings.bot_name} onChange={v => update('bot_name', v)} placeholder="Aria" />
               </Field>
-              <Field label="Personality">
-                <Input value={settings.bot_personality} onChange={v => update('bot_personality', v)} placeholder="Friendly, professional, helpful" />
+              <Field label="AI Persona">
+                <select 
+                  value={settings.bot_personality || 'sales_pro'} 
+                  onChange={e => update('bot_personality', e.target.value)}
+                  className="w-full h-10 px-3 rounded-xl text-sm outline-none transition-all"
+                  style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                >
+                  <option value="sales_pro">Sales Pro (Persuasive, handles objections)</option>
+                  <option value="educator">Educator (Teaching tone, breaks down complexity)</option>
+                  <option value="support_hero">Support Hero (Empathetic, de-escalates)</option>
+                  <option value="lead_magnet">Lead Magnet (Qualifies and collects info)</option>
+                  <option value="advisor">Advisor (Consultative, builds trust)</option>
+                  <option value="concierge">Concierge (Premium service, proactive)</option>
+                </select>
               </Field>
             </div>
             <Field label="Welcome Message">
