@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import {
-  Phone, Mail, Tag, Star, Calendar, Bot, User,
-  MessageSquare, ChevronDown, Plus, Trash2, Zap, Activity,
+  Phone, Mail, Tag, Star, Bot, User,
+  MessageSquare, ChevronDown, Plus, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -205,7 +205,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                   </div>
                 </div>
               )}
-              <InfoRow label="First Contact" value={formatDate(lead?.first_message_at || null)} />
+              {lead?.first_message_at && <InfoRow label="First Contact" value={formatDate(lead.first_message_at)} />}
             </Section>
 
             {/* Conversation Stats */}
@@ -237,37 +237,6 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                   label="Last Message"
                   value={`${new Date(lastMsg.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })} · ${new Date(lastMsg.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`}
                 />
-              )}
-            </Section>
-
-            {/* AI Insights */}
-            <Section title="Insights" icon={Zap} defaultOpen={false}>
-              <div className="flex items-start gap-2.5 bg-muted/40 rounded-xl p-3">
-                <Activity className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-[12px] font-semibold text-foreground">
-                    {meta.bot_paused ? "Human agent active" : "AI handling autonomously"}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    {messages.length === 0
-                      ? "No messages exchanged yet."
-                      : `${messages.length} messages · started ${formatDate(firstMsg?.created_at || null)}`}
-                  </p>
-                </div>
-              </div>
-              {typeof lead?.lead_score === "number" && (
-                <div className="flex items-center justify-between bg-muted/40 rounded-xl px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <Star className="w-3.5 h-3.5 text-amber-500" />
-                    <span className="text-[12px] font-medium text-foreground">Lead quality</span>
-                  </div>
-                  <span className={cn(
-                    "text-[12px] font-bold",
-                    lead.lead_score >= 70 ? "text-emerald-600" : lead.lead_score >= 40 ? "text-amber-600" : "text-muted-foreground"
-                  )}>
-                    {lead.lead_score >= 70 ? "High" : lead.lead_score >= 40 ? "Medium" : "Low"}
-                  </span>
-                </div>
               )}
             </Section>
 

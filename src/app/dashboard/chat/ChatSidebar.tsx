@@ -16,7 +16,6 @@ interface ChatConversation {
   last_message_preview?: string | null;
 }
 
-type FilterTab = 'all' | 'ai' | 'human';
 
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return "";
@@ -55,12 +54,6 @@ function getInitial(conv: ChatConversation): string {
   return "?";
 }
 
-const FILTERS: { key: FilterTab; label: string }[] = [
-  { key: 'all',   label: 'All' },
-  { key: 'ai',    label: 'AI' },
-  { key: 'human', label: 'Human' },
-];
-
 export default function ChatSidebar() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -68,7 +61,6 @@ export default function ChatSidebar() {
   const [convos, setConvos] = useState<ChatConversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<FilterTab>('all');
   const supabaseRef = useRef(createBrowserSupabaseClient());
 
   const load = useCallback(async () => {
@@ -97,8 +89,6 @@ export default function ChatSidebar() {
   }, [load]);
 
   const filtered = convos.filter(c => {
-    if (tab === 'ai' && c.bot_paused) return false;
-    if (tab === 'human' && !c.bot_paused) return false;
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return getDisplayName(c).toLowerCase().includes(q) ||
@@ -109,11 +99,8 @@ export default function ChatSidebar() {
     <div className="w-[320px] flex-shrink-0 border-r border-border flex flex-col bg-background relative z-20">
       {/* Header */}
       <div className="px-5 pt-5 pb-3 border-b border-border/50">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center mb-4">
           <h2 className="text-[17px] font-semibold text-foreground tracking-tight">Inbox</h2>
-          <span className="text-[12px] font-semibold text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-            {convos.length}
-          </span>
         </div>
 
         {/* Search */}
@@ -127,28 +114,6 @@ export default function ChatSidebar() {
           />
         </div>
 
-        {/* Filter Tabs */}
-        <div className="flex gap-1 mt-3">
-          {FILTERS.map(f => (
-            <button
-              key={f.key}
-              onClick={() => setTab(f.key)}
-              className={cn(
-                "flex-1 py-1.5 rounded-lg text-[12px] font-semibold transition-all",
-                tab === f.key
-                  ? "bg-foreground text-background"
-                  : "text-muted-foreground hover:bg-muted"
-              )}
-            >
-              {f.label}
-              {f.key !== 'all' && (
-                <span className="ml-1 opacity-60">
-                  {convos.filter(c => f.key === 'ai' ? !c.bot_paused : c.bot_paused).length}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* List */}
