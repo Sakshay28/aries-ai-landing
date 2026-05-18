@@ -55,6 +55,16 @@ interface FlowRecord {
   edges: FlowEdge[];
 }
 
+// ── Simulation trace ────────────────────────────────────────
+export interface TraceStep {
+  nodeId:    string;
+  nodeType:  string;
+  action:    string;    // e.g. 'send_message', 'condition_true', 'webhook_call'
+  payload?:  unknown;   // message text, webhook url, etc.
+  variables?: Record<string, unknown>;
+  nextId?:   string | null;
+}
+
 interface ExecContext {
   tenantId: string;
   leadId: string | null;
@@ -68,6 +78,8 @@ interface ExecContext {
   isFirstMessage: boolean;
   pendingFlowNode?: string;  // node id to resume on next inbound message
   variables: Record<string, unknown>; // inter-node data bag — persisted across wait_for_reply
+  dryRun?:  boolean;       // if true: skip all side-effects (no WhatsApp sends, no DB writes)
+  trace?:   TraceStep[];   // populated during dry-run to describe what would happen
 }
 
 // ── Fuzzy keyword match: word-boundary aware ─────────────────
@@ -284,6 +296,11 @@ async function executeNode(
     const raw = (node.data?.content as string) || (node.data?.message as string) || '';
     const content = interpolate(raw, ctx);
     if (content.trim()) {
+      // Dry-run: record what would be sent without any side-effects
+      if (ctx.dryRun) {
+        ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_message', payload: content, variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
+        return { nextId: getNextNode(node.id, null, edges), sent: true };
+      }
       try {
         await sendTextMessage(ctx.apiKey, ctx.appPhone, ctx.phone, content, ctx.appName);
         // Record the outbound message in DB
@@ -339,6 +356,10 @@ async function executeNode(
 
   // ── Human Handoff ────────────────────────────────────────
   if (type === 'handoff' || node.data?.label === 'Human Handoff') {
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'handoff', payload: 'bot_paused=true', nextId: getNextNode(node.id, null, edges) });
+      return { nextId: getNextNode(node.id, null, edges) };
+    }
     try {
       await supabaseAdmin
         .from('conversations')
@@ -353,6 +374,10 @@ async function executeNode(
   // ── Tag / Label Lead ─────────────────────────────────────
   if (type === 'tag' || node.id?.startsWith('tag')) {
     const tag = (node.data?.tag as string) || (node.data?.label as string) || '';
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'tag_lead', payload: tag, nextId: getNextNode(node.id, null, edges) });
+      return { nextId: getNextNode(node.id, null, edges) };
+    }
     if (tag && ctx.leadId) {
       try {
         await supabaseAdmin
@@ -369,6 +394,10 @@ async function executeNode(
   // ── Delay / Wait ─────────────────────────────────────────
   if (type === 'delay' || type === 'wait') {
     const seconds = Math.min(Number(node.data?.seconds ?? node.data?.delay ?? 1), 5);
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'delay', payload: `${seconds}s`, nextId: getNextNode(node.id, null, edges) });
+      return { nextId: getNextNode(node.id, null, edges) };
+    }
     await new Promise(r => setTimeout(r, seconds * 1000));
     return { nextId: getNextNode(node.id, null, edges) };
   }
@@ -378,6 +407,10 @@ async function executeNode(
     const method = ((node.data?.method as string) || 'GET').toUpperCase();
     const rawUrl = (node.data?.url as string) || '';
     const url = interpolate(rawUrl, ctx);
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'webhook_call', payload: { method, url }, variables: { ...ctx.variables }, nextId: getNextNode(node.id, 'success', edges) });
+      return { nextId: getNextNode(node.id, 'success', edges) };
+    }
     if (!url || !url.startsWith('http')) {
       console.error(`Flow engine: webhook node ${node.id} has invalid url: "${url}"`);
       return { nextId: getNextNode(node.id, 'error', edges) };
@@ -614,6 +647,10 @@ async function executeNode(
   // ── Wait for Reply — pause flow, resume on next inbound ──
   if (type === 'wait_for_reply') {
     const nextNodeId = getNextNode(node.id, null, edges);
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'wait_for_reply', payload: `will resume at ${nextNodeId}`, nextId: nextNodeId });
+      return { stop: true };
+    }
     if (nextNodeId) {
       await supabaseAdmin
         .from('conversations')
@@ -632,7 +669,68 @@ async function executeNode(
   return { nextId: getNextNode(node.id, null, edges) };
 }
 
-// ── Edge traversal helper ─────────────────────────────────────
+// ── Flow Simulator ───────────────────────────────────────────
+// Runs a specific flow in dry-run mode against a test message.
+// Returns the execution trace without sending any WhatsApp messages
+// or making any DB/HTTP side-effects.
+export interface SimulationResult {
+  matched: boolean;
+  flowName: string;
+  trace: TraceStep[];
+  variables: Record<string, unknown>;
+  messageSent: boolean;
+}
+
+export async function simulateFlow(
+  flowId:    string,
+  testMessage: string,
+  tenantId:  string,
+): Promise<SimulationResult> {
+  const { data: flow, error } = await supabaseAdmin
+    .from('automation_flows')
+    .select('id, name, trigger_type, trigger_keywords, nodes, edges')
+    .eq('id', flowId)
+    .eq('tenant_id', tenantId)
+    .single();
+
+  if (error || !flow) {
+    return { matched: false, flowName: '', trace: [], variables: {}, messageSent: false };
+  }
+
+  const trace: TraceStep[] = [];
+  const ctx: ExecContext = {
+    tenantId,
+    leadId:          null,
+    leadName:        'Test User',
+    conversationId:  'sim-' + flowId,
+    phone:           '+910000000000',
+    apiKey:          'sim',
+    appPhone:        'sim',
+    appName:         'sim',
+    messageText:     testMessage,
+    isFirstMessage:  false,
+    variables:       {},
+    dryRun:          true,
+    trace,
+  };
+
+  const nodes = (flow as FlowRecord).nodes as FlowNode[];
+  const edges = (flow as FlowRecord).edges as FlowEdge[];
+  const triggerNode = nodes.find(n => n.type === 'trigger' || n.type === 'keyword_trigger');
+  if (!triggerNode) return { matched: false, flowName: flow.name as string, trace, variables: {}, messageSent: false };
+
+  const messageSent = await executeFlowGraph(nodes, edges, ctx, triggerNode.id);
+
+  return {
+    matched:     true,
+    flowName:    flow.name as string,
+    trace,
+    variables:   ctx.variables,
+    messageSent,
+  };
+}
+
+// ── Edge traversal helper ─────────────────────────────────────────
 function getNextNode(
   sourceId: string,
   handle: string | null,

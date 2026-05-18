@@ -11,6 +11,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { isDuplicateMessage, getRedisClient } from '@/lib/redis/client';
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
+import { appendLeadRow } from '@/lib/integrations/google-sheets';
 import { parseGupshupWebhook, sendTextMessage } from '@/lib/gupshup/service';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantConfig } from '@/lib/tenant/manager';
@@ -222,6 +223,17 @@ async function handleIncomingMessage(
           source: 'whatsapp',
         },
       }).catch(e => console.error('Integration runner (new_lead):', (e as Error).message));
+
+      // Auto-sync to Google Sheets if connected (non-blocking, silently skip if not configured)
+      appendLeadRow(tenant.id as string, {
+        name:        (newLead.name as string) || undefined,
+        phone:       cleanPhone,
+        email:       (newLead.email as string) || undefined,
+        lead_status: 'new',
+        source:      'whatsapp',
+        lead_score:  10,
+        created_at:  new Date().toISOString(),
+      }).catch(() => { /* Google Sheets not connected — expected */ });
     }
   }
 

@@ -22,6 +22,7 @@ import {
   UserCog,
   Library,
   Network,
+  Activity,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -91,6 +92,7 @@ const navigationItems: NavItem[] = [
   { label: "Knowledge Base", icon: Library, href: "/dashboard/knowledge" },
   { label: "Agents", icon: Network, href: "/dashboard/agents" },
   { label: "Templates", icon: FileText, href: "/dashboard/templates" },
+  { label: "Event Logs", icon: Activity, href: "/dashboard/logs" },
   { label: "Integrations", icon: Puzzle, href: "/dashboard/integrations" },
 ];
 

@@ -21,7 +21,7 @@ function redirectUri()  {
 }
 
 // ── Build OAuth URL ────────────────────────────────────────
-export function getGoogleSheetsAuthUrl(tenantId: string): string {
+export function getGoogleSheetsAuthUrl(state: string): string {
   const params = new URLSearchParams({
     client_id:     clientId(),
     redirect_uri:  redirectUri(),
@@ -29,7 +29,7 @@ export function getGoogleSheetsAuthUrl(tenantId: string): string {
     scope:         SCOPES,
     access_type:   'offline',
     prompt:        'consent',
-    state:         tenantId,
+    state,
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }
