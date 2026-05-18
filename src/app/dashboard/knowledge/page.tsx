@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Database, UploadCloud, FileText, Trash2, BrainCircuit,
-  Activity, AlertCircle, CheckCircle2, FileType2, FilePdf,
+  Activity, AlertCircle, CheckCircle2, FileType2, FileArchive,
   FileSpreadsheet, FileJson, X, Clock, HardDrive,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -33,7 +33,7 @@ function getFileExtension(filename: string): string {
 }
 
 function FileIcon({ ext }: { ext: string }) {
-  if (ext === 'pdf') return <FilePdf className="w-4 h-4 text-red-400" />;
+  if (ext === 'pdf') return <FileArchive className="w-4 h-4 text-red-400" />;
   if (ext === 'csv') return <FileSpreadsheet className="w-4 h-4 text-green-400" />;
   if (ext === 'json') return <FileJson className="w-4 h-4 text-yellow-400" />;
   return <FileType2 className="w-4 h-4 text-blue-400" />;

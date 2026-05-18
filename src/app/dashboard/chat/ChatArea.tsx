@@ -1,10 +1,7 @@
 "use client";
 
-import {
-  Phone, Video, Search, MoreVertical,
-  Paperclip, Smile, Mic, Send, Sparkles, CheckCheck, Bot, User, Mail, Sparkle
-} from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { Phone, Search, MoreVertical, Plus, Send } from "lucide-react";
+import { motion } from "framer-motion";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -45,7 +42,6 @@ export default function ChatArea() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  // Load conversation and messages securely via backend API
   useEffect(() => {
     if (!conversationId) return;
     const supabase = supabaseRef.current;
@@ -58,18 +54,14 @@ export default function ChatArea() {
         if (data.success) {
           setConversationMeta(data.conversation as ConversationMeta);
           setMessages(data.messages as Message[]);
-        } else {
-          console.error("Failed to fetch conversation:", data.error);
         }
         setLoadingMessages(false);
         setTimeout(scrollToBottom, 100);
       })
       .catch((err) => {
-        console.error("Error fetching chat:", err);
         setLoadingMessages(false);
       });
 
-    // Realtime: subscribe to new messages for this conversation
     const channel = supabase
       .channel(`messages-${conversationId}`)
       .on(
@@ -80,7 +72,6 @@ export default function ChatArea() {
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
-          // Verify it's a message row (partitions might have dynamic names like messages_2026_05_17)
           if (!payload.new || !('content' in payload.new)) return;
           setMessages((prev) => {
             const exists = prev.some((m) => m.id === payload.new.id);
@@ -108,12 +99,9 @@ export default function ChatArea() {
         body: JSON.stringify({ conversationId, message: text }),
       });
       if (!res.ok) throw new Error("Failed to send");
-      setInputMsg("");
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-      }
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
     } catch {
-      toast.error("Message failed to send. Please try again.");
+      toast.error("Message failed to send.");
       setInputMsg(text);
     } finally {
       setSending(false);
@@ -127,7 +115,6 @@ export default function ChatArea() {
     }
   };
 
-  // Auto-resize textarea
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputMsg(e.target.value);
     if (textareaRef.current) {
@@ -135,12 +122,6 @@ export default function ChatArea() {
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 128) + "px";
     }
   };
-
-  const displayName = conversationMeta?.leads?.name
-    || conversationMeta?.leads?.phone
-    || conversationMeta?.sender_name
-    || conversationId?.slice(0, 8)
-    || "Unknown";
 
   const toggleHumanMode = async () => {
     if (!conversationId || !conversationMeta) return;
@@ -155,279 +136,177 @@ export default function ChatArea() {
       const data = await res.json();
       if (data.success) {
         setConversationMeta(prev => prev ? { ...prev, bot_paused: newPaused } : null);
-        toast.success(newPaused ? '🙋 Human mode ON — AI is paused' : '🤖 AI is back in control');
-      } else {
-        toast.error('Failed to switch mode');
       }
-    } catch {
-      toast.error('Network error — try again');
     } finally {
       setTogglingMode(false);
     }
   };
 
-  const handleEmailSummary = () => {
-    toast.success("AI is generating an email summary and sending it to your inbox.");
-  };
-
+  const displayName = conversationMeta?.leads?.name
+    || conversationMeta?.leads?.phone
+    || conversationMeta?.sender_name
+    || conversationId?.slice(0, 8)
+    || "Unknown";
+    
   const initial = displayName.charAt(0).toUpperCase();
-  const isActive = conversationMeta?.is_active;
 
-  // Empty state — no conversation selected
   if (!conversationId) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-[#F0F2F5] dark:bg-[#0B141A] min-w-0">
-        <div className="text-center">
-          <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-4 mx-auto">
-            <Sparkles className="w-7 h-7 text-muted-foreground" />
-          </div>
-          <p className="text-base font-medium text-foreground mb-1">Select a conversation</p>
-          <p className="text-sm text-muted-foreground">Choose from your chats on the left to start messaging</p>
-        </div>
+      <div className="flex-1 flex flex-col items-center justify-center bg-[#EFEAE2] dark:bg-[#0B1120] font-sans">
+        <p className="text-[15px] font-medium text-muted-foreground">Select a conversation to start messaging</p>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 bg-[#F0F2F5] dark:bg-[#0B141A] relative shadow-[-10px_0_30px_rgba(0,0,0,0.02)] z-10">
-      {/* Background pattern */}
-      <div
-        className="absolute inset-0 opacity-[0.03] dark:opacity-[0.015] pointer-events-none"
-        style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23000000\' fill-opacity=\'1\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")' }}
-      />
-
-      {/* Header */}
-      <div className="h-[60px] flex items-center justify-between px-6 bg-background/95 backdrop-blur-md border-b border-border/40 relative z-20 transition-colors">
-        <motion.div
-          initial={{ opacity: 0, x: -10 }}
-          animate={{ opacity: 1, x: 0 }}
-          key={conversationId}
-          className="flex items-center gap-3 cursor-pointer group"
-        >
-          <div className="relative">
-            <div className="w-9 h-9 rounded-full bg-emerald-500 text-white shadow-sm flex items-center justify-center font-medium text-[14px]">
-              {initial}
-            </div>
-            {isActive && (
-              <div className="absolute bottom-0 right-0 w-[10px] h-[10px] bg-emerald-500 border-2 border-background rounded-full" />
-            )}
+    <div className="flex-1 flex flex-col bg-[#EFEAE2] dark:bg-[#0B1120] font-sans relative z-10">
+      
+      {/* Premium Header */}
+      <div className="h-[72px] flex items-center justify-between px-6 bg-white dark:bg-[#1A1D21] border-b border-[#E5E7EB] dark:border-white/10 z-20">
+        
+        {/* Left: Identity */}
+        <div className="flex items-center gap-4 cursor-pointer">
+          <div className="w-10 h-10 rounded-full bg-[#F2FDF5] text-[#12B76A] flex items-center justify-center font-semibold text-[16px]">
+            {initial}
           </div>
           <div>
-            <h2 className="text-[15px] font-semibold text-foreground tracking-tight leading-none mb-1 flex items-center gap-2">
+            <h2 className="text-[16px] font-semibold text-foreground tracking-tight leading-none mb-1">
               {displayName}
-              {!conversationMeta?.bot_paused && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded-full border border-emerald-500/20 shadow-sm">
-                  <Sparkle className="w-3 h-3" /> AI Responding
-                </span>
-              )}
-              {conversationMeta?.bot_paused && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest bg-amber-500/10 text-amber-600 px-2 py-0.5 rounded-full border border-amber-500/20 shadow-sm">
-                  <User className="w-3 h-3" /> Human Mode
-                </span>
-              )}
             </h2>
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <p className={cn("text-[12px] font-medium tracking-tight", isActive ? "text-emerald-500" : "text-muted-foreground")}>
-                {isActive ? "Active on WhatsApp" : "Offline"}
-              </p>
-            </div>
+            <p className="text-[13px] font-medium text-muted-foreground tracking-tight">
+              Active now
+            </p>
           </div>
-        </motion.div>
+        </div>
 
-        <div className="flex items-center gap-0.5 sm:gap-1">
-          {/* Human / AI Mode Toggle — most important button */}
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.97 }}
+        {/* Right: Actions */}
+        <div className="flex items-center gap-4">
+          {/* Subtle Human/AI Toggle */}
+          <div 
             onClick={toggleHumanMode}
-            disabled={togglingMode}
             className={cn(
-              "flex items-center gap-1.5 h-8 px-3 rounded-full text-[12px] font-semibold transition-all mr-2 border",
-              conversationMeta?.bot_paused
-                ? "bg-amber-500/10 text-amber-600 border-amber-500/30 hover:bg-amber-500/20"
-                : "bg-cyan-500/10 text-cyan-600 border-cyan-500/30 hover:bg-cyan-500/20"
+              "flex items-center gap-3 px-3 py-1.5 rounded-full cursor-pointer transition-all border",
+              togglingMode ? "opacity-50 pointer-events-none" : "opacity-100",
+              "bg-white dark:bg-[#22252A] border-[#E5E7EB] dark:border-white/10 shadow-sm"
             )}
           >
-            {togglingMode ? (
-              <div className="w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
-            ) : conversationMeta?.bot_paused ? (
-              <><Bot className="w-3.5 h-3.5" /> Hand to AI</>
-            ) : (
-              <><User className="w-3.5 h-3.5" /> Take Over</>
-            )}
-          </motion.button>
+            <span className={cn("text-[12px] font-semibold transition-colors", !conversationMeta?.bot_paused ? "text-foreground" : "text-muted-foreground")}>AI</span>
+            
+            <div className="w-8 h-4 rounded-full bg-muted/50 border border-border relative flex items-center">
+              <motion.div 
+                layout
+                className="w-3 h-3 rounded-full bg-foreground absolute"
+                animate={{ left: conversationMeta?.bot_paused ? "16px" : "3px" }}
+                transition={{ type: "spring", stiffness: 500, damping: 30 }}
+              />
+            </div>
+            
+            <span className={cn("text-[12px] font-semibold transition-colors", conversationMeta?.bot_paused ? "text-foreground" : "text-muted-foreground")}>Human</span>
+          </div>
 
-          <motion.button 
-            whileHover={{ scale: 1.05 }} 
-            whileTap={{ scale: 0.95 }} 
-            onClick={handleEmailSummary}
-            className="flex items-center gap-1.5 h-8 px-3 rounded-full text-[12px] font-semibold transition-all border bg-secondary/50 text-foreground hover:bg-secondary mr-2"
-          >
-            <Mail className="w-3.5 h-3.5 text-indigo-500" />
-            <span className="hidden sm:inline">Email Summary</span>
-          </motion.button>
+          <div className="w-px h-6 bg-border mx-1" />
 
-          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full transition-colors hidden sm:flex">
-            <Video className="w-[18px] h-[18px]" />
-          </motion.button>
-          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full transition-colors hidden sm:flex">
-            <Phone className="w-[18px] h-[18px]" />
-          </motion.button>
-          <div className="w-px h-4 bg-border/60 mx-2 hidden sm:block" />
-          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full transition-colors">
-            <Search className="w-[18px] h-[18px]" />
-          </motion.button>
-          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full transition-colors">
-            <MoreVertical className="w-[18px] h-[18px]" />
-          </motion.button>
+          {/* Minimal Icon Buttons */}
+          <button className="text-muted-foreground hover:text-foreground transition-colors p-1"><Search className="w-[20px] h-[20px] stroke-[1.75]" /></button>
+          <button className="text-muted-foreground hover:text-foreground transition-colors p-1"><Phone className="w-[20px] h-[20px] stroke-[1.75]" /></button>
+          <button className="text-muted-foreground hover:text-foreground transition-colors p-1"><MoreVertical className="w-[20px] h-[20px] stroke-[1.75]" /></button>
         </div>
       </div>
 
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 relative z-10">
-        {loadingMessages ? (
-          <div className="space-y-4">
-            {[...Array(4)].map((_, i) => (
-              <div key={i} className={cn("flex", i % 2 === 0 ? "justify-start" : "justify-end")}>
-                <Skeleton className={cn("h-12 rounded-2xl", i % 2 === 0 ? "w-48" : "w-64")} />
-              </div>
-            ))}
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex justify-center py-16">
-            <p className="text-[13px] text-muted-foreground">No messages yet in this conversation.</p>
-          </div>
-        ) : (
-          <>
-            {messages.map((msg, idx) => {
-              const isInbound = msg.direction === "inbound";
-              const isAI = msg.ai_generated;
-              const showDate =
-                idx === 0 ||
-                new Date(messages[idx - 1].created_at).toDateString() !==
-                new Date(msg.created_at).toDateString();
-
-              return (
-                <div key={msg.id}>
-                  {showDate && (
-                    <div className="flex justify-center mb-4 mt-2">
-                      <span className="px-3 py-1 bg-background/80 backdrop-blur-md border border-border/30 rounded-lg text-[11px] font-medium uppercase tracking-widest text-muted-foreground shadow-sm">
-                        {new Date(msg.created_at).toLocaleDateString("en-IN", {
-                          weekday: "long", day: "numeric", month: "long",
-                        })}
-                      </span>
-                    </div>
-                  )}
-
-                  <motion.div
-                    initial={{ opacity: 0, y: 8, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                    className={cn("flex mb-2 group", isInbound ? "justify-start" : "justify-end")}
-                  >
-                    {isInbound ? (
-                      /* Inbound (customer) */
-                      <div className="bg-background border border-border/30 text-foreground px-4 py-2 rounded-2xl rounded-tl-sm shadow-sm max-w-[85%] sm:max-w-[75%]">
-                        <p className="text-[14px] leading-relaxed tracking-tight">{msg.content}</p>
-                        <div className="flex justify-end items-center gap-1 mt-0.5 -mb-0.5">
-                          <span className="text-[10px] font-medium text-muted-foreground/60">{formatTime(msg.created_at)}</span>
-                        </div>
-                      </div>
-                    ) : isAI ? (
-                      /* Outbound AI */
-                      <div className="bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/10 dark:to-teal-900/10 border border-emerald-500/10 dark:border-emerald-500/20 text-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm shadow-[0_2px_10px_rgba(0,0,0,0.03)] max-w-[85%] sm:max-w-[75%]">
-                        <div className="flex items-center gap-1.5 mb-1.5 opacity-90">
-                          <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-500" />
-                          <span className="text-[11px] font-bold tracking-wide text-emerald-600 dark:text-emerald-500 uppercase">Aries AI</span>
-                        </div>
-                        <p className="text-[14px] leading-relaxed tracking-tight">{msg.content}</p>
-                        <div className="flex justify-end items-center gap-1 mt-1 -mb-0.5">
-                          <span className="text-[10px] font-medium text-emerald-600/50">{formatTime(msg.created_at)}</span>
-                          <CheckCheck className={cn("w-3.5 h-3.5", msg.status === "read" ? "text-blue-500" : "text-muted-foreground/40")} />
-                        </div>
-                      </div>
-                    ) : (
-                      /* Outbound Human */
-                      <div className="bg-[#D9FDD3] dark:bg-[#005C4B] text-[#111B21] dark:text-[#E9EDEF] px-4 py-2 rounded-2xl rounded-tr-sm shadow-sm max-w-[85%] sm:max-w-[75%] border border-transparent dark:border-white/5">
-                        <p className="text-[14px] leading-relaxed tracking-tight">{msg.content}</p>
-                        <div className="flex justify-end items-center gap-1 mt-0.5 -mb-0.5">
-                          <span className="text-[10px] font-medium text-black/40 dark:text-white/40">{formatTime(msg.created_at)}</span>
-                          <CheckCheck className={cn("w-3.5 h-3.5", msg.status === "read" ? "text-blue-500" : "text-black/30 dark:text-white/30")} />
-                        </div>
-                      </div>
-                    )}
-                  </motion.div>
+      {/* Main Chat Area */}
+      <div className="flex-1 overflow-y-auto px-4 py-6">
+        <div className="max-w-[860px] mx-auto w-full space-y-4">
+          
+          {loadingMessages ? (
+            <div className="space-y-4">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className={cn("flex", i % 2 === 0 ? "justify-start" : "justify-end")}>
+                  <Skeleton className={cn("h-12 rounded-[18px]", i % 2 === 0 ? "w-48" : "w-64")} />
                 </div>
-              );
-            })}
-            <div ref={messagesEndRef} />
-          </>
-        )}
+              ))}
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="flex justify-center py-16">
+              <p className="text-[14px] text-muted-foreground">No messages yet.</p>
+            </div>
+          ) : (
+            <>
+              {messages.map((msg, idx) => {
+                const isInbound = msg.direction === "inbound";
+                return (
+                  <motion.div
+                    key={msg.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={cn("flex", isInbound ? "justify-start" : "justify-end")}
+                  >
+                    <div className={cn(
+                      "max-w-[75%] px-5 py-3 rounded-[18px] shadow-[0_1px_2px_rgba(0,0,0,0.02)]",
+                      isInbound 
+                        ? "bg-white dark:bg-[#1A1D21] text-foreground border border-[#E5E7EB] dark:border-white/5 rounded-tl-sm"
+                        : "bg-[#F2FDF5] dark:bg-[#005C4B] text-[#111B21] dark:text-[#E9EDEF] border border-[#E4F4E8] dark:border-transparent rounded-tr-sm"
+                    )}>
+                      <p className="text-[15px] leading-relaxed font-normal">{msg.content}</p>
+                      <div className="flex justify-end mt-1">
+                        <span className="text-[11px] font-medium opacity-50">{formatTime(msg.created_at)}</span>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </>
+          )}
+
+          {/* Clean Quick Replies Demo (Visible at bottom of chat if AI suggests options) */}
+          {/* <div className="flex flex-wrap gap-2 mt-4 justify-start">
+            <button className="px-4 py-2 bg-[#f5f5f5] text-foreground rounded-full text-[14px] font-medium hover:bg-[#111] hover:text-white transition-colors">Reserve Table</button>
+            <button className="px-4 py-2 bg-[#f5f5f5] text-foreground rounded-full text-[14px] font-medium hover:bg-[#111] hover:text-white transition-colors">Plan Event</button>
+          </div> */}
+
+        </div>
       </div>
 
-      {/* Input Bar */}
-      <div className="p-3 bg-background/95 backdrop-blur-md border-t border-border/40 relative z-20">
-        <div className="flex items-end gap-2 bg-muted/40 border border-border/40 rounded-2xl p-1.5 focus-within:ring-1 focus-within:ring-emerald-500/30 focus-within:bg-background transition-all duration-300 shadow-sm">
-          <div className="flex items-center gap-1 pb-1 px-1">
-            <motion.button onClick={() => toast("Emoji picker coming soon")} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full transition-colors">
-              <Smile className="w-[20px] h-[20px]" />
-            </motion.button>
-            <motion.button onClick={() => toast("Attachments coming soon")} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full transition-colors">
-              <Paperclip className="w-[20px] h-[20px]" />
-            </motion.button>
-          </div>
+      {/* Modern Input Bar */}
+      <div className="pb-6 pt-2 px-6 bg-transparent">
+        <div className="max-w-[860px] mx-auto w-full">
+          <div className="flex items-end gap-3 bg-white dark:bg-[#1A1D21] border border-[#E5E7EB] dark:border-white/10 rounded-[20px] p-2 shadow-[0_2px_12px_rgba(0,0,0,0.04)] focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.08)] transition-all">
+            
+            <button className="p-3 text-muted-foreground hover:text-foreground transition-colors flex-shrink-0">
+              <Plus className="w-[22px] h-[22px] stroke-[1.75]" />
+            </button>
 
-          <textarea
-            ref={textareaRef}
-            value={inputMsg}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder="Type a message or use AI assist..."
-            className="flex-1 max-h-32 min-h-[40px] bg-transparent border-0 resize-none focus:ring-0 py-2.5 px-2 text-[15px] text-foreground placeholder:text-muted-foreground/60 tracking-tight outline-none"
-            rows={1}
-            disabled={sending}
-          />
+            <textarea
+              ref={textareaRef}
+              value={inputMsg}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder="Type a message..."
+              className="flex-1 max-h-32 min-h-[44px] bg-transparent border-0 resize-none focus:ring-0 py-3 px-1 text-[15px] text-foreground placeholder:text-muted-foreground/60 outline-none font-normal"
+              rows={1}
+              disabled={sending}
+            />
 
-          <div className="flex items-center gap-1 pb-1 px-1">
-            <motion.button onClick={() => toast("AI Co-pilot coming soon")} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-emerald-500 hover:text-emerald-600 dark:hover:bg-emerald-500/10 rounded-full transition-colors" title="AI Assist">
-              <Sparkles className="w-[20px] h-[20px]" />
-            </motion.button>
-            <AnimatePresence>
-              {!inputMsg && (
-                <motion.button
-                  onClick={() => toast("Voice notes coming soon")}
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full transition-colors hidden sm:block"
-                >
-                  <Mic className="w-[20px] h-[20px]" />
-                </motion.button>
-              )}
-            </AnimatePresence>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
+            <button
               disabled={!inputMsg.trim() || sending}
               onClick={handleSend}
               className={cn(
-                "p-2 ml-1 rounded-full transition-colors shadow-sm flex items-center justify-center",
+                "p-3 rounded-xl transition-all flex items-center justify-center flex-shrink-0 mb-[2px] mr-[2px]",
                 inputMsg.trim() && !sending
-                  ? "bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20"
-                  : "bg-muted text-muted-foreground cursor-not-allowed"
+                  ? "bg-foreground text-background hover:opacity-90"
+                  : "bg-transparent text-muted-foreground"
               )}
             >
               {sending ? (
-                <div className="w-[18px] h-[18px] border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                <div className="w-[20px] h-[20px] border-2 border-background/40 border-t-background rounded-full animate-spin" />
               ) : (
-                <Send className="w-[18px] h-[18px] ml-0.5" />
+                <Send className="w-[20px] h-[20px] ml-0.5 stroke-[1.75]" />
               )}
-            </motion.button>
+            </button>
           </div>
         </div>
       </div>
+
     </div>
   );
 }

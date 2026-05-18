@@ -10,6 +10,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { isDuplicateMessage, getRedisClient } from '@/lib/redis/client';
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
+import { retrieveRelevantDocs } from '@/lib/ai/rag';
 import { parseGupshupWebhook, sendTextMessage } from '@/lib/gupshup/service';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantConfig } from '@/lib/tenant/manager';
@@ -405,23 +406,32 @@ async function handleIncomingMessage(
   const isFirstMessageForAI = storedMsgCount === 0 && history.length === 0;
 
   // Load active smart rules + knowledge docs in parallel (non-blocking)
-  const [{ data: smartRulesRows }, { data: knowledgeRows }, { data: agentRows }] = await Promise.all([
+  const [{ data: smartRulesRows }, { data: agentRows }, ragDocs] = await Promise.all([
     supabaseAdmin
       .from('smart_rules')
       .select('name, trigger_source, ai_summary')
       .eq('tenant_id', tenant.id)
       .eq('status', 'active'),
     supabaseAdmin
-      .from('knowledge_docs')
-      .select('filename, content_text')
-      .eq('tenant_id', tenant.id)
-      .neq('content_text', ''),
-    supabaseAdmin
       .from('agent_configs')
       .select('agent_name, routing_keywords, bot_name, bot_personality, system_prompt')
       .eq('tenant_id', tenant.id)
       .eq('is_active', true),
+    // RAG: semantic search for relevant docs (falls back to [] if no embeddings yet)
+    retrieveRelevantDocs(tenant.id as string, msg.text || '', 3).catch(() => []),
   ]);
+
+  // If RAG returned nothing (e.g. docs not yet embedded), fall back to bulk load
+  let knowledgeRows: Array<{ filename: string; content_text: string }> = ragDocs;
+  if (ragDocs.length === 0) {
+    const { data: fallback } = await supabaseAdmin
+      .from('knowledge_docs')
+      .select('filename, content_text')
+      .eq('tenant_id', tenant.id)
+      .neq('content_text', '')
+      .limit(5);
+    knowledgeRows = (fallback || []) as Array<{ filename: string; content_text: string }>;
+  }
 
   // ── Multi-agent routing: pick agent whose keywords match the message ──
   const lowerMsgText = msg.text?.toLowerCase() ?? '';

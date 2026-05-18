@@ -29,6 +29,7 @@ import { sendTextMessage } from '@/lib/gupshup/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { processMessageWithAI, TenantAIConfig } from '@/lib/ai/engine';
 import { getTenantConfig } from '@/lib/tenant/manager';
+import { createBookingEvent } from '@/lib/integrations/google-calendar';
 import type { Tenant } from '@/lib/types';
 
 // ── Types ────────────────────────────────────────────────────
@@ -538,6 +539,35 @@ async function executeNode(
     if (phoneMatch) ctx.variables.extracted_phone = phoneMatch[0];
     if (nameMatch)  ctx.variables.name            = nameMatch[1].trim();
     return { nextId: getNextNode(node.id, null, edges) };
+  }
+
+  // ── Book Appointment — creates Google Calendar event ─────
+  if (type === 'book_appointment') {
+    try {
+      const title = interpolate((node.data?.title as string) || 'Appointment', ctx);
+      const start = interpolate((node.data?.start as string) || (ctx.variables.slot_start as string) || '', ctx);
+      const end   = interpolate((node.data?.end   as string) || (ctx.variables.slot_end   as string) || '', ctx);
+
+      if (!start || !end) {
+        console.warn('Flow engine: book_appointment missing start/end — skipping');
+        return { nextId: getNextNode(node.id, 'error', edges) };
+      }
+
+      const eventLink = await createBookingEvent(ctx.tenantId, {
+        title,
+        start,
+        end,
+        description:  interpolate((node.data?.description as string) || '', ctx),
+        guestEmail:   (ctx.variables.email as string)       || undefined,
+        guestName:    (ctx.variables.name  as string)        || ctx.leadName || undefined,
+      });
+
+      ctx.variables.booking_link = eventLink;
+      return { nextId: getNextNode(node.id, 'success', edges) };
+    } catch (e) {
+      console.error('Flow engine: book_appointment failed:', (e as Error).message);
+      return { nextId: getNextNode(node.id, 'error', edges) };
+    }
   }
 
   // ── AI Reply — call Gemini, send its response ───────────
