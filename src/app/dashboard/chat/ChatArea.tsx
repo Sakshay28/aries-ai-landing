@@ -26,6 +26,7 @@ interface ConversationMeta {
   is_active: boolean;
   bot_paused: boolean;
   sender_name: string | null;
+  sender_id: string | null;   // phone number of the WhatsApp sender
   leads?: LeadInfo | null;
 }
 
@@ -171,7 +172,8 @@ export default function ChatArea() {
   };
 
   const lead = conversationMeta?.leads;
-  const rawPhone = lead?.phone || conversationMeta?.sender_name || '';
+  // sender_id is the raw phone stored on the conversation row itself — always available
+  const rawPhone = lead?.phone || conversationMeta?.sender_id || conversationMeta?.sender_name || '';
   const displayName = lead?.name || formatPhone(rawPhone) || conversationId?.slice(0, 8) || 'Unknown';
   const initial = (lead?.name ?? rawPhone)?.charAt(0)?.toUpperCase() || '?';
 
