@@ -132,6 +132,11 @@ export default function ChatSidebar() {
             const name = getDisplayName(conv);
             const preview = conv.last_message_preview ?? "";
             const phone = conv.leads?.phone ?? '';
+            // "Recent" = activity in last 5 min (drives pulse + unread emphasis)
+            const isRecent = conv.last_message_at
+              ? (Date.now() - new Date(conv.last_message_at).getTime()) < 5 * 60_000
+              : false;
+            const isUnreadFeel = isRecent && !isActive;
 
             return (
               <button
@@ -162,27 +167,46 @@ export default function ChatSidebar() {
                       {getInitial(conv)}
                     </span>
                   </div>
-                  {/* Mode dot */}
-                  <span className={cn(
-                    "absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-[#111827]",
-                    conv.bot_paused ? "bg-blue-400" : "bg-emerald-400"
-                  )} />
+                  {/* Mode dot (pulses when conversation is active in last 5 min) */}
+                  <span className="absolute bottom-0 right-0 w-2.5 h-2.5">
+                    <span className={cn(
+                      "absolute inset-0 rounded-full border-2 border-white dark:border-[#111827]",
+                      conv.bot_paused ? "bg-blue-400" : "bg-emerald-400"
+                    )} />
+                    {isRecent && (
+                      <span className={cn(
+                        "absolute inset-0 rounded-full animate-ping",
+                        conv.bot_paused ? "bg-blue-400/70" : "bg-emerald-400/70"
+                      )} />
+                    )}
+                  </span>
                 </div>
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline">
                     <span className={cn(
-                      "text-[13.5px] truncate font-semibold",
-                      isActive ? "text-foreground" : "text-foreground/85"
+                      "text-[13.5px] truncate",
+                      isUnreadFeel ? "font-bold text-foreground" : isActive ? "font-semibold text-foreground" : "font-semibold text-foreground/85"
                     )}>
                       {name}
                     </span>
-                    <span className="text-[11px] text-muted-foreground/60 flex-shrink-0 ml-2 font-normal">
+                    <span className={cn(
+                      "text-[11px] flex-shrink-0 ml-2 font-normal",
+                      isUnreadFeel ? "text-emerald-600 dark:text-emerald-400 font-semibold" : "text-muted-foreground/60"
+                    )}>
                       {timeAgo(conv.last_message_at)}
                     </span>
                   </div>
-                  <p className="text-[12.5px] text-muted-foreground/70 truncate mt-0.5 font-normal">{preview || 'No messages yet'}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <p className={cn(
+                      "text-[12.5px] truncate flex-1",
+                      isUnreadFeel ? "text-foreground/80 font-medium" : "text-muted-foreground/70 font-normal"
+                    )}>{preview || 'No messages yet'}</p>
+                    {isUnreadFeel && (
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+                    )}
+                  </div>
                 </div>
               </button>
             );

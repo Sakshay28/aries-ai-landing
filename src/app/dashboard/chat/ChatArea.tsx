@@ -1,6 +1,9 @@
 "use client";
 
-import { Send, Bot, User, Check, CheckCheck, ArrowDown, Paperclip, Smile } from "lucide-react";
+import {
+  Send, Bot, User, Check, CheckCheck, ArrowDown, Paperclip, Smile,
+  Mic, Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal,
+} from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
@@ -202,8 +205,21 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     );
   }
 
+  const chatBgStyle: React.CSSProperties = {
+    background: 'var(--chat-surface, #EAEDF0)',
+    backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Cg fill='%23000' fill-opacity='0.025'%3E%3Ccircle cx='20' cy='20' r='1.2'/%3E%3Ccircle cx='0' cy='0' r='1.2'/%3E%3Ccircle cx='40' cy='0' r='1.2'/%3E%3Ccircle cx='0' cy='40' r='1.2'/%3E%3Ccircle cx='40' cy='40' r='1.2'/%3E%3C/g%3E%3C/svg%3E\")",
+    backgroundSize: '40px 40px',
+  };
+
+  const copyMessage = (text: string) => {
+    navigator.clipboard?.writeText(text).then(
+      () => toast.success('Copied'),
+      () => toast.error('Copy failed'),
+    );
+  };
+
   return (
-    <div className="flex-1 flex flex-col relative overflow-hidden" style={{ background: 'var(--chat-surface, #EAEDF0)' }}>
+    <div className="flex-1 flex flex-col relative overflow-hidden" style={chatBgStyle}>
 
       {/* ── Header ── */}
       <div className="h-[60px] flex items-center justify-between px-5 bg-white dark:bg-[#1C2333] shadow-[0_1px_3px_rgba(0,0,0,0.06)] z-20 flex-shrink-0">
@@ -228,32 +244,54 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           </div>
         </div>
 
-        {/* AI / Human toggle */}
-        <motion.button
-          onClick={toggleHumanMode}
-          disabled={togglingMode}
-          whileTap={{ scale: 0.95 }}
-          className={cn(
-            'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11.5px] font-semibold transition-all duration-300 select-none',
-            conversationMeta?.bot_paused
-              ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800'
-              : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-300 ring-1 ring-emerald-200 dark:ring-emerald-800',
-            togglingMode && 'opacity-40 pointer-events-none'
-          )}
-        >
-          <motion.div animate={{ rotate: togglingMode ? 360 : 0 }} transition={{ duration: 0.4 }}>
-            {conversationMeta?.bot_paused ? <User className="w-3 h-3" /> : <Bot className="w-3 h-3" />}
-          </motion.div>
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.span
-              key={conversationMeta?.bot_paused ? 'human' : 'ai'}
-              initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
-              transition={{ duration: 0.12 }}
+        {/* Right side: actions + AI/Human toggle */}
+        <div className="flex items-center gap-1">
+          {/* Quick action icons */}
+          {[
+            { icon: Search, label: 'Search in chat' },
+            { icon: Sparkles, label: 'AI assist' },
+            { icon: MoreVertical, label: 'More' },
+          ].map(({ icon: Icon, label }) => (
+            <button
+              key={label}
+              title={label}
+              onClick={() => toast(label, { description: 'Coming soon' })}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/60 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
             >
-              {conversationMeta?.bot_paused ? 'Human' : 'AI'}
-            </motion.span>
-          </AnimatePresence>
-        </motion.button>
+              <Icon className="w-4 h-4" />
+            </button>
+          ))}
+
+          {/* Divider */}
+          <div className="w-px h-5 bg-black/[0.06] dark:bg-white/[0.06] mx-1" />
+
+          {/* AI / Human toggle */}
+          <motion.button
+            onClick={toggleHumanMode}
+            disabled={togglingMode}
+            whileTap={{ scale: 0.95 }}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11.5px] font-semibold transition-all duration-300 select-none',
+              conversationMeta?.bot_paused
+                ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800 shadow-[0_0_0_3px_rgba(96,165,250,0.08)]'
+                : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-300 ring-1 ring-emerald-200 dark:ring-emerald-800 shadow-[0_0_0_3px_rgba(52,211,153,0.08)]',
+              togglingMode && 'opacity-40 pointer-events-none'
+            )}
+          >
+            <motion.div animate={{ rotate: togglingMode ? 360 : 0 }} transition={{ duration: 0.4 }}>
+              {conversationMeta?.bot_paused ? <User className="w-3 h-3" /> : <Bot className="w-3 h-3" />}
+            </motion.div>
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.span
+                key={conversationMeta?.bot_paused ? 'human' : 'ai'}
+                initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
+                transition={{ duration: 0.12 }}
+              >
+                {conversationMeta?.bot_paused ? 'Human' : 'AI'}
+              </motion.span>
+            </AnimatePresence>
+          </motion.button>
+        </div>
       </div>
 
       {/* ── Message list ── */}
@@ -278,8 +316,8 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           feed.map((item, i) => {
             if (item.type === 'date') {
               return (
-                <div key={`d-${i}`} className="flex items-center justify-center py-3">
-                  <span className="text-[11px] font-semibold text-muted-foreground bg-background/70 backdrop-blur-sm px-3 py-1 rounded-full border border-border/50">
+                <div key={`d-${i}`} className="flex items-center justify-center py-3 sticky top-0 z-10 pointer-events-none">
+                  <span className="pointer-events-auto text-[10.5px] font-semibold text-foreground/60 bg-white/70 dark:bg-[#1C2333]/70 backdrop-blur-md px-3 py-1 rounded-full shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
                     {item.label}
                   </span>
                 </div>
@@ -300,7 +338,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                       initial={{ opacity: 0, y: 5, scale: 0.97 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       transition={{ duration: 0.15, ease: 'easeOut' }}
-                      className={cn('max-w-[68%] flex', isInbound ? 'justify-start' : 'justify-end')}
+                      className={cn('group relative max-w-[68%] flex items-center gap-1.5', isInbound ? 'justify-start' : 'justify-end flex-row-reverse')}
                     >
                       <div className={cn(
                         'px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)]',
@@ -338,6 +376,31 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                           </div>
                         )}
                       </div>
+
+                      {/* Hover toolbar */}
+                      <div className="opacity-0 group-hover:opacity-100 translate-y-0 transition-opacity duration-150 flex items-center gap-0.5 bg-white dark:bg-[#1F2B3E] rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.1)] ring-1 ring-black/[0.04] dark:ring-white/[0.06] px-0.5 py-0.5 flex-shrink-0">
+                        <button
+                          onClick={() => copyMessage(msg.content)}
+                          title="Copy"
+                          className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                        >
+                          <Copy className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => toast('Reply', { description: 'Coming soon' })}
+                          title="Reply"
+                          className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                        >
+                          <Reply className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => toast('More actions', { description: 'Coming soon' })}
+                          title="More"
+                          className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                        >
+                          <MoreHorizontal className="w-3 h-3" />
+                        </button>
+                      </div>
                     </motion.div>
                   );
                 })}
@@ -363,9 +426,20 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
       {/* ── Composer ── */}
       <div className="flex-shrink-0 px-4 pb-4 pt-3">
-        <div className="flex items-end gap-2 bg-white dark:bg-[#1C2333] rounded-2xl px-3 py-2 shadow-[0_2px_16px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.04] dark:ring-white/[0.04]">
-          <button className="p-1.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors flex-shrink-0 mb-0.5">
+        <div className="flex items-end gap-1 bg-white dark:bg-[#1C2333] rounded-2xl px-2 py-2 shadow-[0_2px_16px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.04] dark:ring-white/[0.04]">
+          <button
+            onClick={() => toast('Attach', { description: 'Coming soon' })}
+            title="Attach"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/50 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors flex-shrink-0 mb-0.5"
+          >
             <Paperclip className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => toast('AI assist', { description: 'Coming soon' })}
+            title="AI assist"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-violet-500/70 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30 transition-colors flex-shrink-0 mb-0.5"
+          >
+            <Sparkles className="w-4 h-4" />
           </button>
           <textarea
             ref={textareaRef}
@@ -381,27 +455,50 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             placeholder="Type a message…"
             rows={1}
             disabled={sending}
-            className="flex-1 bg-transparent border-0 resize-none outline-none text-[13.5px] text-foreground placeholder:text-muted-foreground/50 py-1.5 min-h-[36px] max-h-32"
+            className="flex-1 bg-transparent border-0 resize-none outline-none text-[13.5px] text-foreground placeholder:text-muted-foreground/50 py-1.5 px-1 min-h-[36px] max-h-32"
           />
-          <button className="p-1.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors flex-shrink-0 mb-0.5">
+          <button
+            onClick={() => toast('Emoji', { description: 'Coming soon' })}
+            title="Emoji"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/50 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors flex-shrink-0 mb-0.5"
+          >
             <Smile className="w-4 h-4" />
           </button>
-          <motion.button
-            disabled={!inputMsg.trim() || sending}
-            onClick={handleSend}
-            whileTap={{ scale: 0.92 }}
-            className={cn(
-              'w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mb-0.5 transition-all',
-              inputMsg.trim() && !sending
-                ? 'bg-[#00A884] text-white hover:bg-[#009874]'
-                : 'bg-transparent text-muted-foreground/30'
+
+          {/* Mic OR Send (swaps based on input) */}
+          <AnimatePresence mode="wait" initial={false}>
+            {inputMsg.trim() ? (
+              <motion.button
+                key="send"
+                initial={{ scale: 0.7, opacity: 0, rotate: -30 }}
+                animate={{ scale: 1, opacity: 1, rotate: 0 }}
+                exit={{ scale: 0.7, opacity: 0, rotate: 30 }}
+                transition={{ duration: 0.15 }}
+                whileTap={{ scale: 0.92 }}
+                disabled={sending}
+                onClick={handleSend}
+                className="w-8 h-8 rounded-full bg-[#00A884] text-white hover:bg-[#009874] flex items-center justify-center flex-shrink-0 mb-0.5 transition-colors"
+              >
+                {sending
+                  ? <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  : <Send className="w-3.5 h-3.5" />
+                }
+              </motion.button>
+            ) : (
+              <motion.button
+                key="mic"
+                initial={{ scale: 0.7, opacity: 0, rotate: 30 }}
+                animate={{ scale: 1, opacity: 1, rotate: 0 }}
+                exit={{ scale: 0.7, opacity: 0, rotate: -30 }}
+                transition={{ duration: 0.15 }}
+                whileTap={{ scale: 0.92 }}
+                onClick={() => toast('Voice', { description: 'Coming soon' })}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/60 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors flex-shrink-0 mb-0.5"
+              >
+                <Mic className="w-4 h-4" />
+              </motion.button>
             )}
-          >
-            {sending
-              ? <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              : <Send className="w-3.5 h-3.5" />
-            }
-          </motion.button>
+          </AnimatePresence>
         </div>
       </div>
     </div>

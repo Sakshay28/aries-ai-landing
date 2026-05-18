@@ -4,7 +4,9 @@ import { useState, useEffect } from "react";
 import {
   Phone, Mail, Tag, Star, Bot, User,
   MessageSquare, ChevronDown, Plus, Trash2,
+  UserPlus, StickyNote, Workflow, Sparkles, TrendingUp, Loader2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Message } from "@/lib/types";
@@ -80,6 +82,102 @@ function InfoRow({ label, value }: { label: string; value: string }) {
       <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider">{label}</p>
       <p className="text-[12.5px] text-foreground/85 font-medium">{value || "—"}</p>
     </div>
+  );
+}
+
+// ── Sentiment heuristic (no API needed): score from message volume + AI ratio ──
+function deriveSentiment(messages: Message[]) {
+  if (messages.length === 0) {
+    return { label: "New conversation", emoji: "💬", tone: "neutral" as const, hint: "No messages yet" };
+  }
+  const inbound = messages.filter(m => m.direction === "inbound").length;
+  const ai = messages.filter(m => m.ai_generated).length;
+  const len = messages.length;
+
+  if (inbound >= 5 && ai / Math.max(len, 1) > 0.5) {
+    return { label: "Engaged lead", emoji: "🟢", tone: "positive" as const, hint: "Active back-and-forth" };
+  }
+  if (inbound >= 8) {
+    return { label: "Needs human", emoji: "🟡", tone: "warn" as const, hint: "High inbound volume" };
+  }
+  if (inbound === 0 && len > 0) {
+    return { label: "Awaiting reply", emoji: "⏳", tone: "neutral" as const, hint: "No response yet" };
+  }
+  return { label: "Active", emoji: "🟢", tone: "positive" as const, hint: `${len} messages exchanged` };
+}
+
+const SENTIMENT_BG: Record<"positive" | "warn" | "neutral", string> = {
+  positive: "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400",
+  warn:     "bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400",
+  neutral:  "bg-muted/60 dark:bg-white/[0.05] text-muted-foreground",
+};
+
+function SentimentCard({ messages }: { messages: Message[] }) {
+  const s = deriveSentiment(messages);
+  return (
+    <div className={cn("flex items-center gap-2.5 rounded-xl px-3 py-2.5", SENTIMENT_BG[s.tone])}>
+      <span className="text-[16px] leading-none">{s.emoji}</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-[12px] font-semibold leading-tight">{s.label}</p>
+        <p className="text-[10.5px] opacity-70 mt-0.5">{s.hint}</p>
+      </div>
+      <TrendingUp className="w-3 h-3 opacity-50" />
+    </div>
+  );
+}
+
+function SummaryCard({ meta, messages }: { meta: SharedConversationMeta; messages: Message[] }) {
+  const [loading, setLoading] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+
+  const generate = async () => {
+    if (messages.length === 0) {
+      toast.error("Nothing to summarize yet");
+      return;
+    }
+    setLoading(true);
+    // Heuristic summary (no API call) — pulls last inbound + counts
+    await new Promise(r => setTimeout(r, 600));
+    const last = messages.filter(m => m.direction === "inbound").at(-1);
+    const inbound = messages.filter(m => m.direction === "inbound").length;
+    const ai = messages.filter(m => m.ai_generated).length;
+    const lead = meta.leads;
+    const name = lead?.name || "Customer";
+    const parts = [
+      `${name} sent ${inbound} message${inbound === 1 ? "" : "s"}.`,
+      ai > 0 ? `AI handled ${ai} ${ai === 1 ? "reply" : "replies"}.` : "",
+      last ? `Last said: "${last.content.slice(0, 80)}${last.content.length > 80 ? "…" : ""}"` : "",
+    ].filter(Boolean);
+    setSummary(parts.join(" "));
+    setLoading(false);
+  };
+
+  if (summary) {
+    return (
+      <div className="rounded-xl bg-violet-50 dark:bg-violet-950/20 border border-violet-100 dark:border-violet-900/40 px-3 py-2.5">
+        <div className="flex items-center gap-1.5 mb-1">
+          <Sparkles className="w-3 h-3 text-violet-600 dark:text-violet-400" />
+          <p className="text-[10px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">Summary</p>
+        </div>
+        <p className="text-[12px] text-foreground/85 leading-relaxed">{summary}</p>
+        <button onClick={() => setSummary(null)} className="text-[10.5px] text-violet-600 dark:text-violet-400 font-semibold mt-1.5 hover:underline">
+          Regenerate
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={generate}
+      disabled={loading}
+      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-br from-violet-50 to-fuchsia-50 dark:from-violet-950/30 dark:to-fuchsia-950/30 hover:from-violet-100 hover:to-fuchsia-100 dark:hover:from-violet-900/40 dark:hover:to-fuchsia-900/40 border border-violet-100 dark:border-violet-900/40 text-violet-700 dark:text-violet-300 text-[11.5px] font-semibold transition-all"
+    >
+      {loading
+        ? <><Loader2 className="w-3 h-3 animate-spin" /> Summarizing…</>
+        : <><Sparkles className="w-3 h-3" /> Summarize conversation</>
+      }
+    </button>
   );
 }
 
@@ -172,6 +270,29 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
         )}
       </div>
 
+      {/* Quick Actions */}
+      {meta && (
+        <div className="px-4 pb-3">
+          <div className="grid grid-cols-4 gap-1.5">
+            {[
+              { icon: UserPlus, label: 'Assign' },
+              { icon: Tag, label: 'Tag' },
+              { icon: StickyNote, label: 'Note' },
+              { icon: Workflow, label: 'Flow' },
+            ].map(({ icon: Icon, label }) => (
+              <button
+                key={label}
+                onClick={() => toast(label, { description: 'Coming soon' })}
+                className="group flex flex-col items-center gap-1 py-2 rounded-xl hover:bg-black/[0.03] dark:hover:bg-white/[0.04] transition-colors"
+              >
+                <Icon className="w-3.5 h-3.5 text-muted-foreground/70 group-hover:text-foreground transition-colors" />
+                <span className="text-[10px] font-medium text-muted-foreground/70 group-hover:text-foreground transition-colors">{label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* subtle separator */}
       <div className="mx-4 h-px bg-black/[0.05] dark:bg-white/[0.05] mb-1" />
 
@@ -179,6 +300,12 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
       <div className="flex-1 overflow-y-auto">
         {meta && (
           <>
+            {/* AI Insights */}
+            <Section title="AI Insights" icon={Sparkles}>
+              <SentimentCard messages={messages} />
+              <SummaryCard meta={meta} messages={messages} />
+            </Section>
+
             {/* Contact */}
             <Section title="Contact" icon={Phone}>
               <InfoRow label="Phone" value={formatPhone(rawPhone)} />
