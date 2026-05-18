@@ -1,6 +1,6 @@
 "use client";
 
-import { Send, Bot, User, Check, CheckCheck, ArrowDown } from "lucide-react";
+import { Send, Bot, User, Check, CheckCheck, ArrowDown, Paperclip, Smile } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
@@ -188,37 +188,41 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
   if (!conversationId) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-muted/20">
-        <div className="flex flex-col items-center gap-3 text-center px-8">
-          <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-2">
-            <Bot className="w-7 h-7 text-muted-foreground" />
+      <div
+        className="flex-1 flex flex-col items-center justify-center"
+        style={{ background: 'var(--chat-surface, #EAEDF0)' }}
+      >
+        <div className="flex flex-col items-center gap-2.5 text-center px-8">
+          <div className="w-12 h-12 rounded-2xl bg-white/80 dark:bg-white/5 flex items-center justify-center mb-1 shadow-sm">
+            <Bot className="w-5 h-5 text-muted-foreground/60" />
           </div>
-          <p className="text-[15px] font-semibold text-foreground">No conversation selected</p>
-          <p className="text-[13px] text-muted-foreground">Pick a conversation from the left to get started</p>
+          <p className="text-[14px] font-medium text-foreground/70">Select a conversation</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-muted/10 relative overflow-hidden">
+    <div className="flex-1 flex flex-col relative overflow-hidden" style={{ background: 'var(--chat-surface, #EAEDF0)' }}>
 
       {/* ── Header ── */}
-      <div className="h-16 flex items-center justify-between px-5 bg-background border-b border-border z-20 flex-shrink-0">
+      <div className="h-[60px] flex items-center justify-between px-5 bg-white dark:bg-[#1C2333] shadow-[0_1px_3px_rgba(0,0,0,0.06)] z-20 flex-shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full overflow-hidden bg-muted flex items-center justify-center flex-shrink-0">
-            <img
-              src={avatarUrl(rawPhone || conversationId || 'x')}
-              alt="avatar"
-              className="w-full h-full object-cover"
-              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-            />
-            <span className="text-[13px] font-semibold text-muted-foreground" aria-hidden>{initial}</span>
+          <div className="relative">
+            <div className="w-9 h-9 rounded-full overflow-hidden bg-[#F0F2F5] dark:bg-white/10 flex items-center justify-center flex-shrink-0">
+              <img
+                src={avatarUrl(rawPhone || conversationId || 'x')}
+                alt="avatar"
+                className="w-full h-full object-cover"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+              />
+              <span className="text-[12px] font-semibold text-muted-foreground" aria-hidden>{initial}</span>
+            </div>
+            <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-400 border-2 border-white dark:border-[#1C2333]" />
           </div>
           <div>
-            <p className="text-[14px] font-semibold text-foreground leading-none">{displayName}</p>
-            <p className="text-[12px] text-muted-foreground mt-0.5 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+            <p className="text-[13.5px] font-semibold text-foreground leading-none">{displayName}</p>
+            <p className="text-[11.5px] text-muted-foreground/70 mt-0.5">
               {conversationMeta?.bot_paused ? 'Human mode active' : 'AI responding'}
             </p>
           </div>
@@ -230,23 +234,23 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           disabled={togglingMode}
           whileTap={{ scale: 0.95 }}
           className={cn(
-            'flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[12px] font-semibold transition-all duration-300 border select-none',
+            'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11.5px] font-semibold transition-all duration-300 select-none',
             conversationMeta?.bot_paused
-              ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300'
-              : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300',
+              ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800'
+              : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-300 ring-1 ring-emerald-200 dark:ring-emerald-800',
             togglingMode && 'opacity-40 pointer-events-none'
           )}
         >
           <motion.div animate={{ rotate: togglingMode ? 360 : 0 }} transition={{ duration: 0.4 }}>
-            {conversationMeta?.bot_paused ? <User className="w-3.5 h-3.5" /> : <Bot className="w-3.5 h-3.5" />}
+            {conversationMeta?.bot_paused ? <User className="w-3 h-3" /> : <Bot className="w-3 h-3" />}
           </motion.div>
           <AnimatePresence mode="wait" initial={false}>
             <motion.span
               key={conversationMeta?.bot_paused ? 'human' : 'ai'}
-              initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 5 }}
+              initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
               transition={{ duration: 0.12 }}
             >
-              {conversationMeta?.bot_paused ? 'Human Mode' : 'AI Mode'}
+              {conversationMeta?.bot_paused ? 'Human' : 'AI'}
             </motion.span>
           </AnimatePresence>
         </motion.button>
@@ -256,7 +260,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       <div
         ref={scrollAreaRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-5 py-5 space-y-1"
+        className="flex-1 overflow-y-auto px-4 py-4 space-y-1"
       >
         {loadingMessages ? (
           <div className="space-y-3 pt-2">
@@ -286,43 +290,50 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             const isInbound = group.direction === 'inbound';
 
             return (
-              <div key={`g-${i}`} className={cn('flex flex-col gap-0.5', isInbound ? 'items-start' : 'items-end')}>
+              <div key={`g-${i}`} className={cn('flex flex-col gap-px mb-1', isInbound ? 'items-start' : 'items-end')}>
                 {group.messages.map((msg, mi) => {
+                  const isFirst = mi === 0;
                   const isLast = mi === group.messages.length - 1;
                   return (
                     <motion.div
                       key={msg.id}
-                      initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                      initial={{ opacity: 0, y: 5, scale: 0.97 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
-                      transition={{ duration: 0.18, ease: 'easeOut' }}
-                      className={cn('max-w-[72%] flex', isInbound ? 'justify-start' : 'justify-end')}
+                      transition={{ duration: 0.15, ease: 'easeOut' }}
+                      className={cn('max-w-[68%] flex', isInbound ? 'justify-start' : 'justify-end')}
                     >
                       <div className={cn(
-                        'px-4 py-2.5 text-[14px] leading-relaxed',
+                        'px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)]',
                         isInbound
-                          ? 'bg-background text-foreground border border-border/60 rounded-2xl rounded-tl-md'
+                          ? cn(
+                              'bg-white dark:bg-[#1F2B3E] text-foreground',
+                              isFirst ? 'rounded-2xl rounded-tl-sm' : 'rounded-2xl',
+                              isLast && !isFirst ? 'rounded-bl-sm' : ''
+                            )
                           : cn(
-                            'text-white rounded-2xl rounded-tr-md',
-                            msg.ai_generated
-                              ? 'bg-emerald-600 dark:bg-emerald-700'
-                              : 'bg-foreground dark:bg-white dark:text-black'
-                          )
+                              'bg-[#D9FDD3] dark:bg-[#054640] text-[#111B21] dark:text-[#E9EDEF]',
+                              isFirst ? 'rounded-2xl rounded-tr-sm' : 'rounded-2xl',
+                              isLast && !isFirst ? 'rounded-br-sm' : ''
+                            )
                       )}>
                         <p className="whitespace-pre-wrap">{msg.content}</p>
                         {isLast && (
-                          <div className={cn('flex items-center gap-1 mt-1', isInbound ? 'justify-start' : 'justify-end')}>
-                            <span className={cn('text-[10px]', isInbound ? 'text-muted-foreground' : 'text-white/60')}>
+                          <div className={cn('flex items-center gap-1 mt-0.5', isInbound ? 'justify-start' : 'justify-end')}>
+                            <span className={cn(
+                              'text-[10.5px]',
+                              isInbound ? 'text-black/30 dark:text-white/30' : 'text-black/40 dark:text-white/40'
+                            )}>
                               {formatTime(msg.created_at)}
                             </span>
                             {!isInbound && (
                               msg.status === 'read'
-                                ? <CheckCheck className="w-3 h-3 text-sky-300" />
+                                ? <CheckCheck className="w-3 h-3 text-sky-500 dark:text-sky-300" />
                                 : msg.status === 'delivered'
-                                  ? <CheckCheck className="w-3 h-3 text-white/60" />
-                                  : <Check className="w-3 h-3 text-white/60" />
+                                  ? <CheckCheck className="w-3 h-3 text-black/30 dark:text-white/30" />
+                                  : <Check className="w-3 h-3 text-black/30 dark:text-white/30" />
                             )}
                             {!isInbound && msg.ai_generated && (
-                              <Bot className="w-3 h-3 text-white/50 ml-0.5" />
+                              <Bot className="w-2.5 h-2.5 text-black/25 dark:text-white/25 ml-0.5" />
                             )}
                           </div>
                         )}
@@ -343,16 +354,19 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           <motion.button
             initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }}
             onClick={() => scrollToBottom(true)}
-            className="absolute bottom-24 right-6 w-9 h-9 rounded-full bg-background border border-border shadow-lg flex items-center justify-center z-20 hover:bg-muted transition-colors"
+            className="absolute bottom-24 right-5 w-8 h-8 rounded-full bg-white dark:bg-[#1C2333] shadow-md flex items-center justify-center z-20 hover:shadow-lg transition-shadow"
           >
-            <ArrowDown className="w-4 h-4 text-foreground" />
+            <ArrowDown className="w-3.5 h-3.5 text-foreground" />
           </motion.button>
         )}
       </AnimatePresence>
 
       {/* ── Composer ── */}
-      <div className="flex-shrink-0 px-4 pb-4 pt-2 bg-background border-t border-border">
-        <div className="flex items-end gap-2 bg-muted/40 rounded-2xl px-4 py-2 focus-within:bg-muted/60 transition-colors">
+      <div className="flex-shrink-0 px-4 pb-4 pt-3">
+        <div className="flex items-end gap-2 bg-white dark:bg-[#1C2333] rounded-2xl px-3 py-2 shadow-[0_2px_16px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.04] dark:ring-white/[0.04]">
+          <button className="p-1.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors flex-shrink-0 mb-0.5">
+            <Paperclip className="w-4 h-4" />
+          </button>
           <textarea
             ref={textareaRef}
             value={inputMsg}
@@ -367,23 +381,27 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             placeholder="Type a message…"
             rows={1}
             disabled={sending}
-            className="flex-1 bg-transparent border-0 resize-none outline-none text-[14px] text-foreground placeholder:text-muted-foreground py-1.5 min-h-[36px] max-h-32"
+            className="flex-1 bg-transparent border-0 resize-none outline-none text-[13.5px] text-foreground placeholder:text-muted-foreground/50 py-1.5 min-h-[36px] max-h-32"
           />
-          <button
+          <button className="p-1.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors flex-shrink-0 mb-0.5">
+            <Smile className="w-4 h-4" />
+          </button>
+          <motion.button
             disabled={!inputMsg.trim() || sending}
             onClick={handleSend}
+            whileTap={{ scale: 0.92 }}
             className={cn(
               'w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mb-0.5 transition-all',
               inputMsg.trim() && !sending
-                ? 'bg-foreground text-background hover:opacity-90'
-                : 'bg-transparent text-muted-foreground/40'
+                ? 'bg-[#00A884] text-white hover:bg-[#009874]'
+                : 'bg-transparent text-muted-foreground/30'
             )}
           >
             {sending
-              ? <div className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
-              : <Send className="w-4 h-4" />
+              ? <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              : <Send className="w-3.5 h-3.5" />
             }
-          </button>
+          </motion.button>
         </div>
       </div>
     </div>

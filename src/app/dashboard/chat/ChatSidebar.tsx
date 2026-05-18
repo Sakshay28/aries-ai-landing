@@ -96,24 +96,22 @@ export default function ChatSidebar() {
   });
 
   return (
-    <div className="w-[320px] flex-shrink-0 border-r border-border flex flex-col bg-background relative z-20">
+    <div className="w-[300px] flex-shrink-0 bg-white dark:bg-[#111827] shadow-[1px_0_0_rgba(0,0,0,0.06)] dark:shadow-[1px_0_0_rgba(255,255,255,0.04)] flex flex-col relative z-20">
       {/* Header */}
-      <div className="px-5 pt-5 pb-3 border-b border-border/50">
-        <div className="flex items-center mb-4">
-          <h2 className="text-[17px] font-semibold text-foreground tracking-tight">Inbox</h2>
-        </div>
+      <div className="px-4 pt-5 pb-3">
+        <h2 className="text-[15px] font-semibold text-foreground tracking-tight mb-3">Inbox</h2>
 
         {/* Search */}
-        <div className="relative">
-          <Search className="w-[14px] h-[14px] absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <div className="relative flex items-center">
+          <Search className="w-3.5 h-3.5 absolute left-3 text-muted-foreground/50 pointer-events-none" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search conversations…"
-            className="w-full pl-8 pr-3 py-2 bg-muted/50 rounded-lg text-[13px] outline-none text-foreground placeholder:text-muted-foreground focus:bg-muted transition-colors"
+            placeholder="Search…"
+            className="w-full pl-8 pr-10 py-2 bg-[#F0F2F5] dark:bg-white/5 rounded-xl text-[13px] outline-none text-foreground placeholder:text-muted-foreground/50 focus:bg-[#E8ECF0] dark:focus:bg-white/8 transition-colors"
           />
+          <span className="absolute right-3 text-[10px] font-medium text-muted-foreground/40 pointer-events-none">⌘K</span>
         </div>
-
       </div>
 
       {/* List */}
@@ -140,47 +138,51 @@ export default function ChatSidebar() {
                 key={conv.id}
                 onClick={() => router.push(`/dashboard/chat?conversationId=${conv.id}`)}
                 className={cn(
-                  "w-full flex items-center gap-3 px-4 py-3 text-left transition-colors relative",
+                  "w-full flex items-center gap-3 px-4 py-3 text-left transition-all duration-150 relative group",
                   isActive
-                    ? "bg-muted/80"
-                    : "hover:bg-muted/40"
+                    ? "bg-[#EEF2F7] dark:bg-white/8"
+                    : "hover:bg-[#F5F7FA] dark:hover:bg-white/4"
                 )}
               >
                 {/* Active indicator */}
-                {isActive && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-8 bg-foreground rounded-r-full" />}
+                {isActive && (
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-7 bg-foreground rounded-r-full" />
+                )}
 
-                {/* Avatar */}
-                <div className="w-11 h-11 rounded-full flex-shrink-0 overflow-hidden bg-muted flex items-center justify-center">
-                  <img
-                    src={avatarUrl(phone || conv.id)}
-                    alt="avatar"
-                    className="w-full h-full object-cover"
-                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                  />
+                {/* Avatar with status dot */}
+                <div className="relative flex-shrink-0">
+                  <div className="w-10 h-10 rounded-full overflow-hidden bg-[#F0F2F5] dark:bg-white/10 flex items-center justify-center">
+                    <img
+                      src={avatarUrl(phone || conv.id)}
+                      alt="avatar"
+                      className="w-full h-full object-cover"
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                    />
+                    <span className="text-[12px] font-semibold text-muted-foreground" aria-hidden>
+                      {getInitial(conv)}
+                    </span>
+                  </div>
+                  {/* Mode dot */}
+                  <span className={cn(
+                    "absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-[#111827]",
+                    conv.bot_paused ? "bg-blue-400" : "bg-emerald-400"
+                  )} />
                 </div>
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-center mb-0.5">
-                    <span className={cn("text-[14px] font-semibold truncate", isActive ? "text-foreground" : "text-foreground/90")}>
+                  <div className="flex justify-between items-baseline">
+                    <span className={cn(
+                      "text-[13.5px] truncate font-semibold",
+                      isActive ? "text-foreground" : "text-foreground/85"
+                    )}>
                       {name}
                     </span>
-                    <span className="text-[11px] text-muted-foreground flex-shrink-0 ml-2">
+                    <span className="text-[11px] text-muted-foreground/60 flex-shrink-0 ml-2 font-normal">
                       {timeAgo(conv.last_message_at)}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-[13px] text-muted-foreground truncate flex-1">{preview}</p>
-                    {/* Bot status badge */}
-                    <span className={cn(
-                      "flex-shrink-0 flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md",
-                      conv.bot_paused
-                        ? "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
-                        : "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
-                    )}>
-                      {conv.bot_paused ? <User className="w-2.5 h-2.5" /> : <Bot className="w-2.5 h-2.5" />}
-                    </span>
-                  </div>
+                  <p className="text-[12.5px] text-muted-foreground/70 truncate mt-0.5 font-normal">{preview || 'No messages yet'}</p>
                 </div>
               </button>
             );

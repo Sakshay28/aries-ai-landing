@@ -34,7 +34,13 @@ export default function ChatPage() {
   }, []);
 
   return (
-    <div className="-m-4 md:-m-6 lg:-m-8 h-[calc(100vh-64px)] lg:h-screen flex overflow-hidden bg-background">
+    <div
+      className="-m-4 md:-m-6 lg:-m-8 h-[calc(100vh-64px)] lg:h-screen flex overflow-hidden"
+      style={{
+        background: '#F7F8FA',
+        ['--chat-surface' as string]: '#EAEDF0',
+      } as React.CSSProperties}
+    >
       <Suspense fallback={null}>
         <ChatSidebar />
       </Suspense>

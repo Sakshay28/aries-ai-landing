@@ -46,16 +46,16 @@ function Section({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="border-b border-border/50 last:border-0">
+    <div className="mb-1">
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-muted/30 transition-colors"
+        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors rounded-lg"
       >
-        <div className="flex items-center gap-2">
-          <Icon className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{title}</span>
+        <div className="flex items-center gap-1.5">
+          <Icon className="w-3 h-3 text-muted-foreground/60" />
+          <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/70">{title}</span>
         </div>
-        <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
+        <ChevronDown className={cn("w-3 h-3 text-muted-foreground/40 transition-transform duration-200", open && "rotate-180")} />
       </button>
       <AnimatePresence initial={false}>
         {open && (
@@ -63,10 +63,10 @@ function Section({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: "easeInOut" }}
+            transition={{ duration: 0.18, ease: "easeInOut" }}
             className="overflow-hidden"
           >
-            <div className="px-5 pb-4 space-y-3">{children}</div>
+            <div className="px-4 pb-3 space-y-2.5">{children}</div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -76,9 +76,9 @@ function Section({
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">{label}</p>
-      <p className="text-[13px] text-foreground font-medium">{value || "—"}</p>
+    <div className="flex flex-col gap-0.5">
+      <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider">{label}</p>
+      <p className="text-[12.5px] text-foreground/85 font-medium">{value || "—"}</p>
     </div>
   );
 }
@@ -131,10 +131,10 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const lastMsg = messages.at(-1);
 
   return (
-    <div className="w-[280px] flex-shrink-0 border-l border-border flex flex-col bg-background overflow-hidden">
+    <div className="w-[300px] flex-shrink-0 bg-[#FAFAFA] dark:bg-[#0F1623] shadow-[-1px_0_0_rgba(0,0,0,0.05)] dark:shadow-[-1px_0_0_rgba(255,255,255,0.04)] flex flex-col overflow-hidden">
       {/* ── Hero ── */}
-      <div className="flex flex-col items-center pt-6 pb-5 px-5 border-b border-border/50">
-        <div className="w-16 h-16 rounded-full overflow-hidden bg-muted flex items-center justify-center mb-3 flex-shrink-0">
+      <div className="flex items-center gap-3 px-4 pt-4 pb-3">
+        <div className="w-10 h-10 rounded-full overflow-hidden bg-[#F0F2F5] dark:bg-white/10 flex items-center justify-center flex-shrink-0">
           {meta ? (
             <img
               src={avatarUrl(rawPhone || meta.id)}
@@ -143,23 +143,22 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
               onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
             />
           ) : (
-            <User className="w-7 h-7 text-muted-foreground/40" />
+            <User className="w-5 h-5 text-muted-foreground/40" />
           )}
-          {!meta && <span className="text-[20px] font-semibold text-muted-foreground" aria-hidden>{initial}</span>}
         </div>
 
         {meta ? (
-          <>
-            <p className="text-[15px] font-semibold text-foreground text-center leading-tight">{displayName}</p>
-            {lead?.name && <p className="text-[12px] text-muted-foreground mt-0.5">{formatPhone(rawPhone)}</p>}
-            <div className="flex flex-wrap gap-1.5 justify-center mt-2">
+          <div className="flex-1 min-w-0">
+            <p className="text-[13.5px] font-semibold text-foreground truncate leading-tight">{displayName}</p>
+            {lead?.name && <p className="text-[11.5px] text-muted-foreground/60 mt-0.5 truncate">{formatPhone(rawPhone)}</p>}
+            <div className="flex items-center gap-1.5 mt-1.5">
               {lead?.lead_status && (
-                <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide", STATUS_COLORS[lead.lead_status] || STATUS_COLORS.new)}>
+                <span className={cn("px-1.5 py-0.5 rounded-md text-[9.5px] font-bold uppercase tracking-wide", STATUS_COLORS[lead.lead_status] || STATUS_COLORS.new)}>
                   {lead.lead_status}
                 </span>
               )}
               <span className={cn(
-                "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide",
+                "px-1.5 py-0.5 rounded-md text-[9.5px] font-bold uppercase tracking-wide",
                 meta.bot_paused
                   ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
                   : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
@@ -167,11 +166,14 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 {meta.bot_paused ? "Human" : "AI"}
               </span>
             </div>
-          </>
+          </div>
         ) : (
-          <p className="text-[13px] text-muted-foreground mt-1 text-center">Select a conversation</p>
+          <p className="text-[12px] text-muted-foreground/60">Select a conversation</p>
         )}
       </div>
+
+      {/* subtle separator */}
+      <div className="mx-4 h-px bg-black/[0.05] dark:bg-white/[0.05] mb-1" />
 
       {/* ── Sections ── */}
       <div className="flex-1 overflow-y-auto">
