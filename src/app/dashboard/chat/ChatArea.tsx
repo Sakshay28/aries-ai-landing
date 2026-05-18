@@ -277,8 +277,8 @@ export default function ChatArea() {
                 <div className="w-20 h-20 rounded-full bg-[#F2FDF5] text-[#12B76A] flex items-center justify-center font-bold text-[32px] ring-4 ring-[#12B76A]/15 mb-4">
                   {initial}
                 </div>
-                <p className="text-[18px] font-semibold text-foreground tracking-tight">{lead?.name || 'Unknown'}</p>
-                <p className="text-[13px] text-muted-foreground mt-1">{formatPhone(lead?.phone)}</p>
+                <p className="text-[18px] font-semibold text-foreground tracking-tight">{lead?.name || formatPhone(rawPhone) || 'Unknown'}</p>
+                <p className="text-[13px] text-muted-foreground mt-1">{formatPhone(rawPhone)}</p>
                 {lead?.lead_status && (
                   <span className={cn('mt-2 px-3 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide', STATUS_COLORS[lead.lead_status] || STATUS_COLORS.new)}>
                     {lead.lead_status}
@@ -306,7 +306,7 @@ export default function ChatArea() {
                   </div>
                   <div>
                     <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Phone</p>
-                    <p className="text-[14px] text-foreground">{formatPhone(lead?.phone) || '—'}</p>
+                    <p className="text-[14px] text-foreground">{formatPhone(rawPhone) || '—'}</p>
                   </div>
                 </div>
 
