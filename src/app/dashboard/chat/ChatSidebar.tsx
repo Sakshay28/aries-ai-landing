@@ -38,6 +38,10 @@ function timeAgo(dateStr: string | null): string {
   return new Date(dateStr).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
+function avatarUrl(seed: string): string {
+  return `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(seed)}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
+}
+
 function formatPhone(raw: string | null | undefined): string {
   if (!raw) return '';
   const digits = raw.replace(/\D/g, '');
@@ -167,10 +171,15 @@ export default function ChatSidebar() {
                 )}
               >
                 <div className={cn(
-                  "w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center font-semibold text-[15px] transition-all",
+                  "w-12 h-12 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center font-semibold text-[15px] transition-all",
                   AVATAR_COLORS[colorIdx]
                 )}>
-                  {getInitial(conv)}
+                  <img
+                    src={avatarUrl(conv.leads?.phone || conv.id)}
+                    alt="avatar"
+                    className="w-full h-full object-cover"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }}
+                  />
                 </div>
 
                 <div className="flex-1 min-w-0">

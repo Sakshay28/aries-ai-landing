@@ -30,6 +30,10 @@ interface ConversationMeta {
   leads?: LeadInfo | null;
 }
 
+function avatarUrl(seed: string): string {
+  return `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(seed)}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
+}
+
 function formatPhone(raw: string | null | undefined): string {
   if (!raw) return '';
   const digits = raw.replace(/\D/g, '');
@@ -196,8 +200,14 @@ export default function ChatArea() {
           onClick={() => setInfoOpen(true)}
           className="flex items-center gap-4 hover:opacity-80 transition-opacity text-left"
         >
-          <div className="w-10 h-10 rounded-full bg-[#F2FDF5] text-[#12B76A] flex items-center justify-center font-semibold text-[16px] ring-2 ring-[#12B76A]/20">
-            {initial}
+          <div className="w-10 h-10 rounded-full ring-2 ring-[#12B76A]/20 overflow-hidden bg-[#F2FDF5] flex items-center justify-center">
+            <img
+              src={avatarUrl(rawPhone || conversationId || 'default')}
+              alt="avatar"
+              className="w-full h-full object-cover"
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }}
+            />
+            <span className="absolute text-[16px] font-semibold text-[#12B76A]" aria-hidden>{initial}</span>
           </div>
           <div>
             <h2 className="text-[16px] font-semibold text-foreground tracking-tight leading-none mb-1">
@@ -274,8 +284,14 @@ export default function ChatArea() {
 
               {/* Avatar + Name */}
               <div className="flex flex-col items-center py-8 px-5 border-b border-[#E5E7EB] dark:border-white/10">
-                <div className="w-20 h-20 rounded-full bg-[#F2FDF5] text-[#12B76A] flex items-center justify-center font-bold text-[32px] ring-4 ring-[#12B76A]/15 mb-4">
-                  {initial}
+                <div className="w-20 h-20 rounded-full ring-4 ring-[#12B76A]/15 overflow-hidden bg-[#F2FDF5] flex items-center justify-center mb-4 relative">
+                  <img
+                    src={avatarUrl(rawPhone || conversationId || 'default')}
+                    alt="avatar"
+                    className="w-full h-full object-cover"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }}
+                  />
+                  <span className="absolute text-[32px] font-bold text-[#12B76A]" aria-hidden>{initial}</span>
                 </div>
                 <p className="text-[18px] font-semibold text-foreground tracking-tight">{lead?.name || formatPhone(rawPhone) || 'Unknown'}</p>
                 <p className="text-[13px] text-muted-foreground mt-1">{formatPhone(rawPhone)}</p>
