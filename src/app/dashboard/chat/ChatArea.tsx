@@ -139,7 +139,8 @@ export default function ChatArea() {
   const displayName = conversationMeta?.leads?.name
     || conversationMeta?.leads?.phone
     || conversationMeta?.sender_name
-    || conversationId?.slice(0, 8);
+    || conversationId?.slice(0, 8)
+    || "Unknown";
 
   const toggleHumanMode = async () => {
     if (!conversationId || !conversationMeta) return;
