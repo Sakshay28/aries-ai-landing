@@ -131,16 +131,22 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
     const channel = supabase
       .channel(`messages-${conversationId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', filter: `conversation_id=eq.${conversationId}` },
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
         (payload) => {
           if (!payload.new || !('content' in payload.new)) return;
           setMessages(prev => {
-            if (prev.some(m => m.id === payload.new.id)) return prev;
-            const updated = [...prev, payload.new as Message];
-            onDataLoaded?.(conversationMeta, updated);
-            return updated;
+            const exists = prev.some(m => m.id === (payload.new as Message).id);
+            if (exists) return prev;
+            return [...prev, payload.new as Message];
           });
           setTimeout(() => scrollToBottom(true), 50);
+        })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
+        (payload) => {
+          if (!payload.new || !('id' in payload.new)) return;
+          setMessages(prev =>
+            prev.map(m => m.id === (payload.new as Message).id ? { ...m, status: (payload.new as Message).status } : m)
+          );
         })
       .subscribe();
 
