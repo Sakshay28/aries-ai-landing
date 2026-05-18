@@ -161,7 +161,7 @@ function SidebarBody({
       {/* Header */}
       <div className="flex h-14 items-center justify-between px-4">
         {isOpen && (
-          <div className="flex items-center">
+          <Link href="/dashboard" className="flex items-center hover:opacity-90 transition-opacity">
             <Image 
               src="/logo.png" 
               alt="Aries AI" 
@@ -170,7 +170,7 @@ function SidebarBody({
               className="object-contain h-9 w-auto"
               priority
             />
-          </div>
+          </Link>
         )}
         <Button
           variant="ghost"
