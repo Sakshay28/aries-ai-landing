@@ -1,7 +1,7 @@
 "use client";
 
-import { Plus, Send } from "lucide-react";
-import { motion } from "framer-motion";
+import { Send, X, Phone, Mail, Tag, Star, Calendar, Bot, User } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -10,13 +10,40 @@ import { toast } from "sonner";
 import type { Message } from "@/lib/types";
 import { Skeleton } from "@/components/ui/skeleton";
 
+interface LeadInfo {
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  lead_status: string | null;
+  lead_score: number | null;
+  tags: string[] | null;
+  created_at: string | null;
+  first_message_at: string | null;
+}
+
 interface ConversationMeta {
   id: string;
   is_active: boolean;
   bot_paused: boolean;
   sender_name: string | null;
-  leads?: { name: string | null; phone: string | null } | null;
+  leads?: LeadInfo | null;
 }
+
+function formatPhone(raw: string | null | undefined): string {
+  if (!raw) return '';
+  const digits = raw.replace(/\D/g, '');
+  // Strip leading 91 for Indian numbers
+  const local = digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits;
+  if (local.length === 10) return `+91 ${local.slice(0, 5)} ${local.slice(5)}`;
+  return `+${digits}`;
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  hot:  'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+  warm: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
+  cold: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+  new:  'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-400',
+};
 
 function formatTime(dateStr: string): string {
   return new Date(dateStr).toLocaleTimeString("en-IN", {
@@ -32,6 +59,7 @@ export default function ChatArea() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [conversationMeta, setConversationMeta] = useState<ConversationMeta | null>(null);
   const [togglingMode, setTogglingMode] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const searchParams = useSearchParams();
   const conversationId = searchParams.get("conversationId");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -142,13 +170,10 @@ export default function ChatArea() {
     }
   };
 
-  const displayName = conversationMeta?.leads?.name
-    || conversationMeta?.leads?.phone
-    || conversationMeta?.sender_name
-    || conversationId?.slice(0, 8)
-    || "Unknown";
-    
-  const initial = displayName.charAt(0).toUpperCase();
+  const lead = conversationMeta?.leads;
+  const rawPhone = lead?.phone || conversationMeta?.sender_name || '';
+  const displayName = lead?.name || formatPhone(rawPhone) || conversationId?.slice(0, 8) || 'Unknown';
+  const initial = (lead?.name ?? rawPhone)?.charAt(0)?.toUpperCase() || '?';
 
   if (!conversationId) {
     return (
@@ -161,51 +186,172 @@ export default function ChatArea() {
   return (
     <div className="flex-1 flex flex-col bg-[#EFEAE2] dark:bg-[#0B1120] font-sans relative z-10">
       
-      {/* Premium Header */}
+      {/* Header */}
       <div className="h-[72px] flex items-center justify-between px-6 bg-white dark:bg-[#1A1D21] border-b border-[#E5E7EB] dark:border-white/10 z-20">
         
-        {/* Left: Identity */}
-        <div className="flex items-center gap-4 cursor-pointer">
-          <div className="w-10 h-10 rounded-full bg-[#F2FDF5] text-[#12B76A] flex items-center justify-center font-semibold text-[16px]">
+        {/* Left: Identity — click to open info panel */}
+        <button
+          onClick={() => setInfoOpen(true)}
+          className="flex items-center gap-4 hover:opacity-80 transition-opacity text-left"
+        >
+          <div className="w-10 h-10 rounded-full bg-[#F2FDF5] text-[#12B76A] flex items-center justify-center font-semibold text-[16px] ring-2 ring-[#12B76A]/20">
             {initial}
           </div>
           <div>
             <h2 className="text-[16px] font-semibold text-foreground tracking-tight leading-none mb-1">
               {displayName}
             </h2>
-            <p className="text-[13px] font-medium text-muted-foreground tracking-tight">
-              Active now
+            <p className="text-[13px] font-medium text-muted-foreground tracking-tight flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+              {formatPhone(rawPhone) || 'Tap for info'}
             </p>
           </div>
-        </div>
+        </button>
 
-        {/* Right: Actions */}
-        <div className="flex items-center gap-4">
-          {/* Subtle Human/AI Toggle */}
-          <div 
-            onClick={toggleHumanMode}
-            className={cn(
-              "flex items-center gap-3 px-3 py-1.5 rounded-full cursor-pointer transition-all border",
-              togglingMode ? "opacity-50 pointer-events-none" : "opacity-100",
-              "bg-white dark:bg-[#22252A] border-[#E5E7EB] dark:border-white/10 shadow-sm"
-            )}
+        {/* Right: AI / Human toggle */}
+        <motion.button
+          onClick={toggleHumanMode}
+          disabled={togglingMode}
+          whileTap={{ scale: 0.96 }}
+          className={cn(
+            "relative flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all duration-300 border shadow-sm select-none",
+            conversationMeta?.bot_paused
+              ? "bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300"
+              : "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300",
+            togglingMode && "opacity-50 pointer-events-none"
+          )}
+        >
+          <motion.div
+            animate={{ rotate: togglingMode ? 360 : 0 }}
+            transition={{ duration: 0.4, ease: "easeInOut" }}
           >
-            <span className={cn("text-[12px] font-semibold transition-colors", !conversationMeta?.bot_paused ? "text-foreground" : "text-muted-foreground")}>AI</span>
-            
-            <div className="w-8 h-4 rounded-full bg-muted/50 border border-border relative flex items-center">
-              <motion.div 
-                layout
-                className="w-3 h-3 rounded-full bg-foreground absolute"
-                animate={{ left: conversationMeta?.bot_paused ? "16px" : "3px" }}
-                transition={{ type: "spring", stiffness: 500, damping: 30 }}
-              />
-            </div>
-            
-            <span className={cn("text-[12px] font-semibold transition-colors", conversationMeta?.bot_paused ? "text-foreground" : "text-muted-foreground")}>Human</span>
-          </div>
-
-        </div>
+            {conversationMeta?.bot_paused
+              ? <User className="w-4 h-4" />
+              : <Bot className="w-4 h-4" />
+            }
+          </motion.div>
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.span
+              key={conversationMeta?.bot_paused ? 'human' : 'ai'}
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              transition={{ duration: 0.15 }}
+            >
+              {conversationMeta?.bot_paused ? 'Human Mode' : 'AI Mode'}
+            </motion.span>
+          </AnimatePresence>
+        </motion.button>
       </div>
+
+      {/* Contact Info Slide-in Panel */}
+      <AnimatePresence>
+        {infoOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-30"
+              onClick={() => setInfoOpen(false)}
+            />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+              className="fixed top-0 right-0 h-full w-[320px] bg-white dark:bg-[#1A1D21] border-l border-[#E5E7EB] dark:border-white/10 z-40 shadow-2xl flex flex-col"
+            >
+              {/* Panel Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E7EB] dark:border-white/10">
+                <h3 className="text-[15px] font-semibold text-foreground">Contact Info</h3>
+                <button onClick={() => setInfoOpen(false)} className="p-1.5 rounded-full hover:bg-muted transition-colors">
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
+              </div>
+
+              {/* Avatar + Name */}
+              <div className="flex flex-col items-center py-8 px-5 border-b border-[#E5E7EB] dark:border-white/10">
+                <div className="w-20 h-20 rounded-full bg-[#F2FDF5] text-[#12B76A] flex items-center justify-center font-bold text-[32px] ring-4 ring-[#12B76A]/15 mb-4">
+                  {initial}
+                </div>
+                <p className="text-[18px] font-semibold text-foreground tracking-tight">{lead?.name || 'Unknown'}</p>
+                <p className="text-[13px] text-muted-foreground mt-1">{formatPhone(lead?.phone)}</p>
+                {lead?.lead_status && (
+                  <span className={cn('mt-2 px-3 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide', STATUS_COLORS[lead.lead_status] || STATUS_COLORS.new)}>
+                    {lead.lead_status}
+                  </span>
+                )}
+              </div>
+
+              {/* Details */}
+              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+                {lead?.email && (
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                      <Mail className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Email</p>
+                      <p className="text-[14px] text-foreground">{lead.email}</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                    <Phone className="w-4 h-4 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Phone</p>
+                    <p className="text-[14px] text-foreground">{formatPhone(lead?.phone) || '—'}</p>
+                  </div>
+                </div>
+
+                {typeof lead?.lead_score === 'number' && (
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                      <Star className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Lead Score</p>
+                      <p className="text-[14px] text-foreground">{lead.lead_score} / 100</p>
+                    </div>
+                  </div>
+                )}
+
+                {lead?.tags && lead.tags.length > 0 && (
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <Tag className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">Tags</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {lead.tags.map(t => (
+                          <span key={t} className="px-2 py-0.5 bg-muted rounded-full text-[12px] font-medium text-foreground">{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {lead?.first_message_at && (
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                      <Calendar className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">First Contact</p>
+                      <p className="text-[14px] text-foreground">{new Date(lead.first_message_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Main Chat Area */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
@@ -266,10 +412,6 @@ export default function ChatArea() {
         <div className="max-w-[860px] mx-auto w-full">
           <div className="flex items-end gap-3 bg-white dark:bg-[#1A1D21] border border-[#E5E7EB] dark:border-white/10 rounded-[20px] p-2 shadow-[0_2px_12px_rgba(0,0,0,0.04)] focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.08)] transition-all">
             
-            <button className="p-3 text-muted-foreground hover:text-foreground transition-colors flex-shrink-0">
-              <Plus className="w-[22px] h-[22px] stroke-[1.75]" />
-            </button>
-
             <textarea
               ref={textareaRef}
               value={inputMsg}

@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     // Get conversation details
     const { data: conv, error: convErr } = await supabaseAdmin
       .from("conversations")
-      .select("id, is_active, bot_paused, sender_name, leads(name, phone)")
+      .select("id, is_active, bot_paused, sender_name, leads(name, phone, email, lead_status, lead_score, tags, created_at, first_message_at)")
       .eq("id", id)
       .eq("tenant_id", tenantId)
       .single();
