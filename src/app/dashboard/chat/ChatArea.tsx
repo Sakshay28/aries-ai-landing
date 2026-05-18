@@ -332,16 +332,33 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                 {group.messages.map((msg, mi) => {
                   const isFirst = mi === 0;
                   const isLast = mi === group.messages.length - 1;
+                  const hoverToolbar = (
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center gap-0.5 bg-white dark:bg-[#1F2B3E] rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.1)] ring-1 ring-black/[0.04] dark:ring-white/[0.06] px-0.5 py-0.5 flex-shrink-0 self-center">
+                      <button onClick={() => copyMessage(msg.content)} title="Copy" className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors">
+                        <Copy className="w-3 h-3" />
+                      </button>
+                      <button onClick={() => toast('Reply', { description: 'Coming soon' })} title="Reply" className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors">
+                        <Reply className="w-3 h-3" />
+                      </button>
+                      <button onClick={() => toast('More', { description: 'Coming soon' })} title="More" className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors">
+                        <MoreHorizontal className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+
                   return (
                     <motion.div
                       key={msg.id}
                       initial={{ opacity: 0, y: 5, scale: 0.97 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       transition={{ duration: 0.15, ease: 'easeOut' }}
-                      className={cn('group relative max-w-[68%] flex items-center gap-1.5', isInbound ? 'justify-start' : 'justify-end flex-row-reverse')}
+                      className={cn('group w-full flex items-end gap-1', isInbound ? 'justify-start' : 'justify-end')}
                     >
+                      {/* Outbound: toolbar floats to the LEFT of bubble */}
+                      {!isInbound && hoverToolbar}
+
                       <div className={cn(
-                        'px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)]',
+                        'max-w-[65%] px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)]',
                         isInbound
                           ? cn(
                               'bg-white dark:bg-[#1F2B3E] text-foreground',
@@ -355,52 +372,29 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                             )
                       )}>
                         <p className="whitespace-pre-wrap">{msg.content}</p>
-                        {isLast && (
-                          <div className={cn('flex items-center gap-1 mt-0.5', isInbound ? 'justify-start' : 'justify-end')}>
-                            <span className={cn(
-                              'text-[10.5px]',
-                              isInbound ? 'text-black/30 dark:text-white/30' : 'text-black/40 dark:text-white/40'
-                            )}>
-                              {formatTime(msg.created_at)}
-                            </span>
-                            {!isInbound && (
-                              msg.status === 'read'
-                                ? <CheckCheck className="w-3 h-3 text-sky-500 dark:text-sky-300" />
-                                : msg.status === 'delivered'
-                                  ? <CheckCheck className="w-3 h-3 text-black/30 dark:text-white/30" />
-                                  : <Check className="w-3 h-3 text-black/30 dark:text-white/30" />
-                            )}
-                            {!isInbound && msg.ai_generated && (
-                              <Bot className="w-2.5 h-2.5 text-black/25 dark:text-white/25 ml-0.5" />
-                            )}
-                          </div>
-                        )}
+                        {/* Timestamp + ticks on EVERY bubble */}
+                        <div className={cn('flex items-center gap-1 mt-0.5', isInbound ? 'justify-start' : 'justify-end')}>
+                          <span className={cn(
+                            'text-[10.5px]',
+                            isInbound ? 'text-black/30 dark:text-white/30' : 'text-black/40 dark:text-white/40'
+                          )}>
+                            {formatTime(msg.created_at)}
+                          </span>
+                          {!isInbound && (
+                            msg.status === 'read'
+                              ? <CheckCheck className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
+                              : msg.status === 'delivered'
+                                ? <CheckCheck className="w-3.5 h-3.5 text-black/35 dark:text-white/35" />
+                                : <Check className="w-3.5 h-3.5 text-black/35 dark:text-white/35" />
+                          )}
+                          {!isInbound && msg.ai_generated && (
+                            <Bot className="w-2.5 h-2.5 text-black/25 dark:text-white/25 ml-0.5" />
+                          )}
+                        </div>
                       </div>
 
-                      {/* Hover toolbar */}
-                      <div className="opacity-0 group-hover:opacity-100 translate-y-0 transition-opacity duration-150 flex items-center gap-0.5 bg-white dark:bg-[#1F2B3E] rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.1)] ring-1 ring-black/[0.04] dark:ring-white/[0.06] px-0.5 py-0.5 flex-shrink-0">
-                        <button
-                          onClick={() => copyMessage(msg.content)}
-                          title="Copy"
-                          className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
-                        >
-                          <Copy className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => toast('Reply', { description: 'Coming soon' })}
-                          title="Reply"
-                          className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
-                        >
-                          <Reply className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => toast('More actions', { description: 'Coming soon' })}
-                          title="More"
-                          className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
-                        >
-                          <MoreHorizontal className="w-3 h-3" />
-                        </button>
-                      </div>
+                      {/* Inbound: toolbar floats to the RIGHT of bubble */}
+                      {isInbound && hoverToolbar}
                     </motion.div>
                   );
                 })}
