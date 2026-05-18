@@ -9,7 +9,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { PLAN_DETAILS } from '@/lib/types';
 
@@ -22,7 +21,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
   }
 
-  const cookieStore = await cookies();
+  // Collect cookies written during exchangeCodeForSession so we can
+  // apply them directly onto the final redirect response.
+  // Using cookieStore (next/headers) and then returning a separate
+  // NextResponse.redirect() drops the session — the browser never
+  // receives the auth cookies and middleware sees no session → loop.
+  type CookieEntry = { name: string; value: string; options: Record<string, unknown> };
+  const pendingCookies: CookieEntry[] = [];
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -30,27 +35,12 @@ export async function GET(req: NextRequest) {
     {
       cookies: {
         getAll() {
-          return cookieStore.getAll();
+          return req.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              // SECURITY: force httpOnly + secure + lax sameSite on every
-              // auth cookie so an XSS payload cannot read the session JWT
-              // via document.cookie. We deliberately ignore any conflicting
-              // values Supabase may pass through `options`.
-              cookieStore.set(name, value, {
-                ...options,
-                httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'lax',
-                path: (options as { path?: string } | undefined)?.path ?? '/',
-              });
-            });
-          } catch {
-            // The `set` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing user sessions.
-          }
+          cookiesToSet.forEach(({ name, value, options }) => {
+            pendingCookies.push({ name, value, options: options as Record<string, unknown> });
+          });
         },
       },
     }
@@ -63,6 +53,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
   }
 
+  // Helper: apply collected session cookies onto any response
+  const applySessionCookies = (response: NextResponse) => {
+    pendingCookies.forEach(({ name, value, options }) => {
+      response.cookies.set(name, value, {
+        ...options,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax' as const,
+        path: (options?.path as string) ?? '/',
+      });
+    });
+    return response;
+  };
+
   // Check if user already has a tenant
   const { data: existingUser } = await supabaseAdmin
     .from('users')
@@ -72,7 +76,7 @@ export async function GET(req: NextRequest) {
 
   if (existingUser) {
     // Returning user — go straight to where they were heading.
-    return NextResponse.redirect(`${origin}${next}`);
+    return applySessionCookies(NextResponse.redirect(`${origin}${next}`));
   }
 
   // New OAuth user — auto-provision tenant + user with sensible defaults.
@@ -131,7 +135,7 @@ export async function GET(req: NextRequest) {
 
     console.log(`🎉 New OAuth signup: ${businessName} (${user.email})`);
     // Send new users to onboarding wizard, not dashboard
-    return NextResponse.redirect(`${origin}/onboard`);
+    return applySessionCookies(NextResponse.redirect(`${origin}/onboard`));
   } catch (err) {
     console.error('❌ OAuth callback error:', err);
     return NextResponse.redirect(`${origin}/login?error=signup_failed`);

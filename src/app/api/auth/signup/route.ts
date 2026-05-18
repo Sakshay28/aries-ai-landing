@@ -126,12 +126,12 @@ export async function POST(req: NextRequest) {
       throw userError;
     }
 
-    // 4. Log event
-    await supabaseAdmin.from('analytics_events').insert({
+    // 4. Log event (fire-and-forget — never block signup on analytics)
+    supabaseAdmin.from('analytics_events').insert({
       tenant_id: tenant.id,
       event_type: 'user_signup',
       metadata: { email, plan: selectedPlan },
-    });
+    }).then(({ error: e }) => { if (e) console.warn('analytics_events insert failed (non-fatal):', e.message); });
 
     console.log(`🎉 New signup: ${businessName} (${email}) — ${selectedPlan} plan`);
 
