@@ -1,6 +1,6 @@
 "use client";
 
-import { Send, X, Phone, Mail, Tag, Star, Calendar, Bot, User, MessageSquare, Activity } from "lucide-react";
+import { Send, Bot, User, Check, CheckCheck, ArrowDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
@@ -9,27 +9,9 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { Message } from "@/lib/types";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { SharedConversationMeta } from "./page";
 
-interface LeadInfo {
-  name: string | null;
-  phone: string | null;
-  email: string | null;
-  lead_status: string | null;
-  lead_score: number | null;
-  tags: string[] | null;
-  created_at: string | null;
-  first_message_at: string | null;
-}
-
-interface ConversationMeta {
-  id: string;
-  is_active: boolean;
-  bot_paused: boolean;
-  sender_name: string | null;
-  sender_id: string | null;   // phone number of the WhatsApp sender
-  leads?: LeadInfo | null;
-}
-
+// ── helpers ────────────────────────────────────────────────────────────
 function avatarUrl(seed: string): string {
   return `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(seed)}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
 }
@@ -37,218 +19,232 @@ function avatarUrl(seed: string): string {
 function formatPhone(raw: string | null | undefined): string {
   if (!raw) return '';
   const digits = raw.replace(/\D/g, '');
-  // Strip leading 91 for Indian numbers
   const local = digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits;
   if (local.length === 10) return `+91 ${local.slice(0, 5)} ${local.slice(5)}`;
   return `+${digits}`;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  hot:  'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-  warm: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
-  cold: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-  new:  'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-400',
-};
-
 function formatTime(dateStr: string): string {
-  return new Date(dateStr).toLocaleTimeString("en-IN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return new Date(dateStr).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 }
 
-export default function ChatArea() {
-  const [inputMsg, setInputMsg] = useState("");
+function dateSeparatorLabel(dateStr: string): string {
+  const d = new Date(dateStr);
+  const today = new Date();
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  const isSameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (isSameDay(d, today)) return 'Today';
+  if (isSameDay(d, yesterday)) return 'Yesterday';
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+interface MessageGroup {
+  direction: 'inbound' | 'outbound';
+  messages: Message[];
+}
+
+type FeedItem = { type: 'date'; label: string } | { type: 'group'; group: MessageGroup };
+
+function buildFeed(messages: Message[]): FeedItem[] {
+  const feed: FeedItem[] = [];
+  let lastDay = '';
+  let currentGroup: MessageGroup | null = null;
+
+  const pushGroup = () => { if (currentGroup) feed.push({ type: 'group', group: currentGroup }); };
+
+  for (const msg of messages) {
+    const msgDay = new Date(msg.created_at).toDateString();
+    if (msgDay !== lastDay) {
+      pushGroup(); currentGroup = null;
+      feed.push({ type: 'date', label: dateSeparatorLabel(msg.created_at) });
+      lastDay = msgDay;
+    }
+    const timeDiff = currentGroup?.messages.length
+      ? new Date(msg.created_at).getTime() - new Date(currentGroup.messages.at(-1)!.created_at).getTime()
+      : Infinity;
+    if (!currentGroup || currentGroup.direction !== msg.direction || timeDiff > 120_000) {
+      pushGroup();
+      currentGroup = { direction: msg.direction, messages: [msg] };
+    } else {
+      currentGroup.messages.push(msg);
+    }
+  }
+  pushGroup();
+  return feed;
+}
+
+// ── props ────────────────────────────────────────────────────────────
+interface ChatAreaProps {
+  onDataLoaded?: (meta: SharedConversationMeta | null, messages: Message[]) => void;
+}
+
+// ── component ───────────────────────────────────────────────────────
+export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
+  const [inputMsg, setInputMsg] = useState('');
   const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
-  const [conversationMeta, setConversationMeta] = useState<ConversationMeta | null>(null);
+  const [conversationMeta, setConversationMeta] = useState<SharedConversationMeta | null>(null);
   const [togglingMode, setTogglingMode] = useState(false);
-  const [infoOpen, setInfoOpen] = useState(false);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
   const searchParams = useSearchParams();
-  const conversationId = searchParams.get("conversationId");
+  const conversationId = searchParams.get('conversationId');
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const supabaseRef = useRef(createBrowserSupabaseClient());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  const scrollToBottom = useCallback((smooth = true) => {
+    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' });
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollAreaRef.current;
+    if (!el) return;
+    setShowScrollBtn(el.scrollHeight - el.scrollTop - el.clientHeight > 120);
   }, []);
 
   useEffect(() => {
-    if (!conversationId) return;
+    if (!conversationId) { setConversationMeta(null); setMessages([]); onDataLoaded?.(null, []); return; }
     const supabase = supabaseRef.current;
     setLoadingMessages(true);
     setMessages([]);
 
     fetch(`/api/dashboard/chat/conversation?id=${conversationId}`)
-      .then((res) => res.json())
-      .then((data) => {
+      .then(r => r.json())
+      .then(data => {
         if (data.success) {
-          setConversationMeta(data.conversation as ConversationMeta);
-          setMessages(data.messages as Message[]);
+          const meta = data.conversation as SharedConversationMeta;
+          const msgs = data.messages as Message[];
+          setConversationMeta(meta);
+          setMessages(msgs);
+          onDataLoaded?.(meta, msgs);
         }
         setLoadingMessages(false);
-        setTimeout(scrollToBottom, 100);
+        setTimeout(() => scrollToBottom(false), 80);
       })
-      .catch((err) => {
-        setLoadingMessages(false);
-      });
+      .catch(() => setLoadingMessages(false));
 
     const channel = supabase
       .channel(`messages-${conversationId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          filter: `conversation_id=eq.${conversationId}`,
-        },
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', filter: `conversation_id=eq.${conversationId}` },
         (payload) => {
           if (!payload.new || !('content' in payload.new)) return;
-          setMessages((prev) => {
-            const exists = prev.some((m) => m.id === payload.new.id);
-            if (exists) return prev;
-            return [...prev, payload.new as Message];
+          setMessages(prev => {
+            if (prev.some(m => m.id === payload.new.id)) return prev;
+            const updated = [...prev, payload.new as Message];
+            onDataLoaded?.(conversationMeta, updated);
+            return updated;
           });
-          setTimeout(scrollToBottom, 50);
-        }
-      )
+          setTimeout(() => scrollToBottom(true), 50);
+        })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [conversationId, scrollToBottom]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
 
   const handleSend = async () => {
     if (!inputMsg.trim() || !conversationId || sending) return;
     const text = inputMsg.trim();
-    setInputMsg("");
+    setInputMsg('');
     setSending(true);
-
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
     try {
-      const res = await fetch("/api/chat/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/chat/send', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ conversationId, message: text }),
       });
-      if (!res.ok) throw new Error("Failed to send");
-      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      if (!res.ok) throw new Error('Failed');
     } catch {
-      toast.error("Message failed to send.");
+      toast.error('Message failed to send.');
       setInputMsg(text);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInputMsg(e.target.value);
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 128) + "px";
-    }
+    } finally { setSending(false); }
   };
 
   const toggleHumanMode = async () => {
-    if (!conversationId || !conversationMeta) return;
+    if (!conversationId || !conversationMeta || togglingMode) return;
     const newPaused = !conversationMeta.bot_paused;
     setTogglingMode(true);
     try {
       const res = await fetch(`/api/dashboard/chat/conversation?id=${conversationId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bot_paused: newPaused }),
       });
-      const data = await res.json();
-      if (data.success) {
-        setConversationMeta(prev => prev ? { ...prev, bot_paused: newPaused } : null);
+      if ((await res.json()).success) {
+        const updated = { ...conversationMeta, bot_paused: newPaused };
+        setConversationMeta(updated);
+        onDataLoaded?.(updated, messages);
       }
-    } finally {
-      setTogglingMode(false);
-    }
+    } finally { setTogglingMode(false); }
   };
 
   const lead = conversationMeta?.leads;
-  // sender_id is the raw phone stored on the conversation row itself — always available
   const rawPhone = lead?.phone || conversationMeta?.sender_id || conversationMeta?.sender_name || '';
   const displayName = lead?.name || formatPhone(rawPhone) || conversationId?.slice(0, 8) || 'Unknown';
   const initial = (lead?.name ?? rawPhone)?.charAt(0)?.toUpperCase() || '?';
+  const feed = buildFeed(messages);
 
   if (!conversationId) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-[#EFEAE2] dark:bg-[#0B1120] font-sans">
-        <p className="text-[15px] font-medium text-muted-foreground">Select a conversation to start messaging</p>
+      <div className="flex-1 flex flex-col items-center justify-center bg-muted/20">
+        <div className="flex flex-col items-center gap-3 text-center px-8">
+          <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-2">
+            <Bot className="w-7 h-7 text-muted-foreground" />
+          </div>
+          <p className="text-[15px] font-semibold text-foreground">No conversation selected</p>
+          <p className="text-[13px] text-muted-foreground">Pick a conversation from the left to get started</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-[#EFEAE2] dark:bg-[#0B1120] font-sans relative z-10">
-      
-      {/* Header */}
-      <div className="h-[72px] flex items-center justify-between px-6 bg-white dark:bg-[#1A1D21] border-b border-[#E5E7EB] dark:border-white/10 z-20">
-        
-        {/* Left: Identity — click to open info panel */}
-        <button
-          onClick={() => setInfoOpen(true)}
-          className="flex items-center gap-4 hover:opacity-80 transition-opacity text-left"
-        >
-          <div className="w-10 h-10 rounded-full ring-2 ring-[#12B76A]/20 overflow-hidden bg-[#F2FDF5] flex items-center justify-center">
+    <div className="flex-1 flex flex-col bg-muted/10 relative overflow-hidden">
+
+      {/* ── Header ── */}
+      <div className="h-16 flex items-center justify-between px-5 bg-background border-b border-border z-20 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-full overflow-hidden bg-muted flex items-center justify-center flex-shrink-0">
             <img
-              src={avatarUrl(rawPhone || conversationId || 'default')}
+              src={avatarUrl(rawPhone || conversationId || 'x')}
               alt="avatar"
               className="w-full h-full object-cover"
-              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }}
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
             />
-            <span className="absolute text-[16px] font-semibold text-[#12B76A]" aria-hidden>{initial}</span>
+            <span className="text-[13px] font-semibold text-muted-foreground" aria-hidden>{initial}</span>
           </div>
           <div>
-            <h2 className="text-[16px] font-semibold text-foreground tracking-tight leading-none mb-1">
-              {displayName}
-            </h2>
-            <p className="text-[13px] font-medium text-muted-foreground tracking-tight flex items-center gap-1.5">
+            <p className="text-[14px] font-semibold text-foreground leading-none">{displayName}</p>
+            <p className="text-[12px] text-muted-foreground mt-0.5 flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-              {formatPhone(rawPhone) || 'Tap for info'}
+              {conversationMeta?.bot_paused ? 'Human mode active' : 'AI responding'}
             </p>
           </div>
-        </button>
+        </div>
 
-        {/* Right: AI / Human toggle */}
+        {/* AI / Human toggle */}
         <motion.button
           onClick={toggleHumanMode}
           disabled={togglingMode}
-          whileTap={{ scale: 0.96 }}
+          whileTap={{ scale: 0.95 }}
           className={cn(
-            "relative flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all duration-300 border shadow-sm select-none",
+            'flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[12px] font-semibold transition-all duration-300 border select-none',
             conversationMeta?.bot_paused
-              ? "bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300"
-              : "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300",
-            togglingMode && "opacity-50 pointer-events-none"
+              ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300'
+              : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300',
+            togglingMode && 'opacity-40 pointer-events-none'
           )}
         >
-          <motion.div
-            animate={{ rotate: togglingMode ? 360 : 0 }}
-            transition={{ duration: 0.4, ease: "easeInOut" }}
-          >
-            {conversationMeta?.bot_paused
-              ? <User className="w-4 h-4" />
-              : <Bot className="w-4 h-4" />
-            }
+          <motion.div animate={{ rotate: togglingMode ? 360 : 0 }} transition={{ duration: 0.4 }}>
+            {conversationMeta?.bot_paused ? <User className="w-3.5 h-3.5" /> : <Bot className="w-3.5 h-3.5" />}
           </motion.div>
           <AnimatePresence mode="wait" initial={false}>
             <motion.span
               key={conversationMeta?.bot_paused ? 'human' : 'ai'}
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 6 }}
-              transition={{ duration: 0.15 }}
+              initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 5 }}
+              transition={{ duration: 0.12 }}
             >
               {conversationMeta?.bot_paused ? 'Human Mode' : 'AI Mode'}
             </motion.span>
@@ -256,280 +252,140 @@ export default function ChatArea() {
         </motion.button>
       </div>
 
-      {/* Contact Info Slide-in Panel */}
-      <AnimatePresence>
-        {infoOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-30"
-              onClick={() => setInfoOpen(false)}
-            />
-            <motion.div
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-              className="fixed top-0 right-0 h-full w-[320px] bg-white dark:bg-[#1A1D21] border-l border-[#E5E7EB] dark:border-white/10 z-40 shadow-2xl flex flex-col"
-            >
-              {/* Panel Header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E7EB] dark:border-white/10">
-                <h3 className="text-[15px] font-semibold text-foreground">Contact Info</h3>
-                <button onClick={() => setInfoOpen(false)} className="p-1.5 rounded-full hover:bg-muted transition-colors">
-                  <X className="w-4 h-4 text-muted-foreground" />
-                </button>
+      {/* ── Message list ── */}
+      <div
+        ref={scrollAreaRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto px-5 py-5 space-y-1"
+      >
+        {loadingMessages ? (
+          <div className="space-y-3 pt-2">
+            {['w-48', 'w-64', 'w-40', 'w-72', 'w-56'].map((w, i) => (
+              <div key={i} className={cn('flex', i % 2 ? 'justify-end' : 'justify-start')}>
+                <Skeleton className={cn('h-11 rounded-2xl', w)} />
               </div>
-
-              {/* Avatar + Name */}
-              <div className="flex flex-col items-center py-6 px-5 border-b border-[#E5E7EB] dark:border-white/10">
-                <div className="w-20 h-20 rounded-full ring-4 ring-[#12B76A]/15 overflow-hidden bg-[#F2FDF5] flex items-center justify-center mb-3 relative">
-                  <img
-                    src={avatarUrl(rawPhone || conversationId || 'default')}
-                    alt="avatar"
-                    className="w-full h-full object-cover"
-                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }}
-                  />
-                  <span className="absolute text-[32px] font-bold text-[#12B76A]" aria-hidden>{initial}</span>
-                </div>
-                <p className="text-[17px] font-semibold text-foreground tracking-tight text-center">{lead?.name || formatPhone(rawPhone) || 'Unknown'}</p>
-                {lead?.name && <p className="text-[13px] text-muted-foreground mt-0.5">{formatPhone(rawPhone)}</p>}
-                <div className="flex items-center gap-2 mt-2">
-                  {lead?.lead_status && (
-                    <span className={cn('px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide', STATUS_COLORS[lead.lead_status] || STATUS_COLORS.new)}>
-                      {lead.lead_status}
-                    </span>
-                  )}
-                  <span className={cn(
-                    'px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide',
-                    conversationMeta?.bot_paused
-                      ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                  )}>
-                    {conversationMeta?.bot_paused ? 'Human Mode' : 'AI Mode'}
+            ))}
+          </div>
+        ) : feed.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full gap-2 py-20">
+            <p className="text-[13px] text-muted-foreground">No messages yet. Start the conversation.</p>
+          </div>
+        ) : (
+          feed.map((item, i) => {
+            if (item.type === 'date') {
+              return (
+                <div key={`d-${i}`} className="flex items-center justify-center py-3">
+                  <span className="text-[11px] font-semibold text-muted-foreground bg-background/70 backdrop-blur-sm px-3 py-1 rounded-full border border-border/50">
+                    {item.label}
                   </span>
                 </div>
-              </div>
+              );
+            }
 
-              {/* Details */}
-              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-1">
+            const { group } = item;
+            const isInbound = group.direction === 'inbound';
 
-                {/* Contact section */}
-                <p className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase mb-3">Contact</p>
-
-                <div className="flex items-center gap-3 py-2">
-                  <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                    <Phone className="w-4 h-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Phone</p>
-                    <p className="text-[14px] text-foreground font-medium">{formatPhone(rawPhone) || '—'}</p>
-                  </div>
-                </div>
-
-                {lead?.email && (
-                  <div className="flex items-center gap-3 py-2">
-                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                      <Mail className="w-4 h-4 text-muted-foreground" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Email</p>
-                      <p className="text-[14px] text-foreground font-medium">{lead.email}</p>
-                    </div>
-                  </div>
-                )}
-
-                {typeof lead?.lead_score === 'number' && (
-                  <div className="flex items-center gap-3 py-2">
-                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                      <Star className="w-4 h-4 text-muted-foreground" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Lead Score</p>
-                      <p className="text-[14px] text-foreground font-medium">{lead.lead_score} / 100</p>
-                    </div>
-                  </div>
-                )}
-
-                {lead?.tags && lead.tags.length > 0 && (
-                  <div className="flex items-start gap-3 py-2">
-                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <Tag className="w-4 h-4 text-muted-foreground" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">Tags</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {lead.tags.map(t => (
-                          <span key={t} className="px-2 py-0.5 bg-muted rounded-full text-[12px] font-medium text-foreground">{t}</span>
-                        ))}
+            return (
+              <div key={`g-${i}`} className={cn('flex flex-col gap-0.5', isInbound ? 'items-start' : 'items-end')}>
+                {group.messages.map((msg, mi) => {
+                  const isLast = mi === group.messages.length - 1;
+                  return (
+                    <motion.div
+                      key={msg.id}
+                      initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      transition={{ duration: 0.18, ease: 'easeOut' }}
+                      className={cn('max-w-[72%] flex', isInbound ? 'justify-start' : 'justify-end')}
+                    >
+                      <div className={cn(
+                        'px-4 py-2.5 text-[14px] leading-relaxed',
+                        isInbound
+                          ? 'bg-background text-foreground border border-border/60 rounded-2xl rounded-tl-md'
+                          : cn(
+                            'text-white rounded-2xl rounded-tr-md',
+                            msg.ai_generated
+                              ? 'bg-emerald-600 dark:bg-emerald-700'
+                              : 'bg-foreground dark:bg-white dark:text-black'
+                          )
+                      )}>
+                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                        {isLast && (
+                          <div className={cn('flex items-center gap-1 mt-1', isInbound ? 'justify-start' : 'justify-end')}>
+                            <span className={cn('text-[10px]', isInbound ? 'text-muted-foreground' : 'text-white/60')}>
+                              {formatTime(msg.created_at)}
+                            </span>
+                            {!isInbound && (
+                              msg.status === 'read'
+                                ? <CheckCheck className="w-3 h-3 text-sky-300" />
+                                : msg.status === 'delivered'
+                                  ? <CheckCheck className="w-3 h-3 text-white/60" />
+                                  : <Check className="w-3 h-3 text-white/60" />
+                            )}
+                            {!isInbound && msg.ai_generated && (
+                              <Bot className="w-3 h-3 text-white/50 ml-0.5" />
+                            )}
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Conversation section */}
-                <div className="pt-4 pb-1">
-                  <p className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase mb-3">Conversation</p>
-                </div>
-
-                <div className="flex items-center gap-3 py-2">
-                  <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                    <MessageSquare className="w-4 h-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Total Messages</p>
-                    <p className="text-[14px] text-foreground font-medium">{messages.length}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 py-2">
-                  <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                    <Activity className="w-4 h-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Bot Status</p>
-                    <p className="text-[14px] text-foreground font-medium">{conversationMeta?.bot_paused ? 'Human takeover' : 'AI responding'}</p>
-                  </div>
-                </div>
-
-                {messages.length > 0 && (
-                  <div className="flex items-center gap-3 py-2">
-                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                      <Calendar className="w-4 h-4 text-muted-foreground" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">First Message</p>
-                      <p className="text-[14px] text-foreground font-medium">
-                        {new Date(messages[0].created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {messages.length > 0 && (
-                  <div className="flex items-center gap-3 py-2">
-                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                      <Calendar className="w-4 h-4 text-muted-foreground" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Last Message</p>
-                      <p className="text-[14px] text-foreground font-medium">
-                        {new Date(messages[messages.length - 1].created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-                        {' · '}
-                        {new Date(messages[messages.length - 1].created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {(lead?.first_message_at && messages.length === 0) && (
-                  <div className="flex items-center gap-3 py-2">
-                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                      <Calendar className="w-4 h-4 text-muted-foreground" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">First Contact</p>
-                      <p className="text-[14px] text-foreground font-medium">{new Date(lead.first_message_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
-                    </div>
-                  </div>
-                )}
+                    </motion.div>
+                  );
+                })}
               </div>
-            </motion.div>
-          </>
+            );
+          })
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* ── Scroll to bottom FAB ── */}
+      <AnimatePresence>
+        {showScrollBtn && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }}
+            onClick={() => scrollToBottom(true)}
+            className="absolute bottom-24 right-6 w-9 h-9 rounded-full bg-background border border-border shadow-lg flex items-center justify-center z-20 hover:bg-muted transition-colors"
+          >
+            <ArrowDown className="w-4 h-4 text-foreground" />
+          </motion.button>
         )}
       </AnimatePresence>
 
-      {/* Main Chat Area */}
-      <div className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="max-w-[860px] mx-auto w-full space-y-4">
-          
-          {loadingMessages ? (
-            <div className="space-y-4">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className={cn("flex", i % 2 === 0 ? "justify-start" : "justify-end")}>
-                  <Skeleton className={cn("h-12 rounded-[18px]", i % 2 === 0 ? "w-48" : "w-64")} />
-                </div>
-              ))}
-            </div>
-          ) : messages.length === 0 ? (
-            <div className="flex justify-center py-16">
-              <p className="text-[14px] text-muted-foreground">No messages yet.</p>
-            </div>
-          ) : (
-            <>
-              {messages.map((msg, idx) => {
-                const isInbound = msg.direction === "inbound";
-                return (
-                  <motion.div
-                    key={msg.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={cn("flex", isInbound ? "justify-start" : "justify-end")}
-                  >
-                    <div className={cn(
-                      "max-w-[75%] px-5 py-3 rounded-[18px] shadow-[0_1px_2px_rgba(0,0,0,0.02)]",
-                      isInbound 
-                        ? "bg-white dark:bg-[#1A1D21] text-foreground border border-[#E5E7EB] dark:border-white/5 rounded-tl-sm"
-                        : "bg-[#F2FDF5] dark:bg-[#005C4B] text-[#111B21] dark:text-[#E9EDEF] border border-[#E4F4E8] dark:border-transparent rounded-tr-sm"
-                    )}>
-                      <p className="text-[15px] leading-relaxed font-normal">{msg.content}</p>
-                      <div className="flex justify-end mt-1">
-                        <span className="text-[11px] font-medium opacity-50">{formatTime(msg.created_at)}</span>
-                      </div>
-                    </div>
-                  </motion.div>
-                );
-              })}
-              <div ref={messagesEndRef} />
-            </>
-          )}
-
-          {/* Clean Quick Replies Demo (Visible at bottom of chat if AI suggests options) */}
-          {/* <div className="flex flex-wrap gap-2 mt-4 justify-start">
-            <button className="px-4 py-2 bg-[#f5f5f5] text-foreground rounded-full text-[14px] font-medium hover:bg-[#111] hover:text-white transition-colors">Reserve Table</button>
-            <button className="px-4 py-2 bg-[#f5f5f5] text-foreground rounded-full text-[14px] font-medium hover:bg-[#111] hover:text-white transition-colors">Plan Event</button>
-          </div> */}
-
+      {/* ── Composer ── */}
+      <div className="flex-shrink-0 px-4 pb-4 pt-2 bg-background border-t border-border">
+        <div className="flex items-end gap-2 bg-muted/40 rounded-2xl px-4 py-2 focus-within:bg-muted/60 transition-colors">
+          <textarea
+            ref={textareaRef}
+            value={inputMsg}
+            onChange={e => {
+              setInputMsg(e.target.value);
+              if (textareaRef.current) {
+                textareaRef.current.style.height = 'auto';
+                textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 128) + 'px';
+              }
+            }}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+            placeholder="Type a message…"
+            rows={1}
+            disabled={sending}
+            className="flex-1 bg-transparent border-0 resize-none outline-none text-[14px] text-foreground placeholder:text-muted-foreground py-1.5 min-h-[36px] max-h-32"
+          />
+          <button
+            disabled={!inputMsg.trim() || sending}
+            onClick={handleSend}
+            className={cn(
+              'w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mb-0.5 transition-all',
+              inputMsg.trim() && !sending
+                ? 'bg-foreground text-background hover:opacity-90'
+                : 'bg-transparent text-muted-foreground/40'
+            )}
+          >
+            {sending
+              ? <div className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+              : <Send className="w-4 h-4" />
+            }
+          </button>
         </div>
       </div>
-
-      {/* Modern Input Bar */}
-      <div className="pb-6 pt-2 px-6 bg-transparent">
-        <div className="max-w-[860px] mx-auto w-full">
-          <div className="flex items-end gap-3 bg-white dark:bg-[#1A1D21] border border-[#E5E7EB] dark:border-white/10 rounded-[20px] p-2 shadow-[0_2px_12px_rgba(0,0,0,0.04)] focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.08)] transition-all">
-            
-            <textarea
-              ref={textareaRef}
-              value={inputMsg}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              placeholder="Type a message..."
-              className="flex-1 max-h-32 min-h-[44px] bg-transparent border-0 resize-none focus:ring-0 py-3 px-1 text-[15px] text-foreground placeholder:text-muted-foreground/60 outline-none font-normal"
-              rows={1}
-              disabled={sending}
-            />
-
-            <button
-              disabled={!inputMsg.trim() || sending}
-              onClick={handleSend}
-              className={cn(
-                "p-3 rounded-xl transition-all flex items-center justify-center flex-shrink-0 mb-[2px] mr-[2px]",
-                inputMsg.trim() && !sending
-                  ? "bg-foreground text-background hover:opacity-90"
-                  : "bg-transparent text-muted-foreground"
-              )}
-            >
-              {sending ? (
-                <div className="w-[20px] h-[20px] border-2 border-background/40 border-t-background rounded-full animate-spin" />
-              ) : (
-                <Send className="w-[20px] h-[20px] ml-0.5 stroke-[1.75]" />
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-
     </div>
   );
 }
