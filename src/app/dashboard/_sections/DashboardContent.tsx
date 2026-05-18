@@ -2,7 +2,6 @@ import { GreetingSection } from "./GreetingSection";
 import { DashboardMetrics } from "./DashboardMetrics";
 import { QuickActions } from "./QuickActions";
 import { RecentChats } from "./RecentChats";
-import { OnboardingWizard } from "./OnboardingWizard";
 
 export function DashboardContent() {
   return (
@@ -22,8 +21,6 @@ export function DashboardContent() {
           <RecentChats />
         </div>
       </div>
-      
-      <OnboardingWizard />
     </div>
   );
 }

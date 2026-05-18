@@ -3890,3 +3890,380 @@ Import traces:
  GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 44ms (next.js: 854µs, application-code: 43ms)
  GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 34ms (next.js: 696µs, application-code: 33ms)
  GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 20ms (next.js: 2ms, application-code: 17ms)
+Persisting failed: Unable to write SST file 00002773.sst
+
+Caused by:
+    No such file or directory (os error 2)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+
+thread 'tokio-runtime-worker' (536312) panicked at turbopack/crates/turbo-tasks-backend/src/backend/operation/mod.rs:197:17:
+Failed to restore task data (corrupted database or bug): Data for TaskId 165636)
+
+Caused by:
+    0: Looking up task storage for TaskId 165636 from database failed
+    1: Unable to open static sorted file referenced from 00002181.meta
+    2: Unable to open static sorted file 00002177.sst
+    3: Failed to open SST file /Users/sakshay/Desktop/project-bolt/.next/dev/cache/turbopack/ee6e79b1/00002177.sst
+    4: No such file or directory (os error 2)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'tokio-runtime-worker' (529850) panicked at turbopack/crates/turbo-tasks-backend/src/backend/operation/mod.rs:225:17:
+Failed to restore task data (corrupted database or bug): Data for batch of 11 tasks
+
+Caused by:
+    0: Looking up typed data for 11 tasks from database failed
+    1: Unable to open static sorted file referenced from 00002759.meta
+    2: Unable to open static sorted file 00002758.sst
+    3: Failed to open SST file /Users/sakshay/Desktop/project-bolt/.next/dev/cache/turbopack/ee6e79b1/00002758.sst
+    4: No such file or directory (os error 2)
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+○ Compiling /dashboard ...
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Persisting failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/app/dashboard/chat/page/build-manifest.json'
+}
+⨯ Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Error: ENOENT: no such file or directory, open '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+    at ignore-listed frames {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: '/Users/sakshay/Desktop/project-bolt/.next/dev/server/pages/_app/build-manifest.json'
+}
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+
+thread 'tokio-runtime-worker' (539724) panicked at turbopack/crates/turbo-tasks-backend/src/backend/operation/mod.rs:619:14:
+Failed to lookup task ids: Looking up task id for CachedTaskType { native_fn: NativeFunction { name: "ModuleBatch::new", global_name: "turbopack_core::module_graph::module_batch::ModuleBatch::new", .. }, this: None, arg: ([Vc(RawVc::TaskCell(112502, "turbopack_ecmascript::EcmascriptModuleAsset#0")), Vc(RawVc::TaskCell(112840, "turbopack_ecmascript::rename::module::EcmascriptModuleRenameModule#0")), Vc(RawVc::TaskCell(112529, "turbopack_ecmascript::EcmascriptModuleAsset#0")), Vc(RawVc::TaskCell(112861, "turbopack_ecmascript::rename::module::EcmascriptModuleRenameModule#0")), Vc(RawVc::TaskCell(112503, "turbopack_ecmascript::EcmascriptModuleAsset#0")), Vc(RawVc::TaskCell(112807, "turbopack_ecmascript::rename::module::EcmascriptModuleRenameModule#0")), Vc(RawVc::TaskCell(112505, "turbopack_ecmascript::EcmascriptModuleAsset#0")), Vc(RawVc::TaskCell(112886, "turbopack_ecmascript::rename::module::EcmascriptModuleRenameModule#0")), Vc(RawVc::TaskCell(175379, "turbopack_ecmascript::EcmascriptModuleAsset#0")), Vc(RawVc::TaskCell(175552, "turbopack_ecmascript::rename::module::EcmascriptModuleRenameModule#0")), Vc(RawVc::TaskCell(263022, "turbopack_ecmascript::EcmascriptModuleAsset#0")), Vc(RawVc::TaskCell(958013, "turbopack_ecmascript::rename::module::EcmascriptModuleRenameModule#0")), Vc(RawVc::TaskCell(281594, "turbopack_ecmascript::EcmascriptModuleAsset#0")), Vc(RawVc::TaskCell(958012, "turbopack_ecmascript::rename::module::EcmascriptModuleRenameModule#0")), Vc(RawVc::TaskCell(294448, "turbopack_ecmascript::EcmascriptModuleAsset#0")), Vc(RawVc::TaskCell(703758, "turbopack_ecmascript::rename::module::EcmascriptModuleRenameModule#0")), Vc(RawVc::TaskCell(308911, "turbopack_ecmascript::EcmascriptModuleAsset#0")), Vc(RawVc::TaskCell(650974, "turbopack_ecmascript::rename::module::EcmascriptModuleRenameModule#0")), Vc(RawVc::TaskCell(108154, "turbopack_ecmascript::EcmascriptModuleAsset#0")), Vc(RawVc::TaskCell(108221, "turbopack_ecmascript::EcmascriptModuleAsset#0")), Vc(RawVc::TaskCell(112923, "turbopack_ecmascript::EcmascriptModuleAsset#0")), Vc(RawVc::TaskCell(113303, "turbopack_ecmascript::rename::module::EcmascriptModuleRenameModule#0")), Vc(RawVc::TaskCell(112485, "turbopack_ecmascript::EcmascriptModuleAsset#0")), Vc(RawVc::TaskCell(112746, "turbopack_ecmascript::rename::module::EcmascriptModuleRenameModule#0")), Vc(RawVc::TaskCell(108252, "turbopack_ecmascript::EcmascriptModuleAsset#0")), Vc(RawVc::TaskCell(106065, "turbopack_ecmascript::EcmascriptModuleAsset#0"))], Some(RoaringBitmapWrapper(RoaringBitmap<[23]>))) } from database failed
+
+Caused by:
+    0: Unable to open static sorted file referenced from 00002456.meta
+    1: Unable to open static sorted file 00002454.sst
+    2: Failed to open SST file /Users/sakshay/Desktop/project-bolt/.next/dev/cache/turbopack/ee6e79b1/00002454.sst
+    3: No such file or directory (os error 2)
+
+thread 'tokio-runtime-worker' (542873) panicked at turbopack/crates/turbo-tasks-backend/src/backend/operation/mod.rs:619:14:
+Failed to lookup task ids: Looking up task id for CachedTaskType { native_fn: NativeFunction { name: "EcmascriptDevChunkList::new", global_name: "turbopack_browser::ecmascript::list::asset::EcmascriptDevChunkList::new", .. }, this: None, arg: (Vc(RawVc::TaskCell(35860, "turbopack_browser::chunking_context::BrowserChunkingContext#0")), Vc(RawVc::TaskCell(981600, "turbopack_core::ident::AssetIdent#0")), Vc(RawVc::TaskCell(140101, "turbopack_core::chunk::evaluate::EvaluatableAssets#0")), Vc(RawVc::TaskCell(146951, "turbopack_core::output::OutputAssets#0")), Dynamic) } from database failed
+
+Caused by:
+    0: Unable to open static sorted file referenced from 00000723.meta
+    1: Unable to open static sorted file 00000720.sst
+    2: Failed to open SST file /Users/sakshay/Desktop/project-bolt/.next/dev/cache/turbopack/ee6e79b1/00000720.sst
+    3: No such file or directory (os error 2)
+
+thread 'tokio-runtime-worker' (534650) panicked at turbopack/crates/turbo-tasks-backend/src/backend/operation/mod.rs:197:17:
+Failed to restore task data (corrupted database or bug): Meta for TaskId 140104)
+
+Caused by:
+    0: Looking up task storage for TaskId 140104 from database failed
+    1: Unable to open static sorted file referenced from 00002771.meta
+    2: Unable to open static sorted file 00002769.sst
+    3: Failed to open SST file /Users/sakshay/Desktop/project-bolt/.next/dev/cache/turbopack/ee6e79b1/00002769.sst
+    4: No such file or directory (os error 2)
+
+thread 'tokio-runtime-worker' (539724) panicked at turbopack/crates/turbo-tasks-backend/src/backend/operation/mod.rs:197:17:
+Failed to restore task data (corrupted database or bug): Meta for TaskId 140054)
+
+Caused by:
+    0: Looking up task storage for TaskId 140054 from database failed
+    1: Unable to open static sorted file referenced from 00002771.meta
+    2: Unable to open static sorted file 00002769.sst
+    3: Failed to open SST file /Users/sakshay/Desktop/project-bolt/.next/dev/cache/turbopack/ee6e79b1/00002769.sst
+    4: No such file or directory (os error 2)
+
+thread 'tokio-runtime-worker' (539725) panicked at turbopack/crates/turbo-tasks-backend/src/backend/operation/mod.rs:197:17:
+Failed to restore task data (corrupted database or bug): Meta for TaskId 153877)
+
+Caused by:
+    0: Looking up task storage for TaskId 153877 from database failed
+    1: Unable to open static sorted file referenced from 00002771.meta
+    2: Unable to open static sorted file 00002769.sst
+    3: Failed to open SST file /Users/sakshay/Desktop/project-bolt/.next/dev/cache/turbopack/ee6e79b1/00002769.sst
+    4: No such file or directory (os error 2)
+
+thread 'tokio-runtime-worker' (539724) panicked at turbopack/crates/turbo-tasks-backend/src/backend/operation/mod.rs:197:17:
+Failed to restore task data (corrupted database or bug): Meta for TaskId 143160)
+
+Caused by:
+    0: Looking up task storage for TaskId 143160 from database failed
+    1: Unable to open static sorted file referenced from 00002771.meta
+    2: Unable to open static sorted file 00002769.sst
+    3: Failed to open SST file /Users/sakshay/Desktop/project-bolt/.next/dev/cache/turbopack/ee6e79b1/00002769.sst
+    4: No such file or directory (os error 2)
+
+thread 'tokio-runtime-worker' (542873) panicked at turbopack/crates/turbo-tasks-backend/src/backend/operation/mod.rs:197:17:
+Failed to restore task data (corrupted database or bug): Data for TaskId 168165)
+
+Caused by:
+    0: Looking up task storage for TaskId 168165 from database failed
+    1: Unable to open static sorted file referenced from 00002181.meta
+    2: Unable to open static sorted file 00002177.sst
+    3: Failed to open SST file /Users/sakshay/Desktop/project-bolt/.next/dev/cache/turbopack/ee6e79b1/00002177.sst
+    4: No such file or directory (os error 2)
+
+thread 'tokio-runtime-worker' (540568) panicked at turbopack/crates/turbo-tasks-backend/src/backend/operation/mod.rs:197:17:
+Failed to restore task data (corrupted database or bug): Meta for TaskId 140221)
+
+Caused by:
+    0: Looking up task storage for TaskId 140221 from database failed
+    1: Unable to open static sorted file referenced from 00002771.meta
+    2: Unable to open static sorted file 00002769.sst
+    3: Failed to open SST file /Users/sakshay/Desktop/project-bolt/.next/dev/cache/turbopack/ee6e79b1/00002769.sst
+    4: No such file or directory (os error 2)
+
+thread 'tokio-runtime-worker' (542873) panicked at turbopack/crates/turbo-tasks-backend/src/backend/operation/mod.rs:197:17:
+Failed to restore task data (corrupted database or bug): Meta for TaskId 8470)
+
+Caused by:
+    0: Looking up task storage for TaskId 8470 from database failed
+    1: Unable to open static sorted file referenced from 00002771.meta
+    2: Unable to open static sorted file 00002769.sst
+    3: Failed to open SST file /Users/sakshay/Desktop/project-bolt/.next/dev/cache/turbopack/ee6e79b1/00002769.sst
+    4: No such file or directory (os error 2)
+Persisting failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)

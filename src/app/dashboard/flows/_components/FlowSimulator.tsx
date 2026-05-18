@@ -17,15 +17,12 @@ export default function FlowSimulator() {
   const [messages, setMessages] = useState<{ id: string; type: "bot" | "user" | "ai"; text: string; action?: string }[]>([]);
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const { setSelectedNodeId, flowId: storeFlowId } = useFlowStore();
   const params = useParams();
-  
-  const flowId = storeFlowId || (params.id as string);
+  const flowId = params.id as string;
 
   useEffect(() => {
     setMessages([{ id: "1", type: "bot", text: "Send a message to test this flow." }]);
-    setSelectedNodeId("1");
-  }, [setSelectedNodeId]);
+  }, []);
 
   const handleSend = async () => {
     if (!inputText.trim() || !flowId || flowId === 'new') return;
@@ -55,8 +52,6 @@ export default function FlowSimulator() {
       let delay = 500;
       trace.forEach((step, idx) => {
         setTimeout(() => {
-          setSelectedNodeId(step.nodeId);
-          
           if (step.action === 'send_message' && step.payload) {
             setMessages(prev => [...prev, { id: `${Date.now()}-${idx}`, type: "bot", text: String(step.payload) }]);
           } else if (step.action === 'webhook_call') {
