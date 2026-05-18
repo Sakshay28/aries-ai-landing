@@ -2,35 +2,44 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Plug, ShoppingBag, Database, Webhook, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Plug, ShoppingBag, Database, Webhook, CheckCircle2, ArrowRight, CreditCard, Truck, FileSpreadsheet, Briefcase } from 'lucide-react';
 
 const INTEGRATIONS = [
   {
-    id: 'shopify',
-    name: 'Shopify',
-    description: 'Sync customer data, order history, and trigger abandoned cart flows.',
-    icon: ShoppingBag,
+    id: 'razorpay',
+    name: 'Razorpay',
+    description: 'Auto-generate payment links and track payment status via WhatsApp.',
+    icon: CreditCard,
     status: 'available',
-    color: 'text-[#95BF47]',
-    bgColor: 'bg-[#95BF47]/10'
+    color: 'text-[#3395FF]',
+    bgColor: 'bg-[#3395FF]/10'
   },
   {
-    id: 'hubspot',
-    name: 'HubSpot',
-    description: 'Two-way sync for leads and conversations into your CRM.',
-    icon: Database,
+    id: 'shiprocket',
+    name: 'Shiprocket',
+    description: 'Send automated shipping updates and tracking links to customers.',
+    icon: Truck,
     status: 'available',
-    color: 'text-[#FF7A59]',
-    bgColor: 'bg-[#FF7A59]/10'
+    color: 'text-[#2D9CDB]',
+    bgColor: 'bg-[#2D9CDB]/10'
   },
   {
-    id: 'salesforce',
-    name: 'Salesforce',
-    description: 'Enterprise CRM sync for qualified hot leads.',
-    icon: Database,
+    id: 'zohocrm',
+    name: 'Zoho CRM',
+    description: 'Two-way sync for leads, contacts, and WhatsApp conversations.',
+    icon: Briefcase,
     status: 'available',
-    color: 'text-[#00A1E0]',
-    bgColor: 'bg-[#00A1E0]/10'
+    color: 'text-[#F0483E]',
+    bgColor: 'bg-[#F0483E]/10'
+  },
+  {
+    id: 'googlesheets',
+    name: 'Google Sheets',
+    description: 'Instantly log new leads, bookings, and customer details into a spreadsheet.',
+    icon: FileSpreadsheet,
+    status: 'available',
+    color: 'text-[#0F9D58]',
+    bgColor: 'bg-[#0F9D58]/10'
   },
   {
     id: 'webhooks',
