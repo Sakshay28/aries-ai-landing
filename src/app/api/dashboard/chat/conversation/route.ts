@@ -16,10 +16,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'ID required' }, { status: 400 });
     }
 
-    // Get conversation details
+    // Get conversation details (no join — explicit queries are more reliable)
     const { data: conv, error: convErr } = await supabaseAdmin
       .from("conversations")
-      .select("id, is_active, bot_paused, sender_name, leads(name, phone, email, lead_status, lead_score, tags, created_at, first_message_at)")
+      .select("id, is_active, bot_paused, sender_name, sender_id, lead_id")
       .eq("id", id)
       .eq("tenant_id", tenantId)
       .single();
@@ -28,8 +28,28 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: convErr?.message || 'Not found' }, { status: 404 });
     }
 
+    // Fetch lead: first try lead_id FK, fallback to phone (sender_id) lookup
+    let lead = null;
+    if (conv.lead_id) {
+      const { data } = await supabaseAdmin
+        .from('leads')
+        .select('name, phone, email, lead_status, lead_score, tags, created_at, first_message_at')
+        .eq('id', conv.lead_id)
+        .single();
+      lead = data;
+    }
+    if (!lead && conv.sender_id) {
+      const { data } = await supabaseAdmin
+        .from('leads')
+        .select('name, phone, email, lead_status, lead_score, tags, created_at, first_message_at')
+        .eq('tenant_id', tenantId)
+        .eq('phone', conv.sender_id)
+        .maybeSingle();
+      lead = data;
+    }
+
     // Get messages
-    const { data: msgs, error: msgErr } = await supabaseAdmin
+    const { data: msgs } = await supabaseAdmin
       .from("messages")
       .select("*")
       .eq("conversation_id", id)
@@ -37,7 +57,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      conversation: conv,
+      conversation: { ...conv, leads: lead },
       messages: msgs || []
     });
   } catch (error: any) {

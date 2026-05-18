@@ -38,8 +38,16 @@ function timeAgo(dateStr: string | null): string {
   return new Date(dateStr).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
+function formatPhone(raw: string | null | undefined): string {
+  if (!raw) return '';
+  const digits = raw.replace(/\D/g, '');
+  const local = digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits;
+  if (local.length === 10) return `+91 ${local.slice(0, 5)} ${local.slice(5)}`;
+  return `+${digits}`;
+}
+
 function getDisplayName(conv: ChatConversation): string {
-  return conv.leads?.name || conv.leads?.phone || "Unknown";
+  return conv.leads?.name || formatPhone(conv.leads?.phone) || "Unknown";
 }
 
 function getInitial(conv: ChatConversation): string {
