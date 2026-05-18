@@ -9,6 +9,7 @@
 import { initFollowUpEngine, shutdownFollowUpEngine } from './src/lib/followup/engine';
 import { initWebhookEngine } from './src/lib/webhook/queue';
 import { initBroadcastEngine, shutdownBroadcastEngine } from './src/lib/broadcast/queue';
+import { initEmbeddingEngine } from './src/lib/ai/embedding-queue';
 
 // Bull-Board Imports
 import express from 'express';
@@ -24,15 +25,17 @@ console.log('🚀 Starting standalone BullMQ worker process...');
 initFollowUpEngine();
 initWebhookEngine();
 initBroadcastEngine();
+initEmbeddingEngine();
 
 // Setup Bull-Board
 const redis = getRedisClient();
 if (redis) {
   const webhookQueue = new Queue('incoming-webhooks', { connection: redis });
   const igWebhookQueue = new Queue('ig-incoming-webhooks', { connection: redis });
-  const broadcastQueue = new Queue('broadcast-jobs', { connection: redis });
-  const followupQueue = new Queue('follow-ups', { connection: redis });
-  const timeoutQueue = new Queue('conversation-timeouts', { connection: redis });
+  const broadcastQueue  = new Queue('broadcast-jobs',          { connection: redis });
+  const followupQueue   = new Queue('follow-ups',               { connection: redis });
+  const timeoutQueue    = new Queue('conversation-timeouts',    { connection: redis });
+  const embeddingQueue  = new Queue('embedding-jobs',           { connection: redis });
 
   const serverAdapter = new ExpressAdapter();
   serverAdapter.setBasePath('/admin/queue');
@@ -44,6 +47,7 @@ if (redis) {
       new BullMQAdapter(broadcastQueue),
       new BullMQAdapter(followupQueue),
       new BullMQAdapter(timeoutQueue),
+      new BullMQAdapter(embeddingQueue),
     ],
     serverAdapter: serverAdapter,
   });

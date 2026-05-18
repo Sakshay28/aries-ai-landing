@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { storeDocEmbedding } from '@/lib/ai/rag';
+import { enqueueEmbedding } from '@/lib/ai/embedding-queue';
 
 const TEXT_TYPES = new Set(['txt', 'md', 'csv', 'json', 'html', 'xml']);
 const MAX_BYTES = 500_000; // 500 KB text cap before truncation
@@ -74,9 +74,7 @@ export async function POST(req: NextRequest) {
 
   // Generate + store embedding asynchronously (non-blocking — don't fail upload if this errors)
   if (data?.id && contentText) {
-    storeDocEmbedding(data.id, contentText).catch(
-      e => console.error('knowledge: embedding generation failed for', data.id, e)
-    );
+    enqueueEmbedding({ docId: data.id, contentText });
   }
 
   return NextResponse.json({ success: true, data });
