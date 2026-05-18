@@ -3,50 +3,76 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, CheckCheck } from "lucide-react";
-import { useFlowStore } from "../store";
+import { useParams } from "next/navigation";
+import { Loader2 } from "lucide-react";
+
+interface TraceStep {
+  nodeId: string;
+  nodeType: string;
+  action: string;
+  payload?: any;
+}
 
 export default function FlowSimulator() {
-  const [messages, setMessages] = useState<{ id: string; type: "bot" | "user" | "ai"; text: string }[]>([]);
+  const [messages, setMessages] = useState<{ id: string; type: "bot" | "user" | "ai"; text: string; action?: string }[]>([]);
   const [inputText, setInputText] = useState("");
-  const { setSelectedNodeId } = useFlowStore();
+  const [isLoading, setIsLoading] = useState(false);
+  const { setSelectedNodeId, flowId: storeFlowId } = useFlowStore();
+  const params = useParams();
+  
+  const flowId = storeFlowId || (params.id as string);
 
   useEffect(() => {
-    // Start simulation
-    setTimeout(() => {
-      setMessages([{ id: "1", type: "bot", text: "What type of business do you run?" }]);
-      setSelectedNodeId("1"); // Highlight Step 1
-    }, 500);
-  }, []);
+    setMessages([{ id: "1", type: "bot", text: "Send a message to test this flow." }]);
+    setSelectedNodeId("1");
+  }, [setSelectedNodeId]);
 
-  const handleSend = () => {
-    if (!inputText.trim()) return;
+  const handleSend = async () => {
+    if (!inputText.trim() || !flowId || flowId === 'new') return;
 
     const userMsg = inputText.trim();
     setMessages(prev => [...prev, { id: Date.now().toString(), type: "user", text: userMsg }]);
     setInputText("");
+    setIsLoading(true);
 
-    // Simple script logic for the simulation based on the flow
-    if (messages.length === 1) {
-      // User answered business type
-      setTimeout(() => {
-        setMessages(prev => [...prev, { id: "2", type: "bot", text: "How large is your team?" }]);
-        setSelectedNodeId("2");
-      }, 1000);
-    } else if (messages.length === 3) {
-      // User likely interrupted (Pricing question)
-      setTimeout(() => {
-        setSelectedNodeId("3");
-        setMessages(prev => [...prev, { id: "3", type: "ai", text: "Our plans start at ₹2,999/mo for the Pro tier. Would you like a full breakdown later?" }]);
-      }, 1500);
+    try {
+      const res = await fetch(`/api/dashboard/flows/${flowId}/simulate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userMsg }),
+      });
+      const data = await res.json();
+      
+      if (!res.ok || !data.success || !data.data.matched) {
+        setMessages(prev => [...prev, { id: Date.now().toString(), type: "bot", text: "⚠️ Flow did not trigger. Check keywords." }]);
+        setIsLoading(false);
+        return;
+      }
 
-      // Auto-resume to step 2
-      setTimeout(() => {
-        setSelectedNodeId("4"); // Highlight Resume node
+      const trace: TraceStep[] = data.data.trace;
+      
+      // Animate the trace sequence
+      let delay = 500;
+      trace.forEach((step, idx) => {
         setTimeout(() => {
-          setSelectedNodeId("2"); // Back to Step 2
-          setMessages(prev => [...prev, { id: "4", type: "bot", text: "Coming back to your setup 👇\n\nHow large is your team?" }]);
-        }, 1000);
-      }, 4000);
+          setSelectedNodeId(step.nodeId);
+          
+          if (step.action === 'send_message' && step.payload) {
+            setMessages(prev => [...prev, { id: `${Date.now()}-${idx}`, type: "bot", text: String(step.payload) }]);
+          } else if (step.action === 'webhook_call') {
+            setMessages(prev => [...prev, { id: `${Date.now()}-${idx}`, type: "ai", text: `[Webhook Call] ${step.payload}` }]);
+          } else if (step.action === 'tag_lead') {
+            setMessages(prev => [...prev, { id: `${Date.now()}-${idx}`, type: "ai", text: `[Tag Added] ${step.payload}` }]);
+          }
+        }, delay);
+        delay += 800; // 800ms between node execution animations
+      });
+
+      setTimeout(() => setIsLoading(false), delay);
+      
+    } catch (err) {
+      setMessages(prev => [...prev, { id: Date.now().toString(), type: "bot", text: "Simulation error." }]);
+      setIsLoading(false);
     }
   };
 
@@ -92,7 +118,7 @@ export default function FlowSimulator() {
               >
                 {msg.type === "ai" && (
                   <div className="text-[10px] font-bold text-emerald-400 mb-1 tracking-widest uppercase flex items-center gap-1">
-                    <span className="w-1 h-1 rounded-full bg-emerald-400" /> AI Auto-Response
+                    <span className="w-1 h-1 rounded-full bg-emerald-400" /> Action
                   </div>
                 )}
                 <p className="text-[13px] leading-relaxed tracking-tight whitespace-pre-wrap">{msg.text}</p>
@@ -103,6 +129,14 @@ export default function FlowSimulator() {
               </div>
             </motion.div>
           ))}
+          {isLoading && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-start relative z-10">
+              <div className="px-4 py-3 rounded-[12px] bg-[#202C33] text-white/50 rounded-tl-sm flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span className="text-[12px]">Simulating...</span>
+              </div>
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 

@@ -703,10 +703,16 @@ export function ContactsClient() {
 
           <div className="flex items-center gap-3 pl-6">
             <button 
+              onClick={() => window.open('/api/dashboard/leads/export', '_blank')}
+              className="h-9 px-4 text-[13px] font-medium bg-card text-foreground hover:bg-secondary border border-border/80 rounded-lg transition-colors shadow-sm flex items-center gap-1.5"
+            >
+              <Download className="w-4 h-4 text-muted-foreground" /> Export
+            </button>
+            <button 
               onClick={() => setImportStep('source')}
               className="h-9 px-4 text-[13px] font-medium bg-card text-foreground hover:bg-secondary border border-border/80 rounded-lg transition-colors shadow-sm flex items-center gap-1.5"
             >
-              <DownloadCloud className="w-4 h-4 text-muted-foreground" /> Import
+              <UploadCloud className="w-4 h-4 text-muted-foreground" /> Import
             </button>
             <button
               onClick={() => { resetAddForm(); setAddContactOpen(true); }}

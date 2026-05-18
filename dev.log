@@ -3606,3 +3606,278 @@ Import traces:
     ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component SSR]
     ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
     ./src/app/dashboard/layout.tsx [Server Component] 
+[browser] ./src/app/dashboard/_layout/AppSidebar.tsx:24:3
+the name `Network` is defined multiple times
+  22 |   UserCog,
+  23 |   Library,
+> 24 |   Network,
+     |   ^^^^^^^
+  25 |   Activity,
+  26 | } from "lucide-react";
+  27 | import { Button } from "@/components/ui/button";
+
+Ecmascript file had an error
+
+Import traces:
+  Client Component Browser:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component] 
+⨯ ./src/app/dashboard/_layout/AppSidebar.tsx:24:3
+the name `Network` is defined multiple times
+  [90m22 |[0m   [33mUserCog[0m,
+  [90m23 |[0m   [33mLibrary[0m,
+[31m[1m>[0m [90m24 |[0m   [33mNetwork[0m,
+  [90m   |[0m   [31m[1m^^^^^^^[0m
+  [90m25 |[0m   [33mActivity[0m,
+  [90m26 |[0m } [36mfrom[0m [32m"lucide-react"[0m;
+  [90m27 |[0m [36mimport[0m { [33mButton[0m } [36mfrom[0m [32m"@/components/ui/button"[0m;
+
+Ecmascript file had an error
+
+Import traces:
+  Client Component Browser:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component]
+
+
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 500 in 12ms (next.js: 6ms, application-code: 6ms)
+[browser] Uncaught Error: ./src/app/dashboard/_layout/AppSidebar.tsx:24:3
+the name `Network` is defined multiple times
+  22 |   UserCog,
+  23 |   Library,
+> 24 |   Network,
+     |   ^^^^^^^
+  25 |   Activity,
+  26 | } from "lucide-react";
+  27 | import { Button } from "@/components/ui/button";
+
+Ecmascript file had an error
+
+Import traces:
+  Client Component Browser:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component]
+
+
+    at <unknown> (Error: ./src/app/dashboard/_layout/AppSidebar.tsx:24:3)
+    at <unknown> (Error: (./src/app/dashboard/_layout/AppSidebar.tsx:24:3)
+[browser] ./src/app/dashboard/_layout/AppSidebar.tsx:24:3
+the name `Network` is defined multiple times
+  22 |   UserCog,
+  23 |   Library,
+> 24 |   Network,
+     |   ^^^^^^^
+  25 |   Activity,
+  26 | } from "lucide-react";
+  27 | import { Button } from "@/components/ui/button";
+
+Ecmascript file had an error
+
+Import traces:
+  Client Component Browser:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component] 
+[browser] ./src/app/dashboard/_layout/AppSidebar.tsx:24:3
+the name `Network` is defined multiple times
+  22 |   UserCog,
+  23 |   Library,
+> 24 |   Network,
+     |   ^^^^^^^
+  25 |   Activity,
+  26 | } from "lucide-react";
+  27 | import { Button } from "@/components/ui/button";
+
+Ecmascript file had an error
+
+Import traces:
+  Client Component Browser:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component] 
+[browser] ./src/app/dashboard/_layout/AppSidebar.tsx:24:3
+the name `Network` is defined multiple times
+  22 |   UserCog,
+  23 |   Library,
+> 24 |   Network,
+     |   ^^^^^^^
+  25 |   Activity,
+  26 | } from "lucide-react";
+  27 | import { Button } from "@/components/ui/button";
+
+Ecmascript file had an error
+
+Import traces:
+  Client Component Browser:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component] 
+[browser] ./src/app/dashboard/_layout/AppSidebar.tsx:24:3
+the name `Network` is defined multiple times
+  22 |   UserCog,
+  23 |   Library,
+> 24 |   Network,
+     |   ^^^^^^^
+  25 |   Activity,
+  26 | } from "lucide-react";
+  27 | import { Button } from "@/components/ui/button";
+
+Ecmascript file had an error
+
+Import traces:
+  Client Component Browser:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component] 
+[browser] ./src/app/dashboard/_layout/AppSidebar.tsx:24:3
+the name `Network` is defined multiple times
+  22 |   UserCog,
+  23 |   Library,
+> 24 |   Network,
+     |   ^^^^^^^
+  25 |   Activity,
+  26 | } from "lucide-react";
+  27 | import { Button } from "@/components/ui/button";
+
+Ecmascript file had an error
+
+Import traces:
+  Client Component Browser:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component] 
+[browser] ./src/app/dashboard/_layout/AppSidebar.tsx:24:3
+the name `Network` is defined multiple times
+  22 |   UserCog,
+  23 |   Library,
+> 24 |   Network,
+     |   ^^^^^^^
+  25 |   Activity,
+  26 | } from "lucide-react";
+  27 | import { Button } from "@/components/ui/button";
+
+Ecmascript file had an error
+
+Import traces:
+  Client Component Browser:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component] 
+[browser] ./src/app/dashboard/_layout/AppSidebar.tsx:24:3
+the name `Network` is defined multiple times
+  22 |   UserCog,
+  23 |   Library,
+> 24 |   Network,
+     |   ^^^^^^^
+  25 |   Activity,
+  26 | } from "lucide-react";
+  27 | import { Button } from "@/components/ui/button";
+
+Ecmascript file had an error
+
+Import traces:
+  Client Component Browser:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component] 
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 2.0s (next.js: 64ms, application-code: 1949ms)
+ GET /api/dashboard/automations 200 in 790ms (next.js: 40ms, application-code: 750ms)
+ GET /api/dashboard/automations 200 in 732ms (next.js: 3ms, application-code: 730ms)
+✓ Compiled in 130ms
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 188ms (next.js: 48ms, application-code: 140ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 52ms (next.js: 1004µs, application-code: 51ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 53ms (next.js: 766µs, application-code: 52ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 60ms (next.js: 771µs, application-code: 59ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 73ms (next.js: 1227µs, application-code: 72ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 61ms (next.js: 803µs, application-code: 60ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 60ms (next.js: 1100µs, application-code: 59ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 55ms (next.js: 1170µs, application-code: 54ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 59ms (next.js: 843µs, application-code: 58ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 58ms (next.js: 959µs, application-code: 57ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 46ms (next.js: 1041µs, application-code: 45ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 46ms (next.js: 2ms, application-code: 44ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 27ms (next.js: 1110µs, application-code: 26ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 13ms (next.js: 1195µs, application-code: 12ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 1373ms (next.js: 7ms, application-code: 1367ms)
+ GET /api/dashboard/chat/conversations 200 in 1070ms (next.js: 33ms, application-code: 1037ms)
+ GET /api/dashboard/chat/conversation?id=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 1032ms (next.js: 14ms, application-code: 1018ms)
+ GET /api/dashboard/automations 200 in 555ms (next.js: 15ms, application-code: 541ms)
+ GET /api/dashboard/automations 200 in 1185ms (next.js: 1343µs, application-code: 1184ms)
+[browser] Image with src "/logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
+ GET /api/dashboard/chat/conversation?id=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 1600ms (next.js: 38ms, application-code: 1562ms)
+ GET /api/dashboard/chat/conversations 200 in 1658ms (next.js: 16ms, application-code: 1641ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 143ms (next.js: 75ms, application-code: 67ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 24ms (next.js: 7ms, application-code: 17ms)
