@@ -1,6 +1,6 @@
 "use client";
 
-import { Phone, Search, MoreVertical, Plus, Send } from "lucide-react";
+import { Plus, Send } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
@@ -204,12 +204,6 @@ export default function ChatArea() {
             <span className={cn("text-[12px] font-semibold transition-colors", conversationMeta?.bot_paused ? "text-foreground" : "text-muted-foreground")}>Human</span>
           </div>
 
-          <div className="w-px h-6 bg-border mx-1" />
-
-          {/* Minimal Icon Buttons */}
-          <button className="text-muted-foreground hover:text-foreground transition-colors p-1"><Search className="w-[20px] h-[20px] stroke-[1.75]" /></button>
-          <button className="text-muted-foreground hover:text-foreground transition-colors p-1"><Phone className="w-[20px] h-[20px] stroke-[1.75]" /></button>
-          <button className="text-muted-foreground hover:text-foreground transition-colors p-1"><MoreVertical className="w-[20px] h-[20px] stroke-[1.75]" /></button>
         </div>
       </div>
 
