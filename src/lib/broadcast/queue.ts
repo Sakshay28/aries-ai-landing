@@ -7,6 +7,7 @@ import { sendTemplateMessage } from '@/lib/gupshup/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { sleep } from '@/lib/utils/safety';
 import * as Sentry from '@/lib/sentry-stub';
+import { getRedisClient } from '@/lib/redis/client';
 
 interface TemplateComponent {
   type: string;
@@ -71,6 +72,18 @@ async function processBroadcastJob(data: BroadcastJobData) {
         tenant.gupshup_app_name as string
       );
       sent++;
+      // Tag phone → campaign in Redis so inbound replies can be counted (7-day TTL)
+      try {
+        const redis = getRedisClient();
+        if (redis) {
+          await redis.set(
+            `broadcast:phone:${tenantId}:${lead.phone.replace(/\D/g, '')}`,
+            broadcastId,
+            'EX',
+            86400 * 7
+          );
+        }
+      } catch { /* non-critical */ }
     } catch (error: unknown) {
       failed++;
       const message = error instanceof Error ? error.message : 'Unknown error';

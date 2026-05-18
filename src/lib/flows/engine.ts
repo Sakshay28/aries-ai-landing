@@ -19,6 +19,9 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { sendTextMessage } from '@/lib/gupshup/service';
 import { decryptToken } from '@/lib/utils/crypto';
+import { processMessageWithAI, TenantAIConfig } from '@/lib/ai/engine';
+import { getTenantConfig } from '@/lib/tenant/manager';
+import type { Tenant } from '@/lib/types';
 
 // ── Types ────────────────────────────────────────────────────
 interface FlowNode {
@@ -54,6 +57,8 @@ interface ExecContext {
   appName: string;             // Gupshup app name
   messageText: string;
   isFirstMessage: boolean;
+  pendingFlowNode?: string;  // node id to resume on next inbound message
+  variables: Record<string, unknown>; // inter-node data bag — persisted across wait_for_reply
 }
 
 // ── Fuzzy keyword match: word-boundary aware ─────────────────
@@ -72,7 +77,14 @@ function interpolate(template: string, ctx: ExecContext): string {
   return template
     .replace(/\{\{name\}\}/gi, ctx.leadName || 'there')
     .replace(/\{\{phone\}\}/gi, ctx.phone)
-    .replace(/\{\{message\}\}/gi, ctx.messageText);
+    .replace(/\{\{message\}\}/gi, ctx.messageText)
+    // {{field}} or {{a.b.c}} — resolved from ctx.variables
+    .replace(/\{\{([\w.]+)\}\}/g, (_, path) => {
+      const parts = path.split('.');
+      let val: unknown = ctx.variables;
+      for (const p of parts) val = (val as Record<string, unknown>)?.[p];
+      return val != null ? String(val) : `{{${path}}}`;
+    });
 }
 
 // ── Main entry point ─────────────────────────────────────────
@@ -125,7 +137,34 @@ export async function runFlowsForMessage(
     appName: tenant.gupshup_app_name as string,
     messageText,
     isFirstMessage,
+    variables: {},
   };
+
+  // ── Check for a pending wait_for_reply node from a previous flow run ──
+  const { data: conv } = await supabaseAdmin
+    .from('conversations')
+    .select('context')
+    .eq('id', conversationId)
+    .single();
+  const pendingNode = (conv?.context as Record<string, unknown>)?.pending_flow_node as string | undefined;
+
+  if (pendingNode) {
+    // Restore saved variables and clear the pending marker
+    const savedCtx = { ...(conv?.context as Record<string, unknown>) };
+    delete savedCtx.pending_flow_node;
+    await supabaseAdmin
+      .from('conversations')
+      .update({ context: { ...savedCtx, pending_flow_node: null } })
+      .eq('id', conversationId);
+
+    // Find the flow that owns this node and resume, with restored variables
+    const ownerFlow = (flows as FlowRecord[]).find(f => f.nodes.some(n => n.id === pendingNode));
+    if (ownerFlow) {
+      const resumeCtx: ExecContext = { ...ctx, variables: savedCtx };
+      const handled = await executeFlowFromNode(ownerFlow, resumeCtx, pendingNode);
+      if (handled) return true;
+    }
+  }
 
   const lowerMsg = messageText.toLowerCase().trim();
 
@@ -163,18 +202,11 @@ function triggerMatches(flow: FlowRecord, lowerMsg: string, isFirstMessage: bool
 }
 
 // ── Flow graph traversal ─────────────────────────────────────
-async function executeFlow(flow: FlowRecord, ctx: ExecContext): Promise<boolean> {
-  const nodes = flow.nodes as FlowNode[];
-  const edges = flow.edges as FlowEdge[];
-
-  // Find trigger node (the entry point)
-  const triggerNode = nodes.find(n => n.type === 'trigger' || n.type === 'keyword_trigger');
-  if (!triggerNode) return false;
-
+async function executeFlowGraph(nodes: FlowNode[], edges: FlowEdge[], ctx: ExecContext, startId: string): Promise<boolean> {
   let messageSent = false;
-  let currentId: string | null = triggerNode.id;
+  let currentId: string | null = startId;
   const visited = new Set<string>();
-  const MAX_STEPS = 20; // prevent infinite loops
+  const MAX_STEPS = 20;
   let steps = 0;
 
   while (currentId && steps < MAX_STEPS) {
@@ -186,14 +218,26 @@ async function executeFlow(flow: FlowRecord, ctx: ExecContext): Promise<boolean>
     if (!node) break;
 
     const result = await executeNode(node, ctx, edges, nodes);
-
     if (result.stop) break;
     if (result.sent) messageSent = true;
-
     currentId = result.nextId ?? null;
   }
 
   return messageSent;
+}
+
+async function executeFlowFromNode(flow: FlowRecord, ctx: ExecContext, startNodeId: string): Promise<boolean> {
+  return executeFlowGraph(flow.nodes as FlowNode[], flow.edges as FlowEdge[], ctx, startNodeId);
+}
+
+async function executeFlow(flow: FlowRecord, ctx: ExecContext): Promise<boolean> {
+  const nodes = flow.nodes as FlowNode[];
+  const edges = flow.edges as FlowEdge[];
+
+  const triggerNode = nodes.find(n => n.type === 'trigger' || n.type === 'keyword_trigger');
+  if (!triggerNode) return false;
+
+  return executeFlowGraph(nodes, edges, ctx, triggerNode.id);
 }
 
 interface StepResult {
@@ -255,10 +299,33 @@ async function executeNode(
 
   // ── Condition / Branch ───────────────────────────────────
   if (type === 'condition' || type === 'condition_check') {
-    const keyword = ((node.data?.condition as string) || (node.data?.keyword as string) || '').toLowerCase().trim();
-    const matched = keyword ? keywordMatches(ctx.messageText.toLowerCase(), keyword) : false;
-    const handle = matched ? 'true' : 'false';
-    return { nextId: getNextNode(node.id, handle, edges) };
+    const field = (node.data?.field as string || '').trim();
+    const operator = (node.data?.operator as string || '==');
+    const targetVal = (node.data?.value as string || '');
+
+    let matched = false;
+    if (field) {
+      // Evaluate ctx.variables.{field} (supports dot notation)
+      const parts = field.split('.');
+      let val: unknown = ctx.variables;
+      for (const p of parts) val = (val as Record<string, unknown>)?.[p];
+      const strVal = val != null ? String(val) : '';
+      const numVal = parseFloat(strVal);
+      const numTarget = parseFloat(targetVal);
+      switch (operator) {
+        case '==': matched = strVal === targetVal; break;
+        case '!=': matched = strVal !== targetVal; break;
+        case '>':  matched = !isNaN(numVal) && numVal > numTarget; break;
+        case '<':  matched = !isNaN(numVal) && numVal < numTarget; break;
+        case 'contains': matched = strVal.toLowerCase().includes(targetVal.toLowerCase()); break;
+        default:   matched = strVal === targetVal;
+      }
+    } else {
+      // Fallback: keyword match on incoming message (legacy behaviour)
+      const keyword = ((node.data?.condition as string) || targetVal || '').toLowerCase().trim();
+      matched = keyword ? keywordMatches(ctx.messageText.toLowerCase(), keyword) : false;
+    }
+    return { nextId: getNextNode(node.id, matched ? 'true' : 'false', edges) };
   }
 
   // ── Human Handoff ────────────────────────────────────────
@@ -295,6 +362,60 @@ async function executeNode(
     const seconds = Math.min(Number(node.data?.seconds ?? node.data?.delay ?? 1), 5);
     await new Promise(r => setTimeout(r, seconds * 1000));
     return { nextId: getNextNode(node.id, null, edges) };
+  }
+
+  // ── AI Reply — call Gemini, send its response ───────────
+  if (type === 'ai_reply') {
+    try {
+      const { data: tenantRow } = await supabaseAdmin
+        .from('tenants')
+        .select('*')
+        .eq('id', ctx.tenantId)
+        .single();
+      if (tenantRow) {
+        const tenantConfig: TenantAIConfig = {
+          ...getTenantConfig(tenantRow as unknown as Tenant),
+          isFirstMessage: false,
+        };
+        const aiResp = await processMessageWithAI(
+          ctx.messageText,
+          [],
+          {},
+          tenantConfig,
+          ctx.tenantId
+        );
+        if (aiResp?.reply) {
+          await sendTextMessage(ctx.apiKey, ctx.appPhone, ctx.phone, aiResp.reply, ctx.appName);
+          await supabaseAdmin.from('messages').insert({
+            tenant_id: ctx.tenantId,
+            conversation_id: ctx.conversationId,
+            direction: 'outbound',
+            content: aiResp.reply,
+            message_type: 'text',
+            channel: 'whatsapp',
+            status: 'sent',
+            ai_generated: true,
+          });
+          return { nextId: getNextNode(node.id, null, edges), sent: true };
+        }
+      }
+    } catch (e) {
+      console.error('Flow engine: ai_reply node failed:', (e as Error).message);
+    }
+    return { nextId: getNextNode(node.id, null, edges) };
+  }
+
+  // ── Wait for Reply — pause flow, resume on next inbound ──
+  if (type === 'wait_for_reply') {
+    const nextNodeId = getNextNode(node.id, null, edges);
+    if (nextNodeId) {
+      // Store the next step in conversation context so the next inbound message resumes here
+      await supabaseAdmin
+        .from('conversations')
+        .update({ context: { ...({} as Record<string, unknown>), pending_flow_node: nextNodeId } })
+        .eq('id', ctx.conversationId);
+    }
+    return { stop: true }; // Stop execution until next message arrives
   }
 
   // ── End ──────────────────────────────────────────────────

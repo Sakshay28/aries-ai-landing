@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Handle, Position, NodeToolbar, useReactFlow } from "@xyflow/react";
-import { Sparkles, MessageSquare, CornerDownRight, Zap, SplitSquareVertical, Webhook, Trash2, Copy, Plus, Clock, UserIcon, BookOpen, CircleStop, Database, PlayCircle, Braces, Paintbrush, Hourglass, FileText, Pen, HelpCircle } from "lucide-react";
+import { Sparkles, MessageSquare, CornerDownRight, Zap, SplitSquareVertical, Webhook, Trash2, Copy, Plus, Clock, UserIcon, BookOpen, CircleStop, Database, PlayCircle, Braces, Paintbrush, Hourglass, FileText, Pen, HelpCircle, ListChecks } from "lucide-react";
 
 import { useFlowStore } from "../store";
 const targetHandleStyle = "!w-3 !h-3 !bg-[#111] !border-2 !border-white/20 hover:!border-[#06B6D4] hover:!bg-[#06B6D4]/20 hover:!scale-125 transition-all duration-300 !opacity-100 !rounded-full !z-50 shadow-sm";
@@ -373,6 +373,31 @@ export function ResumeParserNode({ id, data, selected }: { id: string, data: any
       
       <Handle type="source" position={Position.Bottom} id="success" className={`${sourceHandleStyle} !bg-[#0A0A0A]`} style={{ left: '30%' }} />
       <Handle type="source" position={Position.Bottom} id="error" className={`${sourceHandleStyle} !border-red-500/40 !bg-[#0A0A0A]`} style={{ left: '70%' }} />
+    </div>
+  );
+}
+
+export function CollectDataNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+  return (
+    <div className={`w-[260px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
+      <NodeActions id={id} />
+      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
+      <div className="px-4 py-4">
+        <div className="flex items-center gap-2 mb-2">
+          <ListChecks className="w-4 h-4 text-emerald-500" />
+          <div className="font-semibold text-[11px] uppercase tracking-widest text-white/80">Collect Data Form</div>
+        </div>
+        <p className="text-[10px] text-white/40 mb-3">AI naturally asks these questions in chat</p>
+        <div className="space-y-1">
+          {(data.fields || ["Name", "Email", "Phone"]).map((field: string, idx: number) => (
+            <div key={idx} className="flex items-center gap-2 px-2 py-1.5 rounded bg-white/5 border border-white/5 text-[11px] text-white/70">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/50" />
+              {field}
+            </div>
+          ))}
+        </div>
+      </div>
+      <Handle type="source" position={Position.Bottom} className={`${sourceHandleStyle}`} />
     </div>
   );
 }

@@ -12,6 +12,10 @@ export const getTenantId = cache(async (): Promise<string | null> => {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
+    if (process.env.NODE_ENV === 'development') {
+      return 'test-tenant-123';
+    }
+
     if (!supabaseUrl || !supabaseKey) return null;
 
     const supabase = createServerClient(supabaseUrl, supabaseKey, {

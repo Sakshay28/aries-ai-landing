@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse, after } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { isDuplicateMessage } from '@/lib/redis/client';
+import { isDuplicateMessage, getRedisClient } from '@/lib/redis/client';
 import { parseGupshupWebhook, sendTextMessage } from '@/lib/gupshup/service';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantConfig } from '@/lib/tenant/manager';
@@ -271,6 +271,29 @@ async function handleIncomingMessage(
     return;
   }
 
+  // ── Broadcast reply tracking (non-blocking) ──
+  try {
+    const redis = getRedisClient();
+    if (redis) {
+      const broadcastKey = `broadcast:phone:${tenant.id}:${cleanPhone}`;
+      const campaignId = await redis.get(broadcastKey);
+      if (campaignId) {
+        await redis.del(broadcastKey);
+        const { data: campaign } = await supabaseAdmin
+          .from('broadcast_campaigns')
+          .select('replied_count')
+          .eq('id', campaignId)
+          .single();
+        if (campaign) {
+          await supabaseAdmin
+            .from('broadcast_campaigns')
+            .update({ replied_count: ((campaign.replied_count as number) || 0) + 1 })
+            .eq('id', campaignId);
+        }
+      }
+    }
+  } catch { /* non-critical */ }
+
   // ── P2-3: Insert inbound message — upsert to survive duplicate delivery ──
   // ON CONFLICT on wa_message_id is a DB-level dedup that handles the race
   // window that exists even after the Redis/DB pre-check above.
@@ -380,17 +403,25 @@ async function handleIncomingMessage(
   const storedMsgCount = (conversation.message_count as number) ?? 0;
   const isFirstMessageForAI = storedMsgCount === 0 && history.length === 0;
 
-  // Load active smart rules (non-blocking — defaults to [] on error)
-  const { data: smartRulesRows } = await supabaseAdmin
-    .from('smart_rules')
-    .select('name, trigger_source, ai_summary')
-    .eq('tenant_id', tenant.id)
-    .eq('status', 'active');
+  // Load active smart rules + knowledge docs in parallel (non-blocking)
+  const [{ data: smartRulesRows }, { data: knowledgeRows }] = await Promise.all([
+    supabaseAdmin
+      .from('smart_rules')
+      .select('name, trigger_source, ai_summary')
+      .eq('tenant_id', tenant.id)
+      .eq('status', 'active'),
+    supabaseAdmin
+      .from('knowledge_docs')
+      .select('filename, content_text')
+      .eq('tenant_id', tenant.id)
+      .neq('content_text', ''),
+  ]);
 
   const tenantConfig = {
     ...getTenantConfig(tenant as unknown as Parameters<typeof getTenantConfig>[0]),
     isFirstMessage: isFirstMessageForAI,
     smartRules: (smartRulesRows || []) as Array<{ name: string; trigger_source: string; ai_summary: string }>,
+    knowledgeDocs: (knowledgeRows || []) as Array<{ filename: string; content_text: string }>,
   };
   const context = (conversation.context as Record<string, unknown>) || {};
 

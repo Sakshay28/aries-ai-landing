@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { MessageSquare, SplitSquareVertical, Webhook, HandMetal, Sparkles, Clock, UserIcon, BookOpen, CircleStop, PlayCircle, Braces, Paintbrush, Database, Hourglass, FileText, Search, ChevronRight, ShoppingCart, Box, RefreshCw, ShoppingBag, ImageIcon, Mic, MapPin, List, LayoutGrid, FileQuestion, Send, UserPlus, FileSignature, AlertCircle, RefreshCcw, Tag, GitBranch, Repeat, Globe, Phone, Mail, FileCheck, Star, ThumbsUp, CreditCard, ShieldCheck, Calendar, Building, Users, PiggyBank, Link2, Code, Terminal, Edit3, X, CornerDownRight, HelpCircle } from "lucide-react";
+import { MessageSquare, SplitSquareVertical, Webhook, HandMetal, Sparkles, Clock, UserIcon, BookOpen, CircleStop, PlayCircle, Braces, Paintbrush, Database, Hourglass, FileText, Search, ChevronRight, ShoppingCart, Box, RefreshCw, ShoppingBag, ImageIcon, Mic, MapPin, List, LayoutGrid, FileQuestion, Send, UserPlus, FileSignature, AlertCircle, RefreshCcw, Tag, GitBranch, Repeat, Globe, Phone, Mail, FileCheck, Star, ThumbsUp, CreditCard, ShieldCheck, Calendar, Building, Users, PiggyBank, Link2, Code, Terminal, Edit3, X, CornerDownRight, HelpCircle, ListChecks } from "lucide-react";
 import { useFlowStore } from "../store";
 import { useReactFlow } from "@xyflow/react";
 import { BUSINESS_TYPE_CONFIG } from "../config";
@@ -115,6 +115,7 @@ export const nodeCategories = [
     id: "LEAD GENERATION & CRM", title: "Lead Generation & CRM", color: "#F04438",
     nodes: [
       { id: "capture_lead", type: "standard", icon: UserPlus, label: "Capture Lead" },
+      { id: "collect_data", type: "collect_data", icon: ListChecks, label: "Collect Data Form" },
       { id: "lead_quiz", type: "standard", icon: FileQuestion, label: "Lead Qualification Quiz" },
       { id: "lead_score", type: "standard", icon: Star, label: "Lead Score Updater" },
       { id: "push_crm", type: "webhook", icon: Database, label: "Push to CRM" },
@@ -258,6 +259,7 @@ export const getDefaultNodeData = (id: string) => {
     case 'webhook': return { label: "API Request", method: "POST", url: "https://api.example.com" };
     case 'delay': return { label: "Delay", duration: "2" };
     case 'wait': return { label: "Wait for Event", event: "Payment Webhook" };
+    case 'collect_data': return { label: "Collect Data Form", fields: ["Name", "Email", "Phone", "Company"] };
     case 'resume_parser': return { label: "Parse Resume PDF", extracts: "Skills, Experience" };
     case 'handoff': return { label: "Human Handoff", team: "Support Team" };
     case 'end': return { label: "End Flow" };

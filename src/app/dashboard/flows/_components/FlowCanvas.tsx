@@ -2,8 +2,7 @@
 
 import { useCallback, useRef, useState, useEffect } from "react";
 import { ReactFlow, Background, BackgroundVariant, MiniMap, useReactFlow, Panel } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
-import { StandardNode, AIInterruptionNode, ResumeNode, LogicNode, WebhookNode, DelayNode, HandoffNode, KnowledgeNode, EndNode, TriggerNode, ExtractNode, FormatNode, MemoryNode, WaitNode, ResumeParserNode } from "./CustomNodes";
+import { StandardNode, AIInterruptionNode, ResumeNode, LogicNode, WebhookNode, DelayNode, HandoffNode, KnowledgeNode, EndNode, TriggerNode, ExtractNode, FormatNode, MemoryNode, WaitNode, ResumeParserNode, CollectDataNode } from "./CustomNodes";
 import { useFlowStore } from "../store";
 import { getDefaultNodeData } from "./FlowSidebar";
 import { Trash2 } from "lucide-react";
@@ -25,6 +24,7 @@ const nodeTypes = {
   memory: MemoryNode,
   wait: WaitNode,
   resume_parser: ResumeParserNode,
+  collect_data: CollectDataNode,
   show_products: StandardNode,
   order_tracking: StandardNode,
   returns_handler: StandardNode,

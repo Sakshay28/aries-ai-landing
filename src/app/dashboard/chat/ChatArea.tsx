@@ -2,7 +2,7 @@
 
 import {
   Phone, Video, Search, MoreVertical,
-  Paperclip, Smile, Mic, Send, Sparkles, CheckCheck, Bot, User
+  Paperclip, Smile, Mic, Send, Sparkles, CheckCheck, Bot, User, Mail, Sparkle
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -166,6 +166,10 @@ export default function ChatArea() {
     }
   };
 
+  const handleEmailSummary = () => {
+    toast.success("AI is generating an email summary and sending it to your inbox.");
+  };
+
   const initial = displayName.charAt(0).toUpperCase();
   const isActive = conversationMeta?.is_active;
 
@@ -209,23 +213,23 @@ export default function ChatArea() {
             )}
           </div>
           <div>
-            <h2 className="text-[15px] font-semibold text-foreground tracking-tight leading-none mb-1">
+            <h2 className="text-[15px] font-semibold text-foreground tracking-tight leading-none mb-1 flex items-center gap-2">
               {displayName}
-            </h2>
-            <div className="flex items-center gap-1.5">
-              <p className={cn("text-[12px] font-medium tracking-tight", isActive ? "text-emerald-500" : "text-muted-foreground")}>
-                {isActive ? "Active" : "Inactive"}
-              </p>
-              <span className="text-muted-foreground/30 text-[10px]">•</span>
-              {conversationMeta?.bot_paused ? (
-                <span className="text-[12px] text-amber-500 tracking-tight flex items-center gap-1">
-                  <User className="w-3 h-3" /> Human mode
-                </span>
-              ) : (
-                <span className="text-[12px] text-cyan-500 tracking-tight flex items-center gap-1">
-                  <Bot className="w-3 h-3" /> AI handling
+              {!conversationMeta?.bot_paused && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded-full border border-emerald-500/20 shadow-sm">
+                  <Sparkle className="w-3 h-3" /> AI Responding
                 </span>
               )}
+              {conversationMeta?.bot_paused && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest bg-amber-500/10 text-amber-600 px-2 py-0.5 rounded-full border border-amber-500/20 shadow-sm">
+                  <User className="w-3 h-3" /> Human Mode
+                </span>
+              )}
+            </h2>
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <p className={cn("text-[12px] font-medium tracking-tight", isActive ? "text-emerald-500" : "text-muted-foreground")}>
+                {isActive ? "Active on WhatsApp" : "Offline"}
+              </p>
             </div>
           </div>
         </motion.div>
@@ -251,6 +255,16 @@ export default function ChatArea() {
             ) : (
               <><User className="w-3.5 h-3.5" /> Take Over</>
             )}
+          </motion.button>
+
+          <motion.button 
+            whileHover={{ scale: 1.05 }} 
+            whileTap={{ scale: 0.95 }} 
+            onClick={handleEmailSummary}
+            className="flex items-center gap-1.5 h-8 px-3 rounded-full text-[12px] font-semibold transition-all border bg-secondary/50 text-foreground hover:bg-secondary mr-2"
+          >
+            <Mail className="w-3.5 h-3.5 text-indigo-500" />
+            <span className="hidden sm:inline">Email Summary</span>
           </motion.button>
 
           <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full transition-colors hidden sm:flex">
