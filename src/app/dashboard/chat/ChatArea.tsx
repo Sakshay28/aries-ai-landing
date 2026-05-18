@@ -1,6 +1,6 @@
 "use client";
 
-import { Send, X, Phone, Mail, Tag, Star, Calendar, Bot, User } from "lucide-react";
+import { Send, X, Phone, Mail, Tag, Star, Calendar, Bot, User, MessageSquare, Activity } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
@@ -283,8 +283,8 @@ export default function ChatArea() {
               </div>
 
               {/* Avatar + Name */}
-              <div className="flex flex-col items-center py-8 px-5 border-b border-[#E5E7EB] dark:border-white/10">
-                <div className="w-20 h-20 rounded-full ring-4 ring-[#12B76A]/15 overflow-hidden bg-[#F2FDF5] flex items-center justify-center mb-4 relative">
+              <div className="flex flex-col items-center py-6 px-5 border-b border-[#E5E7EB] dark:border-white/10">
+                <div className="w-20 h-20 rounded-full ring-4 ring-[#12B76A]/15 overflow-hidden bg-[#F2FDF5] flex items-center justify-center mb-3 relative">
                   <img
                     src={avatarUrl(rawPhone || conversationId || 'default')}
                     alt="avatar"
@@ -293,53 +293,67 @@ export default function ChatArea() {
                   />
                   <span className="absolute text-[32px] font-bold text-[#12B76A]" aria-hidden>{initial}</span>
                 </div>
-                <p className="text-[18px] font-semibold text-foreground tracking-tight">{lead?.name || formatPhone(rawPhone) || 'Unknown'}</p>
-                <p className="text-[13px] text-muted-foreground mt-1">{formatPhone(rawPhone)}</p>
-                {lead?.lead_status && (
-                  <span className={cn('mt-2 px-3 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide', STATUS_COLORS[lead.lead_status] || STATUS_COLORS.new)}>
-                    {lead.lead_status}
+                <p className="text-[17px] font-semibold text-foreground tracking-tight text-center">{lead?.name || formatPhone(rawPhone) || 'Unknown'}</p>
+                {lead?.name && <p className="text-[13px] text-muted-foreground mt-0.5">{formatPhone(rawPhone)}</p>}
+                <div className="flex items-center gap-2 mt-2">
+                  {lead?.lead_status && (
+                    <span className={cn('px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide', STATUS_COLORS[lead.lead_status] || STATUS_COLORS.new)}>
+                      {lead.lead_status}
+                    </span>
+                  )}
+                  <span className={cn(
+                    'px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide',
+                    conversationMeta?.bot_paused
+                      ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                  )}>
+                    {conversationMeta?.bot_paused ? 'Human Mode' : 'AI Mode'}
                   </span>
-                )}
+                </div>
               </div>
 
               {/* Details */}
-              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-                {lead?.email && (
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                      <Mail className="w-4 h-4 text-muted-foreground" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Email</p>
-                      <p className="text-[14px] text-foreground">{lead.email}</p>
-                    </div>
-                  </div>
-                )}
+              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-1">
 
-                <div className="flex items-center gap-3">
+                {/* Contact section */}
+                <p className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase mb-3">Contact</p>
+
+                <div className="flex items-center gap-3 py-2">
                   <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
                     <Phone className="w-4 h-4 text-muted-foreground" />
                   </div>
                   <div>
                     <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Phone</p>
-                    <p className="text-[14px] text-foreground">{formatPhone(rawPhone) || '—'}</p>
+                    <p className="text-[14px] text-foreground font-medium">{formatPhone(rawPhone) || '—'}</p>
                   </div>
                 </div>
 
+                {lead?.email && (
+                  <div className="flex items-center gap-3 py-2">
+                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                      <Mail className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Email</p>
+                      <p className="text-[14px] text-foreground font-medium">{lead.email}</p>
+                    </div>
+                  </div>
+                )}
+
                 {typeof lead?.lead_score === 'number' && (
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 py-2">
                     <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
                       <Star className="w-4 h-4 text-muted-foreground" />
                     </div>
                     <div>
                       <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Lead Score</p>
-                      <p className="text-[14px] text-foreground">{lead.lead_score} / 100</p>
+                      <p className="text-[14px] text-foreground font-medium">{lead.lead_score} / 100</p>
                     </div>
                   </div>
                 )}
 
                 {lead?.tags && lead.tags.length > 0 && (
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-start gap-3 py-2">
                     <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0 mt-0.5">
                       <Tag className="w-4 h-4 text-muted-foreground" />
                     </div>
@@ -354,14 +368,69 @@ export default function ChatArea() {
                   </div>
                 )}
 
-                {lead?.first_message_at && (
-                  <div className="flex items-center gap-3">
+                {/* Conversation section */}
+                <div className="pt-4 pb-1">
+                  <p className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase mb-3">Conversation</p>
+                </div>
+
+                <div className="flex items-center gap-3 py-2">
+                  <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                    <MessageSquare className="w-4 h-4 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Total Messages</p>
+                    <p className="text-[14px] text-foreground font-medium">{messages.length}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 py-2">
+                  <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                    <Activity className="w-4 h-4 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Bot Status</p>
+                    <p className="text-[14px] text-foreground font-medium">{conversationMeta?.bot_paused ? 'Human takeover' : 'AI responding'}</p>
+                  </div>
+                </div>
+
+                {messages.length > 0 && (
+                  <div className="flex items-center gap-3 py-2">
+                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                      <Calendar className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">First Message</p>
+                      <p className="text-[14px] text-foreground font-medium">
+                        {new Date(messages[0].created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {messages.length > 0 && (
+                  <div className="flex items-center gap-3 py-2">
+                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                      <Calendar className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">Last Message</p>
+                      <p className="text-[14px] text-foreground font-medium">
+                        {new Date(messages[messages.length - 1].created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                        {' · '}
+                        {new Date(messages[messages.length - 1].created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {(lead?.first_message_at && messages.length === 0) && (
+                  <div className="flex items-center gap-3 py-2">
                     <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
                       <Calendar className="w-4 h-4 text-muted-foreground" />
                     </div>
                     <div>
                       <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-semibold">First Contact</p>
-                      <p className="text-[14px] text-foreground">{new Date(lead.first_message_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                      <p className="text-[14px] text-foreground font-medium">{new Date(lead.first_message_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
                     </div>
                   </div>
                 )}
