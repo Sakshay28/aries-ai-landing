@@ -21,6 +21,7 @@ import {
   Bot,
   UserCog,
   Library,
+  Network,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -88,6 +89,7 @@ const navigationItems: NavItem[] = [
     badge: <SmartRulesBadge />,
   },
   { label: "Knowledge Base", icon: Library, href: "/dashboard/knowledge" },
+  { label: "Agents", icon: Network, href: "/dashboard/agents" },
   { label: "Templates", icon: FileText, href: "/dashboard/templates" },
   { label: "Integrations", icon: Puzzle, href: "/dashboard/integrations" },
 ];

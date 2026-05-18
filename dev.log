@@ -1,0 +1,99 @@
+
+> aries-libra-platform@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://172.20.10.9:3000
+- Environments: .env.local
+✓ Ready in 222ms
+
+ GET /dashboard/chat 307 in 214ms (next.js: 84ms, application-code: 131ms)
+ GET /dashboard/chat 200 in 1853ms (next.js: 8ms, application-code: 1845ms)
+[browser] Image with src "/logo.png" has either width or height modified, but not the other. If you use CSS to change the size of your image, also include the styles 'width: "auto"' or 'height: "auto"' to maintain the aspect ratio.
+ GET /api/dashboard/automations 200 in 1009ms (next.js: 95ms, application-code: 914ms)
+ GET /api/dashboard/chat/conversations 200 in 1113ms (next.js: 67ms, application-code: 1046ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 20ms (next.js: 3ms, application-code: 17ms)
+ GET /api/dashboard/automations 200 in 667ms (next.js: 5ms, application-code: 662ms)
+ GET /api/dashboard/chat/conversation?id=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 618ms (next.js: 24ms, application-code: 594ms)
+ GET /api/dashboard/chat/conversations 200 in 783ms (next.js: 3ms, application-code: 780ms)
+ PATCH /api/dashboard/chat/conversation?id=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 1105ms (next.js: 7ms, application-code: 1099ms)
+ GET /api/dashboard/chat/conversations 200 in 645ms (next.js: 4ms, application-code: 641ms)
+ GET /dashboard/agents 200 in 47ms (next.js: 32ms, application-code: 14ms)
+ GET /dashboard/chat 200 in 25ms (next.js: 4ms, application-code: 21ms)
+ GET /api/dashboard/chat/conversations 200 in 1038ms (next.js: 1915µs, application-code: 1036ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 22ms (next.js: 3ms, application-code: 19ms)
+ GET /api/dashboard/chat/conversation?id=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 589ms (next.js: 1079µs, application-code: 588ms)
+ GET /api/dashboard/chat/conversations 200 in 700ms (next.js: 3ms, application-code: 698ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 12ms (next.js: 1888µs, application-code: 10ms)
+ GET /api/dashboard/chat/conversations 200 in 628ms (next.js: 1637µs, application-code: 627ms)
+ GET /dashboard/agents 200 in 23ms (next.js: 4ms, application-code: 20ms)
+ GET /dashboard/broadcast 200 in 47ms (next.js: 34ms, application-code: 13ms)
+ GET /dashboard/contacts 200 in 24ms (next.js: 13ms, application-code: 11ms)
+ GET /dashboard/flows 200 in 49ms (next.js: 34ms, application-code: 15ms)
+ GET /api/dashboard/flows 200 in 868ms (next.js: 228ms, application-code: 640ms)
+ GET /api/dashboard/flows 200 in 471ms (next.js: 1275µs, application-code: 469ms)
+ GET /dashboard/agents 200 in 23ms (next.js: 4ms, application-code: 19ms)
+ GET /dashboard/chat 200 in 24ms (next.js: 4ms, application-code: 19ms)
+ GET /api/dashboard/chat/conversations 200 in 660ms (next.js: 1893µs, application-code: 658ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 18ms (next.js: 3ms, application-code: 15ms)
+ GET /api/dashboard/chat/conversation?id=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 906ms (next.js: 1489µs, application-code: 904ms)
+ GET /api/dashboard/chat/conversations 200 in 996ms (next.js: 3ms, application-code: 993ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 19ms (next.js: 2ms, application-code: 16ms)
+ GET /api/dashboard/chat/conversations 200 in 803ms (next.js: 1967µs, application-code: 801ms)
+✓ Compiled in 786ms
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 1661ms (next.js: 1811µs, application-code: 1660ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 1526ms (next.js: 66ms, application-code: 1460ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 1437ms (next.js: 1147µs, application-code: 1436ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 1417ms (next.js: 1096µs, application-code: 1416ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 1406ms (next.js: 2ms, application-code: 1404ms)
+ GET /dashboard/chat?conversationId=f68e574b-2884-4842-b6b2-fd04f8921a6d 200 in 1387ms (next.js: 1761µs, application-code: 1385ms)
+✓ Compiled in 92ms
+[browser] ./src/app/dashboard/_layout/AppSidebar.tsx:24:3
+the name `Network` is defined multiple times
+  22 |   UserCog,
+  23 |   Library,
+> 24 |   Network,
+     |   ^^^^^^^
+  25 | } from "lucide-react";
+  26 | import { Button } from "@/components/ui/button";
+  27 | import { cn } from "@/lib/utils";
+
+Ecmascript file had an error
+
+Import traces:
+  Client Component Browser:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component] 
+[browser] ./src/app/dashboard/_layout/AppSidebar.tsx:24:3
+the name `Network` is defined multiple times
+  22 |   UserCog,
+  23 |   Library,
+> 24 |   Network,
+     |   ^^^^^^^
+  25 | } from "lucide-react";
+  26 | import { Button } from "@/components/ui/button";
+  27 | import { cn } from "@/lib/utils";
+
+Ecmascript file had an error
+
+Import traces:
+  Client Component Browser:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component Browser]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/app/dashboard/_layout/AppSidebar.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Client Component SSR]
+    ./src/app/dashboard/_layout/DashboardLayoutClient.tsx [Server Component]
+    ./src/app/dashboard/layout.tsx [Server Component] 
