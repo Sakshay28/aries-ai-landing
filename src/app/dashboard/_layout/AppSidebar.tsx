@@ -18,6 +18,7 @@ import {
   CreditCard,
   Settings,
   Zap,
+  Bot,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -53,6 +54,16 @@ const navigationItems: NavItem[] = [
       <div className="flex items-center gap-1.5">
         <div className="w-1.5 h-1.5 rounded-full bg-sidebar-foreground/30" />
         <span className="text-[10px] tracking-wide text-sidebar-foreground/50">12 / 3</span>
+      </div>
+    ) 
+  },
+  { 
+    label: "AI Agents", 
+    icon: Bot, 
+    href: "/dashboard/agents",
+    badge: (
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] tracking-wide text-sidebar-foreground/50">2 Active</span>
       </div>
     ) 
   },

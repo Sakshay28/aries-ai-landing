@@ -374,8 +374,11 @@ async function handleIncomingMessage(
     }));
 
   // ── Call AI engine ──
-  // Refine isFirstMessage using actual history — more accurate than message_count
-  const isFirstMessageForAI = history.length === 0;
+  // Use message_count (pre-increment, from the conversations row we fetched) as the
+  // primary "is this the first message?" signal. history.length can be 0 even for
+  // repeat messages when prior AI replies failed to save — making it unreliable alone.
+  const storedMsgCount = (conversation.message_count as number) ?? 0;
+  const isFirstMessageForAI = storedMsgCount === 0 && history.length === 0;
 
   // Load active smart rules (non-blocking — defaults to [] on error)
   const { data: smartRulesRows } = await supabaseAdmin
@@ -424,7 +427,7 @@ async function handleIncomingMessage(
   }
 
   // ── Insert AI outbound message ──
-  await supabaseAdmin.from('messages').insert({
+  const { error: aiMsgErr } = await supabaseAdmin.from('messages').insert({
     tenant_id: tenant.id,
     conversation_id: conversation.id,
     direction: 'outbound',
@@ -436,6 +439,9 @@ async function handleIncomingMessage(
     ai_generated: true,
     wa_message_id: gupshupMsgId,
   });
+  if (aiMsgErr) {
+    console.error('❌ Gupshup: failed to save AI outbound message (history will be incomplete):', aiMsgErr.message);
+  }
 
   // ── Update conversation context ──
   const updatedContext = { ...context, ...aiResponse.extractedData };

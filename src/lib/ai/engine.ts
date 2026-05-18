@@ -106,6 +106,9 @@ YOUR JOB:
 ${tenantConfig.smartRules && tenantConfig.smartRules.length > 0 ? `SMART RULES (always follow these alongside your core job):
 ${tenantConfig.smartRules.map((r, i) => `${i + 1}. [${r.name}] When: ${r.trigger_source} → ${r.ai_summary}`).join('\n')}` : ''}
 
+${tenantConfig.knowledgeDocs && tenantConfig.knowledgeDocs.length > 0 ? `KNOWLEDGE BASE (use this as your primary source for product/service questions):
+${tenantConfig.knowledgeDocs.map(d => `--- ${d.filename} ---\n${d.content_text}`).join('\n\n')}` : ''}
+
 RULES:
 - NEVER make up information you don't have
 - NEVER start with a greeting if this is not the first message in the conversation
@@ -154,6 +157,7 @@ export interface TenantAIConfig {
   smartRules?: Array<{ name: string; trigger_source: string; ai_summary: string }>;
   // Fix #7: Custom FAQs
   customFaqs?: Array<{ question: string; answer: string }>;
+  knowledgeDocs?: Array<{ filename: string; content_text: string }>;
 }
 
 // ═══════════════════════════════════════
