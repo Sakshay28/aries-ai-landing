@@ -161,11 +161,15 @@ function SidebarBody({
       {/* Header */}
       <div className="flex h-14 items-center justify-between px-4">
         {isOpen && (
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-white overflow-hidden shadow-sm">
-              <Image src="/logo.png" alt="Aries AI Logo" width={24} height={24} className="object-cover" />
-            </div>
-            <span className="text-[14px] font-semibold tracking-tight text-sidebar-foreground">Aries AI</span>
+          <div className="flex items-center">
+            <Image 
+              src="/logo.png" 
+              alt="Aries AI" 
+              width={100} 
+              height={36} 
+              className="object-contain h-9 w-auto"
+              priority
+            />
           </div>
         )}
         <Button
