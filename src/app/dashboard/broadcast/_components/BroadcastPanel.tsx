@@ -14,6 +14,11 @@ interface Campaign {
   failed_count: number;
 }
 
+interface ApprovedTemplate {
+  name: string;
+  body: string;
+}
+
 interface BroadcastPanelProps {
   panelMode: 'edit' | 'analytics' | 'new' | null;
   selectedCampaign: Campaign | null;
@@ -26,6 +31,7 @@ interface BroadcastPanelProps {
   onSend: (id: string) => void;
   setEditName: (name: string) => void;
   setEditTemplate: (template: string) => void;
+  approvedTemplates: ApprovedTemplate[];
 }
 
 export function BroadcastPanel({
@@ -39,7 +45,8 @@ export function BroadcastPanel({
   onSave,
   onSend,
   setEditName,
-  setEditTemplate
+  setEditTemplate,
+  approvedTemplates,
 }: BroadcastPanelProps) {
   if (!panelMode) return null;
 
@@ -90,15 +97,38 @@ export function BroadcastPanel({
               </div>
               
               <div className="space-y-4">
-                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Meta Template Name</label>
-                <input 
-                  type="text" 
-                  value={editTemplate}
-                  onChange={e => setEditTemplate(e.target.value)}
-                  placeholder="e.g. welcome_offer_01"
-                  className="w-full h-10 px-4 bg-background border border-border rounded-lg text-[14px] focus:border-indigo-500 outline-none" 
-                />
-                <p className="text-xs text-muted-foreground mt-1">Must exactly match the approved template name in your Meta Business Manager.</p>
+                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">WhatsApp Template</label>
+                {approvedTemplates.length > 0 ? (
+                  <>
+                    <select
+                      value={editTemplate}
+                      onChange={e => setEditTemplate(e.target.value)}
+                      className="w-full h-10 px-4 bg-background border border-border rounded-lg text-[14px] focus:border-indigo-500 outline-none"
+                    >
+                      <option value="">— Select a template —</option>
+                      {approvedTemplates.map(t => (
+                        <option key={t.name} value={t.name}>{t.name}</option>
+                      ))}
+                    </select>
+                    {editTemplate && (() => {
+                      const tpl = approvedTemplates.find(t => t.name === editTemplate);
+                      return tpl?.body ? (
+                        <p className="text-xs text-muted-foreground bg-secondary/40 rounded-lg px-3 py-2 border border-border/50 leading-relaxed">{tpl.body}</p>
+                      ) : null;
+                    })()}
+                  </>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      value={editTemplate}
+                      onChange={e => setEditTemplate(e.target.value)}
+                      placeholder="e.g. welcome_offer_01"
+                      className="w-full h-10 px-4 bg-background border border-border rounded-lg text-[14px] focus:border-indigo-500 outline-none"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">No approved templates yet — enter the exact template name, or create one in the Templates page.</p>
+                  </>
+                )}
               </div>
 
               <div className="space-y-4">

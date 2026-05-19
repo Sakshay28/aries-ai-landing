@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!tenant.gupshup_api_key || !tenant.gupshup_phone_number || !tenant.gupshup_app_name) {
-      return NextResponse.json({ success: false, error: 'Gupshup is not configured in Settings' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'WhatsApp is not yet active for your account. Contact support.' }, { status: 400 });
     }
 
     // Determine recipient phone number

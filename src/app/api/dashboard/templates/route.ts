@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { decryptToken } from '@/lib/utils/crypto';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import axios from 'axios';
+
+const GUPSHUP_BASE = 'https://api.gupshup.io/wa/api/v1';
 
 export async function GET() {
   try {
@@ -11,23 +12,43 @@ export async function GET() {
 
     const { data: tenant } = await supabaseAdmin
       .from('tenants')
-      .select('wa_business_account_id, wa_access_token')
+      .select('gupshup_api_key, gupshup_app_name')
       .eq('id', tenantId)
       .single();
 
-    if (!tenant?.wa_business_account_id || !tenant?.wa_access_token) {
-      return NextResponse.json({ error: 'WhatsApp not configured' }, { status: 400 });
+    if (!tenant?.gupshup_api_key || !tenant?.gupshup_app_name) {
+      return NextResponse.json({ success: true, data: [] });
     }
 
-    const waToken = decryptToken(tenant.wa_access_token);
-    const url = `https://graph.facebook.com/v21.0/${tenant.wa_business_account_id}/message_templates`;
-    const { data } = await axios.get(url, {
-      headers: { Authorization: `Bearer ${waToken}` }
-    });
+    const apiKey = decryptToken(tenant.gupshup_api_key as string) as string;
 
-    return NextResponse.json({ success: true, data: data.data });
+    const res = await fetch(
+      `${GUPSHUP_BASE}/templates?appName=${encodeURIComponent(tenant.gupshup_app_name as string)}`,
+      { headers: { apikey: apiKey, 'Cache-Control': 'no-cache' }, signal: AbortSignal.timeout(10000) }
+    );
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText);
+      console.error('Gupshup templates list error:', res.status, errText.slice(0, 200));
+      return NextResponse.json({ success: false, error: 'Failed to fetch templates' }, { status: 502 });
+    }
+
+    const json = await res.json();
+    const raw: Record<string, unknown>[] = json.templates || json.data || [];
+
+    const data = raw.map((t) => ({
+      id: (t.id as string) || '',
+      name: (t.elementName as string) || '',
+      category: (t.category as string) || '',
+      language: (t.languageCode as string) || '',
+      status: (t.status as string) || '',
+      components: (t.components as unknown[]) || [],
+    }));
+
+    return NextResponse.json({ success: true, data });
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Internal server error'; return NextResponse.json({ success: false, error: msg }, { status: 500 });
+    const msg = error instanceof Error ? error.message : 'Internal server error';
+    return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
 }
 
@@ -38,29 +59,46 @@ export async function POST(request: Request) {
 
     const { data: tenant } = await supabaseAdmin
       .from('tenants')
-      .select('wa_business_account_id, wa_access_token')
+      .select('gupshup_api_key, gupshup_app_name')
       .eq('id', tenantId)
       .single();
 
-    if (!tenant?.wa_business_account_id || !tenant?.wa_access_token) {
-      return NextResponse.json({ error: 'WhatsApp not configured' }, { status: 400 });
+    if (!tenant?.gupshup_api_key || !tenant?.gupshup_app_name) {
+      return NextResponse.json({ success: false, error: 'WhatsApp is not yet active for your account. Contact support.' }, { status: 400 });
     }
 
+    const apiKey = decryptToken(tenant.gupshup_api_key as string) as string;
     const body = await request.json();
-    const url = `https://graph.facebook.com/v21.0/${tenant.wa_business_account_id}/message_templates`;
-    
-    const { data } = await axios.post(url, body, {
-      headers: { 
-        Authorization: `Bearer ${decryptToken(tenant.wa_access_token)}`,
-        'Content-Type': 'application/json'
-      }
+
+    const params = new URLSearchParams({
+      appId: tenant.gupshup_app_name as string,
+      elementName: body.name as string,
+      category: (body.category as string) || 'MARKETING',
+      languageCode: (body.language as string) || 'en',
+      components: JSON.stringify(body.components || []),
     });
 
-    return NextResponse.json({ success: true, data });
+    const res = await fetch(`${GUPSHUP_BASE}/template`, {
+      method: 'POST',
+      headers: {
+        apikey: apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cache-Control': 'no-cache',
+      },
+      body: params.toString(),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    const json = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      const errMsg = (json as { message?: string }).message || `Error ${res.status}`;
+      return NextResponse.json({ success: false, error: errMsg }, { status: 502 });
+    }
+
+    return NextResponse.json({ success: true, data: json });
   } catch (error: unknown) {
-    type AxiosLike = { response?: { data?: { error?: { message?: string } } }; message?: string };
-    const axErr = error as AxiosLike;
-    const message = axErr?.response?.data?.error?.message || axErr?.message || 'Internal server error';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    const msg = error instanceof Error ? error.message : 'Internal server error';
+    return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
 }

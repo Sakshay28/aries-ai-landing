@@ -48,7 +48,10 @@ export function BroadcastClient() {
 
   // Form State
   const [editName, setEditName] = useState('');
-  const [editTemplate, setEditTemplate] = useState('welcome_offer_01');
+  const [editTemplate, setEditTemplate] = useState('');
+
+  // Approved templates for the picker
+  const [approvedTemplates, setApprovedTemplates] = useState<{ name: string; body: string }[]>([]);
 
   const fetchCampaigns = async () => {
     setLoading(true);
@@ -68,6 +71,21 @@ export function BroadcastClient() {
 
   useEffect(() => {
     fetchCampaigns();
+    // Fetch approved templates for the picker
+    fetch('/api/dashboard/templates')
+      .then(r => r.json())
+      .then(j => {
+        if (j.success && Array.isArray(j.data)) {
+          const approved = j.data
+            .filter((t: { status: string; name: string; components?: { type: string; text?: string }[] }) => t.status === 'APPROVED')
+            .map((t: { name: string; components?: { type: string; text?: string }[] }) => ({
+              name: t.name,
+              body: t.components?.find((c) => c.type === 'BODY')?.text || '',
+            }));
+          setApprovedTemplates(approved);
+        }
+      })
+      .catch(() => {});
     // Close dropdown when clicking outside
     const handleClick = () => setActiveDropdown(null);
     window.addEventListener('click', handleClick);
@@ -91,7 +109,7 @@ export function BroadcastClient() {
       setEditTemplate(campaign.template_name);
     } else {
       setEditName('');
-      setEditTemplate('welcome_offer_01');
+      setEditTemplate('');
     }
   };
 
@@ -424,6 +442,7 @@ export function BroadcastClient() {
         onSend={handleSend}
         setEditName={setEditName}
         setEditTemplate={setEditTemplate}
+        approvedTemplates={approvedTemplates}
       />
     </div>
   );

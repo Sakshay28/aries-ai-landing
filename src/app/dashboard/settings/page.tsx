@@ -35,10 +35,8 @@ interface SettingsData {
   warm_keywords: string[];
   off_hours_message: string;
   off_hours_capture_lead: boolean;
-  // Gupshup fields
-  gupshup_api_key: string;
+  // WhatsApp status (read-only, set by admin)
   gupshup_phone_number: string;
-  gupshup_app_name: string;
   // Outbound webhook
   outbound_webhook_url: string;
 }
@@ -51,9 +49,8 @@ const DEFAULT_SETTINGS: SettingsData = {
   followup_30min: true, followup_3hr: true, followup_24hr: true, followup_7day: false,
   escalation_timeout_mins: 5, hot_keywords: [], warm_keywords: [],
   off_hours_message: '', off_hours_capture_lead: true,
-  // Gupshup
-  gupshup_api_key: '', gupshup_phone_number: '', gupshup_app_name: '',
-  outbound_webhook_url: '',
+  gupshup_phone_number: '',
+  outbound_webhook_url: ''
 };
 
 const TABS = [
@@ -209,41 +206,6 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('business');
   const [dirty, setDirty] = useState(false);
-  const [testingConnection, setTestingConnection] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
-
-  const testGupshupConnection = async () => {
-    if (!settings.gupshup_api_key || !settings.gupshup_phone_number || !settings.gupshup_app_name) {
-      toast.error('Enter your WhatsApp API Key, Phone Number and App Name first');
-      return;
-    }
-    setTestingConnection(true);
-    setConnectionStatus('idle');
-    try {
-      const res = await fetch('/api/dashboard/settings/test-gupshup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          apiKey: settings.gupshup_api_key,
-          phoneNumber: settings.gupshup_phone_number,
-          appName: settings.gupshup_app_name,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setConnectionStatus('success');
-        toast.success('✅ Connected to Gupshup successfully!');
-      } else {
-        setConnectionStatus('error');
-        toast.error(`❌ Connection failed: ${data.error || 'Check your credentials'}`);
-      }
-    } catch {
-      setConnectionStatus('error');
-      toast.error('Connection test failed — network error');
-    } finally {
-      setTestingConnection(false);
-    }
-  };
 
   const update = useCallback(<K extends keyof SettingsData>(key: K, value: SettingsData[K]) => {
     setSettings(s => ({ ...s, [key]: value }));
@@ -407,83 +369,34 @@ export default function SettingsPage() {
       {/* Tab: WhatsApp */}
       {activeTab === 'whatsapp' && (
         <motion.div key="whatsapp" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
-          <SectionCard title="WhatsApp Business Credentials" icon={MessageSquare}>
-            {/* Connection status badge */}
-            <div className="flex items-center gap-3 mb-2">
-              <div
-                className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
-                style={{
-                  background: connectionStatus === 'success' ? 'rgba(16,185,129,0.1)' : connectionStatus === 'error' ? 'rgba(239,68,68,0.1)' : 'var(--secondary)',
-                  color: connectionStatus === 'success' ? '#10B981' : connectionStatus === 'error' ? '#EF4444' : 'var(--muted-foreground)',
-                  border: `1px solid ${connectionStatus === 'success' ? 'rgba(16,185,129,0.2)' : connectionStatus === 'error' ? 'rgba(239,68,68,0.2)' : 'var(--border)'}`,
-                }}
-              >
+          <SectionCard title="WhatsApp Connection" icon={MessageSquare}>
+            {settings.gupshup_phone_number ? (
+              <div className="flex items-center gap-4 py-2">
                 <div
-                  className="w-1.5 h-1.5 rounded-full"
-                  style={{ background: connectionStatus === 'success' ? '#10B981' : connectionStatus === 'error' ? '#EF4444' : 'var(--muted-foreground)' }}
-                />
-                {connectionStatus === 'success' ? 'Connected' : connectionStatus === 'error' ? 'Connection Failed' : 'Not Tested'}
-              </div>
-              <a
-                href="https://business.facebook.com/wa/manage/home/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs font-medium underline"
-                style={{ color: 'var(--muted-foreground)' }}
-              >
-                Open Meta Business Manager →
-              </a>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <Field label="WhatsApp API Key">
-                <div className="relative">
-                  <input
-                    type="password"
-                    value={settings.gupshup_api_key}
-                    onChange={e => update('gupshup_api_key', e.target.value)}
-                    placeholder="sk-••••••••••••••••••••"
-                    className="w-full h-10 px-3 rounded-xl text-sm outline-none"
-                    style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
-                  />
+                  className="flex items-center gap-2.5 px-4 py-2 rounded-full text-sm font-semibold"
+                  style={{ background: 'rgba(16,185,129,0.1)', color: '#10B981', border: '1px solid rgba(16,185,129,0.2)' }}
+                >
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  WhatsApp Active
                 </div>
-              </Field>
-              <Field label="WhatsApp Phone Number (no + prefix)">
-                <Input
-                  value={settings.gupshup_phone_number}
-                  onChange={v => update('gupshup_phone_number', v)}
-                  placeholder="919876543210"
-                />
-              </Field>
-              <Field label="WhatsApp App ID">
-                <Input
-                  value={settings.gupshup_app_name}
-                  onChange={v => update('gupshup_app_name', v)}
-                  placeholder="my-business-app"
-                />
-              </Field>
-            </div>
-
-            <div className="flex items-center gap-3 pt-2">
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.97 }}
-                onClick={testGupshupConnection}
-                disabled={testingConnection}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
-                style={{ background: 'var(--secondary)', border: '1px solid var(--border)', color: 'var(--foreground)', cursor: testingConnection ? 'wait' : 'pointer' }}
-              >
-                {testingConnection ? (
-                  <div className="w-4 h-4 border-2 border-border border-t-cyan-500 rounded-full animate-spin" />
-                ) : (
-                  <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--muted-foreground)' }} />
-                )}
-                {testingConnection ? 'Testing…' : 'Test Connection'}
-              </motion.button>
-              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                Sends a test message to your own phone to verify the connection.
-              </p>
-            </div>
+                <span className="text-sm font-mono" style={{ color: 'var(--muted-foreground)' }}>
+                  +{settings.gupshup_phone_number.slice(0, -3).replace(/./g, '•')}{settings.gupshup_phone_number.slice(-3)}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 py-2">
+                <div
+                  className="flex items-center gap-2.5 px-4 py-2 rounded-full text-sm font-semibold"
+                  style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)', border: '1px solid var(--border)' }}
+                >
+                  <div className="w-2 h-2 rounded-full" style={{ background: 'var(--muted-foreground)' }} />
+                  Setup in Progress
+                </div>
+                <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
+                  Your Aries AI team will activate WhatsApp for your account.
+                </span>
+              </div>
+            )}
           </SectionCard>
 
           {/* Outbound Webhook */}
@@ -502,45 +415,6 @@ export default function SettingsPage() {
             </p>
           </SectionCard>
 
-          {/* Setup Guide for new users */}
-          {!settings.gupshup_api_key && (
-            <SectionCard title="How to Connect WhatsApp API" icon={MessageSquare}>
-              <ol className="space-y-4 text-sm">
-                {[
-                  { step: '1', text: 'Go to ', link: 'https://business.facebook.com/wa/manage/home/', linkText: 'Meta Business Manager' },
-                  { step: '2', text: 'Create an app, add your phone number, and complete the Meta verification process' },
-                  { step: '3', text: 'Copy your API Key, Phone Number (without +), and App ID' },
-                  { step: '4', text: 'Paste them above, click "Test Connection", then save' },
-                  { step: '5', text: `Set your webhook URL in Meta: ${typeof window !== 'undefined' ? window.location.origin : 'https://yoursite.com'}/api/webhooks/whatsapp` },
-                ].map(item => (
-                  <li key={item.step} className="flex items-start gap-3">
-                    <span
-                      className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
-                      style={{ background: 'rgba(6,182,212,0.1)', color: '#06B6D4' }}
-                    >
-                      {item.step}
-                    </span>
-                    <span style={{ color: 'var(--muted-foreground)' }}>
-                      {item.text}
-                      {item.link && (
-                        <a href={item.link} target="_blank" rel="noopener noreferrer" className="underline ml-1" style={{ color: '#06B6D4' }}>
-                          {item.linkText}
-                        </a>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-              <div
-                className="mt-4 p-3 rounded-xl text-xs font-mono break-all"
-                style={{ background: 'var(--secondary)', border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}
-              >
-                Webhook URL: <span style={{ color: 'var(--foreground)' }}>
-                  {typeof window !== 'undefined' ? window.location.origin : 'https://yoursite.com'}/api/webhooks/whatsapp
-                </span>
-              </div>
-            </SectionCard>
-          )}
         </motion.div>
       )}
 
