@@ -13,8 +13,17 @@ import type { Message } from "@/lib/types";
 import type { SharedConversationMeta } from "./page";
 
 // ── helpers ────────────────────────────────────────────────────────
-function avatarUrl(seed: string): string {
-  return `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(seed)}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
+const CRM_AVATAR_COLORS = [
+  'bg-emerald-100 text-emerald-700',
+  'bg-violet-100 text-violet-700',
+  'bg-sky-100 text-sky-700',
+  'bg-amber-100 text-amber-700',
+  'bg-rose-100 text-rose-700',
+];
+function crmAvatarColor(seed: string) {
+  let h = 0;
+  for (const c of seed) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+  return CRM_AVATAR_COLORS[h % CRM_AVATAR_COLORS.length];
 }
 
 function formatPhone(raw: string | null | undefined): string {
@@ -232,17 +241,11 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
     <div className="w-[300px] flex-shrink-0 bg-[#FAFAFA] dark:bg-[#0F1623] shadow-[-1px_0_0_rgba(0,0,0,0.05)] dark:shadow-[-1px_0_0_rgba(255,255,255,0.04)] flex flex-col overflow-hidden">
       {/* ── Hero ── */}
       <div className="flex items-center gap-3 px-4 pt-4 pb-3">
-        <div className="w-10 h-10 rounded-full overflow-hidden bg-[#F0F2F5] dark:bg-white/10 flex items-center justify-center flex-shrink-0">
-          {meta ? (
-            <img
-              src={avatarUrl(rawPhone || meta.id)}
-              alt="avatar"
-              className="w-full h-full object-cover"
-              onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-            />
-          ) : (
-            <User className="w-5 h-5 text-muted-foreground/40" />
-          )}
+        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-bold flex-shrink-0 ${meta ? crmAvatarColor(rawPhone || meta.id) : 'bg-muted'}`}>
+          {meta
+            ? (displayName?.charAt(0)?.toUpperCase() || '?')
+            : <User className="w-5 h-5 text-muted-foreground/40" />
+          }
         </div>
 
         {meta ? (

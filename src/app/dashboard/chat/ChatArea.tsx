@@ -15,8 +15,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { SharedConversationMeta } from "./page";
 
 // ── helpers ────────────────────────────────────────────────────────────
-function avatarUrl(seed: string): string {
-  return `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(seed)}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
+const HEADER_AVATAR_COLORS = [
+  'bg-emerald-100 text-emerald-700',
+  'bg-violet-100 text-violet-700',
+  'bg-sky-100 text-sky-700',
+  'bg-amber-100 text-amber-700',
+  'bg-rose-100 text-rose-700',
+];
+function headerAvatarColor(seed: string) {
+  let h = 0;
+  for (const c of seed) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+  return HEADER_AVATAR_COLORS[h % HEADER_AVATAR_COLORS.length];
 }
 
 function formatPhone(raw: string | null | undefined): string {
@@ -231,14 +240,8 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       <div className="h-[60px] flex items-center justify-between px-5 bg-white dark:bg-[#1C2333] shadow-[0_1px_3px_rgba(0,0,0,0.06)] z-20 flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className="w-9 h-9 rounded-full overflow-hidden bg-[#F0F2F5] dark:bg-white/10 flex items-center justify-center flex-shrink-0">
-              <img
-                src={avatarUrl(rawPhone || conversationId || 'x')}
-                alt="avatar"
-                className="w-full h-full object-cover"
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-              />
-              <span className="text-[12px] font-semibold text-muted-foreground" aria-hidden>{initial}</span>
+            <div className={`w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-bold flex-shrink-0 ${headerAvatarColor(rawPhone || conversationId || 'x')}`}>
+              {initial}
             </div>
             <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-400 border-2 border-white dark:border-[#1C2333]" />
           </div>

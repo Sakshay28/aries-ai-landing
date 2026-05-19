@@ -30,8 +30,18 @@ function timeAgo(dateStr: string | null): string {
   return new Date(dateStr).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
-function avatarUrl(seed: string): string {
-  return `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(seed)}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
+const AVATAR_BG = [
+  'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400',
+  'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-400',
+  'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-400',
+  'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400',
+  'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400',
+];
+
+function avatarColor(seed: string) {
+  let h = 0;
+  for (const c of seed) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+  return AVATAR_BG[h % AVATAR_BG.length];
 }
 
 function formatPhone(raw: string | null | undefined): string {
@@ -156,16 +166,8 @@ export default function ChatSidebar() {
 
                 {/* Avatar with status dot */}
                 <div className="relative flex-shrink-0">
-                  <div className="w-10 h-10 rounded-full overflow-hidden bg-[#F0F2F5] dark:bg-white/10 flex items-center justify-center">
-                    <img
-                      src={avatarUrl(phone || conv.id)}
-                      alt="avatar"
-                      className="w-full h-full object-cover"
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                    />
-                    <span className="text-[12px] font-semibold text-muted-foreground" aria-hidden>
-                      {getInitial(conv)}
-                    </span>
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-bold ${avatarColor(phone || conv.id)}`}>
+                    {getInitial(conv)}
                   </div>
                   {/* Mode dot (pulses when conversation is active in last 5 min) */}
                   <span className="absolute bottom-0 right-0 w-2.5 h-2.5">
