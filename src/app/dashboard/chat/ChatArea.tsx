@@ -163,6 +163,25 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
+  // Polling fallback: refresh statuses every 10s for 'sent' outbound messages
+  // (real-time UPDATE events may be blocked by RLS on the browser client)
+  useEffect(() => {
+    if (!conversationId) return;
+    const interval = setInterval(async () => {
+      const hasPending = messages.some(m => m.direction === 'outbound' && m.status === 'sent');
+      if (!hasPending) return;
+      try {
+        const res = await fetch(`/api/dashboard/chat/statuses?conversationId=${conversationId}`);
+        const data = await res.json();
+        if (!data.success) return;
+        const map: Record<string, string> = {};
+        for (const s of data.statuses as { id: string; status: string }[]) map[s.id] = s.status;
+        setMessages(prev => prev.map(m => map[m.id] ? { ...m, status: map[m.id] as Message['status'] } : m));
+      } catch { /* ignore */ }
+    }, 10_000);
+    return () => clearInterval(interval);
+  }, [conversationId, messages]);
+
   const handleSend = async () => {
     if (!inputMsg.trim() || !conversationId || sending) return;
     const text = inputMsg.trim();
