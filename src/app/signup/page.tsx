@@ -47,7 +47,7 @@ function SignupInner() {
     const origin = window.location.origin;
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${origin}/api/auth/callback?next=/dashboard` },
+      options: { redirectTo: `${origin}/api/auth/callback` },
     });
     if (oauthError) {
       setError(oauthError.message);

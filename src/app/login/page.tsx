@@ -60,7 +60,7 @@ function LoginInner() {
     const supabase = createBrowserSupabaseClient();
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/api/auth/callback?next=/dashboard` },
+      options: { redirectTo: `${window.location.origin}/api/auth/callback` },
     });
     if (oauthError) {
       setError(oauthError.message);
