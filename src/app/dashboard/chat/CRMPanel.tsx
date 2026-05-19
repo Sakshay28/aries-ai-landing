@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Phone, Mail, Tag, Star, Bot, User,
   MessageSquare, ChevronDown, Plus, Trash2,
@@ -226,6 +226,8 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
 
   const deleteNote = (id: string) => saveNotes(notes.filter(n => n.id !== id));
 
+  const noteInputRef = useRef<HTMLInputElement>(null);
+
   const lead = meta?.leads;
   const rawPhone = lead?.phone || meta?.sender_id || meta?.sender_name || "";
   const displayName = lead?.name || formatPhone(rawPhone) || "Unknown";
@@ -277,16 +279,16 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
       {meta && (
         <div className="px-4 pb-3">
           <div className="grid grid-cols-4 gap-1.5">
-            {[
-              { icon: UserPlus, label: 'Assign' },
-              { icon: Tag, label: 'Tag' },
-              { icon: StickyNote, label: 'Note' },
-              { icon: Workflow, label: 'Flow' },
-            ].map(({ icon: Icon, label }) => (
+            {([
+              { icon: UserPlus, label: 'Assign', action: () => toast('Assign', { description: 'Coming soon' }) },
+              { icon: Tag, label: 'Tag', action: () => toast('Tag', { description: 'Coming soon' }) },
+              { icon: StickyNote, label: 'Note', action: () => { noteInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => noteInputRef.current?.focus(), 200); } },
+              { icon: Workflow, label: 'Flow', action: () => toast('Flow', { description: 'Coming soon' }) },
+            ]).map(({ icon: Icon, label, action }) => (
               <button
                 key={label}
-                onClick={() => toast(label, { description: 'Coming soon' })}
-                className="group flex flex-col items-center gap-1 py-2 rounded-xl hover:bg-black/[0.03] dark:hover:bg-white/[0.04] transition-colors"
+                onClick={action}
+                className="group flex flex-col items-center gap-1 py-2 rounded-xl hover:bg-black/[0.03] dark:hover:bg-white/[0.04] transition-colors cursor-pointer"
               >
                 <Icon className="w-3.5 h-3.5 text-muted-foreground/70 group-hover:text-foreground transition-colors" />
                 <span className="text-[10px] font-medium text-muted-foreground/70 group-hover:text-foreground transition-colors">{label}</span>
@@ -311,8 +313,16 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
 
             {/* Contact */}
             <Section title="Contact" icon={Phone}>
-              <InfoRow label="Phone" value={formatPhone(rawPhone)} />
-              {lead?.email && <InfoRow label="Email" value={lead.email} />}
+              <div className="flex flex-col gap-0.5">
+                <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Phone</p>
+                <a href={`tel:+${rawPhone.replace(/\D/g, '')}`} className="text-[12.5px] text-foreground/85 font-medium hover:text-foreground hover:underline transition-colors cursor-pointer">{formatPhone(rawPhone) || "—"}</a>
+              </div>
+              {lead?.email && (
+                <div className="flex flex-col gap-0.5">
+                  <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Email</p>
+                  <a href={`mailto:${lead.email}`} className="text-[12.5px] text-foreground/85 font-medium hover:text-foreground hover:underline transition-colors cursor-pointer truncate">{lead.email}</a>
+                </div>
+              )}
               {typeof lead?.lead_score === "number" && (
                 <div>
                   <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Lead Score</p>
@@ -390,6 +400,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
               ))}
               <div className="flex gap-2 mt-1">
                 <input
+                  ref={noteInputRef}
                   value={noteInput}
                   onChange={e => setNoteInput(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && addNote()}

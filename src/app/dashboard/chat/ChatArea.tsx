@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  Send, Bot, User, Check, CheckCheck, ArrowDown, Paperclip, Smile,
+  Send, Bot, User, Check, CheckCheck, Clock, AlertCircle, ArrowDown, Paperclip, Smile,
   Mic, Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -200,6 +200,23 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     } finally { setSending(false); }
   };
 
+  const handleResend = async (msg: Message) => {
+    if (!conversationId) return;
+    // Optimistically remove the failed bubble; real-time sub re-adds the new sent message
+    setMessages(prev => prev.filter(m => m.id !== msg.id));
+    try {
+      const res = await fetch('/api/chat/send', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId, message: msg.content }),
+      });
+      if (!res.ok) throw new Error('Failed');
+    } catch {
+      toast.error('Resend failed.');
+      // Restore the failed message if the retry also fails
+      setMessages(prev => [...prev, { ...msg, status: 'failed' as Message['status'] }]);
+    }
+  };
+
   const toggleHumanMode = async () => {
     if (!conversationId || !conversationMeta || togglingMode) return;
     const newPaused = !conversationMeta.bot_paused;
@@ -396,7 +413,8 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                           : cn(
                               'bg-[#D9FDD3] dark:bg-[#054640] text-[#111B21] dark:text-[#E9EDEF]',
                               isFirst ? 'rounded-2xl rounded-tr-sm' : 'rounded-2xl',
-                              isLast && !isFirst ? 'rounded-br-sm' : ''
+                              isLast && !isFirst ? 'rounded-br-sm' : '',
+                              msg.status === 'failed' ? 'ring-1 ring-red-300 dark:ring-red-800 opacity-80' : ''
                             )
                       )}>
                         <p className="whitespace-pre-wrap">{msg.content}</p>
@@ -413,7 +431,13 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                               ? <CheckCheck className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
                               : msg.status === 'delivered'
                                 ? <CheckCheck className="w-3.5 h-3.5 text-black/35 dark:text-white/35" />
-                                : <Check className="w-3.5 h-3.5 text-black/35 dark:text-white/35" />
+                                : msg.status === 'sent'
+                                  ? <Check className="w-3.5 h-3.5 text-black/35 dark:text-white/35" />
+                                  : msg.status === 'pending'
+                                    ? <Clock className="w-3 h-3 text-black/30 dark:text-white/30" />
+                                    : msg.status === 'failed'
+                                      ? <button onClick={() => handleResend(msg)} title="Retry sending" className="flex items-center cursor-pointer hover:opacity-70 transition-opacity"><AlertCircle className="w-3.5 h-3.5 text-red-500" /></button>
+                                      : <Check className="w-3.5 h-3.5 text-black/35 dark:text-white/35" />
                           )}
                           {!isInbound && msg.ai_generated && (
                             <Bot className="w-2.5 h-2.5 text-black/25 dark:text-white/25 ml-0.5" />

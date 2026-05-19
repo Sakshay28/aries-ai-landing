@@ -72,6 +72,7 @@ export default function ChatSidebar() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const supabaseRef = useRef(createBrowserSupabaseClient());
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -98,6 +99,17 @@ export default function ChatSidebar() {
     return () => { supabase.removeChannel(channel); };
   }, [load]);
 
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   const filtered = convos.filter(c => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
@@ -115,6 +127,7 @@ export default function ChatSidebar() {
         <div className="relative flex items-center">
           <Search className="w-3.5 h-3.5 absolute left-3 text-muted-foreground/50 pointer-events-none" />
           <input
+            ref={searchInputRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search…"
