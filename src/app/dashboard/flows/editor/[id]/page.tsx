@@ -21,6 +21,7 @@ export default function FlowEditorPage() {
   const router = useRouter();
   const routeId = params.id as string;
   const businessType = searchParams?.get('type') || 'blank';
+  const templateId = searchParams?.get('template') || null;
   const [flowName, setFlowName] = useState('Untitled Flow');
   
   const config = BUSINESS_TYPE_CONFIG[businessType] || BUSINESS_TYPE_CONFIG['blank'];
@@ -54,15 +55,15 @@ export default function FlowEditorPage() {
       loadFlow(routeId);
     } else {
       // Fresh editor — load prebuilt template if applicable
-      const isBlank = businessType === 'blank';
+      const isBlank = businessType === 'blank' && !templateId;
       if (!isBlank) {
-        const { nodes, edges } = getPrebuiltFlow(routeId, businessType);
+        const { nodes, edges } = getPrebuiltFlow(templateId || businessType, businessType);
         loadTemplate(nodes, edges);
       } else {
         loadTemplate([], []);
       }
     }
-  }, [routeId, businessType, loadTemplate, loadFlow]);
+  }, [routeId, businessType, templateId, loadTemplate, loadFlow]);
 
   return (
     <ReactFlowProvider>

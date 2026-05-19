@@ -187,14 +187,45 @@ async function handleIncomingMessage(
     .eq('phone', cleanPhone)
     .single();
 
+  // Detect Click-to-WhatsApp ad source
+  const isFromAd = !!msg.referral && msg.referral.source_type === 'ad';
+  const leadSource = isFromAd ? 'meta_ctwa' : 'whatsapp';
+
   if (existingLead) {
     lead = existingLead;
-    // Update last_message_at
+    // Update last_message_at; if first ad message, tag source
+    const updateData: Record<string, unknown> = { last_message_at: new Date().toISOString() };
+    if (isFromAd && !existingLead.source) {
+      updateData.source = leadSource;
+    }
     await supabaseAdmin
       .from('leads')
-      .update({ last_message_at: new Date().toISOString() })
+      .update(updateData)
       .eq('id', existingLead.id);
   } else {
+    // ── Round-robin: assign new lead to next team member ──
+    let assignedTo: string | null = null;
+    try {
+      const { data: teamMembers } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('tenant_id', tenant.id)
+        .order('created_at', { ascending: true });
+
+      if (teamMembers && teamMembers.length > 0) {
+        const counter = (tenant.lead_assignment_counter as number) ?? 0;
+        const idx = counter % teamMembers.length;
+        assignedTo = teamMembers[idx].id as string;
+        // Increment counter for next lead (non-blocking)
+        void supabaseAdmin
+          .from('tenants')
+          .update({ lead_assignment_counter: counter + 1 })
+          .eq('id', tenant.id);
+      }
+    } catch {
+      // Assignment failed — lead is created unassigned, not a blocker
+    }
+
     // Create new lead
     const { data: newLead } = await supabaseAdmin
       .from('leads')
@@ -203,13 +234,21 @@ async function handleIncomingMessage(
         phone: cleanPhone,
         channel: 'whatsapp',
         lead_status: 'new',
-        lead_score: 10,
+        lead_score: isFromAd ? 30 : 10,
+        source: leadSource,
         first_message_at: new Date().toISOString(),
         last_message_at: new Date().toISOString(),
+        ...(assignedTo && { assigned_to: assignedTo }),
+        ...(isFromAd && msg.referral && {
+          notes: `Meta Ad — "${msg.referral.headline || ''}" | Ad ID: ${msg.referral.source_id || ''} | CLID: ${msg.referral.ctwa_clid || ''}`,
+        }),
       })
       .select()
       .single();
     lead = newLead;
+    if (isFromAd) {
+      console.log(`📢 CTWA lead: ad="${msg.referral?.headline}" clid=${msg.referral?.ctwa_clid}`);
+    }
     // Fire integrations for new lead event (non-blocking)
     if (newLead) {
       fireIntegrations({
@@ -220,7 +259,7 @@ async function handleIncomingMessage(
           phone: cleanPhone,
           email: (newLead.email as string) || '',
           lead_status: 'new',
-          source: 'whatsapp',
+          source: leadSource,
         },
       }).catch(e => console.error('Integration runner (new_lead):', (e as Error).message));
 
@@ -230,8 +269,8 @@ async function handleIncomingMessage(
         phone:       cleanPhone,
         email:       (newLead.email as string) || undefined,
         lead_status: 'new',
-        source:      'whatsapp',
-        lead_score:  10,
+        source:      leadSource,
+        lead_score:  isFromAd ? 30 : 10,
         created_at:  new Date().toISOString(),
       }).catch(() => { /* Google Sheets not connected — expected */ });
     }

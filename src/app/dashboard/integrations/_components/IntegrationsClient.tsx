@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle2, ArrowRight, CreditCard, Truck, FileSpreadsheet, Briefcase, Webhook, X, Loader2, AlertCircle, ExternalLink, Unplug, CalendarCheck } from 'lucide-react';
+import { CheckCircle2, ArrowRight, CreditCard, Truck, FileSpreadsheet, Briefcase, Webhook, X, Loader2, AlertCircle, ExternalLink, Unplug, CalendarCheck, RefreshCw, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 
 // ── Integration definitions ──────────────────────────────────
@@ -26,6 +27,10 @@ interface IntegrationDef {
   docsUrl?: string;
   fields: FieldDef[];
   eventBadges: string[];
+  isOAuth?: boolean;
+  oauthRoute?: string;
+  oauthSpreadsheetParam?: boolean;
+  syncUrl?: string;
 }
 
 const INTEGRATIONS: IntegrationDef[] = [
@@ -72,16 +77,34 @@ const INTEGRATIONS: IntegrationDef[] = [
     ],
   },
   {
-    id: 'googlesheets',
+    id: 'google_sheets',
     name: 'Google Sheets',
-    description: 'Log every new lead and booking into a Google Sheet automatically.',
+    description: 'Leads auto-sync to your Google Sheet in real-time via OAuth — no Zapier needed.',
     icon: FileSpreadsheet,
     color: 'text-[#0F9D58]',
     bgColor: 'bg-[#0F9D58]/10',
-    docsUrl: 'https://zapier.com/apps/google-sheets/integrations',
-    eventBadges: ['New lead'],
+    docsUrl: 'https://developers.google.com/sheets/api',
+    eventBadges: ['New lead', 'Real-time sync'],
+    isOAuth: true,
+    oauthRoute: '/api/integrations/google-sheets/auth',
+    oauthSpreadsheetParam: true,
+    syncUrl: '/api/dashboard/google-sheets/sync',
     fields: [
-      { key: 'webhook_url', label: 'Webhook URL', type: 'url', placeholder: 'https://hooks.zapier.com/hooks/catch/...', required: true, hint: 'Create a Zapier/Make scenario: Webhook → Google Sheets "Add Row". Paste the trigger URL here.' },
+      { key: 'spreadsheet_id', label: 'Google Sheet URL or ID', type: 'url', placeholder: 'https://docs.google.com/spreadsheets/d/...', required: true, hint: 'Open your Google Sheet, paste the full URL or just the ID from the URL.' },
+    ],
+  },
+  {
+    id: 'pabbly',
+    name: 'Pabbly Connect',
+    description: 'Send lead and event data to any Pabbly workflow via webhook — connect 1000+ apps instantly.',
+    icon: Zap,
+    color: 'text-[#FF6B35]',
+    bgColor: 'bg-[#FF6B35]/10',
+    docsUrl: 'https://connect.pabbly.com/',
+    eventBadges: ['New lead', 'Booking confirmed', 'Payment requested'],
+    fields: [
+      { key: 'webhook_url', label: 'Pabbly Webhook URL', type: 'url', placeholder: 'https://connect.pabbly.com/workflow/sendwebhookdata/...', required: true, hint: 'In Pabbly Connect, create a workflow → Add Trigger → Webhook by Pabbly. Copy the webhook URL here.' },
+      { key: 'events', label: 'Fire on events', type: 'select', placeholder: '', required: false, options: [{ value: 'new_lead,booking_confirmed,payment_requested', label: 'All events' }, { value: 'new_lead', label: 'New lead only' }, { value: 'booking_confirmed', label: 'Bookings only' }] },
     ],
   },
   {
@@ -143,6 +166,31 @@ function IntegrationModal({
   });
   const [saving, setSaving] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const handleOAuthConnect = () => {
+    const rawId = form['spreadsheet_id']?.trim();
+    if (!rawId) { toast.error('Please enter your Google Sheet URL or ID'); return; }
+    // Extract the ID from a full URL if needed
+    const match = rawId.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+    const spreadsheetId = match ? match[1] : rawId;
+    window.location.href = `${integration.oauthRoute}?spreadsheet_id=${encodeURIComponent(spreadsheetId)}`;
+  };
+
+  const handleSyncNow = async () => {
+    if (!integration.syncUrl) return;
+    setSyncing(true);
+    try {
+      const res = await fetch(integration.syncUrl, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(`Synced ${data.synced} leads to Google Sheets`);
+    } catch (e) {
+      toast.error((e as Error).message || 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const handleSave = async () => {
     const missing = integration.fields.filter(f => f.required && !form[f.key]?.trim());
@@ -260,17 +308,38 @@ function IntegrationModal({
             </button>
           ) : <div />}
           <div className="flex gap-2">
+            {integration.isOAuth && existing && integration.syncUrl && (
+              <button
+                onClick={handleSyncNow}
+                disabled={syncing}
+                className="px-4 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground flex items-center gap-1.5"
+              >
+                {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                Sync All Leads
+              </button>
+            )}
             <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground">
               Cancel
             </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="px-5 py-2 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition-colors disabled:opacity-60 flex items-center gap-2"
-            >
-              {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              {existing ? 'Update' : 'Connect'}
-            </button>
+            {integration.isOAuth ? (
+              <button
+                onClick={handleOAuthConnect}
+                disabled={saving}
+                className="px-5 py-2 text-sm rounded-lg bg-[#0F9D58] hover:bg-[#0F9D58]/90 text-white font-medium transition-colors disabled:opacity-60 flex items-center gap-2"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                {existing ? 'Reconnect with Google' : 'Connect with Google'}
+              </button>
+            ) : (
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-5 py-2 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition-colors disabled:opacity-60 flex items-center gap-2"
+              >
+                {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {existing ? 'Update' : 'Connect'}
+              </button>
+            )}
           </div>
         </div>
       </motion.div>
@@ -283,6 +352,7 @@ export function IntegrationsClient() {
   const [connected, setConnected] = useState<ConnectedIntegration[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeModal, setActiveModal] = useState<string | null>(null);
+  const searchParams = useSearchParams();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -296,6 +366,22 @@ export function IntegrationsClient() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const success = searchParams.get('success');
+    const error = searchParams.get('error');
+    if (success === 'google_sheets') {
+      toast.success('Google Sheets connected successfully! Leads will sync automatically.');
+      load();
+      window.history.replaceState({}, '', '/dashboard/integrations');
+    } else if (error === 'google_sheets_denied') {
+      toast.error('Google authorization was denied.');
+      window.history.replaceState({}, '', '/dashboard/integrations');
+    } else if (error === 'google_sheets_failed') {
+      toast.error('Failed to connect Google Sheets. Please try again.');
+      window.history.replaceState({}, '', '/dashboard/integrations');
+    }
+  }, [searchParams, load]);
 
   const getConnected = (id: string) => connected.find(c => c.integration_id === id) ?? null;
 

@@ -12,7 +12,7 @@ export async function GET() {
 
   const { data: leads, error } = await supabase
     .from('leads')
-    .select('*, conversations(id)')
+    .select('*, conversations(id), assigned_user:assigned_to(id, full_name, email)')
     .eq('tenant_id', tenantId)
     .order('updated_at', { ascending: false });
 

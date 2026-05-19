@@ -27,7 +27,7 @@ export default function TemplatePickerPage() {
     setTimeout(() => {
       // In a real app, templateId would load specific nodes. 
       // We pass the type to contextually highlight the sidebar.
-      router.push(`/dashboard/flows/editor/${templateId}?type=${businessType}`);
+      router.push(`/dashboard/flows/editor/new?type=${businessType}&template=${templateId}`);
     }, 400);
   };
 

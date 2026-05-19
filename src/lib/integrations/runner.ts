@@ -130,6 +130,26 @@ async function runShiprocket(cfg: IntegrationConfig, event: IntegrationEvent) {
   }
 }
 
+// ── Pabbly Connect: POST to Pabbly webhook URL ───────────────
+async function runPabbly(cfg: IntegrationConfig, event: IntegrationEvent) {
+  const url = cfg.webhook_url;
+  if (!url) return;
+
+  const enabledEvents = (cfg.events || 'new_lead,booking_confirmed,payment_requested').split(',');
+  if (!enabledEvents.includes(event.type)) return;
+
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: event.type, timestamp: new Date().toISOString(), ...event }),
+    });
+    console.log(`⚡ Pabbly Connect: ${event.type} sent → ${url}`);
+  } catch (e) {
+    console.error('Pabbly integration error:', (e as Error).message);
+  }
+}
+
 // ── Custom Webhooks: generic event POST ─────────────────────
 async function runCustomWebhooks(cfg: IntegrationConfig, event: IntegrationEvent) {
   const url = cfg.webhook_url;
@@ -156,6 +176,7 @@ const HANDLERS: Record<string, (cfg: IntegrationConfig, event: IntegrationEvent)
   googlesheets: runGoogleSheets,
   zohocrm: runZohoCRM,
   shiprocket: runShiprocket,
+  pabbly: runPabbly,
   webhooks: runCustomWebhooks,
 };
 

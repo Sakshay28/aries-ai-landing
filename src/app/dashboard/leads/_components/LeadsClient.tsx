@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Filter, MoreHorizontal, User, Phone, Mail, Clock, ShieldCheck, Flame, ThermometerSun, Snowflake } from 'lucide-react';
+import { Search, Filter, MoreHorizontal, User, Phone, Mail, Clock, ShieldCheck, Flame, ThermometerSun, Snowflake, Megaphone, UserCircle2 } from 'lucide-react';
 import type { Lead } from '@/lib/types';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
@@ -141,6 +141,11 @@ export function LeadsClient() {
                             {lead.name || 'Unknown Contact'}
                           </div>
                           <div className="flex gap-2 items-center">
+                            {(lead as any).source === 'meta_ctwa' && (
+                              <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                                <Megaphone className="w-2.5 h-2.5" /> Ad
+                              </span>
+                            )}
                             {lead.channel === 'whatsapp' ? (
                               <MessageCircle className="w-4 h-4 text-emerald-500" aria-label="WhatsApp" />
                             ) : lead.channel?.includes('instagram') ? (
@@ -169,8 +174,18 @@ export function LeadsClient() {
                         </div>
 
                         <div className="flex items-center justify-between mt-4 pt-3 border-t border-border/50">
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-secondary px-2 py-1 rounded-md">
-                            Score: {lead.lead_score}
+                          <div className="flex items-center gap-2">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-secondary px-2 py-1 rounded-md">
+                              Score: {lead.lead_score}
+                            </div>
+                            {(lead as any).assigned_user && (
+                              <div
+                                className="w-6 h-6 rounded-full bg-indigo-500/20 border border-indigo-500/30 text-indigo-500 text-[9px] font-bold flex items-center justify-center shrink-0"
+                                title={`Assigned to: ${(lead as any).assigned_user.full_name || (lead as any).assigned_user.email}`}
+                              >
+                                {((lead as any).assigned_user.full_name || (lead as any).assigned_user.email || '?')[0].toUpperCase()}
+                              </div>
+                            )}
                           </div>
                           
                           <select 

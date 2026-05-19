@@ -25,7 +25,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { sendTextMessage } from '@/lib/gupshup/service';
+import { sendTextMessage, sendMediaMessage } from '@/lib/gupshup/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { processMessageWithAI, TenantAIConfig } from '@/lib/ai/engine';
 import { getTenantConfig } from '@/lib/tenant/manager';
@@ -280,11 +280,53 @@ async function executeNode(
     return { nextId: getNextNode(node.id, null, edges) };
   }
 
-  // ── Send Message ─────────────────────────────────────────
+  // ── Send Media (image / video / audio / file) ────────────
+  if (type === 'send_media' || type === 'send_audio') {
+    const mediaUrl = interpolate((node.data?.mediaUrl as string) || '', ctx);
+    const caption  = interpolate((node.data?.caption as string) || '', ctx);
+    const mediaType = (node.data?.mediaType as string) ||
+      (type === 'send_audio' ? 'audio' : 'image');
+
+    if (!mediaUrl.trim()) {
+      // No URL configured — skip node and continue flow
+      return { nextId: getNextNode(node.id, null, edges) };
+    }
+
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_media', payload: mediaUrl, variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
+      return { nextId: getNextNode(node.id, null, edges), sent: true };
+    }
+
+    try {
+      await sendMediaMessage(
+        ctx.apiKey,
+        ctx.appPhone,
+        ctx.phone,
+        mediaType as 'image' | 'video' | 'audio' | 'file',
+        mediaUrl,
+        caption || undefined,
+        ctx.appName
+      );
+      await supabaseAdmin.from('messages').insert({
+        tenant_id: ctx.tenantId,
+        conversation_id: ctx.conversationId,
+        direction: 'outbound',
+        content: caption || `[${mediaType}]`,
+        message_type: mediaType,
+        channel: 'whatsapp',
+        status: 'sent',
+        ai_generated: false,
+      });
+      return { nextId: getNextNode(node.id, null, edges), sent: true };
+    } catch (e) {
+      console.error(`Flow engine: sendMediaMessage failed for node ${node.id}:`, (e as Error).message);
+      return { nextId: getNextNode(node.id, 'error', edges) };
+    }
+  }
+
+  // ── Send Text Message ─────────────────────────────────────
   if (
     type === 'standard' ||
-    type === 'send_media' ||
-    type === 'send_audio' ||
     type === 'send_location' ||
     type === 'send_buttons' ||
     type === 'send_list' ||

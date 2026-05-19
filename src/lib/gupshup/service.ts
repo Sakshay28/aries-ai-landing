@@ -301,6 +301,14 @@ export interface ParsedGupshupMessage {
   isStatusUpdate: boolean;
   status?: string;         // "sent" | "delivered" | "read" | "failed"
   mediaUrl?: string;
+  referral?: {             // Present when message comes from a Click-to-WhatsApp ad
+    source_type?: string;  // "ad"
+    source_id?: string;    // Meta ad ID
+    headline?: string;     // Ad headline
+    body?: string;         // Ad body text
+    ctwa_clid?: string;    // Click ID for attribution
+    source_url?: string;   // Ad URL
+  };
 }
 
 export function parseGupshupWebhook(body: Record<string, unknown>): ParsedGupshupMessage | null {
@@ -351,6 +359,10 @@ export function parseGupshupWebhook(body: Record<string, unknown>): ParsedGupshu
       text = `[${msgType}]`;
     }
 
+    // CTWA: Meta passes referral data when message is from a Click-to-WhatsApp ad
+    const referral = (payload.referral as Record<string, string> | undefined) ||
+      ((payload.payload as Record<string, unknown>)?.referral as Record<string, string> | undefined);
+
     return {
       messageId: (payload.id as string) || '',
       fromPhone: (payload.source as string) || '',
@@ -361,6 +373,7 @@ export function parseGupshupWebhook(body: Record<string, unknown>): ParsedGupshu
       timestamp,
       isStatusUpdate: false,
       ...(mediaUrl && { mediaUrl }),
+      ...(referral && { referral }),
     };
   }
 

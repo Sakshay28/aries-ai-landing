@@ -1,4 +1,5 @@
 import { Metadata } from 'next';
+import { Suspense } from 'react';
 import { IntegrationsClient } from './_components/IntegrationsClient';
 
 export const metadata: Metadata = {
@@ -9,7 +10,9 @@ export const metadata: Metadata = {
 export default function IntegrationsPage() {
   return (
     <div className="h-[calc(100vh-3.5rem)]">
-      <IntegrationsClient />
+      <Suspense>
+        <IntegrationsClient />
+      </Suspense>
     </div>
   );
 }

@@ -73,6 +73,45 @@ export default function FlowInspector() {
                 </div>
               )}
 
+              {(selectedNode.type === 'send_media' || selectedNode.type === 'send_audio') && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-[11px] text-white/40 font-medium tracking-wide">Media Type</label>
+                    <select
+                      value={(selectedNode.data?.mediaType as string) || (selectedNode.type === 'send_audio' ? 'audio' : 'image')}
+                      onChange={e => updateNodeData(selectedNode.id, { mediaType: e.target.value })}
+                      className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02] appearance-none"
+                    >
+                      <option value="image">Image (JPG / PNG / WebP)</option>
+                      <option value="video">Video (MP4)</option>
+                      <option value="audio">Audio (MP3 / OGG)</option>
+                      <option value="file">File / Document (PDF etc.)</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[11px] text-white/40 font-medium tracking-wide">Media URL</label>
+                    <input
+                      type="url"
+                      value={(selectedNode.data?.mediaUrl as string) || ''}
+                      onChange={e => updateNodeData(selectedNode.id, { mediaUrl: e.target.value })}
+                      placeholder="https://cdn.example.com/image.jpg"
+                      className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 placeholder:text-white/20 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02]"
+                    />
+                    <p className="text-[10px] text-white/25 leading-relaxed">Publicly accessible URL. Supports {'{{variable}}'}-style interpolation.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[11px] text-white/40 font-medium tracking-wide">Caption <span className="text-white/20">(optional)</span></label>
+                    <input
+                      type="text"
+                      value={(selectedNode.data?.caption as string) || ''}
+                      onChange={e => updateNodeData(selectedNode.id, { caption: e.target.value })}
+                      placeholder="Add a caption for this media..."
+                      className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 placeholder:text-white/20 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02]"
+                    />
+                  </div>
+                </>
+              )}
+
               {selectedNode.type === 'interruption' && (
                 <>
                   <div className="space-y-2">

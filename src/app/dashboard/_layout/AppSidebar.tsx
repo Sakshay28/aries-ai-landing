@@ -21,7 +21,6 @@ import {
   Bot,
   UserCog,
   Library,
-  Cpu,
   Activity,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -90,7 +89,6 @@ const navigationItems: NavItem[] = [
     badge: <SmartRulesBadge />,
   },
   { label: "Knowledge Base", icon: Library, href: "/dashboard/knowledge" },
-  { label: "Agents", icon: Cpu, href: "/dashboard/agents" },
   { label: "Templates", icon: FileText, href: "/dashboard/templates" },
   { label: "Event Logs", icon: Activity, href: "/dashboard/logs" },
   { label: "Integrations", icon: Puzzle, href: "/dashboard/integrations" },
