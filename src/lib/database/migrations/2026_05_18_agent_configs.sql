@@ -24,10 +24,6 @@ ALTER TABLE agent_configs ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "agent_configs_tenant_isolation" ON agent_configs;
 CREATE POLICY "agent_configs_tenant_isolation" ON agent_configs
-  USING (
-    tenant_id IN (
-      SELECT id FROM tenants WHERE user_id = auth.uid()
-    )
-  );
+  USING (tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid()));
 
 COMMIT;

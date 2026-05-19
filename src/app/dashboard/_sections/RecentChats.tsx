@@ -5,14 +5,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SkeletonRow } from "@/components/ui/skeleton";
 import { CheckCheck } from "lucide-react";
 import Link from "next/link";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 interface Conversation {
   id: string;
-  lead_id: string | null;
+  sender_name: string | null;
+  sender_id: string | null;
   last_message_at: string | null;
-  unread_count?: number;
-  leads?: { name: string | null; phone: string | null } | null;
+  channel: string | null;
+  message_count: number;
   last_message_text?: string | null;
 }
 
@@ -50,43 +50,17 @@ export function RecentChats() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const supabase = createBrowserSupabaseClient();
-
     async function load() {
-      // Get current session to extract tenant_id via RLS
-      const { data: convData } = await supabase
-        .from("conversations")
-        .select("id, lead_id, last_message_at, leads(name, phone)")
-        .order("last_message_at", { ascending: false })
-        .limit(5);
-
-      if (!convData || convData.length === 0) {
+      try {
+        const res = await fetch('/api/dashboard/conversations?limit=5&active=false');
+        const json = await res.json();
+        setConvos(json.success ? (json.data as Conversation[]) : []);
+      } catch {
         setConvos([]);
+      } finally {
         setLoading(false);
-        return;
       }
-
-      // Fetch last message per conversation
-      const withMessages = await Promise.all(
-        convData.map(async (c) => {
-          const { data: msgs } = await supabase
-            .from("messages")
-            .select("content")
-            .eq("conversation_id", c.id)
-            .order("created_at", { ascending: false })
-            .limit(1);
-
-          return {
-            ...c,
-            last_message_text: msgs?.[0]?.content ?? null,
-          } as unknown as Conversation;
-        })
-      );
-
-      setConvos(withMessages);
-      setLoading(false);
     }
-
     load();
   }, []);
 
@@ -111,12 +85,12 @@ export function RecentChats() {
   return (
     <div className="space-y-3">
       {convos.map((chat, idx) => {
-        const name = chat.leads?.name ?? chat.leads?.phone ?? "Unknown";
-        const initials = getInitials(chat.leads?.name, chat.leads?.phone);
+        const name = chat.sender_name ?? chat.sender_id ?? "Unknown";
+        const initials = getInitials(chat.sender_name, chat.sender_id);
         const avatarColor = AVATAR_COLORS[idx % AVATAR_COLORS.length];
         const preview = chat.last_message_text
           ? chat.last_message_text.slice(0, 60)
-          : "No messages yet";
+          : `${chat.message_count ?? 0} messages`;
 
         return (
           <Link href={`/dashboard/chat?conversationId=${chat.id}`} key={chat.id} className="block outline-none">
