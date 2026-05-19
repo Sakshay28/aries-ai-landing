@@ -24,15 +24,31 @@ const AVATAR_COLORS = [
   "bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-500",
 ];
 
+function formatPhone(raw: string | null | undefined): string {
+  if (!raw) return "Unknown";
+  const digits = raw.replace(/\D/g, "");
+  // Indian numbers: 91XXXXXXXXXX → +91 XXXXX XXXXX
+  if (digits.length === 12 && digits.startsWith("91")) {
+    const num = digits.slice(2);
+    return `+91 ${num.slice(0, 5)} ${num.slice(5)}`;
+  }
+  if (digits.length === 10) return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
+  return `+${digits}`;
+}
+
+function isPhoneNumber(str: string | null | undefined): boolean {
+  return !!str && /^\d{7,}$/.test(str.replace(/\D/g, ""));
+}
+
 function getInitials(name: string | null | undefined, phone: string | null | undefined) {
-  if (name) {
+  if (name && !isPhoneNumber(name)) {
     const parts = name.trim().split(" ");
     return parts.length >= 2
       ? (parts[0][0] + parts[1][0]).toUpperCase()
       : parts[0].slice(0, 2).toUpperCase();
   }
-  if (phone) return phone.slice(-2);
-  return "??";
+  // Phone-only contact — show a phone symbol
+  return "📱";
 }
 
 function timeAgo(dateStr: string | null): string {
@@ -85,12 +101,13 @@ export function RecentChats() {
   return (
     <div className="space-y-3">
       {convos.map((chat, idx) => {
-        const name = chat.sender_name ?? chat.sender_id ?? "Unknown";
+        const hasName = chat.sender_name && !isPhoneNumber(chat.sender_name);
+        const name = hasName ? chat.sender_name! : formatPhone(chat.sender_id);
         const initials = getInitials(chat.sender_name, chat.sender_id);
         const avatarColor = AVATAR_COLORS[idx % AVATAR_COLORS.length];
         const preview = chat.last_message_text
-          ? chat.last_message_text.slice(0, 60)
-          : `${chat.message_count ?? 0} messages`;
+          ? chat.last_message_text.slice(0, 65)
+          : `${chat.message_count ?? 0} message${chat.message_count === 1 ? "" : "s"}`;
 
         return (
           <Link href={`/dashboard/chat?conversationId=${chat.id}`} key={chat.id} className="block outline-none">

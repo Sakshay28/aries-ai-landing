@@ -33,7 +33,29 @@ export async function GET(req: NextRequest) {
 
     if (error) throw error;
 
-    return NextResponse.json({ success: true, data: data || [] });
+    const rows = data || [];
+
+    // Batch-fetch last message per conversation (one query, no N+1)
+    if (rows.length > 0) {
+      const convIds = rows.map((c: { id: string }) => c.id);
+      const { data: msgs } = await supabaseAdmin
+        .from('messages')
+        .select('conversation_id, content, created_at')
+        .in('conversation_id', convIds)
+        .order('created_at', { ascending: false });
+
+      const lastMsgMap: Record<string, string> = {};
+      for (const msg of (msgs || [])) {
+        if (!lastMsgMap[msg.conversation_id]) {
+          lastMsgMap[msg.conversation_id] = msg.content;
+        }
+      }
+
+      const enriched = rows.map((c: Record<string, unknown>) => ({ ...c, last_message_text: lastMsgMap[c.id as string] ?? null }));
+      return NextResponse.json({ success: true, data: enriched });
+    }
+
+    return NextResponse.json({ success: true, data: rows });
   } catch (err) {
     console.error('❌ Conversations fetch error:', err);
     return NextResponse.json({ success: false, error: 'Failed to fetch conversations' }, { status: 500 });
