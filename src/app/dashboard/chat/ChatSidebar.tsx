@@ -30,18 +30,19 @@ function timeAgo(dateStr: string | null): string {
   return new Date(dateStr).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
-const AVATAR_BG = [
-  'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400',
-  'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-400',
-  'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-400',
-  'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400',
-  'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400',
+const AVATAR_GRADIENTS = [
+  'linear-gradient(135deg, #25D366 0%, #128C7E 100%)',
+  'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+  'linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%)',
+  'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)',
+  'linear-gradient(135deg, #ec4899 0%, #f43f5e 100%)',
+  'linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%)',
 ];
 
-function avatarColor(seed: string) {
+function avatarGradient(seed: string) {
   let h = 0;
   for (const c of seed) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
-  return AVATAR_BG[h % AVATAR_BG.length];
+  return AVATAR_GRADIENTS[h % AVATAR_GRADIENTS.length];
 }
 
 function formatPhone(raw: string | null | undefined): string {
@@ -60,7 +61,11 @@ function getInitial(conv: ChatConversation): string {
   const name = conv.leads?.name;
   if (name) return name.charAt(0).toUpperCase();
   const phone = conv.leads?.phone;
-  if (phone) return phone.replace(/\D/g, '').slice(-1) || '?';
+  if (phone) {
+    const digits = phone.replace(/\D/g, '');
+    const local = digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits;
+    return local.charAt(0) || '?';
+  }
   return "?";
 }
 
@@ -297,7 +302,10 @@ export default function ChatSidebar() {
                 )}
 
                 <div className="relative flex-shrink-0">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-bold ${avatarColor(phone || conv.id)}`}>
+                  <div
+                    style={{ background: avatarGradient(phone || conv.id) }}
+                    className="w-10 h-10 rounded-full flex items-center justify-center text-[14px] font-bold text-white shadow-sm"
+                  >
                     {getInitial(conv)}
                   </div>
                   <span className="absolute bottom-0 right-0 w-2.5 h-2.5">

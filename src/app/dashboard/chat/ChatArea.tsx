@@ -16,18 +16,19 @@ import type { SharedConversationMeta } from "./page";
 
 // ── helpers ────────────────────────────────────────────────────────────
 // Consistent with ChatSidebar: same palette, same seed strategy
-const AVATAR_COLORS = [
-  'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400',
-  'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-400',
-  'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-400',
-  'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400',
-  'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400',
+const AVATAR_GRADIENTS = [
+  'linear-gradient(135deg, #25D366 0%, #128C7E 100%)',
+  'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+  'linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%)',
+  'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)',
+  'linear-gradient(135deg, #ec4899 0%, #f43f5e 100%)',
+  'linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%)',
 ];
 
-function avatarColor(seed: string) {
+function avatarGradient(seed: string) {
   let h = 0;
   for (const c of seed) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
-  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+  return AVATAR_GRADIENTS[h % AVATAR_GRADIENTS.length];
 }
 
 function formatPhone(raw: string | null | undefined): string {
@@ -501,7 +502,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const initial = lead?.name
     ? lead.name.charAt(0).toUpperCase()
     : rawPhone
-      ? rawPhone.slice(-1)
+      ? (() => { const d = rawPhone.replace(/\D/g, ''); const loc = d.startsWith('91') && d.length === 12 ? d.slice(2) : d; return loc.charAt(0) || '?'; })()
       : '?';
 
   // Search-filtered messages
@@ -550,9 +551,12 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       <div className="h-[60px] flex items-center justify-between px-5 bg-white dark:bg-[#1C2333] shadow-[0_1px_3px_rgba(0,0,0,0.06)] z-20 flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className={`w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-bold flex-shrink-0 ${avatarColor(avatarSeed)}`}>
-              {initial}
-            </div>
+            <div
+                style={{ background: avatarGradient(avatarSeed) }}
+                className="w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-bold text-white flex-shrink-0 shadow-sm"
+              >
+                {initial}
+              </div>
             <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-400 border-2 border-white dark:border-[#1C2333]" />
           </div>
           <div>
