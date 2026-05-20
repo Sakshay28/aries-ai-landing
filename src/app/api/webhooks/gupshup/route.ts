@@ -283,7 +283,7 @@ async function handleIncomingMessage(
     }
   }
 
-  // ── Resolve or create Conversation ──
+  // ── Resolve or create Conversation (race-condition safe) ──
   let conversation: Record<string, unknown> | null = null;
 
   const { data: existingConv } = await supabaseAdmin
@@ -294,7 +294,7 @@ async function handleIncomingMessage(
     .eq('is_active', true)
     .order('created_at', { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
   if (existingConv) {
     conversation = existingConv;
@@ -303,7 +303,7 @@ async function handleIncomingMessage(
       .update({ last_message_at: new Date().toISOString() })
       .eq('id', existingConv.id);
   } else {
-    const { data: newConv } = await supabaseAdmin
+    const { data: newConv, error: convInsertErr } = await supabaseAdmin
       .from('conversations')
       .insert({
         tenant_id: tenant.id,
@@ -323,7 +323,48 @@ async function handleIncomingMessage(
       })
       .select()
       .single();
-    conversation = newConv;
+
+    // Handle race condition: if a unique constraint violation occurs (duplicate),
+    // or if insert succeeded but another request also inserted, re-fetch the canonical one.
+    if (convInsertErr) {
+      const { data: reFetched } = await supabaseAdmin
+        .from('conversations')
+        .select('*')
+        .eq('tenant_id', tenant.id)
+        .eq('sender_id', cleanPhone)
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      conversation = reFetched;
+    } else {
+      conversation = newConv;
+      // Double-check: if another conversation was created by a parallel request,
+      // keep only the earliest one and delete this duplicate.
+      const { data: allActive } = await supabaseAdmin
+        .from('conversations')
+        .select('id, created_at')
+        .eq('tenant_id', tenant.id)
+        .eq('sender_id', cleanPhone)
+        .eq('is_active', true)
+        .order('created_at', { ascending: true });
+
+      if (allActive && allActive.length > 1) {
+        // Keep the first (oldest), delete the rest
+        const keepId = allActive[0].id;
+        const dupeIds = allActive.slice(1).map(c => c.id);
+        await supabaseAdmin.from('conversations').delete().in('id', dupeIds);
+        if (newConv && newConv.id !== keepId) {
+          // Our insert was the duplicate — use the older one
+          const { data: canonical } = await supabaseAdmin
+            .from('conversations')
+            .select('*')
+            .eq('id', keepId)
+            .single();
+          conversation = canonical;
+        }
+      }
+    }
   }
 
   if (!conversation) {
