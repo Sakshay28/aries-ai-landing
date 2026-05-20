@@ -126,6 +126,15 @@ const SENTIMENT_STYLES = {
 function AIBriefCard({ meta, messages }: { meta: SharedConversationMeta; messages: Message[] }) {
   const [loading, setLoading] = useState(false);
   const [brief, setBrief] = useState<AISummaryBrief | null>(null);
+  const prevConvId = useRef<string>('');
+
+  // Reset brief whenever we switch to a different conversation
+  useEffect(() => {
+    if (prevConvId.current !== meta.id) {
+      prevConvId.current = meta.id;
+      setBrief(null);
+    }
+  }, [meta.id]);
 
   const generate = async () => {
     if (messages.length === 0) { toast.error('Nothing to summarize yet'); return; }

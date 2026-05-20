@@ -39,18 +39,8 @@ export async function GET(req: NextRequest) {
     const conversationId = req.nextUrl.searchParams.get('conversationId');
     if (!conversationId) return NextResponse.json({ success: false, error: 'Missing conversationId' }, { status: 400 });
 
-    // Verify conversation belongs to tenant
-    const { data: conv } = await supabaseAdmin
-      .from('conversations')
-      .select('id, tenant_id, lead_id')
-      .eq('id', conversationId)
-      .eq('tenant_id', tenantId)
-      .maybeSingle();
-
-    if (!conv) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
-
-    // Fetch messages
-    const { data: messages } = await supabaseAdmin
+    // Fetch messages — tenant_id filter is the auth check
+    const { data: messages, error: msgErr } = await supabaseAdmin
       .from('messages')
       .select('direction, content, ai_generated, created_at')
       .eq('conversation_id', conversationId)
@@ -58,7 +48,14 @@ export async function GET(req: NextRequest) {
       .order('created_at', { ascending: true })
       .limit(60);
 
-    if (!messages || messages.length < 2) {
+    if (msgErr) {
+      console.error('[Summary] Messages fetch error:', msgErr.message);
+      return NextResponse.json({ success: true, brief: FALLBACK });
+    }
+
+    console.log(`[Summary] conversationId=${conversationId} tenantId=${tenantId} messages=${messages?.length ?? 0}`);
+
+    if (!messages || messages.length === 0) {
       return NextResponse.json({ success: true, brief: FALLBACK });
     }
 
