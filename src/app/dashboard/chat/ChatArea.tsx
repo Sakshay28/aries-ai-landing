@@ -556,10 +556,19 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-400 border-2 border-white dark:border-[#1C2333]" />
           </div>
           <div>
-            <p className="text-[13.5px] font-semibold text-foreground leading-none">{displayName}</p>
-            <p className="text-[11.5px] text-muted-foreground/70 mt-0.5">
-              {conversationMeta?.bot_paused ? 'Human mode active' : 'AI responding'}
-            </p>
+            {conversationMeta ? (
+              <>
+                <p className="text-[13.5px] font-semibold text-foreground leading-none">{displayName}</p>
+                <p className="text-[11.5px] text-muted-foreground/70 mt-0.5">
+                  {conversationMeta.bot_paused ? 'Human mode active' : 'AI responding'}
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="h-3.5 w-28 rounded bg-muted animate-pulse mb-1.5" />
+                <div className="h-2.5 w-20 rounded bg-muted/60 animate-pulse" />
+              </>
+            )}
           </div>
         </div>
 
