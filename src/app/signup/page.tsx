@@ -84,19 +84,27 @@ function SignupInner() {
       // 2) Auto-login via the browser client so session cookies land directly
       //    on this device — no extra server round-trip needed.
       const supabase = createBrowserSupabaseClient();
-      const { error: loginError } = await supabase.auth.signInWithPassword({
+      const { data: signInData, error: loginError } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
-      if (loginError) {
-        // Account was created but browser login failed — send them to login page
-        window.location.href = "/login";
-        return;
+
+      // If login failed or session is missing, retry once after a short delay.
+      // Supabase admin.createUser() can have brief propagation lag on new accounts.
+      if (loginError || !signInData?.session) {
+        await new Promise((r) => setTimeout(r, 800));
+        const { data: retryData, error: retryError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (retryError || !retryData?.session) {
+          // Account was created but auto-login failed — send to login with success message
+          window.location.href = `/login?message=account_created&email=${encodeURIComponent(email)}`;
+          return;
+        }
       }
 
-      // Give the browser a moment to commit cookies before navigating
-      await new Promise((r) => setTimeout(r, 100));
-      // New users go to onboarding wizard to set up their business
+      // Session is confirmed — navigate to onboarding wizard
       window.location.href = "/onboard";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Signup failed");

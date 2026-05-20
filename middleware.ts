@@ -10,7 +10,7 @@ import { createServerClient } from '@supabase/ssr';
 import { detectBrandFromHost } from '@/lib/brand';
 
 // Routes that require authentication
-const PROTECTED_ROUTES = ['/dashboard', '/admin'];
+const PROTECTED_ROUTES = ['/dashboard', '/admin', '/onboard'];
 // Routes that should redirect to dashboard if already logged in
 const AUTH_ROUTES = ['/login', '/signup'];
 
@@ -155,6 +155,7 @@ export const config = {
     // Auth-protected routes
     '/dashboard/:path*',
     '/admin/:path*',
+    '/onboard',
     '/login',
     '/signup',
     // API routes that need session refresh

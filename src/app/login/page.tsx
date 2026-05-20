@@ -17,12 +17,17 @@ const GD = "#128C7E";
 function LoginInner() {
   const params = useSearchParams();
   const urlError = params.get("error");
+  const urlMessage = params.get("message");
+  const prefillEmail = params.get("email") || "";
   const initialError =
     urlError === "auth_failed" ? "Google sign-in failed. Please try again."
     : urlError === "signup_failed" ? "We couldn't create your account. Please try again or contact support."
     : "";
+  const initialSuccess =
+    urlMessage === "account_created" ? "Account created! Sign in below to continue to your dashboard."
+    : "";
 
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(prefillEmail);
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -173,6 +178,7 @@ function LoginInner() {
               />
             </Labelled>
 
+            {initialSuccess && <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "12px 14px", fontSize: 13, color: "#15803d", marginBottom: 4 }}>{initialSuccess}</div>}
             {error && <div style={styles.errorBox}>{error}</div>}
 
             <button
