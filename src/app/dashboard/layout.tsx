@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import DashboardLayoutClient from "./_layout/DashboardLayoutClient";
 
 export default async function DashboardLayout({
@@ -36,7 +37,10 @@ export default async function DashboardLayout({
     if (!user) redirect("/login");
     userEmail = user?.email || "";
 
-    const { data: userData } = await supabase
+    // Use supabaseAdmin to bypass RLS on users/tenants tables.
+    // The anon-key client silently returns null when RLS is enabled
+    // without SELECT policies, causing the onboarding check to be skipped.
+    const { data: userData } = await supabaseAdmin
       .from("users")
       .select("tenant_id, tenants(onboarding_completed)")
       .eq("auth_id", user.id)
