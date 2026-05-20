@@ -278,16 +278,15 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   }, [conversationId]);
 
   // ── Effect 2: Supabase Realtime — live INSERT + UPDATE ────────────────────
-  // NOTE: We subscribe WITHOUT a server-side filter on conversation_id.
-  // Filtered postgres_changes require Replica Identity FULL on the table.
-  // Instead we filter in JS — safe, zero performance cost (RLS already scopes rows).
+  // Server-side filter on conversation_id (REPLICA IDENTITY FULL is enabled).
+  // JS-side filter kept as extra safety check.
   useEffect(() => {
     if (!conversationId) return;
     const supabase = supabaseRef.current;
 
     const channel = supabase
       .channel(`realtime-messages-${conversationId}-${Date.now()}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' },
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
         (payload) => {
           if (!payload.new || !('id' in payload.new)) return;
           const incoming = payload.new as Message;
@@ -304,7 +303,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           });
           setTimeout(() => scrollToBottom(true), 50);
         })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' },
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
         (payload) => {
           if (!payload.new || !('id' in payload.new)) return;
           const updatedMsg = payload.new as Message;
@@ -362,10 +361,15 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   // ── Effect 3: Fast polling — guaranteed real-time message delivery ─────────
   // Polls every 2s for messages newer than the last known one.
   // Works even if Supabase Realtime is not configured/enabled.
+  // Pauses when tab is hidden (saves bandwidth). Deduplicates in-flight requests.
   useEffect(() => {
     if (!conversationId) return;
+    let inFlight = false;
 
     const poll = async () => {
+      // Skip if tab is hidden or a request is already in progress
+      if (document.hidden || inFlight) return;
+      inFlight = true;
       try {
         const params = new URLSearchParams({ conversationId });
         if (lastMsgTsRef.current) params.set('after', lastMsgTsRef.current);
@@ -389,10 +393,18 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         });
         setTimeout(() => scrollToBottom(true), 50);
       } catch { /* ignore polling errors */ }
+      finally { inFlight = false; }
     };
 
+    // Poll immediately on focus/visibility change for instant catch-up
+    const onVisible = () => { if (!document.hidden) poll(); };
+    document.addEventListener('visibilitychange', onVisible);
+
     const interval = setInterval(poll, 2_000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, scrollToBottom]);
 
