@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createBrowserSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
@@ -35,6 +35,121 @@ function SignupInner() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState(initialError);
+
+  // OTP Signup States
+  const [authMethod, setAuthMethod] = useState<"password" | "email_otp" | "phone_otp">("password");
+  const [phone, setPhone] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const timer = setInterval(() => {
+      setCountdown((prev) => prev - 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [countdown]);
+
+  async function sendSignupOtp(e: React.FormEvent) {
+    e.preventDefault();
+    if (fullName.trim().length < 2) {
+      setError("Name must be at least 2 characters.");
+      return;
+    }
+    if (businessName.trim().length < 2) {
+      setError("Business name must be at least 2 characters.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const supabase = createBrowserSupabaseClient();
+      if (authMethod === "email_otp") {
+        const { error: otpError } = await supabase.auth.signInWithOtp({
+          email,
+          options: {
+            shouldCreateUser: true,
+            emailRedirectTo: `${window.location.origin}/api/auth/callback`,
+          }
+        });
+        if (otpError) throw otpError;
+      } else {
+        const formattedPhone = phone.startsWith("+") ? phone : `+${phone.replace(/\D/g, "")}`;
+        const { error: otpError } = await supabase.auth.signInWithOtp({
+          phone: formattedPhone,
+          options: {
+            shouldCreateUser: true,
+          }
+        });
+        if (otpError) throw otpError;
+      }
+      setOtpSent(true);
+      setCountdown(60);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send verification code.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function verifySignupOtp(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const supabase = createBrowserSupabaseClient();
+      let verifiedEmail = email;
+      let sessionUser;
+
+      if (authMethod === "email_otp") {
+        const { data, error: verifyError } = await supabase.auth.verifyOtp({
+          email,
+          token: otpCode,
+          type: "email",
+        });
+        if (verifyError) throw verifyError;
+        if (!data.session) throw new Error("Verification failed — no session returned.");
+        sessionUser = data.session.user;
+      } else {
+        const formattedPhone = phone.startsWith("+") ? phone : `+${phone.replace(/\D/g, "")}`;
+        const { data, error: verifyError } = await supabase.auth.verifyOtp({
+          phone: formattedPhone,
+          token: otpCode,
+          type: "sms",
+        });
+        if (verifyError) throw verifyError;
+        if (!data.session) throw new Error("Verification failed — no session returned.");
+        sessionUser = data.session.user;
+        // Phone signups default email to an auto-generated one or a placeholder if email field is empty
+        verifiedEmail = sessionUser.email || `${phone.replace(/\D/g, "")}@phone.ariesai.in`;
+      }
+
+      // Provision user and tenant in our public database
+      const provisionRes = await fetch("/api/auth/provision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: verifiedEmail,
+          fullName,
+          businessName,
+          authId: sessionUser.id,
+        }),
+      });
+
+      const provisionData = await provisionRes.json();
+      if (!provisionData.success) {
+        throw new Error(provisionData.error || "Failed to provision workspace");
+      }
+
+      // Session is confirmed — navigate to onboarding wizard
+      window.location.href = "/onboard";
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Verification failed. Check code and try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function handleGoogle() {
     if (!isSupabaseConfigured) {
@@ -193,97 +308,300 @@ function SignupInner() {
             <div style={styles.divider} />
           </div>
 
-          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <Labelled label="Full name">
-              <input
-                type="text"
-                placeholder="Ravi Sharma"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                required
-                minLength={2}
-                autoComplete="name"
-                style={styles.input}
-                onFocus={(e) => focusOn(e)}
-                onBlur={(e) => focusOff(e)}
-              />
-            </Labelled>
-
-            <Labelled label="Work email">
-              <input
-                type="email"
-                placeholder="you@business.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoComplete="email"
-                style={styles.input}
-                onFocus={(e) => focusOn(e)}
-                onBlur={(e) => focusOff(e)}
-              />
-            </Labelled>
-
-            <Labelled label="Business name">
-              <input
-                type="text"
-                placeholder="The Royal Terrace"
-                value={businessName}
-                onChange={(e) => setBusinessName(e.target.value)}
-                required
-                minLength={2}
-                autoComplete="organization"
-                style={styles.input}
-                onFocus={(e) => focusOn(e)}
-                onBlur={(e) => focusOff(e)}
-              />
-            </Labelled>
-
-            <Labelled
-              label="Password"
-              right={
-                <button type="button" onClick={() => setShowPw((s) => !s)} style={styles.showPwBtn}>
-                  {showPw ? "Hide" : "Show"}
-                </button>
-              }
-            >
-              <input
-                type={showPw ? "text" : "password"}
-                placeholder="Minimum 8 characters"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={8}
-                autoComplete="new-password"
-                style={styles.input}
-                onFocus={(e) => focusOn(e)}
-                onBlur={(e) => focusOff(e)}
-              />
-            </Labelled>
-
-            {error && <div style={styles.errorBox}>{error}</div>}
-
+          {/* Toggle Tabs */}
+          <div style={{ display: "flex", gap: 8, background: "#f1f5f9", padding: 4, borderRadius: 12, marginBottom: 24 }}>
             <button
-              type="submit"
-              disabled={!canSubmit}
+              type="button"
+              onClick={() => { setAuthMethod("password"); setOtpSent(false); setError(""); }}
               style={{
-                ...styles.submitBtn,
-                opacity: canSubmit ? 1 : 0.6,
-                cursor: canSubmit ? "pointer" : "not-allowed",
-              }}
-              onMouseEnter={(e) => {
-                if (canSubmit) {
-                  e.currentTarget.style.transform = "translateY(-1px)";
-                  e.currentTarget.style.boxShadow = "0 10px 28px rgba(37,211,102,0.4)";
-                }
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow = "0 6px 18px rgba(37,211,102,0.28)";
+                flex: 1, padding: "10px 12px", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700,
+                background: authMethod === "password" ? "#fff" : "transparent",
+                color: authMethod === "password" ? "#0f172a" : "#64748b",
+                cursor: "pointer", boxShadow: authMethod === "password" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                transition: "all 140ms ease", fontFamily: "inherit"
               }}
             >
-              {loading ? "Creating your account..." : "Start free trial"}
+              Password
             </button>
-          </form>
+            <button
+              type="button"
+              onClick={() => { setAuthMethod("email_otp"); setOtpSent(false); setError(""); }}
+              style={{
+                flex: 1, padding: "10px 12px", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700,
+                background: authMethod === "email_otp" ? "#fff" : "transparent",
+                color: authMethod === "email_otp" ? "#0f172a" : "#64748b",
+                cursor: "pointer", boxShadow: authMethod === "email_otp" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                transition: "all 140ms ease", fontFamily: "inherit"
+              }}
+            >
+              Email OTP
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthMethod("phone_otp"); setOtpSent(false); setError(""); }}
+              style={{
+                flex: 1, padding: "10px 12px", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700,
+                background: authMethod === "phone_otp" ? "#fff" : "transparent",
+                color: authMethod === "phone_otp" ? "#0f172a" : "#64748b",
+                cursor: "pointer", boxShadow: authMethod === "phone_otp" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                transition: "all 140ms ease", fontFamily: "inherit"
+              }}
+            >
+              WhatsApp OTP
+            </button>
+          </div>
+
+          {authMethod === "password" ? (
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <Labelled label="Full name">
+                <input
+                  type="text"
+                  placeholder="Ravi Sharma"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  required
+                  minLength={2}
+                  autoComplete="name"
+                  style={styles.input}
+                  onFocus={(e) => focusOn(e)}
+                  onBlur={(e) => focusOff(e)}
+                />
+              </Labelled>
+
+              <Labelled label="Work email">
+                <input
+                  type="email"
+                  placeholder="you@business.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoComplete="email"
+                  style={styles.input}
+                  onFocus={(e) => focusOn(e)}
+                  onBlur={(e) => focusOff(e)}
+                />
+              </Labelled>
+
+              <Labelled label="Business name">
+                <input
+                  type="text"
+                  placeholder="The Royal Terrace"
+                  value={businessName}
+                  onChange={(e) => setBusinessName(e.target.value)}
+                  required
+                  minLength={2}
+                  autoComplete="organization"
+                  style={styles.input}
+                  onFocus={(e) => focusOn(e)}
+                  onBlur={(e) => focusOff(e)}
+                />
+              </Labelled>
+
+              <Labelled
+                label="Password"
+                right={
+                  <button type="button" onClick={() => setShowPw((s) => !s)} style={styles.showPwBtn}>
+                    {showPw ? "Hide" : "Show"}
+                  </button>
+                }
+              >
+                <input
+                  type={showPw ? "text" : "password"}
+                  placeholder="Minimum 8 characters"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  style={styles.input}
+                  onFocus={(e) => focusOn(e)}
+                  onBlur={(e) => focusOff(e)}
+                />
+              </Labelled>
+
+              {error && <div style={styles.errorBox}>{error}</div>}
+
+              <button
+                type="submit"
+                disabled={!canSubmit}
+                style={{
+                  ...styles.submitBtn,
+                  opacity: canSubmit ? 1 : 0.6,
+                  cursor: canSubmit ? "pointer" : "not-allowed",
+                }}
+                onMouseEnter={(e) => {
+                  if (canSubmit) {
+                    e.currentTarget.style.transform = "translateY(-1px)";
+                    e.currentTarget.style.boxShadow = "0 10px 28px rgba(37,211,102,0.4)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow = "0 6px 18px rgba(37,211,102,0.28)";
+                }}
+              >
+                {loading ? "Creating your account..." : "Start free trial"}
+              </button>
+            </form>
+          ) : !otpSent ? (
+            <form onSubmit={sendSignupOtp} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <Labelled label="Full name">
+                <input
+                  type="text"
+                  placeholder="Ravi Sharma"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  required
+                  minLength={2}
+                  autoComplete="name"
+                  style={styles.input}
+                  onFocus={(e) => focusOn(e)}
+                  onBlur={(e) => focusOff(e)}
+                />
+              </Labelled>
+
+              <Labelled label="Business name">
+                <input
+                  type="text"
+                  placeholder="The Royal Terrace"
+                  value={businessName}
+                  onChange={(e) => setBusinessName(e.target.value)}
+                  required
+                  minLength={2}
+                  autoComplete="organization"
+                  style={styles.input}
+                  onFocus={(e) => focusOn(e)}
+                  onBlur={(e) => focusOff(e)}
+                />
+              </Labelled>
+
+              {authMethod === "email_otp" ? (
+                <Labelled label="Work email">
+                  <input
+                    type="email"
+                    placeholder="you@business.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    autoComplete="email"
+                    style={styles.input}
+                    onFocus={(e) => focusOn(e)}
+                    onBlur={(e) => focusOff(e)}
+                  />
+                </Labelled>
+              ) : (
+                <Labelled label="WhatsApp/SMS phone number">
+                  <input
+                    type="tel"
+                    placeholder="+91 98765 43210"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    required
+                    autoComplete="tel"
+                    style={styles.input}
+                    onFocus={(e) => focusOn(e)}
+                    onBlur={(e) => focusOff(e)}
+                  />
+                </Labelled>
+              )}
+
+              {error && <div style={styles.errorBox}>{error}</div>}
+
+              <button
+                type="submit"
+                disabled={loading || fullName.trim().length < 2 || businessName.trim().length < 2 || (authMethod === "email_otp" ? !email.includes("@") : phone.trim().length < 8)}
+                style={{
+                  ...styles.submitBtn,
+                  opacity: loading ? 0.75 : 1,
+                  cursor: loading ? "wait" : "pointer",
+                }}
+                onMouseEnter={(e) => {
+                  if (!loading) {
+                    e.currentTarget.style.transform = "translateY(-1px)";
+                    e.currentTarget.style.boxShadow = "0 10px 28px rgba(37,211,102,0.4)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow = "0 6px 18px rgba(37,211,102,0.28)";
+                }}
+              >
+                {loading ? "Sending OTP..." : "Send Verification Code"}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={verifySignupOtp} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "12px 14px", fontSize: 13, color: "#15803d", display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontWeight: 700 }}>OTP Code Sent!</span>
+                <span style={{ opacity: 0.9 }}>Enter the 6-digit code sent to {authMethod === "email_otp" ? email : phone}.</span>
+              </div>
+
+              <Labelled label="Enter 6-digit code">
+                <input
+                  type="text"
+                  maxLength={6}
+                  pattern="[0-9]*"
+                  inputMode="numeric"
+                  placeholder="000000"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                  required
+                  style={{ ...styles.input, textAlign: "center", fontSize: 24, letterSpacing: 8, fontWeight: 700 }}
+                  onFocus={(e) => focusOn(e)}
+                  onBlur={(e) => focusOff(e)}
+                />
+              </Labelled>
+
+              {error && <div style={styles.errorBox}>{error}</div>}
+
+              <button
+                type="submit"
+                disabled={loading}
+                style={{
+                  ...styles.submitBtn,
+                  opacity: loading ? 0.75 : 1,
+                  cursor: loading ? "wait" : "pointer",
+                }}
+                onMouseEnter={(e) => {
+                  if (!loading) {
+                    e.currentTarget.style.transform = "translateY(-1px)";
+                    e.currentTarget.style.boxShadow = "0 10px 28px rgba(37,211,102,0.4)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow = "0 6px 18px rgba(37,211,102,0.28)";
+                }}
+              >
+                {loading ? "Verifying..." : "Verify & Create Account"}
+              </button>
+
+              <div style={{ textAlign: "center", marginTop: 8 }}>
+                {countdown > 0 ? (
+                  <span style={{ fontSize: 13, color: "#64748b" }}>
+                    Resend code in {countdown}s
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={sendSignupOtp}
+                    disabled={loading}
+                    style={{ background: "none", border: "none", color: GD, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}
+                  >
+                    Resend code
+                  </button>
+                )}
+                <span style={{ margin: "0 8px", color: "#e2e8f0" }}>|</span>
+                <button
+                  type="button"
+                  onClick={() => { setOtpSent(false); setOtpCode(""); setError(""); }}
+                  style={{ background: "none", border: "none", color: "#64748b", fontSize: 13, fontWeight: 500, cursor: "pointer", padding: 0 }}
+                >
+                  Change {authMethod === "email_otp" ? "email" : "number"}
+                </button>
+              </div>
+            </form>
+          )}
 
           <p style={styles.legal}>
             By signing up you agree to our{" "}
