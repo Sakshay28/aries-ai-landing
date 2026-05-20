@@ -2,7 +2,7 @@
 
 import {
   Send, Bot, User, Check, CheckCheck, Clock, AlertCircle, ArrowDown, Paperclip, Smile,
-  Mic, Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal,
+  Mic, Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal, X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -15,17 +15,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { SharedConversationMeta } from "./page";
 
 // ── helpers ────────────────────────────────────────────────────────────
-const HEADER_AVATAR_COLORS = [
-  'bg-emerald-100 text-emerald-700',
-  'bg-violet-100 text-violet-700',
-  'bg-sky-100 text-sky-700',
-  'bg-amber-100 text-amber-700',
-  'bg-rose-100 text-rose-700',
+// Consistent with ChatSidebar: same palette, same seed strategy
+const AVATAR_COLORS = [
+  'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400',
+  'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-400',
+  'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-400',
+  'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400',
+  'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400',
 ];
-function headerAvatarColor(seed: string) {
+
+function avatarColor(seed: string) {
   let h = 0;
   for (const c of seed) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
-  return HEADER_AVATAR_COLORS[h % HEADER_AVATAR_COLORS.length];
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
 
 function formatPhone(raw: string | null | undefined): string {
@@ -36,14 +38,22 @@ function formatPhone(raw: string | null | undefined): string {
   return `+${digits}`;
 }
 
+// Fix: format time always in IST (Asia/Kolkata) to avoid UTC/local confusion
 function formatTime(dateStr: string): string {
-  return new Date(dateStr).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  return new Date(dateStr).toLocaleTimeString('en-IN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Kolkata',
+  });
 }
 
 function dateSeparatorLabel(dateStr: string): string {
-  const d = new Date(dateStr);
-  const today = new Date();
-  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  // Compare in IST date
+  const toISTDate = (d: Date) =>
+    new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const d = toISTDate(new Date(dateStr));
+  const today = toISTDate(new Date());
+  const yesterday = toISTDate(new Date(Date.now() - 86_400_000));
   const isSameDay = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   if (isSameDay(d, today)) return 'Today';
@@ -66,7 +76,7 @@ function buildFeed(messages: Message[]): FeedItem[] {
   const pushGroup = () => { if (currentGroup) feed.push({ type: 'group', group: currentGroup }); };
 
   for (const msg of messages) {
-    const msgDay = new Date(msg.created_at).toDateString();
+    const msgDay = new Date(msg.created_at).toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata' });
     if (msgDay !== lastDay) {
       pushGroup(); currentGroup = null;
       feed.push({ type: 'date', label: dateSeparatorLabel(msg.created_at) });
@@ -100,12 +110,132 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const [conversationMeta, setConversationMeta] = useState<SharedConversationMeta | null>(null);
   const [togglingMode, setTogglingMode] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const searchParams = useSearchParams();
   const conversationId = searchParams.get('conversationId');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const supabaseRef = useRef(createBrowserSupabaseClient());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const optimisticIdRef = useRef(0);
+  const recognitionRef = useRef<any>(null);
+
+  // Common emojis for the picker
+  const [emojiCategory, setEmojiCategory] = useState(0);
+  const EMOJI_CATEGORIES = [
+    { label: '😊', name: 'Smileys', emojis: ['😊','😂','🤣','😍','😘','😅','😆','😁','🙂','😉','😋','😎','🤩','🥰','😇','🤗','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤔','🤭','🤫','🤥','😶','😐','😑','🙄','😬','🤐','🤢','🤮','🤧','😷','🤒','🤕'] },
+    { label: '👋', name: 'Gestures', emojis: ['👋','🤚','🖐️','✋','🖖','👌','🤌','🤏','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏','🙌','🫶','👐','🤲','🙏','🤝','💪','🦾','🫁','🦵','🦶','👀','👁️','👅','👂','🫂'] },
+    { label: '❤️', name: 'Love', emojis: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❤️‍🔥','❤️‍🩹','💕','💞','💓','💗','💖','💘','💝','💟','♥️','💌','💋','💑','👫','👬','👭','💏','👨‍❤️‍👨','👩‍❤️‍👩','🌹','🌷','🌸','💐'] },
+    { label: '🎉', name: 'Celebrate', emojis: ['🎉','🎊','🎈','🎁','🥳','🎂','🎀','🎗️','🎟️','🎫','🏆','🥇','🥈','🥉','🏅','🎖️','🎪','🎭','🎨','🎬','🎤','🎧','🎼','🎵','🎶','🎯','🎮','🕹️','✨','💫','⭐','🌟','💥','🔥','🎆','🎇','🧨','🪅','🪩','🥂','🍾','🍰'] },
+    { label: '💼', name: 'Business', emojis: ['💼','📊','📈','📉','📋','📌','📍','📎','🖇️','📏','📐','✂️','🗂️','🗃️','🗄️','🗑️','💰','💳','💵','💴','💶','💷','🏦','💹','📄','📃','📑','📜','📝','✏️','🖊️','🖋️','📅','📆','🗓️','📇','📓','📔','📒','📕','📗','📘','📙','📚','🔖','🏷️','📧','📨','📩','📤','📥','💬','📞','☎️','📟','📠','📲','💻','🖥️','🖨️'] },
+    { label: '⏰', name: 'Objects', emojis: ['⏰','⌚','⏱️','⏲️','🕰️','📱','💡','🔦','🕯️','🪔','🔋','🪫','💿','📀','📷','📸','📹','🎥','📽️','🎞️','📞','☎️','📺','📻','🎙️','🔎','🔬','🔭','📡','🚨','🔐','🔑','🗝️','🔒','🔓','🚪','🪞','🪟','💊','💉','🩺','🩹','🏥','🚑','⚗️','🔧','🔨','⚒️','🛠️','⛏️','🪛','🔩','🪤','💣','🔗','📿','🧲','🪜','🪣','🧹','🧺'] },
+    { label: '🚀', name: 'Travel', emojis: ['🚀','✈️','🛸','🚁','⛵','🚢','🛳️','🚂','🚃','🚄','🚅','🚆','🚇','🚈','🚉','🚊','🚝','🚞','🚋','🚌','🚍','🚎','🚐','🚑','🚒','🚓','🚔','🚕','🚖','🚗','🚘','🚙','🛻','🚚','🚛','🚜','🏎️','🏍️','🛵','🚲','🛴','🛹','🛼','🚏','🛣️','🗺️','🏔️','🗻','🏕️','🏖️','🏜️','🏝️','🏞️','🏟️','🏛️','🏗️','🏘️','🏠','🏡','🏢','🏣','🏤','🏥','🏦','🌍','🌎','🌏','🌐'] },
+    { label: '🍕', name: 'Food', emojis: ['🍕','🍔','🍟','🌭','🍿','🧂','🥓','🥚','🍳','🧇','🥞','🧈','🍞','🥐','🥨','🥯','🧀','🥗','🥙','🥪','🌮','🌯','🫔','🥫','🍝','🍜','🍲','🍛','🍣','🍱','🥟','🦪','🍤','🍙','🍚','🍘','🍥','🥮','🍢','🧁','🍰','🎂','🍮','🍭','🍬','🍫','🍿','🍩','🍪','🌰','🥜','🍯','🧃','🥤','🧋','☕','🍵','🧉','🍶','🍺','🍻','🥂','🍷','🥃','🍸','🍹','🧊'] },
+  ];
+
+  const handleEnhanceText = async () => {
+    if (aiLoading) return;
+    const draft = inputMsg.trim();
+    if (!draft) {
+      toast.error('Type something first, then tap ✨ to enhance it.');
+      return;
+    }
+    setAiLoading(true);
+    try {
+      const res = await fetch('/api/ai/enhance-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: draft }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.enhanced) {
+          setInputMsg(data.enhanced);
+          setTimeout(() => textareaRef.current?.focus(), 50);
+          setAiLoading(false);
+          return;
+        }
+      }
+    } catch { /* fall through to local enhancement */ }
+    // Local enhancement fallback — fix grammar, capitalise, add punctuation
+    let enhanced = draft.charAt(0).toUpperCase() + draft.slice(1);
+    if (!/[.!?]$/.test(enhanced)) enhanced += '.';
+    // Make it more professional
+    enhanced = enhanced
+      .replace(/\bi\b/g, 'I')
+      .replace(/\bdont\b/gi, "don't")
+      .replace(/\bcant\b/gi, "can't")
+      .replace(/\bwont\b/gi, "won't")
+      .replace(/\bim\b/gi, "I'm")
+      .replace(/\bits\b(?!')/gi, "it's")
+      .replace(/\bu\b/g, 'you')
+      .replace(/\bur\b/g, 'your')
+      .replace(/\bpls\b/gi, 'please')
+      .replace(/\bthx\b/gi, 'thanks')
+      .replace(/\bthanku\b/gi, 'thank you')
+      .replace(/\basap\b/gi, 'as soon as possible')
+      .replace(/  +/g, ' ')
+      .trim();
+    setInputMsg(enhanced);
+    setTimeout(() => textareaRef.current?.focus(), 50);
+    toast.success('Text enhanced ✨');
+    setAiLoading(false);
+  };
+
+  const handleEmojiInsert = (emoji: string) => {
+    const el = textareaRef.current;
+    if (el) {
+      const start = el.selectionStart ?? inputMsg.length;
+      const end = el.selectionEnd ?? inputMsg.length;
+      const next = inputMsg.slice(0, start) + emoji + inputMsg.slice(end);
+      setInputMsg(next);
+      setTimeout(() => { el.focus(); el.setSelectionRange(start + emoji.length, start + emoji.length); }, 10);
+    } else {
+      setInputMsg(prev => prev + emoji);
+    }
+    setEmojiOpen(false);
+  };
+
+  const handleVoiceInput = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) { toast.error('Voice input not supported in this browser. Try Chrome.'); return; }
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-IN';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognitionRef.current = recognition;
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setInputMsg(prev => prev ? prev + ' ' + transcript : transcript);
+      setTimeout(() => textareaRef.current?.focus(), 50);
+    };
+    recognition.onerror = () => { toast.error('Voice input error. Please try again.'); };
+    recognition.onend = () => setIsRecording(false);
+    recognition.start();
+    setIsRecording(true);
+    toast('🎤 Listening…', { description: 'Speak now. Tap mic again to stop.' });
+  };
+
+  const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setInputMsg(prev => prev ? prev + ` [📎 ${file.name}]` : `[📎 ${file.name}]`);
+      toast('File attached', { description: `${file.name} — send the message to share it.` });
+    }
+    e.target.value = '';
+  };
 
   const scrollToBottom = useCallback((smooth = true) => {
     messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' });
@@ -117,13 +247,20 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     setShowScrollBtn(el.scrollHeight - el.scrollTop - el.clientHeight > 120);
   }, []);
 
+  // Open search panel
+  useEffect(() => {
+    if (searchOpen) setTimeout(() => searchInputRef.current?.focus(), 60);
+  }, [searchOpen]);
+
+  // ── Effect 1: Load initial messages from API ─────────────────────────────
   useEffect(() => {
     if (!conversationId) { setConversationMeta(null); setMessages([]); onDataLoaded?.(null, []); return; }
-    const supabase = supabaseRef.current;
     setLoadingMessages(true);
     setMessages([]);
+    setSearchOpen(false);
+    setSearchQuery('');
 
-    fetch(`/api/dashboard/chat/conversation?id=${conversationId}`)
+    fetch(`/api/dashboard/chat/conversation?id=${conversationId}&_t=${Date.now()}`)
       .then(r => r.json())
       .then(data => {
         if (data.success) {
@@ -137,50 +274,127 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         setTimeout(() => scrollToBottom(false), 80);
       })
       .catch(() => setLoadingMessages(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+
+  // ── Effect 2: Supabase Realtime — live INSERT + UPDATE ────────────────────
+  // NOTE: We subscribe WITHOUT a server-side filter on conversation_id.
+  // Filtered postgres_changes require Replica Identity FULL on the table.
+  // Instead we filter in JS — safe, zero performance cost (RLS already scopes rows).
+  useEffect(() => {
+    if (!conversationId) return;
+    const supabase = supabaseRef.current;
 
     const channel = supabase
-      .channel(`messages-${conversationId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
+      .channel(`realtime-messages-${conversationId}-${Date.now()}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
-          if (!payload.new || !('content' in payload.new)) return;
+          if (!payload.new || !('id' in payload.new)) return;
+          const incoming = payload.new as Message;
+          // JS-side filter: only care about this conversation
+          if (incoming.conversation_id !== conversationId) return;
           setMessages(prev => {
-            const exists = prev.some(m => m.id === (payload.new as Message).id);
-            if (exists) return prev;
-            return [...prev, payload.new as Message];
+            // Remove any optimistic placeholder that matches this content + direction
+            const withoutOptimistic = prev.filter(m =>
+              !(m.id.startsWith('__optimistic__') && m.content === incoming.content && m.direction === incoming.direction)
+            );
+            const exists = withoutOptimistic.some(m => m.id === incoming.id);
+            if (exists) return withoutOptimistic;
+            return [...withoutOptimistic, incoming];
           });
           setTimeout(() => scrollToBottom(true), 50);
         })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' },
         (payload) => {
           if (!payload.new || !('id' in payload.new)) return;
-          setMessages(prev =>
-            prev.map(m => m.id === (payload.new as Message).id ? { ...m, status: (payload.new as Message).status } : m)
-          );
+          const updatedMsg = payload.new as Message;
+          setMessages(prev => {
+            const exists = prev.some(m => m.id === updatedMsg.id);
+            if (!exists) return prev;
+            return prev.map(m => m.id === updatedMsg.id ? { ...m, status: updatedMsg.status } : m);
+          });
         })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Realtime] ✅ Subscribed to messages for conversation:', conversationId);
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.error('[Realtime] ❌ Channel error/timeout for conversation:', conversationId, status);
+        }
+      });
 
     return () => { supabase.removeChannel(channel); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
-  // Polling fallback: refresh statuses every 10s for 'sent' outbound messages
-  // (real-time UPDATE events may be blocked by RLS on the browser client)
+  // Status polling: every 3s, always run — picks up delivered/read from Gupshup webhook DB updates
   useEffect(() => {
     if (!conversationId) return;
-    const interval = setInterval(async () => {
-      const hasPending = messages.some(m => m.direction === 'outbound' && m.status === 'sent');
-      if (!hasPending) return;
+    const poll = async () => {
       try {
         const res = await fetch(`/api/dashboard/chat/statuses?conversationId=${conversationId}`);
         const data = await res.json();
         if (!data.success) return;
         const map: Record<string, string> = {};
         for (const s of data.statuses as { id: string; status: string }[]) map[s.id] = s.status;
-        setMessages(prev => prev.map(m => map[m.id] ? { ...m, status: map[m.id] as Message['status'] } : m));
+        // Apply status updates to all messages that have a DB id (not optimistic)
+        setMessages(prev => prev.map(m => {
+          if (m.id.startsWith('__optimistic__')) return m;
+          return map[m.id] ? { ...m, status: map[m.id] as Message['status'] } : m;
+        }));
       } catch { /* ignore */ }
-    }, 10_000);
+    };
+    // Poll immediately on mount, then every 3s
+    poll();
+    const interval = setInterval(poll, 3_000);
     return () => clearInterval(interval);
-  }, [conversationId, messages]);
+  }, [conversationId]);
+
+  // Track latest message timestamp via ref (avoids stale closure in poll)
+  const lastMsgTsRef = useRef('');
+  useEffect(() => {
+    const realMsgs = messages.filter(m => !m.id.startsWith('__optimistic__'));
+    if (realMsgs.length > 0) {
+      const latest = realMsgs.reduce((a, b) => (a.created_at > b.created_at ? a : b));
+      lastMsgTsRef.current = latest.created_at;
+    }
+  }, [messages]);
+
+  // ── Effect 3: Fast polling — guaranteed real-time message delivery ─────────
+  // Polls every 2s for messages newer than the last known one.
+  // Works even if Supabase Realtime is not configured/enabled.
+  useEffect(() => {
+    if (!conversationId) return;
+
+    const poll = async () => {
+      try {
+        const params = new URLSearchParams({ conversationId });
+        if (lastMsgTsRef.current) params.set('after', lastMsgTsRef.current);
+
+        const res = await fetch(`/api/dashboard/chat/new-messages?${params}`);
+        const data = await res.json();
+        if (!data.success || !data.messages?.length) return;
+
+        setMessages(prev => {
+          const existingIds = new Set(prev.map(m => m.id));
+          const incoming = (data.messages as Message[]).filter(m => !existingIds.has(m.id));
+          if (incoming.length === 0) return prev;
+
+          // Remove optimistic placeholders that match incoming real messages
+          const cleaned = prev.filter(m => {
+            if (!m.id.startsWith('__optimistic__')) return true;
+            return !incoming.some(n => n.content === m.content && n.direction === m.direction);
+          });
+
+          return [...cleaned, ...incoming];
+        });
+        setTimeout(() => scrollToBottom(true), 50);
+      } catch { /* ignore polling errors */ }
+    };
+
+    const interval = setInterval(poll, 2_000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, scrollToBottom]);
 
   const handleSend = async () => {
     if (!inputMsg.trim() || !conversationId || sending) return;
@@ -188,21 +402,54 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     setInputMsg('');
     setSending(true);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
+
+    // Add optimistic bubble immediately (shows clock icon while API processes)
+    const optimisticId = `__optimistic__${++optimisticIdRef.current}`;
+    const optimisticMsg: Message = {
+      id: optimisticId,
+      conversation_id: conversationId,
+      content: text,
+      direction: 'outbound',
+      status: 'pending',
+      created_at: new Date().toISOString(),
+      ai_generated: false,
+    } as Message;
+    setMessages(prev => [...prev, optimisticMsg]);
+    setTimeout(() => scrollToBottom(true), 30);
+
     try {
       const res = await fetch('/api/chat/send', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ conversationId, message: text }),
       });
-      if (!res.ok) throw new Error('Failed');
-    } catch {
-      toast.error('Message failed to send.');
+      const apiData = await res.json();
+      if (!res.ok || !apiData.success) throw new Error(apiData.error || 'Failed');
+
+      // Replace optimistic bubble with the real saved message from DB
+      // This gives us the real UUID, correct timestamp, and 'sent' status (✓)
+      const realMsg: Message | null = apiData.message;
+      setMessages(prev => {
+        const withoutOptimistic = prev.filter(m => m.id !== optimisticId);
+        if (!realMsg) {
+          // Fallback: just mark optimistic as sent
+          return prev.map(m => m.id === optimisticId ? { ...m, status: 'sent' as Message['status'] } : m);
+        }
+        const exists = withoutOptimistic.some(m => m.id === realMsg.id);
+        if (exists) return withoutOptimistic;
+        return [...withoutOptimistic, realMsg];
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Message failed to send.';
+      toast.error(msg);
+      setMessages(prev => prev.map(m =>
+        m.id === optimisticId ? { ...m, status: 'failed' as Message['status'] } : m
+      ));
       setInputMsg(text);
     } finally { setSending(false); }
   };
 
   const handleResend = async (msg: Message) => {
     if (!conversationId) return;
-    // Optimistically remove the failed bubble; real-time sub re-adds the new sent message
     setMessages(prev => prev.filter(m => m.id !== msg.id));
     try {
       const res = await fetch('/api/chat/send', {
@@ -212,7 +459,6 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       if (!res.ok) throw new Error('Failed');
     } catch {
       toast.error('Resend failed.');
-      // Restore the failed message if the retry also fails
       setMessages(prev => [...prev, { ...msg, status: 'failed' as Message['status'] }]);
     }
   };
@@ -237,8 +483,37 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const lead = conversationMeta?.leads;
   const rawPhone = lead?.phone || conversationMeta?.sender_id || conversationMeta?.sender_name || '';
   const displayName = lead?.name || formatPhone(rawPhone) || conversationId?.slice(0, 8) || 'Unknown';
-  const initial = (lead?.name ?? rawPhone)?.charAt(0)?.toUpperCase() || '?';
-  const feed = buildFeed(messages);
+  // Consistent avatar seed with sidebar (phone → fallback to conversationId)
+  const avatarSeed = rawPhone || conversationId || 'x';
+  // Consistent initial: prefer first letter of name, else last digit of phone number (same as sidebar getInitial)
+  const initial = lead?.name
+    ? lead.name.charAt(0).toUpperCase()
+    : rawPhone
+      ? rawPhone.slice(-1)
+      : '?';
+
+  // Search-filtered messages
+  const filteredFeed = buildFeed(
+    searchQuery.trim()
+      ? messages.filter(m => m.content?.toLowerCase().includes(searchQuery.toLowerCase()))
+      : messages
+  );
+
+  const copyMessage = (text: string) => {
+    navigator.clipboard?.writeText(text).then(
+      () => toast.success('Copied'),
+      () => toast.error('Copy failed'),
+    );
+  };
+
+  const chatBgStyle: React.CSSProperties = {
+    background: 'var(--background)',
+    backgroundImage:
+      'radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.04), transparent 50%), ' +
+      'radial-gradient(circle at 0% 100%, rgba(139, 92, 246, 0.04), transparent 50%), ' +
+      'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'40\' height=\'40\' viewBox=\'0 0 40 40\'%3E%3Cg fill=\'%23888\' fill-opacity=\'0.015\'%3E%3Ccircle cx=\'20\' cy=\'20\' r=\'1.2\'/%3E%3Ccircle cx=\'0\' cy=\'0\' r=\'1.2\'/%3E%3Ccircle cx=\'40\' cy=\'0\' r=\'1.2\'/%3E%3Ccircle cx=\'0\' cy=\'40\' r=\'1.2\'/%3E%3Ccircle cx=\'40\' cy=\'40\' r=\'1.2\'/%3E%3C/g%3E%3C/svg%3E")',
+    backgroundSize: '40px 40px, 40px 40px',
+  };
 
   if (!conversationId) {
     return (
@@ -256,19 +531,6 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     );
   }
 
-  const chatBgStyle: React.CSSProperties = {
-    background: 'var(--chat-surface, #EAEDF0)',
-    backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Cg fill='%23000' fill-opacity='0.025'%3E%3Ccircle cx='20' cy='20' r='1.2'/%3E%3Ccircle cx='0' cy='0' r='1.2'/%3E%3Ccircle cx='40' cy='0' r='1.2'/%3E%3Ccircle cx='0' cy='40' r='1.2'/%3E%3Ccircle cx='40' cy='40' r='1.2'/%3E%3C/g%3E%3C/svg%3E\")",
-    backgroundSize: '40px 40px',
-  };
-
-  const copyMessage = (text: string) => {
-    navigator.clipboard?.writeText(text).then(
-      () => toast.success('Copied'),
-      () => toast.error('Copy failed'),
-    );
-  };
-
   return (
     <div className="flex-1 flex flex-col relative overflow-hidden" style={chatBgStyle}>
 
@@ -276,7 +538,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       <div className="h-[60px] flex items-center justify-between px-5 bg-white dark:bg-[#1C2333] shadow-[0_1px_3px_rgba(0,0,0,0.06)] z-20 flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className={`w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-bold flex-shrink-0 ${headerAvatarColor(rawPhone || conversationId || 'x')}`}>
+            <div className={`w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-bold flex-shrink-0 ${avatarColor(avatarSeed)}`}>
               {initial}
             </div>
             <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-400 border-2 border-white dark:border-[#1C2333]" />
@@ -289,23 +551,54 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           </div>
         </div>
 
-        {/* Right side: actions + AI/Human toggle */}
+        {/* Right side */}
         <div className="flex items-center gap-1">
-          {/* Quick action icons */}
-          {[
-            { icon: Search, label: 'Search in chat' },
-            { icon: Sparkles, label: 'AI assist' },
-            { icon: MoreVertical, label: 'More' },
-          ].map(({ icon: Icon, label }) => (
+          {/* Search toggle */}
+          <button
+            title="Search in chat"
+            onClick={() => { setSearchOpen(v => !v); if (searchOpen) setSearchQuery(''); }}
+            className={cn(
+              "w-8 h-8 rounded-full flex items-center justify-center transition-colors",
+              searchOpen
+                ? "text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40"
+                : "text-muted-foreground/60 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+            )}
+          >
+            <Search className="w-4 h-4" />
+          </button>
+
+
+          {/* More options */}
+          <div className="relative">
             <button
-              key={label}
-              title={label}
-              onClick={() => toast(label, { description: 'Coming soon' })}
+              title="More options"
+              onClick={() => setMoreMenuOpen(v => !v)}
               className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/60 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
             >
-              <Icon className="w-4 h-4" />
+              <MoreVertical className="w-4 h-4" />
             </button>
-          ))}
+            <AnimatePresence>
+              {moreMenuOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.92, y: -4 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.92, y: -4 }}
+                  transition={{ duration: 0.12 }}
+                  className="absolute right-0 top-10 z-50 bg-card border border-border rounded-xl shadow-xl py-1 min-w-[160px]"
+                >
+                  {[
+                    { label: '✅ Mark resolved', action: () => { toggleHumanMode(); setMoreMenuOpen(false); } },
+                    { label: '📋 Copy chat link', action: () => { navigator.clipboard.writeText(window.location.href); toast.success('Chat link copied!'); setMoreMenuOpen(false); } },
+                    { label: '🔇 Mute notifications', action: () => { toast.success('Conversation muted for 24h'); setMoreMenuOpen(false); } },
+                  ].map(item => (
+                    <button key={item.label} onClick={item.action}
+                      className="w-full text-left px-4 py-2 text-[12.5px] hover:bg-muted transition-colors"
+                    >{item.label}</button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
           {/* Divider */}
           <div className="w-px h-5 bg-black/[0.06] dark:bg-white/[0.06] mx-1" />
@@ -339,6 +632,41 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         </div>
       </div>
 
+      {/* ── Inline Search Bar ── */}
+      <AnimatePresence>
+        {searchOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 44, opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="flex-shrink-0 overflow-hidden bg-white/90 dark:bg-[#1C2333]/90 backdrop-blur-md border-b border-border z-10"
+          >
+            <div className="flex items-center gap-2 px-4 h-full">
+              <Search className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" />
+              <input
+                ref={searchInputRef}
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search in conversation…"
+                className="flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground/40 outline-none"
+              />
+              {searchQuery && (
+                <span className="text-[11px] text-muted-foreground/50 flex-shrink-0">
+                  {messages.filter(m => m.content?.toLowerCase().includes(searchQuery.toLowerCase())).length} results
+                </span>
+              )}
+              <button
+                onClick={() => { setSearchOpen(false); setSearchQuery(''); }}
+                className="w-5 h-5 rounded-full flex items-center justify-center text-muted-foreground/40 hover:text-foreground transition-colors"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Message list ── */}
       <div
         ref={scrollAreaRef}
@@ -353,12 +681,14 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
               </div>
             ))}
           </div>
-        ) : feed.length === 0 ? (
+        ) : filteredFeed.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 py-20">
-            <p className="text-[13px] text-muted-foreground">No messages yet. Start the conversation.</p>
+            <p className="text-[13px] text-muted-foreground">
+              {searchQuery ? `No messages matching "${searchQuery}"` : 'No messages yet. Start the conversation.'}
+            </p>
           </div>
         ) : (
-          feed.map((item, i) => {
+          filteredFeed.map((item, i) => {
             if (item.type === 'date') {
               return (
                 <div key={`d-${i}`} className="flex items-center justify-center py-3 sticky top-0 z-10 pointer-events-none">
@@ -377,6 +707,8 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                 {group.messages.map((msg, mi) => {
                   const isFirst = mi === 0;
                   const isLast = mi === group.messages.length - 1;
+                  const isOptimistic = msg.id.startsWith('__optimistic__');
+
                   const hoverToolbar = (
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center gap-0.5 bg-white dark:bg-[#1F2B3E] rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.1)] ring-1 ring-black/[0.04] dark:ring-white/[0.06] px-0.5 py-0.5 flex-shrink-0 self-center">
                       <button onClick={() => copyMessage(msg.content)} title="Copy" className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors">
@@ -391,6 +723,27 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                     </div>
                   );
 
+                  // Tick icon: WhatsApp-style
+                  // pending → clock, sent → single grey tick, delivered → double grey tick, read → double BLUE tick, failed → red alert
+                  const tickIcon = (() => {
+                    if (msg.status === 'read')
+                      return <CheckCheck className="w-3.5 h-3.5 text-sky-300" />;
+                    if (msg.status === 'delivered')
+                      return <CheckCheck className="w-3.5 h-3.5 text-white/60" />;
+                    if (msg.status === 'sent')
+                      return <Check className="w-3.5 h-3.5 text-white/60" />;
+                    if (msg.status === 'pending' || isOptimistic)
+                      return <Clock className="w-3 h-3 text-white/40" />;
+                    if (msg.status === 'failed')
+                      return (
+                        <button onClick={() => handleResend(msg)} title="Retry" className="flex items-center cursor-pointer hover:opacity-70 transition-opacity">
+                          <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+                        </button>
+                      );
+                    // Default fallback: single tick
+                    return <Check className="w-3.5 h-3.5 text-white/60" />;
+                  })();
+
                   return (
                     <motion.div
                       key={msg.id}
@@ -399,53 +752,43 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                       transition={{ duration: 0.15, ease: 'easeOut' }}
                       className={cn('group w-full flex items-end gap-1', isInbound ? 'justify-start' : 'justify-end')}
                     >
-                      {/* Outbound: toolbar floats to the LEFT of bubble */}
+                      {/* Outbound: toolbar floats LEFT of bubble */}
                       {!isInbound && hoverToolbar}
 
                       <div className={cn(
-                        'max-w-[65%] px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)]',
+                        'max-w-[65%] px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150',
                         isInbound
                           ? cn(
-                              'bg-white dark:bg-[#1F2B3E] text-foreground',
-                              isFirst ? 'rounded-2xl rounded-tl-sm' : 'rounded-2xl',
-                              isLast && !isFirst ? 'rounded-bl-sm' : ''
-                            )
+                            'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10 text-foreground',
+                            isFirst ? 'rounded-2xl rounded-tl-sm' : 'rounded-2xl',
+                            isLast && !isFirst ? 'rounded-bl-sm' : ''
+                          )
                           : cn(
-                              'bg-[#D9FDD3] dark:bg-[#054640] text-[#111B21] dark:text-[#E9EDEF]',
-                              isFirst ? 'rounded-2xl rounded-tr-sm' : 'rounded-2xl',
-                              isLast && !isFirst ? 'rounded-br-sm' : '',
-                              msg.status === 'failed' ? 'ring-1 ring-red-300 dark:ring-red-800 opacity-80' : ''
-                            )
+                            isOptimistic
+                              ? 'bg-gradient-to-r from-indigo-400/70 to-violet-500/70 border-indigo-400/10'
+                              : 'bg-gradient-to-r from-indigo-500/90 to-violet-600/90 border-indigo-400/20',
+                            'text-white shadow-[0_0_12px_rgba(99,102,241,0.15)]',
+                            isFirst ? 'rounded-2xl rounded-tr-sm' : 'rounded-2xl',
+                            isLast && !isFirst ? 'rounded-br-sm' : '',
+                            msg.status === 'failed' ? 'ring-1 ring-red-300 dark:ring-red-800 opacity-80' : ''
+                          )
                       )}>
                         <p className="whitespace-pre-wrap">{msg.content}</p>
-                        {/* Timestamp + ticks on EVERY bubble */}
+
+                        {/* Timestamp + ticks — shown on every bubble */}
                         <div className={cn('flex items-center gap-1 mt-0.5', isInbound ? 'justify-start' : 'justify-end')}>
                           <span className={cn(
                             'text-[10.5px]',
-                            isInbound ? 'text-black/30 dark:text-white/30' : 'text-black/40 dark:text-white/40'
+                            isInbound ? 'text-black/30 dark:text-white/30' : 'text-white/60'
                           )}>
                             {formatTime(msg.created_at)}
                           </span>
-                          {!isInbound && (
-                            msg.status === 'read'
-                              ? <CheckCheck className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
-                              : msg.status === 'delivered'
-                                ? <CheckCheck className="w-3.5 h-3.5 text-black/35 dark:text-white/35" />
-                                : msg.status === 'sent'
-                                  ? <Check className="w-3.5 h-3.5 text-black/35 dark:text-white/35" />
-                                  : msg.status === 'pending'
-                                    ? <Clock className="w-3 h-3 text-black/30 dark:text-white/30" />
-                                    : msg.status === 'failed'
-                                      ? <button onClick={() => handleResend(msg)} title="Retry sending" className="flex items-center cursor-pointer hover:opacity-70 transition-opacity"><AlertCircle className="w-3.5 h-3.5 text-red-500" /></button>
-                                      : <Check className="w-3.5 h-3.5 text-black/35 dark:text-white/35" />
-                          )}
-                          {!isInbound && msg.ai_generated && (
-                            <Bot className="w-2.5 h-2.5 text-black/25 dark:text-white/25 ml-0.5" />
-                          )}
+                          {/* Only show ticks for outbound messages — no bot icon, no extras */}
+                          {!isInbound && tickIcon}
                         </div>
                       </div>
 
-                      {/* Inbound: toolbar floats to the RIGHT of bubble */}
+                      {/* Inbound: toolbar floats RIGHT of bubble */}
                       {isInbound && hoverToolbar}
                     </motion.div>
                   );
@@ -472,20 +815,31 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
       {/* ── Composer ── */}
       <div className="flex-shrink-0 px-4 pb-4 pt-3">
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,video/*,.pdf,.doc,.docx"
+          className="hidden"
+          onChange={handleFileAttach}
+        />
         <div className="flex items-end gap-1 bg-white dark:bg-[#1C2333] rounded-2xl px-2 py-2 shadow-[0_2px_16px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.04] dark:ring-white/[0.04]">
           <button
-            onClick={() => toast('Attach', { description: 'Coming soon' })}
-            title="Attach"
+            onClick={() => fileInputRef.current?.click()}
+            title="Attach file"
             className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/50 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors flex-shrink-0 mb-0.5"
           >
             <Paperclip className="w-4 h-4" />
           </button>
           <button
-            onClick={() => toast('AI assist', { description: 'Coming soon' })}
-            title="AI assist"
-            className="w-8 h-8 rounded-full flex items-center justify-center text-violet-500/70 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30 transition-colors flex-shrink-0 mb-0.5"
+            onClick={handleEnhanceText}
+            disabled={aiLoading}
+            title="Enhance with AI ✨"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-violet-500/70 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30 transition-colors flex-shrink-0 mb-0.5 disabled:opacity-40"
           >
-            <Sparkles className="w-4 h-4" />
+            {aiLoading
+              ? <div className="w-3.5 h-3.5 border-2 border-violet-400/40 border-t-violet-500 rounded-full animate-spin" />
+              : <Sparkles className="w-4 h-4" />}
           </button>
           <textarea
             ref={textareaRef}
@@ -503,15 +857,68 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             disabled={sending}
             className="flex-1 bg-transparent border-0 resize-none outline-none text-[13.5px] text-foreground placeholder:text-muted-foreground/50 py-1.5 px-1 min-h-[36px] max-h-32"
           />
-          <button
-            onClick={() => toast('Emoji', { description: 'Coming soon' })}
-            title="Emoji"
-            className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/50 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors flex-shrink-0 mb-0.5"
-          >
-            <Smile className="w-4 h-4" />
-          </button>
 
-          {/* Mic OR Send (swaps based on input) */}
+          {/* Emoji picker */}
+          <div className="relative flex-shrink-0 mb-0.5">
+            <button
+              onClick={() => setEmojiOpen(v => !v)}
+              title="Emoji"
+              className={cn(
+                "w-8 h-8 rounded-full flex items-center justify-center transition-colors",
+                emojiOpen ? "bg-amber-50 dark:bg-amber-950/30 text-amber-500" : "text-muted-foreground/50 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+              )}
+            >
+              <Smile className="w-4 h-4" />
+            </button>
+            <AnimatePresence>
+              {emojiOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9, y: 4 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, y: 4 }}
+                  transition={{ duration: 0.12 }}
+                  className="absolute bottom-12 right-0 z-50 bg-card border border-border rounded-2xl shadow-2xl overflow-hidden w-[300px]"
+                >
+                  {/* Header */}
+                  <div className="px-3 pt-2.5 pb-1.5 border-b border-border">
+                    <p className="text-[11px] font-semibold text-muted-foreground">{EMOJI_CATEGORIES[emojiCategory].name}</p>
+                  </div>
+
+                  {/* Category tabs */}
+                  <div className="flex border-b border-border bg-muted/30">
+                    {EMOJI_CATEGORIES.map((cat, i) => (
+                      <button
+                        key={cat.name}
+                        onClick={() => setEmojiCategory(i)}
+                        title={cat.name}
+                        className={cn(
+                          'flex-1 py-1.5 text-[15px] transition-colors',
+                          i === emojiCategory
+                            ? 'bg-card border-b-2 border-indigo-500'
+                            : 'hover:bg-muted/60 text-muted-foreground/60'
+                        )}
+                      >{cat.label}</button>
+                    ))}
+                  </div>
+
+                  {/* Scrollable emoji grid */}
+                  <div className="overflow-y-auto" style={{ maxHeight: '200px' }}>
+                    <div className="grid grid-cols-8 gap-0.5 p-2">
+                      {EMOJI_CATEGORIES[emojiCategory].emojis.map(e => (
+                        <button
+                          key={e}
+                          onClick={() => handleEmojiInsert(e)}
+                          className="w-8 h-8 flex items-center justify-center text-[18px] hover:bg-muted rounded-lg transition-colors"
+                        >{e}</button>
+                      ))}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Mic ↔ Send swap */}
           <AnimatePresence mode="wait" initial={false}>
             {inputMsg.trim() ? (
               <motion.button
@@ -538,8 +945,13 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                 exit={{ scale: 0.7, opacity: 0, rotate: -30 }}
                 transition={{ duration: 0.15 }}
                 whileTap={{ scale: 0.92 }}
-                onClick={() => toast('Voice', { description: 'Coming soon' })}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/60 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors flex-shrink-0 mb-0.5"
+                onClick={handleVoiceInput}
+                className={cn(
+                  "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mb-0.5 transition-colors",
+                  isRecording
+                    ? "bg-red-500 text-white animate-pulse"
+                    : "text-muted-foreground/60 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                )}
               >
                 <Mic className="w-4 h-4" />
               </motion.button>

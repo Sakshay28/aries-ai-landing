@@ -8,9 +8,9 @@
 //  - Tenant config caching
 // ═══════════════════════════════════════════════════════════
 
-// ── Redis disabled for Vercel deployment ──
-// The worker service (separate repo/container) handles BullMQ + Redis.
-// This stub always returns null, triggering built-in fallback paths.
+// ── Redis: Upstash HTTP client (works on Vercel Edge/Serverless) ──
+// Set UPSTASH_REDIS_URL + UPSTASH_REDIS_TOKEN in Vercel env vars to activate.
+// Falls back to null gracefully — all callers have null-safe fallback paths.
 
 export interface RedisClient {
   ping(): Promise<string>;
@@ -22,9 +22,37 @@ export interface RedisClient {
   expire(key: string, seconds: number): Promise<number>;
 }
 
+let _redis: RedisClient | null = null;
+
 export function getRedisClient(): RedisClient | null {
-  return null;
+  if (_redis) return _redis;
+
+  const url = process.env.UPSTASH_REDIS_URL;
+  const token = process.env.UPSTASH_REDIS_TOKEN;
+  if (!url || !token) return null;
+
+  // Upstash REST API wrapper — works in any Node.js / Edge environment
+  const call = async (method: string, args: unknown[]): Promise<unknown> => {
+    const res = await fetch(`${url}/${[method, ...args].map(a => encodeURIComponent(String(a))).join('/')}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = await res.json() as { result: unknown };
+    return json.result;
+  };
+
+  _redis = {
+    ping: () => call('PING', []) as Promise<string>,
+    get: (k) => call('GET', [k]) as Promise<string | null>,
+    set: (k, v, ...rest) => call('SET', [k, v, ...rest]),
+    del: (...keys) => call('DEL', keys) as Promise<number>,
+    keys: (p) => call('KEYS', [p]) as Promise<string[]>,
+    incr: (k) => call('INCR', [k]) as Promise<number>,
+    expire: (k, s) => call('EXPIRE', [k, String(s)]) as Promise<number>,
+  };
+
+  return _redis;
 }
+
 
 // ═══════════════════════════════════════
 // DEDUPLICATION — Redis-backed message dedup

@@ -11,14 +11,16 @@ import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Message } from "@/lib/types";
 import type { SharedConversationMeta } from "./page";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 // ── helpers ────────────────────────────────────────────────────────
+// Same palette & hash as ChatSidebar / ChatArea — ensures avatar color is identical everywhere
 const CRM_AVATAR_COLORS = [
-  'bg-emerald-100 text-emerald-700',
-  'bg-violet-100 text-violet-700',
-  'bg-sky-100 text-sky-700',
-  'bg-amber-100 text-amber-700',
-  'bg-rose-100 text-rose-700',
+  'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400',
+  'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-400',
+  'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-400',
+  'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400',
+  'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400',
 ];
 function crmAvatarColor(seed: string) {
   let h = 0;
@@ -202,6 +204,123 @@ interface CRMPanelProps {
 export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [noteInput, setNoteInput] = useState("");
+  const [localLead, setLocalLead] = useState<any>(null);
+  const [team, setTeam] = useState<any[]>([]);
+  const [loadingTeam, setLoadingTeam] = useState(false);
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [isEditingEmail, setIsEditingEmail] = useState(false);
+  const [isEditingPhone, setIsEditingPhone] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+
+  const noteInputRef = useRef<HTMLInputElement>(null);
+  const agentSelectRef = useRef<HTMLSelectElement>(null);
+  const notesSectionRef = useRef<HTMLDivElement>(null);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(true);
+
+  const PREDEFINED_TAGS = ['VIP', 'Follow-up', 'Complaint', 'Booking', 'Pricing', 'Interested', 'Not interested', 'Spam'];
+
+  const toggleTag = async (tag: string) => {
+    if (!localLead?.id) return;
+    const current: string[] = localLead.tags || [];
+    const updated = current.includes(tag) ? current.filter((t: string) => t !== tag) : [...current, tag];
+    setLocalLead((prev: any) => prev ? { ...prev, tags: updated } : null);
+    const supabase = createBrowserSupabaseClient();
+    await supabase.from('leads').update({ tags: updated }).eq('id', localLead.id);
+  };
+
+  useEffect(() => {
+    setLocalLead(meta?.leads || null);
+    setIsEditingName(false);
+    setIsEditingEmail(false);
+    setIsEditingPhone(false);
+  }, [meta]);
+
+  useEffect(() => {
+    setLoadingTeam(true);
+    fetch("/api/dashboard/team")
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) setTeam(data.users || []);
+      })
+      .catch(err => console.error("Error fetching team:", err))
+      .finally(() => setLoadingTeam(false));
+  }, []);
+
+  const updateLeadStatus = async (status: string) => {
+    if (!localLead?.id) return;
+    const originalStatus = localLead.lead_status;
+    setLocalLead((prev: any) => prev ? { ...prev, lead_status: status } : null);
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase
+      .from('leads')
+      .update({ lead_status: status })
+      .eq('id', localLead.id);
+    if (error) {
+      toast.error("Failed to update status");
+      setLocalLead((prev: any) => prev ? { ...prev, lead_status: originalStatus } : null);
+    } else {
+      toast.success("Lead status updated to " + status);
+    }
+  };
+
+  const updateLeadScore = async (score: number) => {
+    if (!localLead?.id) return;
+    const originalScore = localLead.lead_score;
+    setLocalLead((prev: any) => prev ? { ...prev, lead_score: score } : null);
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase
+      .from('leads')
+      .update({ lead_score: score })
+      .eq('id', localLead.id);
+    if (error) {
+      toast.error("Failed to update lead score");
+      setLocalLead((prev: any) => prev ? { ...prev, lead_score: originalScore } : null);
+    } else {
+      toast.success("Lead score updated to " + score);
+    }
+  };
+
+  const assignAgent = async (userId: string | null) => {
+    if (!localLead?.id) return;
+    const originalAgent = localLead.assigned_to;
+    setLocalLead((prev: any) => prev ? { ...prev, assigned_to: userId } : null);
+    try {
+      const res = await fetch(`/api/dashboard/leads/${localLead.id}/assign`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assigned_to: userId })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Failed to assign');
+      }
+      toast.success(userId ? "Lead assigned to agent" : "Lead unassigned");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to assign agent");
+      setLocalLead((prev: any) => prev ? { ...prev, assigned_to: originalAgent } : null);
+    }
+  };
+
+  const saveField = async (field: 'name' | 'email' | 'phone', value: string) => {
+    if (!localLead?.id) return;
+    const originalVal = localLead[field];
+    setLocalLead((prev: any) => prev ? { ...prev, [field]: value || null } : null);
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase
+      .from('leads')
+      .update({ [field]: value || null })
+      .eq('id', localLead.id);
+    if (error) {
+      toast.error(`Failed to update ${field}`);
+      setLocalLead((prev: any) => prev ? { ...prev, [field]: originalVal } : null);
+    } else {
+      toast.success(`Lead ${field} updated`);
+    }
+  };
 
   // Load notes from localStorage keyed by conversation id
   useEffect(() => {
@@ -223,15 +342,11 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
     saveNotes([...notes, { id: Date.now().toString(), text, createdAt: new Date().toISOString() }]);
     setNoteInput("");
   };
-
   const deleteNote = (id: string) => saveNotes(notes.filter(n => n.id !== id));
-
-  const noteInputRef = useRef<HTMLInputElement>(null);
 
   const lead = meta?.leads;
   const rawPhone = lead?.phone || meta?.sender_id || meta?.sender_name || "";
   const displayName = lead?.name || formatPhone(rawPhone) || "Unknown";
-  const initial = (lead?.name ?? rawPhone)?.charAt(0)?.toUpperCase() || "?";
 
   const inboundCount = messages.filter(m => m.direction === "inbound").length;
   const outboundCount = messages.filter(m => m.direction === "outbound").length;
@@ -240,31 +355,70 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const lastMsg = messages.at(-1);
 
   return (
-    <div className="w-[300px] flex-shrink-0 bg-[#FAFAFA] dark:bg-[#0F1623] shadow-[-1px_0_0_rgba(0,0,0,0.05)] dark:shadow-[-1px_0_0_rgba(255,255,255,0.04)] flex flex-col overflow-hidden">
+    <div className="w-[300px] flex-shrink-0 bg-card border-l border-border flex flex-col overflow-hidden">
       {/* ── Hero ── */}
       <div className="flex items-center gap-3 px-4 pt-4 pb-3">
         <div className={`w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-bold flex-shrink-0 ${meta ? crmAvatarColor(rawPhone || meta.id) : 'bg-muted'}`}>
           {meta
-            ? (displayName?.charAt(0)?.toUpperCase() || '?')
+            ? (lead?.name
+                ? lead.name.charAt(0).toUpperCase()
+                : rawPhone
+                  ? rawPhone.replace(/\D/g, '').slice(-1) || '?'
+                  : '?')
             : <User className="w-5 h-5 text-muted-foreground/40" />
           }
         </div>
 
         {meta ? (
           <div className="flex-1 min-w-0">
-            <p className="text-[13.5px] font-semibold text-foreground truncate leading-tight">{displayName}</p>
-            {lead?.name && <p className="text-[11.5px] text-muted-foreground/60 mt-0.5 truncate">{formatPhone(rawPhone)}</p>}
+            {isEditingName ? (
+              <input
+                type="text"
+                value={editName}
+                onChange={e => setEditName(e.target.value)}
+                onBlur={() => {
+                  setIsEditingName(false);
+                  if (editName.trim() && editName.trim() !== localLead?.name) {
+                    saveField('name', editName.trim());
+                  }
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    setIsEditingName(false);
+                    if (editName.trim() && editName.trim() !== localLead?.name) {
+                      saveField('name', editName.trim());
+                    }
+                  } else if (e.key === 'Escape') {
+                    setIsEditingName(false);
+                  }
+                }}
+                autoFocus
+                className="text-[13px] bg-secondary border border-indigo-500/50 rounded px-1.5 py-0.5 text-foreground outline-none w-full font-semibold focus:border-indigo-500 transition-colors"
+              />
+            ) : (
+              <p
+                onClick={() => {
+                  setEditName(localLead?.name || displayName);
+                  setIsEditingName(true);
+                }}
+                title="Click to edit name"
+                className="text-[13.5px] font-semibold text-foreground truncate leading-tight hover:underline hover:text-indigo-400 cursor-pointer transition-colors"
+              >
+                {displayName}
+              </p>
+            )}
+            {rawPhone && <p className="text-[11.5px] text-muted-foreground/60 mt-0.5 truncate">{formatPhone(rawPhone)}</p>}
             <div className="flex items-center gap-1.5 mt-1.5">
-              {lead?.lead_status && (
-                <span className={cn("px-1.5 py-0.5 rounded-md text-[9.5px] font-bold uppercase tracking-wide", STATUS_COLORS[lead.lead_status] || STATUS_COLORS.new)}>
-                  {lead.lead_status}
+              {localLead?.lead_status && (
+                <span className={cn("px-1.5 py-0.5 rounded-md text-[9.5px] font-bold uppercase tracking-wide", STATUS_COLORS[localLead.lead_status] || STATUS_COLORS.new)}>
+                  {localLead.lead_status}
                 </span>
               )}
               <span className={cn(
                 "px-1.5 py-0.5 rounded-md text-[9.5px] font-bold uppercase tracking-wide",
                 meta.bot_paused
-                  ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                  : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                  ? "bg-blue-500/20 text-blue-400 border border-blue-500/20"
+                  : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/20"
               )}>
                 {meta.bot_paused ? "Human" : "AI"}
               </span>
@@ -280,10 +434,35 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
         <div className="px-4 pb-3">
           <div className="grid grid-cols-4 gap-1.5">
             {([
-              { icon: UserPlus, label: 'Assign', action: () => toast('Assign', { description: 'Coming soon' }) },
-              { icon: Tag, label: 'Tag', action: () => toast('Tag', { description: 'Coming soon' }) },
-              { icon: StickyNote, label: 'Note', action: () => { noteInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => noteInputRef.current?.focus(), 200); } },
-              { icon: Workflow, label: 'Flow', action: () => toast('Flow', { description: 'Coming soon' }) },
+              {
+                icon: UserPlus, label: 'Assign',
+                action: () => {
+                  agentSelectRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  setTimeout(() => {
+                    agentSelectRef.current?.focus();
+                    agentSelectRef.current?.classList.add('ring-2', 'ring-indigo-500');
+                    setTimeout(() => agentSelectRef.current?.classList.remove('ring-2', 'ring-indigo-500'), 1500);
+                  }, 300);
+                }
+              },
+              {
+                icon: Tag, label: 'Tag',
+                action: () => setTagsOpen(v => !v)
+              },
+              {
+                icon: StickyNote, label: 'Note',
+                action: () => {
+                  setNotesOpen(true);
+                  setTimeout(() => {
+                    notesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    setTimeout(() => noteInputRef.current?.focus(), 300);
+                  }, 100);
+                }
+              },
+              {
+                icon: Workflow, label: 'Flow',
+                action: () => window.location.href = '/dashboard/flows'
+              },
             ]).map(({ icon: Icon, label, action }) => (
               <button
                 key={label}
@@ -295,11 +474,39 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
               </button>
             ))}
           </div>
+
+          {/* Tag picker dropdown */}
+          {tagsOpen && (
+            <div className="px-4 pb-3">
+              <div className="bg-muted/50 rounded-xl p-2.5">
+                <p className="text-[9.5px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">Quick Tags</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {PREDEFINED_TAGS.map(tag => {
+                    const active = (localLead?.tags || []).includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        onClick={() => toggleTag(tag)}
+                        className={cn(
+                          'px-2 py-1 rounded-lg text-[11px] font-semibold transition-all',
+                          active
+                            ? 'bg-indigo-500 text-white shadow-sm'
+                            : 'bg-white dark:bg-white/10 text-foreground/70 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-600'
+                        )}
+                      >
+                        {active ? '✓ ' : ''}{tag}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* subtle separator */}
+          <div className="mx-4 h-px bg-border mb-1 mt-1" />
         </div>
       )}
-
-      {/* subtle separator */}
-      <div className="mx-4 h-px bg-black/[0.05] dark:bg-white/[0.05] mb-1" />
 
       {/* ── Sections ── */}
       <div className="flex-1 overflow-y-auto">
@@ -313,41 +520,147 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
 
             {/* Contact */}
             <Section title="Contact" icon={Phone}>
-              <div className="flex flex-col gap-0.5">
+              {/* Phone Row */}
+              <div className="flex flex-col gap-0.5 group">
                 <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Phone</p>
-                <a href={`tel:+${rawPhone.replace(/\D/g, '')}`} className="text-[12.5px] text-foreground/85 font-medium hover:text-foreground hover:underline transition-colors cursor-pointer">{formatPhone(rawPhone) || "—"}</a>
-              </div>
-              {lead?.email && (
-                <div className="flex flex-col gap-0.5">
-                  <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Email</p>
-                  <a href={`mailto:${lead.email}`} className="text-[12.5px] text-foreground/85 font-medium hover:text-foreground hover:underline transition-colors cursor-pointer truncate">{lead.email}</a>
-                </div>
-              )}
-              {typeof lead?.lead_score === "number" && (
-                <div>
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Lead Score</p>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-emerald-500 rounded-full transition-all"
-                        style={{ width: `${lead.lead_score}%` }}
-                      />
-                    </div>
-                    <span className="text-[12px] font-semibold text-foreground">{lead.lead_score}</span>
+                {isEditingPhone ? (
+                  <input
+                    type="text"
+                    value={editPhone}
+                    onChange={e => setEditPhone(e.target.value)}
+                    onBlur={() => {
+                      setIsEditingPhone(false);
+                      if (editPhone.trim() && editPhone.trim() !== localLead?.phone) {
+                        saveField('phone', editPhone.trim());
+                      }
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        setIsEditingPhone(false);
+                        if (editPhone.trim() && editPhone.trim() !== localLead?.phone) {
+                          saveField('phone', editPhone.trim());
+                        }
+                      } else if (e.key === 'Escape') {
+                        setIsEditingPhone(false);
+                      }
+                    }}
+                    autoFocus
+                    className="text-[12.5px] bg-secondary border border-indigo-500/50 rounded px-1.5 py-0.5 text-foreground outline-none w-full"
+                  />
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <a href={`tel:+${rawPhone.replace(/\D/g, '')}`} className="text-[12.5px] text-foreground/85 font-medium hover:underline hover:text-indigo-400 transition-colors cursor-pointer">
+                      {formatPhone(rawPhone) || "—"}
+                    </a>
+                    <button
+                      onClick={() => {
+                        setEditPhone(localLead?.phone || "");
+                        setIsEditingPhone(true);
+                      }}
+                      className="text-[10px] text-indigo-500 hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      Edit
+                    </button>
                   </div>
-                </div>
-              )}
-              {lead?.tags && lead.tags.length > 0 && (
+                )}
+              </div>
+
+              {/* Email Row */}
+              <div className="flex flex-col gap-0.5 group">
+                <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Email</p>
+                {isEditingEmail ? (
+                  <input
+                    type="email"
+                    value={editEmail}
+                    onChange={e => setEditEmail(e.target.value)}
+                    onBlur={() => {
+                      setIsEditingEmail(false);
+                      if (editEmail.trim() !== localLead?.email) {
+                        saveField('email', editEmail.trim());
+                      }
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        setIsEditingEmail(false);
+                        if (editEmail.trim() !== localLead?.email) {
+                          saveField('email', editEmail.trim());
+                        }
+                      } else if (e.key === 'Escape') {
+                        setIsEditingEmail(false);
+                      }
+                    }}
+                    autoFocus
+                    className="text-[12.5px] bg-secondary border border-indigo-500/50 rounded px-1.5 py-0.5 text-foreground outline-none w-full"
+                  />
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[12.5px] text-foreground/85 font-medium truncate">
+                      {localLead?.email || "—"}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setEditEmail(localLead?.email || "");
+                        setIsEditingEmail(true);
+                      }}
+                      className="text-[10px] text-indigo-500 hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Status Row */}
+              <div className="flex flex-col gap-0.5">
+                <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1">Lead Status</p>
+                <select
+                  value={localLead?.lead_status || 'new'}
+                  onChange={e => updateLeadStatus(e.target.value)}
+                  className="w-full text-[12px] bg-secondary/50 border border-border hover:border-indigo-500/50 rounded-lg px-2.5 py-1.5 outline-none focus:border-indigo-500 cursor-pointer text-foreground transition-all duration-150 font-semibold"
+                >
+                  <option value="new">New</option>
+                  <option value="hot">Hot 🔥</option>
+                  <option value="warm">Warm ☀️</option>
+                  <option value="cold">Cold ❄️</option>
+                  <option value="converted">Converted 👑</option>
+                </select>
+              </div>
+
+              {/* Agent Assignment */}
+              <div className="flex flex-col gap-0.5">
+                <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1">Assigned Agent</p>
+                {loadingTeam ? (
+                  <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading team...
+                  </div>
+                ) : (
+                  <select
+                    ref={agentSelectRef}
+                    value={localLead?.assigned_to || ""}
+                    onChange={e => assignAgent(e.target.value || null)}
+                    className="w-full text-[12px] bg-secondary/50 border border-border hover:border-indigo-500/50 rounded-lg px-2.5 py-1.5 outline-none focus:border-indigo-500 cursor-pointer text-foreground transition-all duration-150 font-semibold"
+                  >
+                    <option value="">Unassigned</option>
+                    {team.map((u: any) => (
+                      <option key={u.id} value={u.id}>
+                        {u.full_name || u.email}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {localLead?.tags && localLead.tags.length > 0 && (
                 <div>
                   <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Tags</p>
                   <div className="flex flex-wrap gap-1">
-                    {lead.tags.map(t => (
+                    {localLead.tags.map((t: string) => (
                       <span key={t} className="px-2 py-0.5 bg-muted rounded-md text-[11px] font-medium text-foreground">{t}</span>
                     ))}
                   </div>
                 </div>
               )}
-              {lead?.first_message_at && <InfoRow label="First Contact" value={formatDate(lead.first_message_at)} />}
+              {localLead?.first_message_at && <InfoRow label="First Contact" value={formatDate(localLead.first_message_at)} />}
             </Section>
 
             {/* Conversation Stats */}
@@ -383,7 +696,8 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
             </Section>
 
             {/* Notes */}
-            <Section title="Notes" icon={Tag} defaultOpen={false}>
+            <div ref={notesSectionRef}>
+              <Section title="Notes" icon={Tag} defaultOpen={notesOpen}>
               {notes.length === 0 && (
                 <p className="text-[12px] text-muted-foreground">No notes yet.</p>
               )}
@@ -416,6 +730,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 </button>
               </div>
             </Section>
+            </div>
           </>
         )}
 

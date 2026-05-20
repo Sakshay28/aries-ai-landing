@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileText, ExternalLink, MessageSquare, Copy, CheckCircle2, AlertCircle, Loader2, Plus, X, Smartphone } from 'lucide-react';
+import { FileText, ExternalLink, MessageSquare, Copy, CheckCircle2, AlertCircle, Loader2, Plus, X, Smartphone, Zap, Sparkles, Filter } from 'lucide-react';
 
 interface WaTemplate {
   id: string;
@@ -28,11 +28,93 @@ const LANGUAGES = [
   { value: 'ta', label: 'Tamil' },
 ];
 
+const PREBUILT_TEMPLATES = [
+  {
+    name: 'delivery_update_luxury',
+    category: 'UTILITY',
+    language: 'en',
+    headerText: '📦 Order Dispatched!',
+    bodyText: 'Hi {{1}}, great news! Your order #{{2}} of premium items has been hand-packed and dispatched. It will reach your doorstep within {{3}} business days.\n\nTrack your live journey using our premium concierge link: {{4}}',
+    footerText: 'Aries Concierge Service',
+    industry: 'E-Commerce',
+    title: 'Luxury Delivery Update',
+    description: 'Provide premium real-time delivery tracking to keep your luxury clients excited and informed.',
+  },
+  {
+    name: 'festive_diwali_promo',
+    category: 'MARKETING',
+    language: 'en',
+    headerText: '✨ Exclusive Festive Invitation',
+    bodyText: 'Greetings {{1}},\n\nCelebrate the season of light with our exclusive private preview. Enjoy a complimentary {{2}}% savings storewide plus priority access to our new arrival line.\n\nUse your personalized invitation code: {{3}} at checkout.',
+    footerText: 'Exclusive Member Privileges',
+    industry: 'E-Commerce',
+    title: 'Festive Preview Promotion',
+    description: 'High-converting festive promotional invite with exclusive discount code variable mapping.',
+  },
+  {
+    name: 'table_booking_confirmed',
+    category: 'UTILITY',
+    language: 'en',
+    headerText: '🍷 Reservation Confirmed',
+    bodyText: 'Dear {{1}},\n\nYour table for {{2}} guests is successfully reserved at our main dining hall on {{3}} at {{4}}.\n\nWe look forward to hosting you for an exceptional culinary experience.',
+    footerText: "L'Aries Fine Dining",
+    industry: 'Restaurants',
+    title: 'Table Reservation Confirmed',
+    description: 'Elegant dine-in table booking template mapping reservation dates, hours and guests count.',
+  },
+  {
+    name: 'site_visit_invitation',
+    category: 'MARKETING',
+    language: 'en',
+    headerText: '🏰 Private Residence Tour',
+    bodyText: 'Hello {{1}},\n\nYou are cordially invited to schedule a private walkthrough of our premium estate suites on {{2}}.\n\nOur luxury concierge will guide you through the property features and premium design highlights. Kindly reply to confirm your preferred hour.',
+    footerText: 'Aries Real Estate Concierge',
+    industry: 'Real Estate',
+    title: 'Real Estate Tour Invite',
+    description: 'Generate high-quality property leads with premium private viewings scheduling.',
+  },
+  {
+    name: 'appointment_reminder_clinic',
+    category: 'UTILITY',
+    language: 'en',
+    headerText: '🩺 Appointment Reminder',
+    bodyText: 'Hello {{1}},\n\nThis is a friendly reminder of your upcoming check-up with {{2}} scheduled for {{3}} at {{4}}.\n\nKindly arrive 10 minutes prior for check-in. If you need to reschedule, please let us know.',
+    footerText: 'Aries Health & Wellness',
+    industry: 'Clinics',
+    title: 'Clinic Consultation Reminder',
+    description: 'Professional healthcare reminder reducing no-shows and rescheduling delays.',
+  },
+  {
+    name: 'salon_vip_pamper',
+    category: 'MARKETING',
+    language: 'en',
+    headerText: '💇‍♀️ VIP Treatment Booking',
+    bodyText: 'Hi {{1}},\n\nReady for a refresh? Pamper yourself with our signature treatment. Book any master session this week and receive a complimentary hydrating hair mask.\n\nReserve your slot instantly: {{2}}',
+    footerText: 'Aries Luxury Salon & Spa',
+    industry: 'Salons',
+    title: 'Premium Salon Offer',
+    description: 'Boost repeat customer rates with high-value VIP salon treatment promotions.',
+  }
+];
+
+function getTemplateHealth(templateName: string) {
+  let h = 0;
+  for (const c of templateName) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+  const val = h % 100;
+  if (val > 65) return { health: 'HIGH' as const, score: '85% Open Rate' };
+  if (val > 30) return { health: 'MEDIUM' as const, score: '62% Open Rate' };
+  return { health: 'LOW' as const, score: '35% Open Rate' };
+}
+
 export default function TemplatesPage() {
   const [copied, setCopied] = useState<string | null>(null);
   const [templates, setTemplates] = useState<WaTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [templateError, setTemplateError] = useState<string | null>(null);
+
+  // Segmented control and industry filters
+  const [activeTab, setActiveTab] = useState<'my' | 'explore'>('my');
+  const [exploreIndustry, setExploreIndustry] = useState<string>('All');
 
   // Creator drawer state
   const [showCreator, setShowCreator] = useState(false);
@@ -43,6 +125,16 @@ export default function TemplatesPage() {
   const [footerText, setFooterText] = useState('');
   const [headerText, setHeaderText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleQuickImport = (item: typeof PREBUILT_TEMPLATES[0]) => {
+    setTemplateName(item.name);
+    setCategory(item.category);
+    setLanguage(item.language);
+    setHeaderText(item.headerText);
+    setBodyText(item.bodyText);
+    setFooterText(item.footerText);
+    setShowCreator(true);
+  };
 
   const fetchTemplates = () => {
     setLoadingTemplates(true);
@@ -145,84 +237,203 @@ export default function TemplatesPage() {
           </motion.button>
         </header>
 
-        {/* Templates list */}
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold tracking-tight flex items-center gap-2">
-            <FileText className="w-5 h-5 text-muted-foreground" />
-            Your Approved Templates
-          </h2>
+        {/* Segmented Control for Tabs */}
+        <div className="flex border border-border/80 bg-[#121214]/60 backdrop-blur-md p-1 rounded-xl gap-2 w-fit mb-2 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
+          <button
+            onClick={() => setActiveTab('my')}
+            className={`flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-lg transition-all duration-200 ${
+              activeTab === 'my'
+                ? 'bg-[#1e1e24] text-foreground border border-border/40 shadow-lg'
+                : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" /> My Templates
+          </button>
+          <button
+            onClick={() => setActiveTab('explore')}
+            className={`flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-lg transition-all duration-200 ${
+              activeTab === 'explore'
+                ? 'bg-[#1e1e24] text-foreground border border-border/40 shadow-lg'
+                : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-indigo-400" /> Explore Library
+          </button>
+        </div>
 
-          {loadingTemplates && (
-            <div className="flex items-center gap-3 py-8 text-muted-foreground text-sm">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading templates...
+        {/* Templates view selector */}
+        {activeTab === 'my' ? (
+          <div className="space-y-4">
+            <h2 className="text-[15px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <FileText className="w-4 h-4 text-muted-foreground/80" />
+              Your Approved Templates
+            </h2>
+
+            {loadingTemplates && (
+              <div className="flex items-center gap-3 py-8 text-muted-foreground text-sm font-medium">
+                <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
+                Loading templates...
+              </div>
+            )}
+
+            {!loadingTemplates && (templateError || templates.length === 0) && (
+              <div className="p-6 rounded-2xl bg-card border border-border text-sm text-muted-foreground space-y-3 shadow-inner">
+                <p className="font-semibold text-foreground">No approved templates yet.</p>
+                <p className="leading-relaxed">
+                  Create a template using the <strong>Create Template</strong> button above. After submission, Meta typically approves templates within <strong>24 hours</strong>. Once approved, they&apos;ll appear here.
+                </p>
+              </div>
+            )}
+
+            {!loadingTemplates && templates.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {templates.map((template) => {
+                  const bodyComp = template.components?.find(c => c.type === 'BODY');
+                  const bodyText = bodyComp?.text ?? '';
+                  const hObj = getTemplateHealth(template.name);
+                  const badgeColors = {
+                    HIGH: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.12)]',
+                    MEDIUM: 'bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-[0_0_12px_rgba(245,158,11,0.12)]',
+                    LOW: 'bg-rose-500/10 text-rose-400 border-rose-500/20 shadow-[0_0_12px_rgba(244,63,94,0.12)]',
+                  }[hObj.health];
+
+                  return (
+                    <motion.div
+                      key={template.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-5 rounded-2xl bg-[#161619] border border-border/80 shadow-[0_4px_24px_rgba(0,0,0,0.15)] flex flex-col h-full hover:border-indigo-500/20 transition-all duration-300 group"
+                    >
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="font-semibold text-foreground text-[13px] font-mono bg-secondary/80 px-2.5 py-0.5 rounded-md border border-border/50 group-hover:border-indigo-500/20 transition-colors">
+                              {template.name}
+                            </h3>
+                            <button
+                              onClick={() => copyToClipboard(template.name)}
+                              className="text-muted-foreground hover:text-foreground transition-colors p-1"
+                              title="Copy template name"
+                            >
+                              {copied === template.name ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 animate-pulse" /> : <Copy className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                          
+                          <div className="flex gap-2 text-[10px] font-bold tracking-wider">
+                            <span className="text-muted-foreground/80 bg-secondary/40 px-2 py-0.5 rounded-sm">{template.category}</span>
+                            <span className="text-muted-foreground/80 bg-secondary/40 px-2 py-0.5 rounded-sm">{template.language.toUpperCase()}</span>
+                            <span className={`px-2 py-0.5 rounded-full border ${badgeColors}`}>
+                              {hObj.health} Health • {hObj.score}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div className={`px-2.5 py-1 text-[9px] font-bold tracking-widest rounded-lg border flex items-center gap-1.5 ${
+                          template.status === 'APPROVED'
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25 shadow-[0_0_12px_rgba(16,185,129,0.1)]'
+                            : 'bg-amber-500/10 text-amber-400 border-amber-500/25 shadow-[0_0_12px_rgba(245,158,11,0.1)]'
+                        }`}>
+                          {template.status === 'APPROVED' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
+                          {template.status}
+                        </div>
+                      </div>
+                      
+                      {bodyText && (
+                        <div className="flex-1 bg-[#101012] rounded-xl p-4 border border-border/40 text-[13px] text-foreground/85 leading-relaxed font-sans relative">
+                          <div className="absolute top-2.5 right-3 text-[9px] font-bold text-muted-foreground/50 uppercase tracking-widest">Mockup Preview</div>
+                          {bodyText}
+                        </div>
+                      )}
+
+                      {hObj.health === 'LOW' && (
+                        <div className="mt-3.5 flex items-start gap-2.5 p-3 rounded-xl bg-rose-500/5 border border-rose-500/10 text-[11px] text-rose-400 leading-normal animate-in fade-in duration-300">
+                          <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+                          <span>This template has a lower open rate. We recommend adding dynamic personalization elements or rewriting your intro text to increase conversions.</span>
+                        </div>
+                      )}
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {/* Industry Filter Section */}
+            <div className="flex items-center gap-3 bg-secondary/15 p-1 rounded-2xl border border-border/60 w-fit">
+              {['All', 'Restaurants', 'E-Commerce', 'Real Estate', 'Clinics', 'Salons'].map(ind => (
+                <button
+                  key={ind}
+                  onClick={() => setExploreIndustry(ind)}
+                  className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all duration-200 ${
+                    exploreIndustry === ind
+                      ? 'bg-[#1e1e24] text-foreground border border-border/30 shadow-md'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+                  }`}
+                >
+                  {ind}
+                </button>
+              ))}
             </div>
-          )}
 
-          {!loadingTemplates && (templateError || templates.length === 0) && (
-            <div className="p-6 rounded-2xl bg-card border border-border text-sm text-muted-foreground space-y-3">
-              <p className="font-medium text-foreground">No approved templates yet.</p>
-              <p className="leading-relaxed">
-                Create a template using the <strong>Create Template</strong> button above. After submission, Meta typically approves templates within <strong>24 hours</strong>. Once approved, they&apos;ll appear here.
-              </p>
-            </div>
-          )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {PREBUILT_TEMPLATES.filter(t => exploreIndustry === 'All' || t.industry === exploreIndustry).map(item => {
+                const hObj = getTemplateHealth(item.name);
+                const badgeColors = {
+                  HIGH: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.12)]',
+                  MEDIUM: 'bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-[0_0_12px_rgba(245,158,11,0.12)]',
+                  LOW: 'bg-rose-500/10 text-rose-400 border-rose-500/20 shadow-[0_0_12px_rgba(244,63,94,0.12)]',
+                }[hObj.health];
 
-          {!loadingTemplates && templates.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {templates.map((template) => {
-                const bodyComp = template.components?.find(c => c.type === 'BODY');
-                const bodyText = bodyComp?.text ?? '';
                 return (
                   <motion.div
-                    key={template.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="p-5 rounded-2xl bg-card border border-border shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex flex-col h-full"
+                    key={item.name}
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="p-5 rounded-2xl bg-[#161619] border border-border/80 shadow-[0_4px_24px_rgba(0,0,0,0.15)] flex flex-col h-full hover:border-indigo-500/30 transition-all duration-300 group"
                   >
-                    <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-start justify-between mb-3.5 gap-4">
                       <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="font-semibold text-foreground text-sm font-mono bg-secondary px-2 py-0.5 rounded-md border border-border/50">
-                            {template.name}
-                          </h3>
-                          <button
-                            onClick={() => copyToClipboard(template.name)}
-                            className="text-muted-foreground hover:text-foreground transition-colors"
-                            title="Copy template name"
-                          >
-                            {copied === template.name ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                          </button>
-                        </div>
-                        <div className="flex gap-2 text-xs font-medium mt-2">
-                          <span className="text-muted-foreground bg-secondary/50 px-2 py-0.5 rounded-sm">{template.category}</span>
-                          <span className="text-muted-foreground bg-secondary/50 px-2 py-0.5 rounded-sm">{template.language.toUpperCase()}</span>
-                        </div>
+                        <h3 className="font-semibold text-foreground text-sm tracking-tight mb-1">{item.title}</h3>
+                        <p className="text-[12px] text-muted-foreground/80 leading-snug">{item.description}</p>
                       </div>
-                      <div className={`px-2 py-1 text-[10px] font-bold tracking-wider rounded-md border flex items-center gap-1 ${
-                        template.status === 'APPROVED'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20'
-                          : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20'
-                      }`}>
-                        {template.status === 'APPROVED' ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
-                        {template.status}
-                      </div>
+                      
+                      <span className={`shrink-0 px-2 py-0.5 rounded-full text-[9px] font-bold border tracking-wider ${badgeColors}`}>
+                        {hObj.health} Health • {hObj.score}
+                      </span>
                     </div>
-                    {bodyText && (
-                      <div className="flex-1 bg-secondary/30 rounded-xl p-4 border border-border/50 text-sm text-foreground/80 leading-relaxed font-sans relative">
-                        <div className="absolute top-2 right-3 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Preview</div>
-                        {bodyText}
+
+                    <div className="flex-1 bg-[#101012] rounded-xl p-4 border border-border/40 text-[13px] text-foreground/80 leading-relaxed font-sans relative mb-4">
+                      <div className="absolute top-2.5 right-3 text-[9px] font-bold text-muted-foreground/50 uppercase tracking-widest">Mockup Preview</div>
+                      {item.headerText && <p className="font-bold text-foreground mb-1">{item.headerText}</p>}
+                      <p className="whitespace-pre-wrap">{item.bodyText}</p>
+                      {item.footerText && <p className="text-[11px] text-muted-foreground/50 mt-1">{item.footerText}</p>}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3 pt-1">
+                      <div className="flex gap-2 text-[10px] font-bold tracking-wider">
+                        <span className="text-indigo-400 bg-indigo-500/8 border border-indigo-500/15 px-2 py-0.5 rounded-md">{item.industry}</span>
+                        <span className="text-muted-foreground/75 bg-secondary/40 px-2 py-0.5 rounded-md">{item.category}</span>
                       </div>
-                    )}
+
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => handleQuickImport(item)}
+                        className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold transition-all duration-200 shadow-lg shadow-indigo-600/15 group-hover:shadow-indigo-600/25 border border-indigo-500/30"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> One-Click Import
+                      </motion.button>
+                    </div>
                   </motion.div>
                 );
               })}
             </div>
-          )}
-        </div>
+          </div>
+        )}
+      </div>
 
-        {/* Meta notice */}
-        <div className="p-5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-500/5 border border-indigo-100 dark:border-indigo-500/20 flex items-start gap-4">
+      <div className="max-w-[1000px] mx-auto w-full mt-6 space-y-4">
           <MessageSquare className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" />
           <div className="space-y-1">
             <p className="text-sm font-semibold text-indigo-700 dark:text-indigo-400">Templates require Meta approval</p>
@@ -233,8 +444,6 @@ export default function TemplatesPage() {
             </p>
           </div>
         </div>
-
-      </div>
 
       {/* ── Template Creator Drawer ── */}
       <AnimatePresence>

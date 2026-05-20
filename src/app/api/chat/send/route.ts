@@ -114,7 +114,14 @@ export async function POST(req: NextRequest) {
       .update({ last_message_at: new Date().toISOString() })
       .eq('id', conversationId);
 
-    return NextResponse.json({ success: true, messageId: insertedMsg.id });
+    // Fetch the final message state to return to client
+    const { data: finalMsg } = await supabaseAdmin
+      .from('messages')
+      .select('*')
+      .eq('id', insertedMsg.id)
+      .single();
+
+    return NextResponse.json({ success: true, messageId: insertedMsg.id, message: finalMsg || null });
 
   } catch (err) {
     console.error('Chat send error:', err);

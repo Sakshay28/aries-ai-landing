@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     // Get conversation details (no join — explicit queries are more reliable)
     const { data: conv, error: convErr } = await supabaseAdmin
       .from("conversations")
-      .select("id, is_active, bot_paused, sender_name, sender_id, lead_id")
+      .select("id, is_active, bot_paused, sender_name, sender_id, lead_id, escalated")
       .eq("id", id)
       .eq("tenant_id", tenantId)
       .single();
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     if (conv.lead_id) {
       const { data } = await supabaseAdmin
         .from('leads')
-        .select('name, phone, email, lead_status, lead_score, tags, created_at, first_message_at')
+        .select('id, name, phone, email, lead_status, lead_score, tags, created_at, first_message_at, assigned_to')
         .eq('id', conv.lead_id)
         .single();
       lead = data;
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
     if (!lead && conv.sender_id) {
       const { data } = await supabaseAdmin
         .from('leads')
-        .select('name, phone, email, lead_status, lead_score, tags, created_at, first_message_at')
+        .select('id, name, phone, email, lead_status, lead_score, tags, created_at, first_message_at, assigned_to')
         .eq('tenant_id', tenantId)
         .eq('phone', conv.sender_id)
         .maybeSingle();

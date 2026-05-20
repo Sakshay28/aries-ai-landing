@@ -80,30 +80,45 @@ export function LeadsClient() {
 
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-hidden">
-      <header className="h-[72px] border-b border-border/60 flex items-center justify-between px-6 lg:px-8 shrink-0 relative z-20 backdrop-blur-md bg-background/80">
-        <div className="flex items-center gap-6 flex-1">
-          <h1 className="text-lg font-semibold tracking-tight text-foreground/90">Sales Pipeline</h1>
-          <div className="hidden md:flex max-w-sm relative group w-full">
+      <header className="border-b border-border/60 shrink-0 relative z-20 backdrop-blur-md bg-background/80">
+        <div className="flex items-center justify-between px-4 md:px-6 lg:px-8 h-[60px] md:h-[72px]">
+          <h1 className="text-base md:text-lg font-semibold tracking-tight text-foreground/90">Sales Pipeline</h1>
+          <div className="flex items-center gap-2">
+            <div className="hidden md:flex max-w-sm relative group w-full">
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                <Search className="h-4 w-4 text-muted-foreground/60 group-focus-within:text-indigo-500/70" />
+              </div>
+              <input 
+                type="text" 
+                placeholder="Search by name or phone..." 
+                className="w-full h-9 pl-10 pr-4 bg-card/60 border border-border/80 hover:border-border focus:border-indigo-500/30 rounded-lg text-sm transition-all outline-none"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            <button className="h-9 px-3 md:px-4 text-[13px] font-medium bg-secondary hover:bg-secondary/80 rounded-lg transition-colors flex items-center border border-border">
+              <Filter className="w-3.5 h-3.5 md:mr-1.5" /> <span className="hidden md:inline">Filter</span>
+            </button>
+          </div>
+        </div>
+        {/* Mobile search row */}
+        <div className="md:hidden px-4 pb-3">
+          <div className="relative group">
             <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-              <Search className="h-4 w-4 text-muted-foreground/60 group-focus-within:text-indigo-500/70" />
+              <Search className="h-4 w-4 text-muted-foreground/60" />
             </div>
             <input 
               type="text" 
               placeholder="Search by name or phone..." 
-              className="w-full h-9 pl-10 pr-4 bg-card/60 border border-border/80 hover:border-border focus:border-indigo-500/30 rounded-lg text-sm transition-all outline-none"
+              className="w-full h-9 pl-10 pr-4 bg-card/60 border border-border/80 focus:border-indigo-500/30 rounded-lg text-sm transition-all outline-none"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <button className="h-9 px-4 text-[13px] font-medium bg-secondary hover:bg-secondary/80 rounded-lg transition-colors flex items-center border border-border">
-            <Filter className="w-3.5 h-3.5 mr-1.5" /> Filter
-          </button>
-        </div>
       </header>
 
-      <div className="flex-1 overflow-x-auto overflow-y-hidden p-6 lg:p-8 custom-scrollbar">
+      <div className="flex-1 overflow-x-auto overflow-y-hidden p-3 md:p-6 lg:p-8 custom-scrollbar">
         <div className="flex gap-6 h-full min-w-max pb-4">
           {STATUS_COLUMNS.map((column) => {
             const columnLeads = getLeadsByStatus(column.id);

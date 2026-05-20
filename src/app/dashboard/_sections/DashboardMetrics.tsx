@@ -56,9 +56,9 @@ export function DashboardMetrics() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[...Array(4)].map((_, i) => (
           <Card key={i} className="border-border bg-[#F9F9F8] dark:bg-card shadow-none">
-            <CardContent className="p-6">
-              <p className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase mb-4">—</p>
-              <div className="text-2xl font-semibold text-muted-foreground mb-4">Error</div>
+            <CardContent className="p-4 sm:p-6">
+              <p className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase mb-2 sm:mb-4">—</p>
+              <div className="text-xl sm:text-2xl font-semibold text-muted-foreground mb-2 sm:mb-4">Error</div>
               {i === 0 && (
                 <button
                   onClick={load}
@@ -109,9 +109,9 @@ export function DashboardMetrics() {
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
       {metrics.map((m) => (
         <Card key={m.label} className="border-border bg-[#F9F9F8] dark:bg-card shadow-none transition-colors">
-          <CardContent className="p-6">
-            <p className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase mb-4">{m.label}</p>
-            <div className="text-4xl font-semibold text-foreground tracking-tight mb-4">{m.value}</div>
+          <CardContent className="p-4 sm:p-6">
+            <p className="text-[10px] sm:text-[11px] font-bold tracking-widest text-muted-foreground uppercase mb-2 sm:mb-4 truncate">{m.label}</p>
+            <div className="text-2xl sm:text-4xl font-semibold text-foreground tracking-tight mb-2 sm:mb-4">{m.value}</div>
             <div className={cn(
               "flex items-center text-sm font-medium",
               m.isPositive ? "text-emerald-500" : "text-destructive"

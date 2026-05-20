@@ -13,6 +13,7 @@ export interface SharedConversationMeta {
   sender_name: string | null;
   sender_id: string | null;
   leads?: {
+    id: string;
     name: string | null;
     phone: string | null;
     email: string | null;
@@ -21,6 +22,7 @@ export interface SharedConversationMeta {
     tags: string[] | null;
     created_at: string | null;
     first_message_at: string | null;
+    assigned_to?: string | null;
   } | null;
 }
 
@@ -35,10 +37,10 @@ export default function ChatPage() {
 
   return (
     <div
-      className="-m-4 md:-m-6 lg:-m-8 h-[calc(100vh-64px)] lg:h-screen flex overflow-hidden"
+      className="-m-4 md:-m-6 lg:-m-8 h-[calc(100vh-64px)] lg:h-screen flex overflow-hidden bg-background text-foreground"
       style={{
-        background: '#F7F8FA',
-        ['--chat-surface' as string]: '#EAEDF0',
+        background: 'var(--background)',
+        ['--chat-surface' as string]: 'var(--secondary)',
       } as React.CSSProperties}
     >
       <Suspense fallback={null}>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Search, Bot, User } from "lucide-react";
+import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -12,10 +12,10 @@ interface ChatConversation {
   last_message_at: string | null;
   is_active: boolean;
   bot_paused: boolean;
+  escalated?: boolean;
   leads?: { name: string | null; phone: string | null } | null;
   last_message_preview?: string | null;
 }
-
 
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return "";
@@ -60,45 +60,120 @@ function getInitial(conv: ChatConversation): string {
   const name = conv.leads?.name;
   if (name) return name.charAt(0).toUpperCase();
   const phone = conv.leads?.phone;
-  if (phone) return phone.slice(-1);
+  if (phone) return phone.replace(/\D/g, '').slice(-1) || '?';
   return "?";
 }
 
 export default function ChatSidebar() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const activeId = searchParams.get("conversationId") || "";
+  // Read activeId directly from searchParams inside callbacks via ref — avoids
+  // making activeId a dependency that causes load() to get a new reference.
+  const activeIdRef = useRef(searchParams.get("conversationId") || "");
+  activeIdRef.current = searchParams.get("conversationId") || "";
+  const activeId = activeIdRef.current;
+
   const [convos, setConvos] = useState<ChatConversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<'active' | 'requesting' | 'intervened'>('active');
+  const [tenantId, setTenantId] = useState<string | null>(null);
+
   const supabaseRef = useRef(createBrowserSupabaseClient());
   const searchInputRef = useRef<HTMLInputElement>(null);
+  // Track whether we've done the initial auto-select so it only happens once.
+  const hasAutoSelected = useRef(false);
+  // RouterRef so load() doesn't need router as a dependency.
+  const routerRef = useRef(router);
+  routerRef.current = router;
 
+  // ─── STABLE load() — no dependencies that change on URL navigation ───────
+  // Using a ref-based pattern so the Realtime callback always calls the latest
+  // version without needing to re-subscribe the channel.
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/dashboard/chat/conversations");
+      const res = await fetch(`/api/dashboard/chat/conversations?_t=${Date.now()}`);
       const data = await res.json();
-      if (!data.success) { setLoading(false); return; }
-      setConvos(data.conversations);
-      setLoading(false);
-      if (!activeId && data.conversations.length > 0) {
-        router.push(`/dashboard/chat?conversationId=${data.conversations[0].id}`);
+      if (!data.success) {
+        setLoading(false);
+        return;
       }
-    } catch { setLoading(false); }
-  }, [activeId, router]);
+      setConvos(data.conversations);
+      if (data.tenantId) {
+        setTenantId(data.tenantId);
+      }
+      setLoading(false);
 
+      // Auto-select the first conversation only once (on initial load).
+      if (!hasAutoSelected.current && !activeIdRef.current && data.conversations.length > 0) {
+        hasAutoSelected.current = true;
+        routerRef.current.push(`/dashboard/chat?conversationId=${data.conversations[0].id}`);
+      }
+    } catch {
+      setLoading(false);
+    }
+  }, []); // ← intentionally empty: uses refs for activeId and router
+
+  // ─── Mount: initial load ──────────────────────────────────────────────────
   useEffect(() => {
     load();
-    const supabase = supabaseRef.current;
-    const channel = supabase
-      .channel("chat-sidebar-convos")
-      .on("postgres_changes", { event: "*", schema: "public" }, (payload) => {
-        if (payload.table?.startsWith('messages') || payload.table === 'conversations') load();
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
   }, [load]);
 
+  // ─── Realtime subscription — triggers when tenantId is loaded ─────────────
+  useEffect(() => {
+    if (!tenantId) return;
+
+    const supabase = supabaseRef.current;
+    const channel = supabase
+      .channel(`chat-sidebar-${tenantId}`)
+      // Conversation updates: status changes, escalations, bot_paused toggles
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "conversations"
+        },
+        (payload) => {
+          if (payload.new && (payload.new as any).tenant_id === tenantId) {
+            load();
+          }
+        }
+      )
+      // New messages: refresh sidebar previews + last_message_at ordering
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages"
+        },
+        (payload) => {
+          if (payload.new && (payload.new as any).tenant_id === tenantId) {
+            load();
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Sidebar Realtime] ✅ Subscribed for tenant:', tenantId);
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.error('[Sidebar Realtime] ❌ Error:', status);
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [tenantId, load]);
+
+  // ─── Polling fallback — guarantees sidebar updates even without Realtime ───
+  useEffect(() => {
+    const interval = setInterval(() => { load(); }, 5_000);
+    return () => clearInterval(interval);
+  }, [load]);
+
+  // ─── Keyboard shortcut ⌘K / Ctrl+K ──────────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -111,6 +186,14 @@ export default function ChatSidebar() {
   }, []);
 
   const filtered = convos.filter(c => {
+    if (activeTab === 'requesting') {
+      if (!c.escalated) return false;
+    } else if (activeTab === 'intervened') {
+      if (!c.bot_paused) return false;
+    } else {
+      if (c.bot_paused) return false;
+    }
+
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return getDisplayName(c).toLowerCase().includes(q) ||
@@ -118,10 +201,48 @@ export default function ChatSidebar() {
   });
 
   return (
-    <div className="w-[300px] flex-shrink-0 bg-white dark:bg-[#111827] shadow-[1px_0_0_rgba(0,0,0,0.06)] dark:shadow-[1px_0_0_rgba(255,255,255,0.04)] flex flex-col relative z-20">
+    <div className="w-[300px] flex-shrink-0 bg-card border-r border-border flex flex-col relative z-20">
       {/* Header */}
       <div className="px-4 pt-5 pb-3">
         <h2 className="text-[15px] font-semibold text-foreground tracking-tight mb-3">Inbox</h2>
+
+        {/* Tabs */}
+        <div className="flex gap-1 p-0.5 bg-secondary rounded-lg mb-3">
+          {(['active', 'requesting', 'intervened'] as const).map((tab) => {
+            const count = convos.filter(c => {
+              if (tab === 'requesting') return c.escalated;
+              if (tab === 'intervened') return c.bot_paused;
+              return !c.bot_paused;
+            }).length;
+
+            return (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={cn(
+                  "flex-1 py-1.5 rounded-md text-[11px] font-medium transition-all relative capitalize",
+                  activeTab === tab
+                    ? "bg-card text-foreground shadow-sm font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {tab}
+                {count > 0 && (
+                  <span className={cn(
+                    "ml-1 px-1.5 py-0.2 rounded-full text-[9px] font-bold",
+                    tab === 'requesting'
+                      ? "bg-red-500/20 text-red-500"
+                      : tab === 'intervened'
+                        ? "bg-blue-500/20 text-blue-400"
+                        : "bg-emerald-500/20 text-emerald-400"
+                  )}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
 
         {/* Search */}
         <div className="relative flex items-center">
@@ -131,7 +252,7 @@ export default function ChatSidebar() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search…"
-            className="w-full pl-8 pr-10 py-2 bg-[#F0F2F5] dark:bg-white/5 rounded-xl text-[13px] outline-none text-foreground placeholder:text-muted-foreground/50 focus:bg-[#E8ECF0] dark:focus:bg-white/8 transition-colors"
+            className="w-full pl-8 pr-10 py-2 bg-secondary rounded-xl text-[13px] outline-none text-foreground placeholder:text-muted-foreground/50 focus:bg-[#E8ECF0] dark:focus:bg-white/8 transition-colors"
           />
           <span className="absolute right-3 text-[10px] font-medium text-muted-foreground/40 pointer-events-none">⌘K</span>
         </div>
@@ -155,7 +276,6 @@ export default function ChatSidebar() {
             const name = getDisplayName(conv);
             const preview = conv.last_message_preview ?? "";
             const phone = conv.leads?.phone ?? '';
-            // "Recent" = activity in last 5 min (drives pulse + unread emphasis)
             const isRecent = conv.last_message_at
               ? (Date.now() - new Date(conv.last_message_at).getTime()) < 5 * 60_000
               : false;
@@ -168,21 +288,18 @@ export default function ChatSidebar() {
                 className={cn(
                   "w-full flex items-center gap-3 px-4 py-3 text-left transition-all duration-150 relative group",
                   isActive
-                    ? "bg-[#EEF2F7] dark:bg-white/8"
+                    ? "bg-[#EEF2F7] dark:bg-white/8 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] border-y border-black/5 dark:border-white/5"
                     : "hover:bg-[#F5F7FA] dark:hover:bg-white/4"
                 )}
               >
-                {/* Active indicator */}
                 {isActive && (
-                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-7 bg-foreground rounded-r-full" />
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-gradient-to-b from-indigo-500 to-violet-500 rounded-r-full shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
                 )}
 
-                {/* Avatar with status dot */}
                 <div className="relative flex-shrink-0">
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-bold ${avatarColor(phone || conv.id)}`}>
                     {getInitial(conv)}
                   </div>
-                  {/* Mode dot (pulses when conversation is active in last 5 min) */}
                   <span className="absolute bottom-0 right-0 w-2.5 h-2.5">
                     <span className={cn(
                       "absolute inset-0 rounded-full border-2 border-white dark:border-[#111827]",
@@ -197,7 +314,6 @@ export default function ChatSidebar() {
                   </span>
                 </div>
 
-                {/* Content */}
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline">
                     <span className={cn(

@@ -682,7 +682,8 @@ export function ContactsClient() {
       <div className="flex-1 flex flex-col min-w-0 bg-transparent relative z-10">
         
         {/* Global AI Search Header */}
-        <header className="h-[72px] border-b border-border/60 flex items-center justify-between px-6 shrink-0 bg-background/80 backdrop-blur-md z-20">
+        <header className="border-b border-border/60 shrink-0 bg-background/80 backdrop-blur-md z-20">
+        <div className="h-[60px] md:h-[72px] flex items-center justify-between px-4 md:px-6">
           <div className="flex-1 max-w-2xl relative group">
             <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
               <Search className="h-4 w-4 text-muted-foreground/60 group-focus-within:text-indigo-500/70 transition-colors" />
@@ -701,31 +702,50 @@ export function ContactsClient() {
             )}
           </div>
 
-          <div className="flex items-center gap-3 pl-6">
+          <div className="flex items-center gap-2 pl-2 md:pl-4 shrink-0">
             <button 
               onClick={() => window.open('/api/dashboard/leads/export', '_blank')}
-              className="h-9 px-4 text-[13px] font-medium bg-card text-foreground hover:bg-secondary border border-border/80 rounded-lg transition-colors shadow-sm flex items-center gap-1.5"
+              className="h-9 px-2.5 md:px-4 text-[13px] font-medium bg-card text-foreground hover:bg-secondary border border-border/80 rounded-lg transition-colors shadow-sm flex items-center gap-1.5"
             >
-              <Download className="w-4 h-4 text-muted-foreground" /> Export
+              <Download className="w-4 h-4 text-muted-foreground" />
+              <span className="hidden sm:inline">Export</span>
             </button>
             <button 
               onClick={() => setImportStep('source')}
-              className="h-9 px-4 text-[13px] font-medium bg-card text-foreground hover:bg-secondary border border-border/80 rounded-lg transition-colors shadow-sm flex items-center gap-1.5"
+              className="h-9 px-2.5 md:px-4 text-[13px] font-medium bg-card text-foreground hover:bg-secondary border border-border/80 rounded-lg transition-colors shadow-sm flex items-center gap-1.5"
             >
-              <UploadCloud className="w-4 h-4 text-muted-foreground" /> Import
+              <UploadCloud className="w-4 h-4 text-muted-foreground" />
+              <span className="hidden sm:inline">Import</span>
             </button>
             <button
               onClick={() => { resetAddForm(); setAddContactOpen(true); }}
-              className="h-9 px-4 text-[13px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.1)] transition-colors flex items-center"
+              className="h-9 px-3 md:px-4 text-[13px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg shadow-[0_1px_2px_rgba(0,0,0,0.1)] transition-colors flex items-center"
             >
-              <Plus className="w-3.5 h-3.5 mr-1.5" />
-              Add Contact
+              <Plus className="w-3.5 h-3.5 md:mr-1.5" />
+              <span className="hidden md:inline">Add Contact</span>
             </button>
           </div>
+        </div>
+        {/* Mobile filter tabs */}
+        <div className="md:hidden flex gap-2 overflow-x-auto px-4 pb-3 scrollbar-none">
+          {filters.map((filter) => (
+            <button
+              key={filter.id}
+              onClick={() => setActiveFilter(filter.id)}
+              className={`shrink-0 h-8 px-3 rounded-full text-[12px] font-semibold border transition-all ${
+                activeFilter === filter.id
+                  ? 'bg-foreground text-background border-foreground'
+                  : 'bg-transparent text-muted-foreground border-border hover:border-foreground/30'
+              }`}
+            >
+              {filter.label} {filterCounts[filter.id] ? `(${filterCounts[filter.id]})` : ''}
+            </button>
+          ))}
+        </div>
         </header>
 
         {/* Contact Stream Wrapper */}
-        <div className="flex-1 overflow-auto p-6 lg:p-8 z-10 custom-scrollbar relative">
+        <div className="flex-1 overflow-auto p-3 md:p-6 lg:p-8 z-10 custom-scrollbar relative">
           
           {/* Floating Bulk Actions Bar */}
           <AnimatePresence>

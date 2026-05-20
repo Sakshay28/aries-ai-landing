@@ -50,6 +50,11 @@ export function BroadcastClient() {
   const [editName, setEditName] = useState('');
   const [editTemplate, setEditTemplate] = useState('');
 
+  // Retargeting & Scheduler State
+  const [audienceType, setAudienceType] = useState<'all' | 'retarget'>('all');
+  const [retargetParentId, setRetargetParentId] = useState<string | null>(null);
+  const [scheduledAt, setScheduledAt] = useState<string | null>(null);
+
   // Approved templates for the picker
   const [approvedTemplates, setApprovedTemplates] = useState<{ name: string; body: string }[]>([]);
 
@@ -105,12 +110,63 @@ export function BroadcastClient() {
     setActiveDropdown(null);
     
     if (campaign) {
-      setEditName(campaign.name);
+      // Parse retargeting name prefix
+      const nameVal = campaign.name;
+      if (nameVal.startsWith('__retarget:')) {
+        const endIdx = nameVal.indexOf('__:');
+        if (endIdx !== -1) {
+          const parentId = nameVal.slice(11, endIdx);
+          const cleanName = nameVal.slice(endIdx + 3);
+          setEditName(cleanName);
+          setAudienceType('retarget');
+          setRetargetParentId(parentId);
+        } else {
+          setEditName(nameVal);
+          setAudienceType('all');
+          setRetargetParentId(null);
+        }
+      } else {
+        setEditName(nameVal);
+        setAudienceType('all');
+        setRetargetParentId(null);
+      }
       setEditTemplate(campaign.template_name);
+
+      // Parse scheduling
+      if (campaign.scheduled_at) {
+        const date = new Date(campaign.scheduled_at);
+        const offset = date.getTimezoneOffset();
+        const local = new Date(date.getTime() - offset * 60_000);
+        setScheduledAt(local.toISOString().slice(0, 16));
+      } else {
+        setScheduledAt(null);
+      }
     } else {
       setEditName('');
       setEditTemplate('');
+      setAudienceType('all');
+      setRetargetParentId(null);
+      setScheduledAt(null);
     }
+  };
+
+  const handleRetargetAction = (parentCampaign: Campaign) => {
+    let cleanParentName = parentCampaign.name;
+    if (cleanParentName.startsWith('__retarget:')) {
+      const endIdx = cleanParentName.indexOf('__:');
+      if (endIdx !== -1) {
+        cleanParentName = cleanParentName.slice(endIdx + 3);
+      }
+    }
+    
+    setSelectedCampaign(null);
+    setPanelMode('new');
+    setEditName(`Retarget: ${cleanParentName}`);
+    setEditTemplate(parentCampaign.template_name);
+    setAudienceType('retarget');
+    setRetargetParentId(parentCampaign.id);
+    setScheduledAt(null);
+    setActiveDropdown(null);
   };
 
   const closePanel = () => {
@@ -136,28 +192,58 @@ export function BroadcastClient() {
         const { data: tenantData } = await supabase.from('tenants').select('id').single();
         if (!tenantData) throw new Error('No tenant found');
         
-        // Mock calculating audience size (all valid phone numbers)
-        const { count } = await supabase
-          .from('leads')
-          .select('id', { count: 'exact', head: true })
-          .not('phone', 'is', null);
+        let finalName = editName;
+        let finalAudienceCount = 0;
+
+        if (audienceType === 'retarget' && retargetParentId) {
+          finalName = `__retarget:${retargetParentId}__:${editName}`;
+          const parentCamp = campaigns.find(c => c.id === retargetParentId);
+          if (parentCamp) {
+            finalAudienceCount = Math.max(0, (parentCamp.sent_count || 0) - (parentCamp.read_count || 0));
+          }
+        } else {
+          const { count } = await supabase
+            .from('leads')
+            .select('id', { count: 'exact', head: true })
+            .not('phone', 'is', null);
+          finalAudienceCount = count || 0;
+        }
+
+        const isScheduled = scheduledAt !== null;
 
         const { error } = await supabase.from('broadcast_campaigns').insert({
           tenant_id: tenantData.id,
-          name: editName,
+          name: finalName,
           template_name: editTemplate,
-          audience_count: count || 0,
-          status: 'draft'
+          audience_count: finalAudienceCount,
+          status: isScheduled ? 'scheduled' : 'draft',
+          scheduled_at: isScheduled ? new Date(scheduledAt).toISOString() : null
         });
         
         if (error) throw error;
-        toast.success('Campaign created successfully');
+        toast.success(isScheduled ? 'Campaign scheduled successfully' : 'Campaign created successfully');
       } else if (selectedCampaign) {
+        let finalName = editName;
+        let finalAudienceCount = selectedCampaign.audience_count;
+
+        if (audienceType === 'retarget' && retargetParentId) {
+          finalName = `__retarget:${retargetParentId}__:${editName}`;
+          const parentCamp = campaigns.find(c => c.id === retargetParentId);
+          if (parentCamp) {
+            finalAudienceCount = Math.max(0, (parentCamp.sent_count || 0) - (parentCamp.read_count || 0));
+          }
+        }
+
+        const isScheduled = scheduledAt !== null;
+
         const { error } = await supabase
           .from('broadcast_campaigns')
           .update({
-            name: editName,
+            name: finalName,
             template_name: editTemplate,
+            audience_count: finalAudienceCount,
+            status: isScheduled ? 'scheduled' : 'draft',
+            scheduled_at: isScheduled ? new Date(scheduledAt).toISOString() : null
           })
           .eq('id', selectedCampaign.id);
           
@@ -337,9 +423,32 @@ export function BroadcastClient() {
                           {campaign.status}
                         </div>
                       </div>
-                      <h3 className="text-[18px] md:text-[20px] font-semibold text-foreground/90 mb-1.5 truncate">
-                        {campaign.name}
-                      </h3>
+                      
+                      {(() => {
+                        const nameVal = campaign.name;
+                        let cleanName = nameVal;
+                        let isRetarget = false;
+                        if (nameVal.startsWith('__retarget:')) {
+                          const endIdx = nameVal.indexOf('__:');
+                          if (endIdx !== -1) {
+                            cleanName = nameVal.slice(endIdx + 3);
+                            isRetarget = true;
+                          }
+                        }
+                        return (
+                          <div className="flex items-center gap-2.5 mb-1.5 flex-wrap">
+                            <h3 className="text-[18px] md:text-[20px] font-semibold text-foreground/90 truncate max-w-full">
+                              {cleanName}
+                            </h3>
+                            {isRetarget && (
+                              <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shadow-[0_0_8px_rgba(99,102,241,0.2)]">
+                                <Zap className="w-3 h-3 text-indigo-400" /> Retarget
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
+
                       <div className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground/80 truncate">
                         <span className="text-foreground/60 shrink-0">Template: {campaign.template_name}</span>
                         <span className="opacity-40 shrink-0">•</span>
@@ -397,7 +506,18 @@ export function BroadcastClient() {
                               exit={{ opacity: 0, y: 5, scale: 0.95 }}
                               className="absolute right-0 top-full mt-2 w-48 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-50 flex flex-col py-1"
                             >
-                              <button onClick={(e) => handleDelete(campaign.id, e)} className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 text-left">
+                              {campaign.status === 'completed' && (
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRetargetAction(campaign);
+                                  }} 
+                                  className="flex items-center gap-2 px-3 py-2 text-sm text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 text-left font-medium"
+                                >
+                                  <Zap className="w-4 h-4" /> Retarget Campaign
+                                </button>
+                              )}
+                              <button onClick={(e) => handleDelete(campaign.id, e)} className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 text-left font-medium">
                                 <Trash2 className="w-4 h-4" /> Delete
                               </button>
                             </motion.div>
@@ -443,6 +563,13 @@ export function BroadcastClient() {
         setEditName={setEditName}
         setEditTemplate={setEditTemplate}
         approvedTemplates={approvedTemplates}
+        audienceType={audienceType}
+        setAudienceType={setAudienceType}
+        retargetParentId={retargetParentId}
+        setRetargetParentId={setRetargetParentId}
+        scheduledAt={scheduledAt}
+        setScheduledAt={setScheduledAt}
+        completedCampaigns={campaigns.filter(c => c.status === 'completed')}
       />
     </div>
   );

@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
       req.nextUrl.searchParams.get('token') ??
       req.headers.get('x-gupshup-token');
     if (token !== webhookSecret) {
+      console.warn(`⚠️ Gupshup Webhook: Secret token mismatch. Provided: "${token}", Expected: "${webhookSecret}"`);
       // Return 200 so Gupshup doesn't retry; we just discard the forged payload.
       return NextResponse.json({ ok: true });
     }
@@ -118,6 +119,12 @@ async function processWebhookAsync(parsed: Awaited<ReturnType<typeof parseGupshu
   // Route by event type
   if (parsed.isStatusUpdate) {
     await handleStatusUpdate(parsed);
+    return;
+  }
+
+  // Reactions are WhatsApp metadata — skip AI, skip DB insert
+  if (parsed.isReaction) {
+    console.log(`👍 Gupshup: reaction ignored (emoji: ${parsed.reactionEmoji}, to: ${parsed.reactedToMessageId})`);
     return;
   }
 
@@ -347,29 +354,38 @@ async function handleIncomingMessage(
     }
   } catch { /* non-critical */ }
 
-  // ── P2-3: Insert inbound message — upsert to survive duplicate delivery ──
-  // ON CONFLICT on wa_message_id is a DB-level dedup that handles the race
-  // window that exists even after the Redis/DB pre-check above.
-  const { error: insertErr } = await supabaseAdmin.from('messages').upsert(
-    {
-      tenant_id: tenant.id,
-      conversation_id: conversation.id,
-      direction: 'inbound',
-      content: msg.text,
-      message_type: msg.type === 'text' ? 'text' : 'image',
-      channel: 'whatsapp',
-      sender_id: cleanPhone,
-      status: 'delivered',
-      ai_generated: false,
-      wa_message_id: msg.messageId,
-    },
-    { onConflict: 'wa_message_id', ignoreDuplicates: true }
-  );
+  // ── P2-3: Insert inbound message — safe duplicate-check-then-insert ──
+  // NOTE: upsert with onConflict:'wa_message_id' requires a unique DB constraint
+  // that may not exist. We use a manual check instead to avoid crashes.
+  if (msg.messageId) {
+    const { data: existing } = await supabaseAdmin
+      .from('messages')
+      .select('id')
+      .eq('wa_message_id', msg.messageId)
+      .maybeSingle();
+    if (existing) {
+      console.log(`⚠️ Duplicate inbound message ignored: ${msg.messageId}`);
+      return;
+    }
+  }
+
+  const { error: insertErr } = await supabaseAdmin.from('messages').insert({
+    tenant_id: tenant.id,
+    conversation_id: conversation.id,
+    direction: 'inbound',
+    content: msg.text,
+    message_type: msg.type === 'text' ? 'text' : 'image',
+    channel: 'whatsapp',
+    sender_id: cleanPhone,
+    status: 'delivered',
+    ai_generated: false,
+    wa_message_id: msg.messageId,
+  });
   if (insertErr) {
-    // Most likely a duplicate — bail out to avoid sending a second AI reply.
-    console.error('❌ Message insert/upsert failed (likely duplicate):', insertErr.message);
+    console.error('❌ Message insert failed:', insertErr.message);
     return;
   }
+  console.log(`✅ Inbound message saved: "${msg.text}" from ${cleanPhone}`);
 
   // ── Update conversation message count ──
   try {
@@ -378,6 +394,13 @@ async function handleIncomingMessage(
     // Non-critical — proceed without incrementing
   }
 
+  // ── Update conversation last_message_at NOW (before AI) ──
+  // This fires Supabase Realtime immediately so the sidebar re-orders
+  // and shows the new message within ~500ms, not after AI completes.
+  void supabaseAdmin
+    .from('conversations')
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', conversation.id);
 
   // ── Fire outbound webhook (non-blocking) ──
   const outboundUrl = (tenant as Record<string, unknown>).outbound_webhook_url as string | undefined;
@@ -626,10 +649,51 @@ async function handleStatusUpdate(
 
   const mappedStatus = statusMap[msg.status] || msg.status;
 
-  await supabaseAdmin
+  // Fetch the current message status first to prevent out-of-order webhook status overwrites (e.g. read arriving before delivered)
+  const { data: currentMsg, error: fetchErr } = await supabaseAdmin
+    .from('messages')
+    .select('status')
+    .eq('wa_message_id', msg.messageId)
+    .maybeSingle();
+
+  if (fetchErr) {
+    console.error(`❌ Gupshup status update: failed to fetch current status: ${fetchErr.message}`);
+    return;
+  }
+
+  if (!currentMsg) {
+    console.warn(`⚠️ Gupshup status update: No message matched wa_message_id="${msg.messageId}" in DB.`);
+    return;
+  }
+
+  const currentStatus = currentMsg.status;
+
+  // Rules to prevent status downgrade:
+  let allowUpdate = true;
+  if (currentStatus === 'read') {
+    allowUpdate = false; // Once read, it stays read forever
+  } else if (currentStatus === 'delivered') {
+    allowUpdate = (mappedStatus === 'read'); // Once delivered, it can only go to read
+  } else if (currentStatus === 'failed') {
+    allowUpdate = (mappedStatus === 'delivered' || mappedStatus === 'read'); // Allow recovery if it actually succeeded
+  }
+
+  if (!allowUpdate) {
+    console.log(`📬 Gupshup status update ignored (downgrade prevention): ${msg.messageId} is already "${currentStatus}", new is "${mappedStatus}"`);
+    return;
+  }
+
+  const { data: updated, error } = await supabaseAdmin
     .from('messages')
     .update({ status: mappedStatus })
-    .eq('wa_message_id', msg.messageId);
+    .eq('wa_message_id', msg.messageId)
+    .select('id');
 
-  console.log(`📬 Gupshup status update: ${msg.messageId} → ${mappedStatus}`);
+  if (error) {
+    console.error(`❌ Gupshup status update DB error: ${error.message}`);
+  } else if (!updated || updated.length === 0) {
+    console.warn(`⚠️ Gupshup status update: No message matched wa_message_id="${msg.messageId}" in DB.`);
+  } else {
+    console.log(`📬 Gupshup status update success: ${msg.messageId} → ${mappedStatus} (updated message ${updated[0].id})`);
+  }
 }

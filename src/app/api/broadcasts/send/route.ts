@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function processCampaign(
+export async function processCampaign(
   tenantId: string,
   campaignId: string,
   campaign: Record<string, unknown>,
@@ -71,17 +71,87 @@ async function processCampaign(
   try {
     const decryptedApiKey = decryptToken(tenant.gupshup_api_key as string) as string;
 
-    const { data: leads, error } = await supabaseAdmin
-      .from('leads')
-      .select('id, phone')
-      .eq('tenant_id', tenantId)
-      .not('phone', 'is', null)
-      .limit(MAX_RECIPIENTS);
+    const nameVal = campaign.name as string;
+    let leads: { id: string; phone: string }[] = [];
+    let fetchError = null;
 
-    if (error || !leads || leads.length === 0) {
+    if (nameVal && nameVal.startsWith('__retarget:')) {
+      const endIdx = nameVal.indexOf('__:');
+      if (endIdx !== -1) {
+        const parentCampaignId = nameVal.slice(11, endIdx);
+        
+        // Fetch all messages for the parent campaign to determine non-readers
+        const { data: parentMsgs, error: parentMsgsErr } = await supabaseAdmin
+          .from('broadcast_messages')
+          .select('lead_id, status')
+          .eq('campaign_id', parentCampaignId);
+
+        if (parentMsgsErr) {
+          console.error('Error fetching parent campaign messages:', parentMsgsErr);
+          throw parentMsgsErr;
+        }
+
+        // Gather lead IDs that read the parent campaign
+        const readLeadIds = new Set(
+          (parentMsgs || [])
+            .filter(m => m.status === 'read')
+            .map(m => m.lead_id)
+        );
+
+        // Gather lead IDs that were sent the parent campaign but did not read it
+        const targetLeadIds = Array.from(
+          new Set(
+            (parentMsgs || [])
+              .filter(m => m.lead_id && !readLeadIds.has(m.lead_id))
+              .map(m => m.lead_id)
+          )
+        );
+
+        if (targetLeadIds.length > 0) {
+          const { data, error } = await supabaseAdmin
+            .from('leads')
+            .select('id, phone')
+            .eq('tenant_id', tenantId)
+            .in('id', targetLeadIds)
+            .not('phone', 'is', null)
+            .limit(MAX_RECIPIENTS);
+          leads = (data || []) as { id: string; phone: string }[];
+          fetchError = error;
+        } else {
+          leads = [];
+        }
+      } else {
+        // Fallback if naming convention was malformed
+        const { data, error } = await supabaseAdmin
+          .from('leads')
+          .select('id, phone')
+          .eq('tenant_id', tenantId)
+          .not('phone', 'is', null)
+          .limit(MAX_RECIPIENTS);
+        leads = (data || []) as { id: string; phone: string }[];
+        fetchError = error;
+      }
+    } else {
+      // Normal campaign: fetch all contacts
+      const { data, error } = await supabaseAdmin
+        .from('leads')
+        .select('id, phone')
+        .eq('tenant_id', tenantId)
+        .not('phone', 'is', null)
+        .limit(MAX_RECIPIENTS);
+      leads = (data || []) as { id: string; phone: string }[];
+      fetchError = error;
+    }
+
+    if (fetchError) {
+      throw fetchError;
+    }
+
+    if (leads.length === 0) {
+      // Complete campaign immediately since no recipients are targeted
       await supabaseAdmin
         .from('broadcast_campaigns')
-        .update({ status: 'failed' })
+        .update({ status: 'completed', sent_count: 0, failed_count: 0 })
         .eq('id', campaignId);
       return;
     }

@@ -295,10 +295,13 @@ export interface ParsedGupshupMessage {
   fromPhone: string;       // Customer phone number (e.g. "919876543210")
   appPhone: string;        // Your Gupshup sender phone (from "app" field)
   appName: string;         // Gupshup app name (from body.app)
-  type: string;            // "text" | "image" | "audio" | "video" | "file" | "location"
+  type: string;            // "text" | "image" | "audio" | "video" | "file" | "location" | "reaction"
   text: string;            // Extracted message text / caption
   timestamp: number;
   isStatusUpdate: boolean;
+  isReaction?: boolean;    // True when the inbound event is a WhatsApp emoji reaction
+  reactionEmoji?: string;  // The emoji reacted with (e.g. "👍")
+  reactedToMessageId?: string; // wa_message_id of the message that was reacted to
   status?: string;         // "sent" | "delivered" | "read" | "failed"
   mediaUrl?: string;
   referral?: {             // Present when message comes from a Click-to-WhatsApp ad
@@ -324,7 +327,7 @@ export function parseGupshupWebhook(body: Record<string, unknown>): ParsedGupshu
   // Status update event — Gupshup v2 uses "message-event"
   if (eventType === 'message-event' || eventType === 'message-status') {
     return {
-      messageId: (payload.id as string) || '',
+      messageId: (payload.gsId as string) || (payload.id as string) || '',
       fromPhone: (payload.destination as string) || (payload.source as string) || '',
       appPhone: app,
       appName: app,
@@ -355,6 +358,25 @@ export function parseGupshupWebhook(body: Record<string, unknown>): ParsedGupshu
       const innerPayload = payload.payload as Record<string, unknown> | undefined;
       const loc = (innerPayload || payload.location) as Record<string, number> | undefined;
       text = loc ? `📍 Location: ${loc.latitude}, ${loc.longitude}` : '📍 Location shared';
+    } else if (msgType === 'reaction') {
+      // WhatsApp emoji reactions — treat as metadata, not a new message
+      const innerPayload = payload.payload as Record<string, unknown> | undefined;
+      const emoji = (innerPayload?.emoji as string) || (payload.emoji as string) || '👍';
+      const reactedTo = (innerPayload?.id as string) || (payload.id as string) || '';
+      console.log(`👍 Gupshup: reaction received — emoji: ${emoji}, reacted to: ${reactedTo}`);
+      return {
+        messageId: (payload.id as string) || '',
+        fromPhone: (payload.source as string) || '',
+        appPhone: app,
+        appName: app,
+        type: 'reaction',
+        text: '',
+        timestamp,
+        isStatusUpdate: false,
+        isReaction: true,
+        reactionEmoji: emoji,
+        reactedToMessageId: reactedTo,
+      };
     } else {
       text = `[${msgType}]`;
     }

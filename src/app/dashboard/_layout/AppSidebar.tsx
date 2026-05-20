@@ -223,7 +223,7 @@ function SidebarBody({
       {/* Header */}
       <div className="flex h-14 items-center justify-between px-4">
         {isOpen && (
-          <Link href="/dashboard" className="flex items-center hover:opacity-90 transition-opacity">
+          <Link href="/dashboard" prefetch={false} className="flex items-center hover:opacity-90 transition-opacity">
             <Image 
               src="/logo.png" 
               alt="Aries AI" 
@@ -304,6 +304,7 @@ function SidebarBody({
 
             <Link
               href="/dashboard/settings/profile"
+              prefetch={false}
               onClick={() => setMenuOpen(false)}
               className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-sidebar-foreground hover:bg-black/5 dark:hover:bg-white/5 hover:text-sidebar-accent-foreground transition-colors"
             >
@@ -313,6 +314,7 @@ function SidebarBody({
 
             <Link
               href="/dashboard/settings"
+              prefetch={false}
               onClick={() => setMenuOpen(false)}
               className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-sidebar-foreground hover:bg-black/5 dark:hover:bg-white/5 hover:text-sidebar-accent-foreground transition-colors"
             >
@@ -322,6 +324,7 @@ function SidebarBody({
 
             <Link
               href="/dashboard/billing"
+              prefetch={false}
               onClick={() => setMenuOpen(false)}
               className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-sidebar-foreground hover:bg-black/5 dark:hover:bg-white/5 hover:text-sidebar-accent-foreground transition-colors"
             >
@@ -361,6 +364,7 @@ function NavButton({
   return (
     <Link
       href={item.href}
+      prefetch={false}
       className={cn(
         "group relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-[13px] font-medium transition-colors",
         isActive

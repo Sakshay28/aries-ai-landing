@@ -5,7 +5,6 @@ import AppHeader from "./AppHeader";
 import AppSidebar from "./AppSidebar";
 import Backdrop from "./Backdrop";
 import { SidebarProvider } from "./SidebarContext";
-import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function DashboardLayoutClient({
   children,
@@ -19,7 +18,6 @@ export default function DashboardLayoutClient({
       <div className="flex min-h-screen w-full bg-background text-foreground overflow-hidden">
         <AppSidebar userEmail={userEmail} />
         <Backdrop />
-        <ThemeToggle />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <AppHeader />
           <main className="flex-1 overflow-auto">

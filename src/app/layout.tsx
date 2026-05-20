@@ -24,16 +24,45 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Aries AI - AI-Powered WhatsApp Automation",
+  metadataBase: new URL("https://ariesai.in"),
+  title: {
+    default: "Aries AI - AI-Powered WhatsApp Automation for Indian Businesses",
+    template: "%s | Aries AI",
+  },
   description: "Automate customer conversations, capture leads, and grow revenue with AI-powered WhatsApp & Instagram bots. Built for Indian businesses on the official Meta WhatsApp Cloud API.",
-  keywords: ["WhatsApp automation India", "Aries AI", "AI chatbot India", "WhatsApp business automation", "lead generation India", "WhatsApp API", "ariesai.in"],
+  keywords: ["WhatsApp automation India", "Aries AI", "AI chatbot India", "WhatsApp business automation", "lead generation India", "WhatsApp API", "ariesai.in", "WhatsApp bot", "customer support automation", "AI chatbot for business"],
+  authors: [{ name: "Aries AI", url: "https://ariesai.in" }],
+  creator: "Aries AI",
+  publisher: "Aries AI",
   verification: {
     google: "google412dea1a2f069bcb",
+  },
+  alternates: {
+    canonical: "/",
   },
   openGraph: {
     title: "Aries AI - AI-Powered WhatsApp Automation",
     description: "Turn WhatsApp into your smartest revenue engine. AI-powered conversations that capture leads, follow up, and close deals — 24/7.",
+    url: "https://ariesai.in",
+    siteName: "Aries AI",
+    locale: "en_IN",
     type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Aries AI - AI-Powered WhatsApp Automation",
+    description: "Turn WhatsApp into your smartest revenue engine. AI chatbot for Indian businesses.",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
   },
 };
 

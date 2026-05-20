@@ -38,16 +38,18 @@ export default async function DashboardLayout({
 
     const { data: userData } = await supabase
       .from("users")
-      .select("tenant_id")
+      .select("tenant_id, tenants(onboarding_completed)")
       .eq("auth_id", user.id)
       .maybeSingle();
+
     if (userData?.tenant_id) {
-      const { data: tenant } = await supabase
-        .from("tenants")
-        .select("onboarding_completed")
-        .eq("id", userData.tenant_id)
-        .maybeSingle();
-      if (tenant && tenant.onboarding_completed === false) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tenantsVal = (userData as any).tenants as { onboarding_completed: boolean } | { onboarding_completed: boolean }[] | null;
+      const onboardingCompleted = Array.isArray(tenantsVal)
+        ? tenantsVal[0]?.onboarding_completed
+        : tenantsVal?.onboarding_completed;
+
+      if (onboardingCompleted === false) {
         redirect("/onboard");
       }
     }
