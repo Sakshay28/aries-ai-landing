@@ -112,9 +112,10 @@ export default function TemplatesPage() {
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [templateError, setTemplateError] = useState<string | null>(null);
 
-  // Segmented control and industry filters
+  // Segmented control, industry filters, search query
   const [activeTab, setActiveTab] = useState<'my' | 'explore'>('my');
   const [exploreIndustry, setExploreIndustry] = useState<string>('All');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Creator drawer state
   const [showCreator, setShowCreator] = useState(false);
@@ -222,7 +223,7 @@ export default function TemplatesPage() {
 
         <header className="flex items-start justify-between gap-4">
           <div className="space-y-1.5">
-            <h1 className="text-2xl font-semibold tracking-tight">WhatsApp Templates</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">WhatsApp Templates</h1>
             <p className="text-muted-foreground text-sm max-w-2xl">
               Create templates here and submit them to Meta for approval. Once approved, use them in Broadcasts.
             </p>
@@ -237,41 +238,62 @@ export default function TemplatesPage() {
           </motion.button>
         </header>
 
-        {/* Segmented Control for Tabs */}
-        <div className="flex border border-border/80 bg-[#121214]/60 backdrop-blur-md p-1 rounded-xl gap-2 w-fit mb-2 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
-          <button
-            onClick={() => setActiveTab('my')}
-            className={`flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-lg transition-all duration-200 ${
-              activeTab === 'my'
-                ? 'bg-[#1e1e24] text-foreground border border-border/40 shadow-lg'
-                : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5" /> My Templates
-          </button>
-          <button
-            onClick={() => setActiveTab('explore')}
-            className={`flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-lg transition-all duration-200 ${
-              activeTab === 'explore'
-                ? 'bg-[#1e1e24] text-foreground border border-border/40 shadow-lg'
-                : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5 text-indigo-400" /> Explore Library
-          </button>
+        {/* Filters and Search Bar Row */}
+        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+          {/* Segmented Control for Tabs */}
+          <div className="flex bg-muted p-1 rounded-xl gap-1 border border-border shadow-sm">
+            <button
+              onClick={() => { setActiveTab('my'); setSearchQuery(''); }}
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-all duration-200 ${
+                activeTab === 'my'
+                  ? 'bg-background text-foreground border border-border shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" /> My Templates
+            </button>
+            <button
+              onClick={() => { setActiveTab('explore'); setSearchQuery(''); }}
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-all duration-200 ${
+                activeTab === 'explore'
+                  ? 'bg-background text-foreground border border-border shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> Explore Library
+            </button>
+          </div>
+
+          {/* Search bar */}
+          <div className="w-full sm:max-w-xs relative">
+            <input
+              type="text"
+              placeholder={`Search ${activeTab === 'my' ? 'my templates' : 'explore library'}...`}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-card border border-border rounded-xl pl-4 pr-10 py-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary transition-all"
+            />
+            {searchQuery ? (
+              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            ) : (
+              <Filter className="w-3.5 h-3.5 text-muted-foreground/50 absolute right-3 top-1/2 -translate-y-1/2" />
+            )}
+          </div>
         </div>
 
         {/* Templates view selector */}
         {activeTab === 'my' ? (
           <div className="space-y-4">
-            <h2 className="text-[15px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+            <h2 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
               <FileText className="w-4 h-4 text-muted-foreground/80" />
               Your Approved Templates
             </h2>
 
             {loadingTemplates && (
               <div className="flex items-center gap-3 py-8 text-muted-foreground text-sm font-medium">
-                <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
                 Loading templates...
               </div>
             )}
@@ -285,90 +307,109 @@ export default function TemplatesPage() {
               </div>
             )}
 
-            {!loadingTemplates && templates.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {templates.map((template) => {
-                  const bodyComp = template.components?.find(c => c.type === 'BODY');
-                  const bodyText = bodyComp?.text ?? '';
-                  const hObj = getTemplateHealth(template.name);
-                  const badgeColors = {
-                    HIGH: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.12)]',
-                    MEDIUM: 'bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-[0_0_12px_rgba(245,158,11,0.12)]',
-                    LOW: 'bg-rose-500/10 text-rose-400 border-rose-500/20 shadow-[0_0_12px_rgba(244,63,94,0.12)]',
-                  }[hObj.health];
+            {!loadingTemplates && templates.length > 0 && (() => {
+              const filtered = templates.filter(t => t.name.toLowerCase().includes(searchQuery.toLowerCase()) || t.category.toLowerCase().includes(searchQuery.toLowerCase()));
+              if (filtered.length === 0) {
+                return (
+                  <div className="p-8 text-center text-sm text-muted-foreground bg-card border border-border rounded-2xl">
+                    No matching templates found for &ldquo;{searchQuery}&rdquo;.
+                  </div>
+                );
+              }
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {filtered.map((template) => {
+                    const bodyComp = template.components?.find(c => c.type === 'BODY');
+                    const bodyText = bodyComp?.text ?? '';
+                    const headerComp = template.components?.find(c => c.type === 'HEADER');
+                    const footerComp = template.components?.find(c => c.type === 'FOOTER');
+                    const hObj = getTemplateHealth(template.name);
+                    const badgeColors = {
+                      HIGH: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
+                      MEDIUM: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
+                      LOW: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
+                    }[hObj.health];
 
-                  return (
-                    <motion.div
-                      key={template.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="p-5 rounded-2xl bg-[#161619] border border-border/80 shadow-[0_4px_24px_rgba(0,0,0,0.15)] flex flex-col h-full hover:border-indigo-500/20 transition-all duration-300 group"
-                    >
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="space-y-1.5">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="font-semibold text-foreground text-[13px] font-mono bg-secondary/80 px-2.5 py-0.5 rounded-md border border-border/50 group-hover:border-indigo-500/20 transition-colors">
-                              {template.name}
-                            </h3>
-                            <button
-                              onClick={() => copyToClipboard(template.name)}
-                              className="text-muted-foreground hover:text-foreground transition-colors p-1"
-                              title="Copy template name"
-                            >
-                              {copied === template.name ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 animate-pulse" /> : <Copy className="w-3.5 h-3.5" />}
-                            </button>
+                    return (
+                      <motion.div
+                        key={template.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="p-5 rounded-2xl bg-card border border-border shadow-sm flex flex-col h-full hover:border-border-hover hover:shadow-md transition-all duration-300 group"
+                      >
+                        <div className="flex items-start justify-between mb-4 gap-2">
+                          <div className="space-y-1.5 flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="font-semibold text-foreground text-[13px] font-mono bg-muted px-2 py-0.5 rounded-md border border-border truncate max-w-full" title={template.name}>
+                                {template.name}
+                              </h3>
+                              <button
+                                onClick={() => copyToClipboard(template.name)}
+                                className="text-muted-foreground hover:text-foreground transition-colors p-1"
+                                title="Copy template name"
+                              >
+                                {copied === template.name ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                            
+                            <div className="flex gap-2 text-[10px] font-bold tracking-wider flex-wrap">
+                              <span className="text-muted-foreground bg-muted px-2 py-0.5 rounded-md border border-border">{template.category}</span>
+                              <span className="text-muted-foreground bg-muted px-2 py-0.5 rounded-md border border-border">{template.language.toUpperCase()}</span>
+                              <span className={`px-2 py-0.5 rounded-md border ${badgeColors}`}>
+                                {hObj.health} • {hObj.score}
+                              </span>
+                            </div>
                           </div>
                           
-                          <div className="flex gap-2 text-[10px] font-bold tracking-wider">
-                            <span className="text-muted-foreground/80 bg-secondary/40 px-2 py-0.5 rounded-sm">{template.category}</span>
-                            <span className="text-muted-foreground/80 bg-secondary/40 px-2 py-0.5 rounded-sm">{template.language.toUpperCase()}</span>
-                            <span className={`px-2 py-0.5 rounded-full border ${badgeColors}`}>
-                              {hObj.health} Health • {hObj.score}
-                            </span>
+                          <div className={`shrink-0 px-2.5 py-1 text-[9px] font-bold tracking-widest rounded-lg border flex items-center gap-1.5 ${
+                            template.status === 'APPROVED'
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                          }`}>
+                            {template.status === 'APPROVED' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
+                            {template.status}
                           </div>
                         </div>
                         
-                        <div className={`px-2.5 py-1 text-[9px] font-bold tracking-widest rounded-lg border flex items-center gap-1.5 ${
-                          template.status === 'APPROVED'
-                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25 shadow-[0_0_12px_rgba(16,185,129,0.1)]'
-                            : 'bg-amber-500/10 text-amber-400 border-amber-500/25 shadow-[0_0_12px_rgba(245,158,11,0.1)]'
-                        }`}>
-                          {template.status === 'APPROVED' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
-                          {template.status}
+                        {/* WhatsApp Mockup Preview */}
+                        <div className="flex-1 bg-[#efeae2] dark:bg-[#1a2329] rounded-xl p-4 border border-border relative min-h-[140px] flex flex-col justify-end">
+                          <div className="absolute top-2.5 right-3 text-[8px] font-bold text-muted-foreground/50 uppercase tracking-widest">WhatsApp Preview</div>
+                          <div className="bg-background text-foreground rounded-xl rounded-tl-none p-3 shadow-[0_1px_2px_rgba(0,0,0,0.08)] max-w-[85%] space-y-1 mt-6 border border-border/20">
+                            {headerComp?.text && <p className="font-bold text-xs text-foreground leading-snug">{headerComp.text}</p>}
+                            <p className="text-xs text-foreground/90 leading-relaxed whitespace-pre-wrap">{bodyText}</p>
+                            {footerComp?.text && <p className="text-[10px] text-muted-foreground mt-1">{footerComp.text}</p>}
+                            <div className="flex justify-end items-center gap-1 mt-1">
+                              <span className="text-[9px] text-muted-foreground/60">12:00 PM</span>
+                              <span className="text-[10px] text-sky-500 font-bold leading-none">✓✓</span>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                      
-                      {bodyText && (
-                        <div className="flex-1 bg-[#101012] rounded-xl p-4 border border-border/40 text-[13px] text-foreground/85 leading-relaxed font-sans relative">
-                          <div className="absolute top-2.5 right-3 text-[9px] font-bold text-muted-foreground/50 uppercase tracking-widest">Mockup Preview</div>
-                          {bodyText}
-                        </div>
-                      )}
 
-                      {hObj.health === 'LOW' && (
-                        <div className="mt-3.5 flex items-start gap-2.5 p-3 rounded-xl bg-rose-500/5 border border-rose-500/10 text-[11px] text-rose-400 leading-normal animate-in fade-in duration-300">
-                          <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
-                          <span>This template has a lower open rate. We recommend adding dynamic personalization elements or rewriting your intro text to increase conversions.</span>
-                        </div>
-                      )}
-                    </motion.div>
-                  );
-                })}
-              </div>
-            )}
+                        {hObj.health === 'LOW' && (
+                          <div className="mt-3.5 flex items-start gap-2.5 p-3 rounded-xl bg-rose-500/5 border border-rose-500/10 text-[11px] text-rose-600 dark:text-rose-400 leading-normal">
+                            <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+                            <span>This template has a lower open rate. We recommend adding dynamic personalization elements to increase conversions.</span>
+                          </div>
+                        )}
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         ) : (
           <div className="space-y-6">
             {/* Industry Filter Section */}
-            <div className="flex items-center gap-3 bg-secondary/15 p-1 rounded-2xl border border-border/60 w-fit">
+            <div className="flex items-center gap-2 bg-muted p-1 rounded-xl border border-border w-fit overflow-auto max-w-full">
               {['All', 'Restaurants', 'E-Commerce', 'Real Estate', 'Clinics', 'Salons'].map(ind => (
                 <button
                   key={ind}
                   onClick={() => setExploreIndustry(ind)}
-                  className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all duration-200 ${
+                  className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 ${
                     exploreIndustry === ind
-                      ? 'bg-[#1e1e24] text-foreground border border-border/30 shadow-md'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+                      ? 'bg-background text-foreground border border-border shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   {ind}
@@ -376,74 +417,98 @@ export default function TemplatesPage() {
               ))}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {PREBUILT_TEMPLATES.filter(t => exploreIndustry === 'All' || t.industry === exploreIndustry).map(item => {
-                const hObj = getTemplateHealth(item.name);
-                const badgeColors = {
-                  HIGH: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.12)]',
-                  MEDIUM: 'bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-[0_0_12px_rgba(245,158,11,0.12)]',
-                  LOW: 'bg-rose-500/10 text-rose-400 border-rose-500/20 shadow-[0_0_12px_rgba(244,63,94,0.12)]',
-                }[hObj.health];
+            {(() => {
+              const filtered = PREBUILT_TEMPLATES.filter(t => 
+                (exploreIndustry === 'All' || t.industry === exploreIndustry) &&
+                (t.title.toLowerCase().includes(searchQuery.toLowerCase()) || t.description.toLowerCase().includes(searchQuery.toLowerCase()) || t.bodyText.toLowerCase().includes(searchQuery.toLowerCase()))
+              );
 
+              if (filtered.length === 0) {
                 return (
-                  <motion.div
-                    key={item.name}
-                    initial={{ opacity: 0, scale: 0.98 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="p-5 rounded-2xl bg-[#161619] border border-border/80 shadow-[0_4px_24px_rgba(0,0,0,0.15)] flex flex-col h-full hover:border-indigo-500/30 transition-all duration-300 group"
-                  >
-                    <div className="flex items-start justify-between mb-3.5 gap-4">
-                      <div>
-                        <h3 className="font-semibold text-foreground text-sm tracking-tight mb-1">{item.title}</h3>
-                        <p className="text-[12px] text-muted-foreground/80 leading-snug">{item.description}</p>
-                      </div>
-                      
-                      <span className={`shrink-0 px-2 py-0.5 rounded-full text-[9px] font-bold border tracking-wider ${badgeColors}`}>
-                        {hObj.health} Health • {hObj.score}
-                      </span>
-                    </div>
-
-                    <div className="flex-1 bg-[#101012] rounded-xl p-4 border border-border/40 text-[13px] text-foreground/80 leading-relaxed font-sans relative mb-4">
-                      <div className="absolute top-2.5 right-3 text-[9px] font-bold text-muted-foreground/50 uppercase tracking-widest">Mockup Preview</div>
-                      {item.headerText && <p className="font-bold text-foreground mb-1">{item.headerText}</p>}
-                      <p className="whitespace-pre-wrap">{item.bodyText}</p>
-                      {item.footerText && <p className="text-[11px] text-muted-foreground/50 mt-1">{item.footerText}</p>}
-                    </div>
-
-                    <div className="flex items-center justify-between gap-3 pt-1">
-                      <div className="flex gap-2 text-[10px] font-bold tracking-wider">
-                        <span className="text-indigo-400 bg-indigo-500/8 border border-indigo-500/15 px-2 py-0.5 rounded-md">{item.industry}</span>
-                        <span className="text-muted-foreground/75 bg-secondary/40 px-2 py-0.5 rounded-md">{item.category}</span>
-                      </div>
-
-                      <motion.button
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => handleQuickImport(item)}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold transition-all duration-200 shadow-lg shadow-indigo-600/15 group-hover:shadow-indigo-600/25 border border-indigo-500/30"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> One-Click Import
-                      </motion.button>
-                    </div>
-                  </motion.div>
+                  <div className="p-12 text-center text-sm text-muted-foreground bg-card border border-border rounded-2xl">
+                    No templates found in library matching &ldquo;{searchQuery}&rdquo;.
+                  </div>
                 );
-              })}
-            </div>
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {filtered.map(item => {
+                    const hObj = getTemplateHealth(item.name);
+                    const badgeColors = {
+                      HIGH: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
+                      MEDIUM: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
+                      LOW: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
+                    }[hObj.health];
+
+                    return (
+                      <motion.div
+                        key={item.name}
+                        initial={{ opacity: 0, scale: 0.98 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="p-5 rounded-2xl bg-card border border-border shadow-sm flex flex-col h-full hover:border-border-hover hover:shadow-md transition-all duration-300 group"
+                      >
+                        <div className="flex items-start justify-between mb-3.5 gap-4">
+                          <div>
+                            <h3 className="font-semibold text-foreground text-sm tracking-tight mb-1">{item.title}</h3>
+                            <p className="text-[12px] text-muted-foreground leading-snug">{item.description}</p>
+                          </div>
+                          
+                          <span className={`shrink-0 px-2 py-0.5 rounded-full text-[9px] font-bold border tracking-wider ${badgeColors}`}>
+                            {hObj.health} • {hObj.score}
+                          </span>
+                        </div>
+
+                        {/* WhatsApp Mockup Preview */}
+                        <div className="flex-1 bg-[#efeae2] dark:bg-[#1a2329] rounded-xl p-4 border border-border relative mb-4 min-h-[140px] flex flex-col justify-end">
+                          <div className="absolute top-2.5 right-3 text-[8px] font-bold text-muted-foreground/50 uppercase tracking-widest">WhatsApp Preview</div>
+                          <div className="bg-background text-foreground rounded-xl rounded-tl-none p-3 shadow-[0_1px_2px_rgba(0,0,0,0.08)] max-w-[85%] space-y-1 mt-6 border border-border/20">
+                            {item.headerText && <p className="font-bold text-xs text-foreground leading-snug">{item.headerText}</p>}
+                            <p className="text-xs text-foreground/90 leading-relaxed whitespace-pre-wrap">{item.bodyText}</p>
+                            {item.footerText && <p className="text-[10px] text-muted-foreground mt-1">{item.footerText}</p>}
+                            <div className="flex justify-end items-center gap-1 mt-1">
+                              <span className="text-[9px] text-muted-foreground/60">12:00 PM</span>
+                              <span className="text-[10px] text-sky-500 font-bold leading-none">✓✓</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 pt-1">
+                          <div className="flex gap-2 text-[10px] font-bold tracking-wider">
+                            <span className="text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md">{item.industry}</span>
+                            <span className="text-muted-foreground bg-muted px-2 py-0.5 rounded-md border border-border">{item.category}</span>
+                          </div>
+
+                          <motion.button
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => handleQuickImport(item)}
+                            className="flex items-center gap-1.5 px-3.5 py-2 bg-primary hover:bg-primary/95 text-primary-foreground rounded-xl text-xs font-semibold transition-all duration-200 border border-primary/20"
+                          >
+                            <Plus className="w-3.5 h-3.5" /> One-Click Import
+                          </motion.button>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
 
-      <div className="max-w-[1000px] mx-auto w-full mt-6 space-y-4">
-          <MessageSquare className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <p className="text-sm font-semibold text-indigo-700 dark:text-indigo-400">Templates require Meta approval</p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              All WhatsApp templates must be approved by Meta before they can be used in broadcasts. Approval typically takes less than 24 hours.
-              You can also manage templates directly in
-              {' '}<a href="https://business.facebook.com/wa/manage/message-templates/" target="_blank" rel="noopener noreferrer" className="text-indigo-500 hover:underline">Meta Business Manager <ExternalLink className="inline w-3 h-3" /></a>.
-            </p>
-          </div>
+      <div className="max-w-[1000px] mx-auto w-full mt-8 border-t border-border pt-6 flex items-start gap-3">
+        <MessageSquare className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+        <div className="space-y-1">
+          <p className="text-sm font-semibold text-foreground">Templates require Meta approval</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            All WhatsApp templates must be approved by Meta before they can be used in broadcasts. Approval typically takes less than 24 hours.
+            You can also manage templates directly in
+            {' '}<a href="https://business.facebook.com/wa/manage/message-templates/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Meta Business Manager <ExternalLink className="inline w-3 h-3" /></a>.
+          </p>
         </div>
+      </div>
 
       {/* ── Template Creator Drawer ── */}
       <AnimatePresence>
@@ -487,7 +552,7 @@ export default function TemplatesPage() {
                         value={templateName}
                         onChange={e => setTemplateName(e.target.value)}
                         placeholder="e.g. welcome_offer_diwali"
-                        className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                        className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 transition-colors"
                       />
                       {sanitizedName && sanitizedName !== templateName && (
                         <p className="text-[11px] text-amber-500 flex items-center gap-1">
@@ -506,7 +571,7 @@ export default function TemplatesPage() {
                             key={cat.id}
                             onClick={() => setCategory(cat.id)}
                             className={`p-3 rounded-xl border text-left transition-all ${category === cat.id
-                              ? 'border-indigo-500/50 bg-indigo-500/8 text-foreground'
+                              ? 'border-primary bg-primary/5 text-foreground'
                               : 'border-border hover:border-border/80 text-muted-foreground hover:text-foreground'
                             }`}
                           >
@@ -523,7 +588,7 @@ export default function TemplatesPage() {
                       <select
                         value={language}
                         onChange={e => setLanguage(e.target.value)}
-                        className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-indigo-500/50 transition-colors"
+                        className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary/50 transition-colors"
                       >
                         {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
                       </select>
@@ -537,7 +602,7 @@ export default function TemplatesPage() {
                         value={headerText}
                         onChange={e => setHeaderText(e.target.value)}
                         placeholder="e.g. 🎉 Special Offer Just for You!"
-                        className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                        className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 transition-colors"
                       />
                     </div>
 
@@ -549,7 +614,7 @@ export default function TemplatesPage() {
                         onChange={e => setBodyText(e.target.value)}
                         placeholder="Hello {{1}}, your order #{{2}} has been confirmed! 🎉"
                         rows={4}
-                        className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-indigo-500/50 transition-colors resize-none"
+                        className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 transition-colors resize-none"
                       />
                       <p className="text-[11px] text-muted-foreground/60">Use {`{{1}}`}, {`{{2}}`} for dynamic variables (customer name, order number, etc.)</p>
                     </div>
@@ -562,7 +627,7 @@ export default function TemplatesPage() {
                         value={footerText}
                         onChange={e => setFooterText(e.target.value)}
                         placeholder="e.g. Reply STOP to unsubscribe"
-                        className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                        className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 transition-colors"
                       />
                     </div>
 
@@ -597,19 +662,22 @@ export default function TemplatesPage() {
                       <Smartphone className="w-3.5 h-3.5" /> Live Preview
                     </div>
                     {/* Phone mockup */}
-                    <div className="flex-1 bg-[#E5DDD5] dark:bg-[#2C2C2C] rounded-2xl p-4 flex flex-col gap-3">
+                    <div className="flex-1 bg-[#efeae2] dark:bg-[#1a2329] rounded-2xl p-4 flex flex-col justify-end">
                       {(headerText || bodyText || footerText) ? (
-                        <div className="bg-white dark:bg-[#1F2C34] rounded-2xl rounded-tl-sm p-3 shadow-sm max-w-[90%] space-y-1.5">
+                        <div className="bg-background text-foreground rounded-xl rounded-tl-none p-3 shadow-[0_1px_2px_rgba(0,0,0,0.08)] max-w-[90%] space-y-1.5 border border-border/20">
                           {headerText && (
-                            <p className="text-[13px] font-bold text-gray-900 dark:text-white leading-snug">{headerText}</p>
+                            <p className="text-[13px] font-bold text-foreground leading-snug">{headerText}</p>
                           )}
                           {bodyText && (
-                            <p className="text-[12.5px] text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-wrap">{bodyText}</p>
+                            <p className="text-[12px] text-foreground/90 leading-relaxed whitespace-pre-wrap">{bodyText}</p>
                           )}
                           {footerText && (
-                            <p className="text-[11px] text-gray-400 mt-1">{footerText}</p>
+                            <p className="text-[10px] text-muted-foreground mt-1">{footerText}</p>
                           )}
-                          <p className="text-[10px] text-gray-400 text-right mt-1">12:00 PM ✓✓</p>
+                          <div className="flex justify-end items-center gap-1 mt-1">
+                            <span className="text-[9px] text-muted-foreground/60">12:00 PM</span>
+                            <span className="text-[10px] text-sky-500 font-bold leading-none animate-pulse">✓✓</span>
+                          </div>
                         </div>
                       ) : (
                         <div className="flex-1 flex items-center justify-center">
