@@ -4,8 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Phone, Tag, Bot, User,
   MessageSquare, ChevronDown, Plus, Trash2,
-  UserPlus, StickyNote, Workflow, Sparkles, Loader2,
-  Target, Zap, ArrowRight, Brain,
+  UserPlus, StickyNote, Workflow, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -98,188 +97,6 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ── AI Brief types (mirrored from API route) ─────────────────────
-interface AISummaryBrief {
-  conversationGoal: string;
-  keyContext: { label: string; value: string }[];
-  intents: { label: string; confidence: number }[];
-  sentiment: { label: string; emoji: string; explanation: string; tone: 'positive' | 'neutral' | 'frustrated' | 'confused' };
-  leadScore: number;
-  leadScoreReasons: string[];
-  recommendedAction: { level: 'green' | 'yellow' | 'purple'; action: string };
-  snapshot: string;
-}
-
-const ACTION_STYLES = {
-  green:  { bg: 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/40', text: 'text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-500' },
-  yellow: { bg: 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/40',   text: 'text-amber-700 dark:text-amber-300',   dot: 'bg-amber-500' },
-  purple: { bg: 'bg-violet-50 dark:bg-violet-950/30 border-violet-200 dark:border-violet-800/40', text: 'text-violet-700 dark:text-violet-300', dot: 'bg-violet-500' },
-};
-
-const SENTIMENT_STYLES = {
-  positive:   'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/40',
-  neutral:    'bg-slate-50 dark:bg-white/[0.04] text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10',
-  frustrated: 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800/40',
-  confused:   'bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800/40',
-};
-
-function AIBriefCard({ meta, messages }: { meta: SharedConversationMeta; messages: Message[] }) {
-  const [loading, setLoading] = useState(false);
-  const [brief, setBrief] = useState<AISummaryBrief | null>(null);
-  const prevConvId = useRef<string>('');
-
-  // Reset brief whenever we switch to a different conversation
-  useEffect(() => {
-    if (prevConvId.current !== meta.id) {
-      prevConvId.current = meta.id;
-      setBrief(null);
-    }
-  }, [meta.id]);
-
-  const generate = async () => {
-    if (messages.length === 0) { toast.error('Nothing to summarize yet'); return; }
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/dashboard/chat/summary?conversationId=${meta.id}`);
-      const data = await res.json();
-      if (data.success) setBrief(data.brief);
-      else toast.error('Could not generate brief');
-    } catch { toast.error('Brief generation failed'); }
-    finally { setLoading(false); }
-  };
-
-  if (!brief) {
-    return (
-      <button
-        onClick={generate}
-        disabled={loading}
-        className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-gradient-to-br from-violet-50 to-fuchsia-50 dark:from-violet-950/30 dark:to-fuchsia-950/30 hover:from-violet-100 hover:to-fuchsia-100 dark:hover:from-violet-900/40 dark:hover:to-fuchsia-900/40 border border-violet-100 dark:border-violet-900/40 text-violet-700 dark:text-violet-300 text-[11.5px] font-semibold transition-all"
-      >
-        {loading
-          ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating AI Brief…</>
-          : <><Brain className="w-3.5 h-3.5" /> <span>✨ Generate AI Brief</span></>
-        }
-      </button>
-    );
-  }
-
-  const actionStyle = ACTION_STYLES[brief.recommendedAction.level];
-  const sentStyle = SENTIMENT_STYLES[brief.sentiment.tone] || SENTIMENT_STYLES.neutral;
-
-  return (
-    <div className="space-y-2.5">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-violet-500" />
-          <span className="text-[11px] font-bold text-violet-600 dark:text-violet-400 uppercase tracking-wider">AI Brief</span>
-        </div>
-        <button onClick={() => setBrief(null)} className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors">
-          Regenerate
-        </button>
-      </div>
-
-      {/* Snapshot TL;DR */}
-      <div className="rounded-xl bg-gradient-to-br from-violet-50 to-fuchsia-50 dark:from-violet-950/20 dark:to-fuchsia-950/20 border border-violet-100 dark:border-violet-900/30 px-3 py-2.5">
-        <p className="text-[12px] text-foreground/85 leading-relaxed italic">"{brief.snapshot}"</p>
-      </div>
-
-      {/* Conversation Goal */}
-      <div className="rounded-xl bg-muted/40 px-3 py-2.5 space-y-1">
-        <div className="flex items-center gap-1.5">
-          <Target className="w-3 h-3 text-muted-foreground/60" />
-          <p className="text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground/60">Goal</p>
-        </div>
-        <p className="text-[12px] text-foreground/85 leading-snug">{brief.conversationGoal}</p>
-      </div>
-
-      {/* Key Context */}
-      {brief.keyContext.length > 0 && (
-        <div className="rounded-xl bg-muted/40 px-3 py-2.5 space-y-1.5">
-          <p className="text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground/60 mb-1">Key Context</p>
-          {brief.keyContext.map((ctx, i) => (
-            <div key={i} className="flex items-center justify-between">
-              <span className="text-[11px] text-muted-foreground/70">{ctx.label}</span>
-              <span className="text-[11.5px] font-semibold text-foreground/85">{ctx.value}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Intents */}
-      {brief.intents.length > 0 && (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-1.5">
-            <Zap className="w-3 h-3 text-muted-foreground/60" />
-            <p className="text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground/60">Intent</p>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {brief.intents.map((intent, i) => (
-              <div key={i} className="flex items-center gap-1.5 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-800/40 rounded-full px-2.5 py-1">
-                <span className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300">{intent.label}</span>
-                <span className="text-[10px] font-bold text-indigo-400 dark:text-indigo-500">{intent.confidence}%</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Sentiment */}
-      <div className={cn('flex items-center gap-2.5 rounded-xl px-3 py-2.5 border', sentStyle)}>
-        <span className="text-[18px] leading-none">{brief.sentiment.emoji}</span>
-        <div className="flex-1 min-w-0">
-          <p className="text-[12px] font-semibold leading-tight">{brief.sentiment.label}</p>
-          <p className="text-[10.5px] opacity-75 mt-0.5 leading-snug">{brief.sentiment.explanation}</p>
-        </div>
-      </div>
-
-      {/* Lead Score */}
-      <div className="rounded-xl bg-muted/40 px-3 py-2.5 space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground/60">Lead Score</p>
-          <span className="text-[13px] font-bold text-foreground">{brief.leadScore}<span className="text-[10px] text-muted-foreground/60">/100</span></span>
-        </div>
-        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-          <div
-            className="h-full rounded-full transition-all duration-700"
-            style={{ width: `${brief.leadScore}%`, background: brief.leadScore >= 70 ? '#22c55e' : brief.leadScore >= 40 ? '#f59e0b' : '#ef4444' }}
-          />
-        </div>
-        <div className="space-y-0.5">
-          {brief.leadScoreReasons.map((r, i) => (
-            <p key={i} className="text-[10.5px] text-muted-foreground/70 flex items-center gap-1">
-              <span className="text-muted-foreground/40">•</span> {r}
-            </p>
-          ))}
-        </div>
-      </div>
-
-      {/* Recommended Action */}
-      <div className={cn('rounded-xl px-3 py-2.5 border space-y-2', actionStyle.bg)}>
-        <div className="flex items-center gap-1.5">
-          <span className={cn('w-2 h-2 rounded-full flex-shrink-0', actionStyle.dot)} />
-          <p className={cn('text-[9.5px] font-bold uppercase tracking-wider', actionStyle.text)}>Recommended Action</p>
-        </div>
-        <p className={cn('text-[12px] font-medium leading-snug', actionStyle.text)}>{brief.recommendedAction.action}</p>
-        <div className="flex flex-wrap gap-1.5 pt-0.5">
-          {(['Assign Agent', 'Take Over', 'Follow-up'] as const).map((label) => (
-            <button
-              key={label}
-              onClick={() => toast.info(`${label} — coming soon`)}
-              className={cn(
-                'flex items-center gap-1 px-2 py-1 rounded-lg text-[10.5px] font-semibold border transition-all hover:opacity-80',
-                actionStyle.bg, actionStyle.text
-              )}
-            >
-              <ArrowRight className="w-2.5 h-2.5" />
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── note type ────────────────────────────────────────────────────────
 interface Note { id: string; text: string; createdAt: string; }
@@ -604,11 +421,6 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
       <div className="flex-1 overflow-y-auto">
         {meta && (
           <>
-            {/* AI Insights */}
-            <Section title="AI Brief" icon={Sparkles}>
-              <AIBriefCard meta={meta} messages={messages} />
-            </Section>
-
             {/* Contact */}
             <Section title="Contact" icon={Phone}>
               {/* Phone Row */}
