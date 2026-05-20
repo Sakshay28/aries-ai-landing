@@ -7,6 +7,12 @@ import { CheckCircle2, ArrowRight, CreditCard, Truck, FileSpreadsheet, Briefcase
 import { toast } from 'sonner';
 
 // ── Integration definitions ──────────────────────────────────
+const MetaIcon = (props: any) => (
+  <svg viewBox="0 0 24 24" width="20" height="24" stroke="currentColor" strokeWidth="2.2" fill="none" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z" />
+  </svg>
+);
+
 interface FieldDef {
   key: string;
   label: string;
@@ -134,6 +140,22 @@ const INTEGRATIONS: IntegrationDef[] = [
     fields: [
       { key: 'webhook_url', label: 'Endpoint URL', type: 'url', placeholder: 'https://hooks.zapier.com/hooks/catch/...', required: true },
       { key: 'events', label: 'Fire on events', type: 'select', placeholder: '', required: false, options: [{ value: 'new_lead,booking_confirmed,payment_requested', label: 'All events' }, { value: 'new_lead', label: 'New lead only' }, { value: 'booking_confirmed', label: 'Bookings only' }] },
+    ],
+  },
+  {
+    id: 'meta_ads',
+    name: 'Meta Ads & Pixel (CAPI)',
+    description: 'Instantly sync Facebook Lead Forms to WhatsApp/Voice CRM, track Click-to-WhatsApp ad attribution, and trigger server-side Conversions API (CAPI) events.',
+    icon: MetaIcon,
+    color: 'text-[#1877F2]',
+    bgColor: 'bg-[#1877F2]/10',
+    docsUrl: 'https://developers.facebook.com/docs/marketing-api/conversions-api',
+    eventBadges: ['Meta Lead Ads', 'Conversions API', 'Pixel Tracking'],
+    fields: [
+      { key: 'access_token', label: 'System Access Token', type: 'password', placeholder: 'EAAG...', required: true, hint: 'Meta Business Suite → Business Settings → System Users → Generate Token' },
+      { key: 'pixel_id', label: 'Meta Pixel ID', type: 'text', placeholder: '1234567890', required: true, hint: 'Meta Events Manager → Data Sources → Pixel ID' },
+      { key: 'page_ids', label: 'Facebook Page IDs', type: 'text', placeholder: '1029384756', required: true, hint: 'Comma-separated Page IDs associated with your active Lead Forms' },
+      { key: 'capi_events', label: 'Fire Conversions on', type: 'select', placeholder: '', required: false, options: [{ value: 'Lead,Schedule,Purchase', label: 'Lead, Schedule & Purchase events' }, { value: 'Lead', label: 'Leads only' }, { value: 'Purchase', label: 'Purchases only' }] },
     ],
   },
 ];
