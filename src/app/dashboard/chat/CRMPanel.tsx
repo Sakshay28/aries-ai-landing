@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useRef } from "react";
 import {
-  Phone, Mail, Tag, Star, Bot, User,
+  Phone, Tag, Bot, User,
   MessageSquare, ChevronDown, Plus, Trash2,
-  UserPlus, StickyNote, Workflow, Sparkles, TrendingUp, Loader2,
+  UserPlus, StickyNote, Workflow, Sparkles, Loader2,
+  Target, Zap, ArrowRight, Brain,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -15,17 +16,18 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 // ── helpers ────────────────────────────────────────────────────────
 // Same palette & hash as ChatSidebar / ChatArea — ensures avatar color is identical everywhere
-const CRM_AVATAR_COLORS = [
-  'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400',
-  'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-400',
-  'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-400',
-  'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400',
-  'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400',
+const CRM_AVATAR_GRADIENTS = [
+  'linear-gradient(135deg, #25D366 0%, #128C7E 100%)',
+  'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+  'linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%)',
+  'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)',
+  'linear-gradient(135deg, #ec4899 0%, #f43f5e 100%)',
+  'linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%)',
 ];
-function crmAvatarColor(seed: string) {
+function crmAvatarGradient(seed: string) {
   let h = 0;
   for (const c of seed) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
-  return CRM_AVATAR_COLORS[h % CRM_AVATAR_COLORS.length];
+  return CRM_AVATAR_GRADIENTS[h % CRM_AVATAR_GRADIENTS.length];
 }
 
 function formatPhone(raw: string | null | undefined): string {
@@ -96,99 +98,177 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ── Sentiment heuristic (no API needed): score from message volume + AI ratio ──
-function deriveSentiment(messages: Message[]) {
-  if (messages.length === 0) {
-    return { label: "New conversation", emoji: "💬", tone: "neutral" as const, hint: "No messages yet" };
-  }
-  const inbound = messages.filter(m => m.direction === "inbound").length;
-  const ai = messages.filter(m => m.ai_generated).length;
-  const len = messages.length;
-
-  if (inbound >= 5 && ai / Math.max(len, 1) > 0.5) {
-    return { label: "Engaged lead", emoji: "🟢", tone: "positive" as const, hint: "Active back-and-forth" };
-  }
-  if (inbound >= 8) {
-    return { label: "Needs human", emoji: "🟡", tone: "warn" as const, hint: "High inbound volume" };
-  }
-  if (inbound === 0 && len > 0) {
-    return { label: "Awaiting reply", emoji: "⏳", tone: "neutral" as const, hint: "No response yet" };
-  }
-  return { label: "Active", emoji: "🟢", tone: "positive" as const, hint: `${len} messages exchanged` };
+// ── AI Brief types (mirrored from API route) ─────────────────────
+interface AISummaryBrief {
+  conversationGoal: string;
+  keyContext: { label: string; value: string }[];
+  intents: { label: string; confidence: number }[];
+  sentiment: { label: string; emoji: string; explanation: string; tone: 'positive' | 'neutral' | 'frustrated' | 'confused' };
+  leadScore: number;
+  leadScoreReasons: string[];
+  recommendedAction: { level: 'green' | 'yellow' | 'purple'; action: string };
+  snapshot: string;
 }
 
-const SENTIMENT_BG: Record<"positive" | "warn" | "neutral", string> = {
-  positive: "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400",
-  warn:     "bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400",
-  neutral:  "bg-muted/60 dark:bg-white/[0.05] text-muted-foreground",
+const ACTION_STYLES = {
+  green:  { bg: 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/40', text: 'text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-500' },
+  yellow: { bg: 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/40',   text: 'text-amber-700 dark:text-amber-300',   dot: 'bg-amber-500' },
+  purple: { bg: 'bg-violet-50 dark:bg-violet-950/30 border-violet-200 dark:border-violet-800/40', text: 'text-violet-700 dark:text-violet-300', dot: 'bg-violet-500' },
 };
 
-function SentimentCard({ messages }: { messages: Message[] }) {
-  const s = deriveSentiment(messages);
-  return (
-    <div className={cn("flex items-center gap-2.5 rounded-xl px-3 py-2.5", SENTIMENT_BG[s.tone])}>
-      <span className="text-[16px] leading-none">{s.emoji}</span>
-      <div className="flex-1 min-w-0">
-        <p className="text-[12px] font-semibold leading-tight">{s.label}</p>
-        <p className="text-[10.5px] opacity-70 mt-0.5">{s.hint}</p>
-      </div>
-      <TrendingUp className="w-3 h-3 opacity-50" />
-    </div>
-  );
-}
+const SENTIMENT_STYLES = {
+  positive:   'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/40',
+  neutral:    'bg-slate-50 dark:bg-white/[0.04] text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10',
+  frustrated: 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800/40',
+  confused:   'bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800/40',
+};
 
-function SummaryCard({ meta, messages }: { meta: SharedConversationMeta; messages: Message[] }) {
+function AIBriefCard({ meta, messages }: { meta: SharedConversationMeta; messages: Message[] }) {
   const [loading, setLoading] = useState(false);
-  const [summary, setSummary] = useState<string | null>(null);
+  const [brief, setBrief] = useState<AISummaryBrief | null>(null);
 
   const generate = async () => {
-    if (messages.length === 0) {
-      toast.error("Nothing to summarize yet");
-      return;
-    }
+    if (messages.length === 0) { toast.error('Nothing to summarize yet'); return; }
     setLoading(true);
-    // Heuristic summary (no API call) — pulls last inbound + counts
-    await new Promise(r => setTimeout(r, 600));
-    const last = messages.filter(m => m.direction === "inbound").at(-1);
-    const inbound = messages.filter(m => m.direction === "inbound").length;
-    const ai = messages.filter(m => m.ai_generated).length;
-    const lead = meta.leads;
-    const name = lead?.name || "Customer";
-    const parts = [
-      `${name} sent ${inbound} message${inbound === 1 ? "" : "s"}.`,
-      ai > 0 ? `AI handled ${ai} ${ai === 1 ? "reply" : "replies"}.` : "",
-      last ? `Last said: "${last.content.slice(0, 80)}${last.content.length > 80 ? "…" : ""}"` : "",
-    ].filter(Boolean);
-    setSummary(parts.join(" "));
-    setLoading(false);
+    try {
+      const res = await fetch(`/api/dashboard/chat/summary?conversationId=${meta.id}`);
+      const data = await res.json();
+      if (data.success) setBrief(data.brief);
+      else toast.error('Could not generate brief');
+    } catch { toast.error('Brief generation failed'); }
+    finally { setLoading(false); }
   };
 
-  if (summary) {
+  if (!brief) {
     return (
-      <div className="rounded-xl bg-violet-50 dark:bg-violet-950/20 border border-violet-100 dark:border-violet-900/40 px-3 py-2.5">
-        <div className="flex items-center gap-1.5 mb-1">
-          <Sparkles className="w-3 h-3 text-violet-600 dark:text-violet-400" />
-          <p className="text-[10px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">Summary</p>
-        </div>
-        <p className="text-[12px] text-foreground/85 leading-relaxed">{summary}</p>
-        <button onClick={() => setSummary(null)} className="text-[10.5px] text-violet-600 dark:text-violet-400 font-semibold mt-1.5 hover:underline">
-          Regenerate
-        </button>
-      </div>
+      <button
+        onClick={generate}
+        disabled={loading}
+        className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-gradient-to-br from-violet-50 to-fuchsia-50 dark:from-violet-950/30 dark:to-fuchsia-950/30 hover:from-violet-100 hover:to-fuchsia-100 dark:hover:from-violet-900/40 dark:hover:to-fuchsia-900/40 border border-violet-100 dark:border-violet-900/40 text-violet-700 dark:text-violet-300 text-[11.5px] font-semibold transition-all"
+      >
+        {loading
+          ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating AI Brief…</>
+          : <><Brain className="w-3.5 h-3.5" /> <span>✨ Generate AI Brief</span></>
+        }
+      </button>
     );
   }
 
+  const actionStyle = ACTION_STYLES[brief.recommendedAction.level];
+  const sentStyle = SENTIMENT_STYLES[brief.sentiment.tone] || SENTIMENT_STYLES.neutral;
+
   return (
-    <button
-      onClick={generate}
-      disabled={loading}
-      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-br from-violet-50 to-fuchsia-50 dark:from-violet-950/30 dark:to-fuchsia-950/30 hover:from-violet-100 hover:to-fuchsia-100 dark:hover:from-violet-900/40 dark:hover:to-fuchsia-900/40 border border-violet-100 dark:border-violet-900/40 text-violet-700 dark:text-violet-300 text-[11.5px] font-semibold transition-all"
-    >
-      {loading
-        ? <><Loader2 className="w-3 h-3 animate-spin" /> Summarizing…</>
-        : <><Sparkles className="w-3 h-3" /> Summarize conversation</>
-      }
-    </button>
+    <div className="space-y-2.5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Sparkles className="w-3.5 h-3.5 text-violet-500" />
+          <span className="text-[11px] font-bold text-violet-600 dark:text-violet-400 uppercase tracking-wider">AI Brief</span>
+        </div>
+        <button onClick={() => setBrief(null)} className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+          Regenerate
+        </button>
+      </div>
+
+      {/* Snapshot TL;DR */}
+      <div className="rounded-xl bg-gradient-to-br from-violet-50 to-fuchsia-50 dark:from-violet-950/20 dark:to-fuchsia-950/20 border border-violet-100 dark:border-violet-900/30 px-3 py-2.5">
+        <p className="text-[12px] text-foreground/85 leading-relaxed italic">"{brief.snapshot}"</p>
+      </div>
+
+      {/* Conversation Goal */}
+      <div className="rounded-xl bg-muted/40 px-3 py-2.5 space-y-1">
+        <div className="flex items-center gap-1.5">
+          <Target className="w-3 h-3 text-muted-foreground/60" />
+          <p className="text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground/60">Goal</p>
+        </div>
+        <p className="text-[12px] text-foreground/85 leading-snug">{brief.conversationGoal}</p>
+      </div>
+
+      {/* Key Context */}
+      {brief.keyContext.length > 0 && (
+        <div className="rounded-xl bg-muted/40 px-3 py-2.5 space-y-1.5">
+          <p className="text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground/60 mb-1">Key Context</p>
+          {brief.keyContext.map((ctx, i) => (
+            <div key={i} className="flex items-center justify-between">
+              <span className="text-[11px] text-muted-foreground/70">{ctx.label}</span>
+              <span className="text-[11.5px] font-semibold text-foreground/85">{ctx.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Intents */}
+      {brief.intents.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <Zap className="w-3 h-3 text-muted-foreground/60" />
+            <p className="text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground/60">Intent</p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {brief.intents.map((intent, i) => (
+              <div key={i} className="flex items-center gap-1.5 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-800/40 rounded-full px-2.5 py-1">
+                <span className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300">{intent.label}</span>
+                <span className="text-[10px] font-bold text-indigo-400 dark:text-indigo-500">{intent.confidence}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Sentiment */}
+      <div className={cn('flex items-center gap-2.5 rounded-xl px-3 py-2.5 border', sentStyle)}>
+        <span className="text-[18px] leading-none">{brief.sentiment.emoji}</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-[12px] font-semibold leading-tight">{brief.sentiment.label}</p>
+          <p className="text-[10.5px] opacity-75 mt-0.5 leading-snug">{brief.sentiment.explanation}</p>
+        </div>
+      </div>
+
+      {/* Lead Score */}
+      <div className="rounded-xl bg-muted/40 px-3 py-2.5 space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground/60">Lead Score</p>
+          <span className="text-[13px] font-bold text-foreground">{brief.leadScore}<span className="text-[10px] text-muted-foreground/60">/100</span></span>
+        </div>
+        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all duration-700"
+            style={{ width: `${brief.leadScore}%`, background: brief.leadScore >= 70 ? '#22c55e' : brief.leadScore >= 40 ? '#f59e0b' : '#ef4444' }}
+          />
+        </div>
+        <div className="space-y-0.5">
+          {brief.leadScoreReasons.map((r, i) => (
+            <p key={i} className="text-[10.5px] text-muted-foreground/70 flex items-center gap-1">
+              <span className="text-muted-foreground/40">•</span> {r}
+            </p>
+          ))}
+        </div>
+      </div>
+
+      {/* Recommended Action */}
+      <div className={cn('rounded-xl px-3 py-2.5 border space-y-2', actionStyle.bg)}>
+        <div className="flex items-center gap-1.5">
+          <span className={cn('w-2 h-2 rounded-full flex-shrink-0', actionStyle.dot)} />
+          <p className={cn('text-[9.5px] font-bold uppercase tracking-wider', actionStyle.text)}>Recommended Action</p>
+        </div>
+        <p className={cn('text-[12px] font-medium leading-snug', actionStyle.text)}>{brief.recommendedAction.action}</p>
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {(['Assign Agent', 'Take Over', 'Follow-up'] as const).map((label) => (
+            <button
+              key={label}
+              onClick={() => toast.info(`${label} — coming soon`)}
+              className={cn(
+                'flex items-center gap-1 px-2 py-1 rounded-lg text-[10.5px] font-semibold border transition-all hover:opacity-80',
+                actionStyle.bg, actionStyle.text
+              )}
+            >
+              <ArrowRight className="w-2.5 h-2.5" />
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -358,12 +438,15 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
     <div className="w-[300px] flex-shrink-0 bg-card border-l border-border flex flex-col overflow-hidden">
       {/* ── Hero ── */}
       <div className="flex items-center gap-3 px-4 pt-4 pb-3">
-        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-bold flex-shrink-0 ${meta ? crmAvatarColor(rawPhone || meta.id) : 'bg-muted'}`}>
+        <div
+          style={meta ? { background: crmAvatarGradient(rawPhone || meta.id) } : {}}
+          className={cn('w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-bold flex-shrink-0 shadow-sm text-white', !meta && 'bg-muted')}
+        >
           {meta
             ? (lead?.name
                 ? lead.name.charAt(0).toUpperCase()
                 : rawPhone
-                  ? rawPhone.replace(/\D/g, '').slice(-1) || '?'
+                  ? (() => { const d = rawPhone.replace(/\D/g, ''); const l = d.startsWith('91') && d.length === 12 ? d.slice(2) : d; return l.charAt(0) || '?'; })()
                   : '?')
             : <User className="w-5 h-5 text-muted-foreground/40" />
           }
@@ -513,9 +596,8 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
         {meta && (
           <>
             {/* AI Insights */}
-            <Section title="AI Insights" icon={Sparkles}>
-              <SentimentCard messages={messages} />
-              <SummaryCard meta={meta} messages={messages} />
+            <Section title="AI Brief" icon={Sparkles}>
+              <AIBriefCard meta={meta} messages={messages} />
             </Section>
 
             {/* Contact */}
