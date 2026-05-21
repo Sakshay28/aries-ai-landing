@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
-import { sendTextMessage } from '@/lib/gupshup/service';
+import { sendTextMessage } from '@/lib/meta/service';
 import { sendInstagramMessage } from '@/lib/instagram/service';
 import { decryptToken } from '@/lib/utils/crypto';
 
@@ -33,10 +33,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Conversation not found' }, { status: 404 });
     }
 
-    // Get tenant credentials (admin client needed for gupshup keys)
+    // Get tenant credentials (admin client needed for decryption keys)
     const { data: tenant, error: tenantErr } = await supabaseAdmin
       .from('tenants')
-      .select('gupshup_api_key, gupshup_phone_number, gupshup_app_name')
+      .select('wa_access_token, wa_phone_number_id')
       .eq('id', tenantId)
       .single();
 
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Tenant not found' }, { status: 404 });
     }
 
-    if (!tenant.gupshup_api_key || !tenant.gupshup_phone_number || !tenant.gupshup_app_name) {
+    if (!tenant.wa_access_token || !tenant.wa_phone_number_id) {
       return NextResponse.json({ success: false, error: 'WhatsApp is not yet active for your account. Contact support.' }, { status: 400 });
     }
 
@@ -83,13 +83,16 @@ export async function POST(req: NextRequest) {
         await sendInstagramMessage(tenant as unknown as Parameters<typeof sendInstagramMessage>[0], recipientPhone, message.trim());
         externalMessageId = "ig_" + Date.now().toString(); // Mock ID for IG since it doesn't return one directly in all cases
       } else {
-        // Default to Gupshup WhatsApp
+        // Send via Meta WhatsApp
+        const decryptedToken = decryptToken(tenant.wa_access_token);
+        if (!decryptedToken) {
+          throw new Error('Access token decryption failed');
+        }
         const waResult = await sendTextMessage(
-          decryptToken(tenant.gupshup_api_key) as string,
-          tenant.gupshup_phone_number,
+          decryptedToken,
+          tenant.wa_phone_number_id,
           recipientPhone,
-          message.trim(),
-          tenant.gupshup_app_name
+          message.trim()
         );
         externalMessageId = waResult.messageId;
       }

@@ -46,18 +46,18 @@ export async function GET(req: NextRequest) {
       // 2. Fetch tenant credentials
       const { data: tenant } = await supabaseAdmin
         .from('tenants')
-        .select('gupshup_api_key, gupshup_phone_number, gupshup_app_name')
+        .select('wa_access_token, wa_phone_number_id')
         .eq('id', campaign.tenant_id)
         .single();
 
-      if (tenant?.gupshup_api_key && tenant?.gupshup_phone_number && tenant?.gupshup_app_name) {
+      if (tenant?.wa_access_token && tenant?.wa_phone_number_id) {
         // 3. Process the campaign in the background safely (fire-and-forget style to avoid timeout)
         processCampaign(campaign.tenant_id, campaign.id, campaign, tenant).catch(err => {
           console.error(`Scheduled Campaign ${campaign.id} execution failed:`, err);
         });
         triggeredCampaignIds.push(campaign.id);
       } else {
-        console.error(`Missing Gupshup settings for campaign ${campaign.id} (Tenant ${campaign.tenant_id})`);
+        console.error(`Missing WhatsApp settings for campaign ${campaign.id} (Tenant ${campaign.tenant_id})`);
         await supabaseAdmin
           .from('broadcast_campaigns')
           .update({ status: 'failed' })

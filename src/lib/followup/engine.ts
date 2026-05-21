@@ -11,7 +11,8 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantById, getTenantConfig } from '@/lib/tenant/manager';
-import { sendTextMessage, sendTemplateMessage, isGupshupConfigured } from '@/lib/gupshup/service';
+import { sendTextMessage, sendTemplateMessage } from '@/lib/meta/service';
+const isMetaConfigured = (t: Tenant) => !!t.wa_access_token && !!t.wa_phone_number_id;
 import { generateFollowUpMessage } from '@/lib/ai/engine';
 import type { Tenant } from '@/lib/types';
 import { decryptToken } from '@/lib/utils/crypto';
@@ -128,7 +129,7 @@ async function processFollowUpJob(data: FollowUpJobData): Promise<void> {
 
   // Get tenant
   const tenant = await getTenantById(tenantId);
-  if (!tenant || !tenant.is_active || !isGupshupConfigured(tenant)) {
+  if (!tenant || !tenant.is_active || !isMetaConfigured(tenant)) {
     await markFollowUpCancelled(followUpId, tenant ? 'WhatsApp not configured' : 'Tenant inactive');
     return;
   }
@@ -153,11 +154,10 @@ async function processFollowUpJob(data: FollowUpJobData): Promise<void> {
     await sendFollowUpWithTemplate(tenant, leadPhone, followUpType, leadName);
   } else {
     await sendTextMessage(
-      decryptToken(tenant.gupshup_api_key as string) as string,
-      tenant.gupshup_phone_number as string,
+      decryptToken(tenant.wa_access_token as string) as string,
+      tenant.wa_phone_number_id as string,
       leadPhone,
-      message,
-      tenant.gupshup_app_name as string
+      message
     );
   }
 
@@ -249,7 +249,7 @@ export async function processPendingFollowUps(): Promise<number> {
       }
 
       const tenant = await getTenantById(followUp.tenant_id);
-      if (!tenant || !tenant.is_active || !isGupshupConfigured(tenant)) {
+      if (!tenant || !tenant.is_active || !isMetaConfigured(tenant)) {
         await markFollowUpCancelled(followUp.id, 'Tenant inactive or WA not configured');
         continue;
       }
@@ -269,11 +269,10 @@ export async function processPendingFollowUps(): Promise<number> {
         await sendFollowUpWithTemplate(tenant, lead.phone, followUp.follow_up_type, lead.name);
       } else {
         await sendTextMessage(
-          decryptToken(tenant.gupshup_api_key as string) as string,
-          tenant.gupshup_phone_number as string,
+          decryptToken(tenant.wa_access_token as string) as string,
+          tenant.wa_phone_number_id as string,
           lead.phone,
-          message,
-          tenant.gupshup_app_name as string
+          message
         );
       }
 
@@ -382,13 +381,12 @@ async function sendFollowUpWithTemplate(
 ) {
   try {
     await sendTemplateMessage(
-      decryptToken(tenant.gupshup_api_key as string) as string,
-      tenant.gupshup_phone_number as string,
+      decryptToken(tenant.wa_access_token as string) as string,
+      tenant.wa_phone_number_id as string,
       phone,
       'follow_up_reminder',
       [name || 'there'],
-      'en',
-      tenant.gupshup_app_name as string
+      'en'
     );
   } catch {
     console.warn(`⚠️ [${tenant.business_name}] Template message failed for ${followUpType}, skipping`);

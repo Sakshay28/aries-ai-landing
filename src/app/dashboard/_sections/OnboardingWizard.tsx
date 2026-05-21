@@ -8,12 +8,12 @@ import { cn } from "@/lib/utils";
 
 const STEPS = [
   {
-    id: 'gupshup',
+    id: 'whatsapp',
     title: 'Connect WhatsApp',
-    description: 'Link your Gupshup account to start sending and receiving messages.',
+    description: 'Link your Meta WhatsApp API credentials to start sending and receiving messages.',
     icon: MessageSquare,
-    actionLabel: 'Go to Integrations',
-    href: '/dashboard/integrations',
+    actionLabel: 'Configure API',
+    href: '/dashboard/settings?tab=whatsapp',
   },
   {
     id: 'knowledge',

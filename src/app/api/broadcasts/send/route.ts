@@ -2,9 +2,9 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { decryptToken } from '@/lib/utils/crypto';
-import { sendTemplateMessage } from '@/lib/gupshup/service';
+import { sendTemplateMessage } from '@/lib/meta/service';
 
-const BATCH_DELAY_MS = 200;  // 5 msg/s — safe for all Gupshup plans
+const BATCH_DELAY_MS = 200;  // 5 msg/s — safe for all plans
 const MAX_RECIPIENTS = 500;  // guard against Vercel 5-min timeout
 
 export async function POST(req: NextRequest) {
@@ -38,11 +38,11 @@ export async function POST(req: NextRequest) {
     // Get tenant config
     const { data: tenant } = await supabaseAdmin
       .from('tenants')
-      .select('gupshup_api_key, gupshup_phone_number, gupshup_app_name')
+      .select('wa_access_token, wa_phone_number_id')
       .eq('id', tenantId)
       .single();
 
-    if (!tenant?.gupshup_api_key || !tenant?.gupshup_phone_number || !tenant?.gupshup_app_name) {
+    if (!tenant?.wa_access_token || !tenant?.wa_phone_number_id) {
       return NextResponse.json({ success: false, error: 'WhatsApp is not yet active for your account. Contact support.' }, { status: 400 });
     }
 
@@ -69,7 +69,7 @@ export async function processCampaign(
   tenant: Record<string, unknown>
 ) {
   try {
-    const decryptedApiKey = decryptToken(tenant.gupshup_api_key as string) as string;
+    const decryptedApiKey = decryptToken(tenant.wa_access_token as string) as string;
 
     const nameVal = campaign.name as string;
     let leads: { id: string; phone: string }[] = [];
@@ -163,12 +163,11 @@ export async function processCampaign(
       try {
         const result = await sendTemplateMessage(
           decryptedApiKey,
-          tenant.gupshup_phone_number as string,
+          tenant.wa_phone_number_id as string,
           lead.phone,
           campaign.template_name as string,
           [],
-          'en',
-          tenant.gupshup_app_name as string
+          'en'
         );
 
         sent++;

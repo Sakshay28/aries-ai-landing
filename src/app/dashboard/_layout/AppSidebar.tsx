@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useSidebar } from "./SidebarContext";
 import { useEffect, useState } from "react";
+import { detectBrandFromHost, BRANDS } from "@/lib/brand";
 
 function SmartRulesBadge() {
   const [count, setCount] = useState<number | null>(null);
@@ -207,7 +208,11 @@ function SidebarBody({
     try {
       const res = await fetch("/api/auth/logout", { method: "POST" });
       if (res.ok) {
-        window.location.href = "/login";
+        // Dynamic redirect based on the brand host
+        const host = typeof window !== "undefined" ? window.location.host : "";
+        const brand = detectBrandFromHost(host);
+        const domain = BRANDS[brand]?.domain || "ariesai.in";
+        window.location.href = `https://${domain}`;
       } else {
         console.error("Failed to log out");
       }

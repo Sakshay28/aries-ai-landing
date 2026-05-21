@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import crypto from 'crypto';
-import { verifySignature } from '../src/lib/whatsapp/service';
+import { verifySignature } from '../src/lib/meta/service';
 
 const APP_SECRET = 'test-app-secret-for-hmac';
 

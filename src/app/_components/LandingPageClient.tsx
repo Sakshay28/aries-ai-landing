@@ -500,46 +500,48 @@ function Pricing() {
   const [billing, setBilling] = useState<"monthly" | "annual">("monthly");
   const plans = [
     {
-      name: "Starter", price: "999", period: "/month", oldPrice: "1,499",
-      desc: "For single location businesses",
-      caps: ["Up to 500 contacts", "1,000 conversations/month"],
-      features: ["Free WhatsApp Business API", "Free Blue Tick Application", "₹50 Free Conversation Credits", "Unlimited Free Service Conversations", "Basic AI Chatbot", "Live Chat Dashboard", "Create Template Messages", "Upload & Manage Contacts", "Up to 5 Tags"],
+      name: "Starter", price: "1,499", period: "/month", oldPrice: "2,000",
+      desc: "For single location or small businesses starting with WhatsApp marketing",
+      caps: ["1 Agent Seat included", "2,000 conversations/month"],
+      features: ["Free WhatsApp Business API Connection", "Free Blue Tick Application", "₹100 Free Conversation Credits", "Unlimited Free Service Conversations", "Manual Live Chat Inbox", "Create Template Messages", "Broadcast Campaigns & Scheduler", "Upload & Manage Contacts (up to 10 tags)"],
       cta: "Start Free Trial", popular: false,
       templateCharges: { marketing: "₹1.09", utility: "₹0.145", auth: "₹0.145", service: "Unlimited Free" },
       voiceCalls: null as null,
     },
     {
-      name: "Growth", price: "2,499", period: "/month", oldPrice: "3,999",
-      desc: "Scale your WhatsApp marketing",
-      caps: ["Up to 10,000 contacts", "5,000 conversations/month"],
-      features: ["Everything in Free, plus:", "AI Chatbot with Custom Training", "WhatsApp Broadcast Campaigns", "Click-to-WhatsApp Ads Manager", "Campaign Analytics & Reports", "Custom Attributes & Segments", "Up to 20 Tags", "Email Support"],
+      name: "Growth", price: "2,990", period: "/month", oldPrice: "3,999",
+      desc: "Scale your customer support with AI FAQ automation",
+      caps: ["2 Agent Seats included (simultaneous login)", "10,000 conversations/month"],
+      features: ["Everything in Starter, plus:", "AI Chatbot FAQ Automator (1 Active Bot)", "Chatbot trained on website & custom FAQs", "Multi-lingual responses (Hindi, English, Hinglish)", "Smart User Attributes & Custom Segments", "Priority Email Support"],
       cta: "Start Free Trial", popular: false,
       templateCharges: { marketing: "₹1.09", utility: "₹0.145", auth: "₹0.145", service: "Unlimited Free" },
       voiceCalls: null as null,
     },
     {
-      name: "Pro", price: "4,999", period: "/month", oldPrice: "6,999",
-      desc: "WhatsApp + Instagram AI automation",
-      caps: ["Up to 50,000 contacts", "Unlimited conversations"],
-      features: ["Everything in Growth, plus:", "Instagram DM Automation", "Advanced Gemini AI Engine", "Multi-Agent Live Chat", "CRM & Advanced Analytics", "Workflow Automation Builder", "In-Chat Payments (UPI/Cards)", "Unlimited Tags & Attributes", "Priority Support"],
+      name: "Pro", price: "4,999", period: "/month", oldPrice: "5,999",
+      desc: "Advanced interactive workflows and flow builders",
+      caps: ["5 Agent Seats included", "25,000 conversations/month"],
+      features: ["Everything in Growth, plus:", "Visual WhatsApp Chatbot Flow Builder", "Up to 5 Active WhatsApp Chatbot Flows", "Google Sheets Live Sync", "Automatic Lead Scoring & Escalation Alerts", "Multi-Agent Routing & Chat Transfer", "CRM Integrations (Shopify, HubSpot, Salesforce)", "Priority WhatsApp & Email Support"],
       cta: "Start Free Trial", popular: true,
-      templateCharges: { marketing: "₹0.90", utility: "₹0.145", auth: "₹0.145", service: "Unlimited Free" },
+      templateCharges: { marketing: "₹1.09", utility: "₹0.145", auth: "₹0.145", service: "Unlimited Free" },
       voiceCalls: null as null,
     },
     {
-      name: "Ultra Premium", price: "6,999", period: "/month", oldPrice: "9,999",
-      desc: "AI Voice Calling + Full automation suite",
-      caps: ["Unlimited contacts", "Unlimited conversations"],
-      features: ["Everything in Pro, plus:", "🔥 AI Voice Calling for Booking Confirmation", "150 AI Voice Calls Included", "Auto WhatsApp Fallback on Missed Calls", "Dedicated Account Manager", "Custom Integrations & API Access", "White-label Reports", "Onboarding Assistance", "24/7 Priority Support"],
-      cta: "Start Free Trial", popular: false,
-      templateCharges: { marketing: "Custom", utility: "₹0.145", auth: "₹0.145", service: "Unlimited Free" },
+      name: "Ultra Premium", price: "Custom", period: "", oldPrice: "",
+      desc: "AI Voice Calling + Custom integrations for high-volume brands",
+      caps: ["Custom Agent Seats", "Unlimited conversations"],
+      features: ["Everything in Pro, plus:", "Dedicated Custom LLM training & fine-tuning", "Custom system integrations & database sync", "White-label analytics reports & client portals", "🔥 AI Voice Calling for Booking Confirmation", "150 AI Voice Calls Included", "Auto WhatsApp Fallback on Missed Calls", "Dedicated Account Manager & SLA (under 1 hour)"],
+      cta: "Contact Sales", popular: false,
+      templateCharges: { marketing: "₹1.09", utility: "₹0.145", auth: "₹0.145", service: "Unlimited Free" },
       voiceCalls: { included: 150, addon: "₹15/call after 150 calls", topup: "₹999 for 100 extra calls" } as { included: number; addon: string; topup: string },
     },
   ];
 
   const getPrice = (price: string) => {
+    if (price === "Custom") return "Custom";
     if (price === "0") return "0";
     const num = parseInt(price.replace(",", ""));
+    if (isNaN(num)) return price;
     if (billing === "annual") return Math.round(num * 0.8).toLocaleString("en-IN");
     return price;
   };
@@ -584,14 +586,14 @@ function Pricing() {
                     </span>
                   </div>
                 )}
-                <span className="ps" style={{ fontSize: 15 }}>₹</span>
+                {plan.price !== "Custom" && <span className="ps" style={{ fontSize: 15 }}>₹</span>}
                 <span style={{ fontSize: 44, fontWeight: 900, letterSpacing: "-2px", color: "inherit" }}>{getPrice(plan.price)}</span>
-                <span className="ps" style={{ fontSize: 14 }}> {plan.period}</span>
-                {billing === "annual" && plan.price !== "0" && (
+                {plan.price !== "Custom" && <span className="ps" style={{ fontSize: 14 }}> {plan.period}</span>}
+                {billing === "annual" && plan.price !== "0" && plan.price !== "Custom" && (
                   <div style={{ fontSize: 12, color: G, fontWeight: 600, marginTop: 4 }}>Billed annually</div>
                 )}
               </div>
-              <Link href="/signup" className="pb">{plan.cta}</Link>
+              <Link href={plan.price === "Custom" ? "#contact-us" : "/signup"} className="pb">{plan.cta}</Link>
               <hr className="sep" style={{ border: "none", borderTop: "1px solid", margin: "20px 0 16px" }} />
               <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
                 {plan.caps.map(cap => (

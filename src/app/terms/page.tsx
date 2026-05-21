@@ -30,7 +30,7 @@ export default function TermsPage() {
         </Section>
 
         <Section title="2. Description of Service">
-          Aries AI provides an AI-powered WhatsApp Business automation platform that enables businesses to automate customer conversations, capture leads, and manage communications through Meta&apos;s official WhatsApp Business API, facilitated by our BSP partner Gupshup.
+          Aries AI provides an AI-powered WhatsApp Business automation platform that enables businesses to automate customer conversations, capture leads, and manage communications directly through Meta&apos;s official WhatsApp Business API.
         </Section>
 
         <Section title="3. Account Registration">
@@ -84,7 +84,7 @@ export default function TermsPage() {
         </Section>
 
         <Section title="8. Service Availability">
-          We strive for 99.9% uptime but do not guarantee uninterrupted service. The Service depends on third-party infrastructure (Meta WhatsApp API, Gupshup, Supabase) and may experience downtime due to factors beyond our control.
+          We strive for 99.9% uptime but do not guarantee uninterrupted service. The Service depends on third-party infrastructure (Meta WhatsApp API, Supabase) and may experience downtime due to factors beyond our control.
         </Section>
 
         <Section title="9. Limitation of Liability">

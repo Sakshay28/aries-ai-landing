@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import {
   Building2, Bot, Clock, Phone, Mail, Globe, MapPin,
   Users, Zap, Save, CheckCircle2, AlertCircle, Plus, X,
-  MessageSquare, BrainCircuit, Bell
+  MessageSquare, BrainCircuit, Bell, Copy, Eye, EyeOff, Key, HelpCircle, ExternalLink, RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -35,8 +35,11 @@ interface SettingsData {
   warm_keywords: string[];
   off_hours_message: string;
   off_hours_capture_lead: boolean;
-  // WhatsApp status (read-only, set by admin)
-  gupshup_phone_number: string;
+  // Direct Meta Settings
+  wa_phone_number_id: string;
+  wa_business_account_id: string;
+  wa_access_token: string;
+  wa_verify_token: string;
   // Outbound webhook
   outbound_webhook_url: string;
 }
@@ -49,7 +52,10 @@ const DEFAULT_SETTINGS: SettingsData = {
   followup_30min: true, followup_3hr: true, followup_24hr: true, followup_7day: false,
   escalation_timeout_mins: 5, hot_keywords: [], warm_keywords: [],
   off_hours_message: '', off_hours_capture_lead: true,
-  gupshup_phone_number: '',
+  wa_phone_number_id: '',
+  wa_business_account_id: '',
+  wa_access_token: '',
+  wa_verify_token: '',
   outbound_webhook_url: ''
 };
 
@@ -207,9 +213,33 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('business');
   const [dirty, setDirty] = useState(false);
 
+  // Meta Cloud API States
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; error?: string; details?: any } | null>(null);
+  const [showToken, setShowToken] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState('');
+
   const update = useCallback(<K extends keyof SettingsData>(key: K, value: SettingsData[K]) => {
     setSettings(s => ({ ...s, [key]: value }));
     setDirty(true);
+  }, []);
+
+  // Set Webhook URL on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setWebhookUrl(`${window.location.origin}/api/webhooks/whatsapp`);
+    }
+  }, []);
+
+  // Support reading ?tab=whatsapp in query parameters
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get('tab');
+      if (tab && TABS.some(t => t.id === tab)) {
+        setActiveTab(tab);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -221,6 +251,43 @@ export default function SettingsPage() {
       .catch(() => toast.error('Failed to load settings'))
       .finally(() => setLoading(false));
   }, []);
+
+  const handleTestConnection = async () => {
+    if (!settings.wa_phone_number_id) {
+      toast.error('WhatsApp Phone Number ID is required to run connection test');
+      return;
+    }
+    setTestingConnection(true);
+    setTestResult(null);
+    try {
+      const res = await fetch('/api/dashboard/settings/test-whatsapp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accessToken: settings.wa_access_token,
+          phoneNumberId: settings.wa_phone_number_id,
+        }),
+      });
+      const data = await res.json();
+      setTestResult(data);
+      if (data.success) {
+        toast.success('Connection test successful!');
+      } else {
+        toast.error(`Connection test failed: ${data.error || 'Verification failed'}`);
+      }
+    } catch (err) {
+      toast.error(`Connection test error: ${(err as Error).message}`);
+      setTestResult({ success: false, error: (err as Error).message });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const copyToClipboard = (text: string, label: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    toast.success(`${label} copied to clipboard`);
+  };
 
   const save = async () => {
     setSaving(true);
@@ -369,37 +436,216 @@ export default function SettingsPage() {
       {/* Tab: WhatsApp */}
       {activeTab === 'whatsapp' && (
         <motion.div key="whatsapp" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
-          <SectionCard title="WhatsApp Connection" icon={MessageSquare}>
-            {settings.gupshup_phone_number ? (
+          {/* Connection Status Card */}
+          <SectionCard title="WhatsApp Connection Status" icon={MessageSquare}>
+            {settings.wa_phone_number_id && settings.wa_access_token ? (
               <div className="flex items-center gap-4 py-2">
                 <div
                   className="flex items-center gap-2.5 px-4 py-2 rounded-full text-sm font-semibold"
                   style={{ background: 'rgba(16,185,129,0.1)', color: '#10B981', border: '1px solid rgba(16,185,129,0.2)' }}
                 >
                   <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  WhatsApp Active
+                  Meta API Connected
                 </div>
-                <span className="text-sm font-mono" style={{ color: 'var(--muted-foreground)' }}>
-                  +{settings.gupshup_phone_number.slice(0, -3).replace(/./g, '•')}{settings.gupshup_phone_number.slice(-3)}
-                </span>
+                <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  Phone ID: <span className="font-mono font-bold">{settings.wa_phone_number_id}</span>
+                </div>
               </div>
             ) : (
               <div className="flex items-center gap-3 py-2">
                 <div
                   className="flex items-center gap-2.5 px-4 py-2 rounded-full text-sm font-semibold"
-                  style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)', border: '1px solid var(--border)' }}
+                  style={{ background: 'rgba(245,158,11,0.1)', color: '#F59E0B', border: '1px solid rgba(245,158,11,0.2)' }}
                 >
-                  <div className="w-2 h-2 rounded-full" style={{ background: 'var(--muted-foreground)' }} />
-                  Setup in Progress
+                  <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                  Connection Pending
                 </div>
-                <span className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                  Your Aries AI team will activate WhatsApp for your account.
+                <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  Provide your Meta credentials below to activate your automated WhatsApp chatbot.
                 </span>
               </div>
             )}
           </SectionCard>
 
-          {/* Outbound Webhook */}
+          {/* Credentials Card */}
+          <SectionCard title="Meta Cloud API Credentials (BYO-Keys)" icon={Key}>
+            <p className="text-xs -mt-1" style={{ color: 'var(--muted-foreground)' }}>
+              Configure your direct WhatsApp Business integration. Find these values in your Meta App Dashboard under WhatsApp &gt; API Setup.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-2">
+              <Field label="WhatsApp Phone Number ID">
+                <Input
+                  value={settings.wa_phone_number_id || ''}
+                  onChange={v => update('wa_phone_number_id', v)}
+                  placeholder="e.g. 104598129038102"
+                />
+              </Field>
+              <Field label="WhatsApp Business Account ID (WABA ID)">
+                <Input
+                  value={settings.wa_business_account_id || ''}
+                  onChange={v => update('wa_business_account_id', v)}
+                  placeholder="e.g. 103982938102830"
+                />
+              </Field>
+            </div>
+            
+            <div className="mt-4">
+              <Field label="System User Access Token">
+                <div className="relative flex items-center">
+                  <input
+                    type={showToken ? 'text' : 'password'}
+                    value={settings.wa_access_token || ''}
+                    onChange={e => update('wa_access_token', e.target.value)}
+                    placeholder="EAAW..."
+                    className="w-full h-10 pl-3 pr-10 rounded-xl text-sm outline-none transition-all"
+                    style={{
+                      background: 'var(--background)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--foreground)',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowToken(!showToken)}
+                    className="absolute right-3 text-muted-foreground hover:text-foreground focus:outline-none"
+                  >
+                    {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-[11px] mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                  A permanent access token generated via Meta Business Manager for your System User.
+                </p>
+              </Field>
+            </div>
+
+            <div className="mt-6 pt-5 border-t flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4" style={{ borderColor: 'var(--border)' }}>
+              <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                Make sure to save changes before running the connection test.
+              </div>
+              <button
+                type="button"
+                onClick={handleTestConnection}
+                disabled={testingConnection || !settings.wa_phone_number_id}
+                className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                style={{
+                  background: settings.wa_phone_number_id ? 'var(--secondary)' : 'var(--muted)',
+                  border: '1px solid var(--border)',
+                  color: settings.wa_phone_number_id ? 'var(--foreground)' : 'var(--muted-foreground)',
+                  cursor: settings.wa_phone_number_id && !testingConnection ? 'pointer' : 'not-allowed',
+                }}
+              >
+                {testingConnection ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4" />
+                )}
+                {testingConnection ? 'Testing Connection...' : 'Test Connection'}
+              </button>
+            </div>
+
+            {testResult && (
+              <div
+                className="mt-4 p-4 rounded-xl text-sm border"
+                style={{
+                  background: testResult.success ? 'rgba(16,185,129,0.06)' : 'rgba(239,68,68,0.06)',
+                  borderColor: testResult.success ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)',
+                  color: testResult.success ? '#10B981' : '#EF4444',
+                }}
+              >
+                <div className="flex items-start gap-2.5">
+                  {testResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  )}
+                  <div>
+                    <div className="font-semibold">{testResult.success ? 'Success! Connection is working.' : 'Connection Failed'}</div>
+                    {testResult.success && testResult.details && (
+                      <div className="text-xs mt-1.5 space-y-1 font-mono text-emerald-600/90 dark:text-emerald-400/90">
+                        <div>Verified Name: {testResult.details.verified_name || 'N/A'}</div>
+                        <div>Display Phone: {testResult.details.display_phone_number || 'N/A'}</div>
+                        <div>Quality Rating: {testResult.details.quality_rating || 'N/A'}</div>
+                      </div>
+                    )}
+                    {!testResult.success && testResult.error && (
+                      <p className="text-xs mt-1 leading-relaxed">{testResult.error}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </SectionCard>
+
+          {/* Webhook Settings Card */}
+          <SectionCard title="Meta Webhook Configuration" icon={Zap}>
+            <p className="text-xs -mt-1" style={{ color: 'var(--muted-foreground)' }}>
+              To receive customer messages, copy these values into your Meta App Webhook configuration.
+            </p>
+            
+            <div className="space-y-4 mt-4">
+              <div>
+                <label className="text-[10px] font-bold tracking-wider uppercase text-muted-foreground block mb-1">
+                  Callback URL
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    readOnly
+                    type="text"
+                    value={webhookUrl}
+                    className="flex-1 h-9 px-3 rounded-lg text-xs font-mono border outline-none bg-background text-muted-foreground"
+                    style={{ borderColor: 'var(--border)' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(webhookUrl, 'Callback URL')}
+                    className="h-9 w-9 flex items-center justify-center rounded-lg border hover:bg-secondary transition-colors"
+                    style={{ borderColor: 'var(--border)' }}
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold tracking-wider uppercase text-muted-foreground block mb-1">
+                  Verify Token
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    readOnly
+                    type="text"
+                    value={settings.wa_verify_token || ''}
+                    className="flex-1 h-9 px-3 rounded-lg text-xs font-mono border outline-none bg-background text-muted-foreground"
+                    style={{ borderColor: 'var(--border)' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(settings.wa_verify_token || '', 'Verify Token')}
+                    className="h-9 w-9 flex items-center justify-center rounded-lg border hover:bg-secondary transition-colors"
+                    style={{ borderColor: 'var(--border)' }}
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 p-4 rounded-xl text-xs space-y-2.5" style={{ background: 'var(--secondary)', border: '1px solid var(--border)' }}>
+              <div className="font-semibold text-foreground flex items-center gap-1.5">
+                <HelpCircle className="w-3.5 h-3.5 text-cyan-500" />
+                Webhook Setup Instructions
+              </div>
+              <ol className="list-decimal list-inside space-y-1.5 text-muted-foreground leading-relaxed">
+                <li>Go to the <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener noreferrer" className="text-cyan-500 hover:underline inline-flex items-center gap-0.5">Meta Developer Portal <ExternalLink className="w-3 h-3" /></a> and select your App.</li>
+                <li>Add the <strong>WhatsApp</strong> product to your App, and go to the <strong>Configuration</strong> sub-tab.</li>
+                <li>Under <strong>Webhooks</strong>, click <strong>Edit</strong> and paste the Callback URL and Verify Token from above.</li>
+                <li>Click <strong>Verify and Save</strong>.</li>
+                <li>Under Webhook fields, click <strong>Manage</strong> and subscribe to the <strong>messages</strong> field (Crucial for receiving chat replies).</li>
+              </ol>
+            </div>
+          </SectionCard>
+
+          {/* Outbound Webhook Card */}
           <SectionCard title="Outbound Webhook (Zapier / Make / Custom)" icon={Zap}>
             <Field label="Webhook URL">
               <Input
@@ -414,7 +660,6 @@ export default function SettingsPage() {
               Compatible with Zapier, Make, n8n, or any custom HTTP endpoint.
             </p>
           </SectionCard>
-
         </motion.div>
       )}
 

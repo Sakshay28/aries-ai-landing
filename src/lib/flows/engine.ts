@@ -25,7 +25,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { sendTextMessage, sendMediaMessage } from '@/lib/gupshup/service';
+import { sendTextMessage, sendMediaMessage, MetaMediaType } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { processMessageWithAI, TenantAIConfig } from '@/lib/ai/engine';
 import { getTenantConfig } from '@/lib/tenant/manager';
@@ -71,9 +71,8 @@ interface ExecContext {
   leadName: string;            // for {{name}} interpolation
   conversationId: string;
   phone: string;               // destination phone number
-  apiKey: string;              // decrypted Gupshup API key
-  appPhone: string;            // Gupshup source phone
-  appName: string;             // Gupshup app name
+  accessToken: string;         // decrypted Meta access token
+  phoneNumberId: string;       // Meta phone number ID
   messageText: string;
   isFirstMessage: boolean;
   pendingFlowNode?: string;  // node id to resume on next inbound message
@@ -135,7 +134,7 @@ export async function runFlowsForMessage(
   const [{ data: tenant }, { data: lead }] = await Promise.all([
     supabaseAdmin
       .from('tenants')
-      .select('gupshup_api_key, gupshup_phone_number, gupshup_app_name')
+      .select('wa_access_token, wa_phone_number_id')
       .eq('id', tenantId)
       .single(),
     leadId
@@ -143,7 +142,13 @@ export async function runFlowsForMessage(
       : Promise.resolve({ data: null }),
   ]);
 
-  if (!tenant?.gupshup_api_key || !tenant?.gupshup_phone_number || !tenant?.gupshup_app_name) {
+  if (!tenant?.wa_access_token || !tenant?.wa_phone_number_id) {
+    return false;
+  }
+
+  const decryptedToken = decryptToken(tenant.wa_access_token as string);
+  if (!decryptedToken) {
+    console.error(`Flow engine: failed to decrypt token for tenant ${tenantId}`);
     return false;
   }
 
@@ -153,9 +158,8 @@ export async function runFlowsForMessage(
     leadName: (lead as { name?: string } | null)?.name || '',
     conversationId,
     phone,
-    apiKey: decryptToken(tenant.gupshup_api_key as string) as string,
-    appPhone: tenant.gupshup_phone_number as string,
-    appName: tenant.gupshup_app_name as string,
+    accessToken: decryptedToken,
+    phoneNumberId: tenant.wa_phone_number_id as string,
     messageText,
     isFirstMessage,
     variables: {},
@@ -297,15 +301,16 @@ async function executeNode(
       return { nextId: getNextNode(node.id, null, edges), sent: true };
     }
 
+    const metaMediaType = mediaType === 'file' ? 'document' : (mediaType as MetaMediaType);
+
     try {
       await sendMediaMessage(
-        ctx.apiKey,
-        ctx.appPhone,
+        ctx.accessToken,
+        ctx.phoneNumberId,
         ctx.phone,
-        mediaType as 'image' | 'video' | 'audio' | 'file',
+        metaMediaType,
         mediaUrl,
-        caption || undefined,
-        ctx.appName
+        caption || undefined
       );
       await supabaseAdmin.from('messages').insert({
         tenant_id: ctx.tenantId,
@@ -344,7 +349,7 @@ async function executeNode(
         return { nextId: getNextNode(node.id, null, edges), sent: true };
       }
       try {
-        await sendTextMessage(ctx.apiKey, ctx.appPhone, ctx.phone, content, ctx.appName);
+        await sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content);
         // Record the outbound message in DB
         await supabaseAdmin.from('messages').insert({
           tenant_id: ctx.tenantId,
@@ -666,7 +671,7 @@ async function executeNode(
           ctx.tenantId
         );
         if (aiResp?.reply) {
-          await sendTextMessage(ctx.apiKey, ctx.appPhone, ctx.phone, aiResp.reply, ctx.appName);
+          await sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, aiResp.reply);
           await supabaseAdmin.from('messages').insert({
             tenant_id: ctx.tenantId,
             conversation_id: ctx.conversationId,
@@ -746,9 +751,8 @@ export async function simulateFlow(
     leadName:        'Test User',
     conversationId:  'sim-' + flowId,
     phone:           '+910000000000',
-    apiKey:          'sim',
-    appPhone:        'sim',
-    appName:         'sim',
+    accessToken:     'sim',
+    phoneNumberId:   'sim',
     messageText:     testMessage,
     isFirstMessage:  false,
     variables:       {},

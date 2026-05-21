@@ -3,10 +3,10 @@
 // ═══════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { invalidateCache } from '@/lib/tenant/manager';
 import { getTenantId } from '@/lib/auth/getTenantId';
+import { encryptToken } from '@/lib/utils/crypto';
 
 export async function GET() {
   const tenantId = await getTenantId();
@@ -24,7 +24,7 @@ export async function GET() {
       followup_30min, followup_3hr, followup_24hr, followup_7day,
       escalation_timeout_mins, hot_keywords, warm_keywords,
       custom_faqs, off_hours_message, off_hours_capture_lead,
-      gupshup_phone_number,
+      wa_phone_number_id, wa_business_account_id, wa_access_token, wa_verify_token,
       outbound_webhook_url
     `)
     .eq('id', tenantId)
@@ -32,6 +32,11 @@ export async function GET() {
 
   if (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+
+  // Mask sensitive credentials
+  if (data && data.wa_access_token) {
+    data.wa_access_token = '••••••••';
   }
 
   return NextResponse.json({ success: true, data });
@@ -55,6 +60,7 @@ export async function PATCH(req: NextRequest) {
     'followup_30min', 'followup_3hr', 'followup_24hr', 'followup_7day',
     'escalation_timeout_mins', 'hot_keywords', 'warm_keywords',
     'custom_faqs', 'off_hours_message', 'off_hours_capture_lead',
+    'wa_phone_number_id', 'wa_business_account_id', 'wa_verify_token',
     'outbound_webhook_url'
   ];
 
@@ -62,6 +68,18 @@ export async function PATCH(req: NextRequest) {
   for (const key of allowedFields) {
     if (body[key] !== undefined) {
       updates[key] = body[key];
+    }
+  }
+
+  // Handle encrypted access token specifically
+  if (body.wa_access_token !== undefined) {
+    if (body.wa_access_token === '••••••••') {
+      // Do nothing, do not overwrite the existing encrypted token in DB
+    } else if (body.wa_access_token === '' || body.wa_access_token === null) {
+      updates.wa_access_token = null;
+    } else {
+      // Encrypt the new token using AES-256-GCM
+      updates.wa_access_token = encryptToken(body.wa_access_token);
     }
   }
 
@@ -82,6 +100,11 @@ export async function PATCH(req: NextRequest) {
 
   // Invalidate cached tenant config so changes take effect immediately
   await invalidateCache(tenantId);
+
+  // Mask token on response
+  if (data && data.wa_access_token) {
+    data.wa_access_token = '••••••••';
+  }
 
   return NextResponse.json({ success: true, data });
 }

@@ -73,14 +73,19 @@ function LoginInner() {
     setLoading(true);
     setError("");
     try {
-      const supabase = createBrowserSupabaseClient();
-      const { data, error: verifyError } = await supabase.auth.verifyOtp({
-        email,
-        token: otpCode,
-        type: "email",
+      const res = await fetch("/api/auth/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          token: otpCode,
+          type: "email",
+        }),
       });
-      if (verifyError) throw verifyError;
-      if (!data.session) throw new Error("Verification failed — no session returned.");
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "Verification failed");
+      }
       window.location.replace("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid code. Please check and try again.");
@@ -189,7 +194,23 @@ function LoginInner() {
               </Labelled>
 
               {initialSuccess && <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "12px 14px", fontSize: 13, color: "#15803d", marginBottom: 4 }}>{initialSuccess}</div>}
-              {error && <div style={styles.errorBox}>{error}</div>}
+              {error && (
+                <div style={styles.errorBox}>
+                  {error.toLowerCase().includes("rate limit") ? (
+                    <div>
+                      <div style={{ fontWeight: 700, marginBottom: 4 }}>Email Rate Limit Exceeded</div>
+                      <div style={{ fontSize: 12.5, lineHeight: 1.5, opacity: 0.95 }}>
+                        Supabase restricts how frequently verification emails can be sent. To continue testing immediately, we recommend setting up a <strong>Test OTP</strong>:
+                        <ol style={{ margin: "6px 0 0 16px", padding: 0 }}>
+                          <li>Go to your <strong>Supabase Dashboard &rarr; Authentication &rarr; Providers &rarr; Email</strong>.</li>
+                          <li>Scroll to <strong>Test OTPs</strong> and add a new entry (e.g., <code>test@ariesai.in</code> with OTP <code>12345678</code>).</li>
+                          <li>Try signing in with that test email. It will bypass SMTP rate limits and log you in instantly!</li>
+                        </ol>
+                      </div>
+                    </div>
+                  ) : error}
+                </div>
+              )}
 
               <button
                 type="submit"
@@ -217,16 +238,16 @@ function LoginInner() {
             <form onSubmit={verifyOtp} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "12px 14px", fontSize: 13, color: "#15803d", display: "flex", flexDirection: "column", gap: 4 }}>
                 <span style={{ fontWeight: 700 }}>OTP Code Sent!</span>
-                <span style={{ opacity: 0.9 }}>Enter the 6-digit code sent to {email}.</span>
+                <span style={{ opacity: 0.9 }}>Enter the 8-digit code sent to {email}.</span>
               </div>
 
-              <Labelled label="Enter 6-digit code">
+              <Labelled label="Enter 8-digit code">
                 <input
                   type="text"
-                  maxLength={6}
+                  maxLength={8}
                   pattern="[0-9]*"
                   inputMode="numeric"
-                  placeholder="000000"
+                  placeholder="00000000"
                   value={otpCode}
                   onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
                   required

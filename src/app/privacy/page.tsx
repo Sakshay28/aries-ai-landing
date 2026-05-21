@@ -43,7 +43,7 @@ export default function PrivacyPolicyPage() {
           <ul style={{ paddingLeft: 20, lineHeight: 2 }}>
             <li>To provide, maintain, and improve our AI-powered WhatsApp automation Service.</li>
             <li>To train your custom AI assistant with your business-specific information.</li>
-            <li>To process and deliver WhatsApp messages on your behalf via Meta&apos;s official WhatsApp Business API through our BSP partner (Gupshup).</li>
+            <li>To process and deliver WhatsApp messages on your behalf via Meta&apos;s official WhatsApp Business API.</li>
             <li>To send you transactional emails (billing, account alerts, service notifications).</li>
             <li>To provide customer support and respond to inquiries.</li>
             <li>To detect, prevent, and address fraud and security issues.</li>
@@ -54,7 +54,6 @@ export default function PrivacyPolicyPage() {
           We share data only with the following categories of service providers, solely for operating the Service:
           <ul style={{ paddingLeft: 20, lineHeight: 2, marginTop: 12 }}>
             <li><strong>Meta (WhatsApp Business API):</strong> Message delivery and processing.</li>
-            <li><strong>Gupshup:</strong> WhatsApp Business Solution Provider (BSP) for API access.</li>
             <li><strong>Google (Gemini AI):</strong> AI language model for generating conversational responses.</li>
             <li><strong>Supabase:</strong> Secure database hosting and authentication.</li>
             <li><strong>Razorpay:</strong> Payment processing.</li>
