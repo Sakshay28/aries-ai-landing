@@ -18,14 +18,14 @@ function getAI(): GoogleGenAI {
   return _ai;
 }
 
-const EMBED_MODEL = 'text-embedding-004';
+const EMBED_MODEL = 'gemini-embedding-2';
 
 // ── Generate a 768-dim embedding vector for a text string ──
 export async function embedText(text: string): Promise<number[]> {
   const result = await getAI().models.embedContent({
     model:    EMBED_MODEL,
     contents: text,
-    config:   { taskType: 'RETRIEVAL_QUERY' },
+    config:   { taskType: 'RETRIEVAL_QUERY', outputDimensionality: 768 },
   });
   const values = result.embeddings?.[0]?.values;
   if (!values || values.length === 0) throw new Error('Embedding returned empty values');
@@ -37,7 +37,7 @@ export async function embedDocument(text: string): Promise<number[]> {
   const result = await getAI().models.embedContent({
     model:    EMBED_MODEL,
     contents: text,
-    config:   { taskType: 'RETRIEVAL_DOCUMENT' },
+    config:   { taskType: 'RETRIEVAL_DOCUMENT', outputDimensionality: 768 },
   });
   const values = result.embeddings?.[0]?.values;
   if (!values || values.length === 0) throw new Error('Embedding returned empty values');

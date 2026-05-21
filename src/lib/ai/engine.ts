@@ -22,7 +22,7 @@ function getAI(): GoogleGenAI {
   }
   return _ai;
 }
-const MODEL = 'gemini-2.0-flash';
+const MODEL = 'gemini-2.5-flash';
 
 // ── Response Types ──
 export interface AIResponse {
@@ -249,7 +249,7 @@ export async function processMessageWithAI(
 function parseAIResponse(text: string): AIResponse {
   try {
     // Strip markdown code blocks if present
-    let cleaned = text;
+    let cleaned = text.trim();
     if (cleaned.startsWith('```')) {
       cleaned = cleaned.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
     }
@@ -267,7 +267,37 @@ function parseAIResponse(text: string): AIResponse {
       confidence: parsed.confidence || 0.5,
     };
   } catch {
-    // If JSON parsing fails, use the raw text as the reply
+    // Try to extract the reply using regex if it's a malformed/truncated JSON
+    const replyMatch = text.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (replyMatch) {
+      try {
+        const extractedReply = JSON.parse(`"${replyMatch[1]}"`);
+        return {
+          reply: extractedReply,
+          extractedData: {},
+          intent: 'unknown',
+          sentiment: 'neutral',
+          shouldEscalate: false,
+          nextStep: 'ask_intent',
+          confidence: 0.3,
+        };
+      } catch {}
+    }
+
+    // If it looks like JSON but we couldn't parse or extract a reply, don't show the raw JSON markup to the user
+    if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+      return {
+        reply: "I'd love to help! Could you tell me what you're looking for?",
+        extractedData: {},
+        intent: 'unknown',
+        sentiment: 'neutral',
+        shouldEscalate: false,
+        nextStep: 'ask_intent',
+        confidence: 0.3,
+      };
+    }
+
+    // If JSON parsing fails and it doesn't look like JSON, use the raw text as the reply
     return {
       reply: text || "I'd love to help! Could you tell me what you're looking for?",
       extractedData: {},

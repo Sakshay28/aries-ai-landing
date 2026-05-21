@@ -6,20 +6,31 @@ const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function main() {
-  const convId = 'f68e574b-2884-4842-b6b2-fd04f8921a6d';
-  console.log(`Checking conversation details for ID: ${convId}`);
-  
-  const { data: conv, error } = await supabase
-    .from('conversations')
-    .select('*')
-    .eq('id', convId)
-    .single();
+  console.log('Fetching last 15 messages across all conversations...');
+  const { data: messages, error } = await supabase
+    .from('messages')
+    .select(`
+      id,
+      conversation_id,
+      content,
+      direction,
+      status,
+      created_at,
+      tenant_id
+    `)
+    .order('created_at', { ascending: false })
+    .limit(15);
     
   if (error) {
-    console.error('Error:', error);
-  } else {
-    console.log('Conversation Details:', conv);
+    console.error('Error fetching messages:', error);
+    return;
   }
+  
+  console.log('Recent Messages:');
+  messages.forEach(msg => {
+    console.log(`[${msg.created_at}] [Tenant: ${msg.tenant_id}] [Conv: ${msg.conversation_id}] [Dir: ${msg.direction}] [Status: ${msg.status}]`);
+    console.log(`  Content: "${msg.content}"`);
+  });
 }
 
 main();

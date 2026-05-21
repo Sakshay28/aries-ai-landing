@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { processCampaign } from '@/app/api/broadcasts/send/route';
+import { processCampaign } from '@/lib/broadcast/queue';
 
 export const dynamic = 'force-dynamic';
 

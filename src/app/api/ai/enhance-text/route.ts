@@ -27,7 +27,7 @@ Enhance the following draft message written by a customer support agent:
 Draft message: "${text.trim()}"`;
 
     const response = await getAI().models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.5-flash',
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         temperature: 0.3,

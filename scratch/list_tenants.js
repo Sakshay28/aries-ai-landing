@@ -5,17 +5,17 @@ const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-async function main() {
-  console.log('Fetching all tenants...');
+async function run() {
   const { data, error } = await supabase
     .from('tenants')
-    .select('*');
+    .select('id, business_name, business_email, wa_phone_number_id, wa_business_account_id, wa_webhook_verified');
     
   if (error) {
-    console.error('Error:', error);
+    console.error('Error fetching tenants:', error);
   } else {
-    console.log('Tenants list:', data);
+    console.log('All tenants in database:');
+    console.log(JSON.stringify(data, null, 2));
   }
 }
 
-main();
+run();

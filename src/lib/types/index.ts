@@ -84,6 +84,8 @@ export interface Tenant {
   // Meta
   is_active: boolean;
   onboarding_completed: boolean;
+  lead_assignment_counter?: number | null;
+  outbound_webhook_url?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -201,7 +201,7 @@ CREATE TABLE conversations (
   escalation_reason TEXT,
   
   -- AI
-  ai_model_used TEXT DEFAULT 'gemini-2.0-flash',
+  ai_model_used TEXT DEFAULT 'gemini-2.5-flash',
   ai_tokens_used INTEGER DEFAULT 0,
   
   -- Metadata

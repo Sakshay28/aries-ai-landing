@@ -47,3 +47,5 @@ next-env.d.ts
 
 # local dev / one-off scripts (DB probes, RLS fixes, scratch files)
 .scripts/
+scratch/
+ngrok.log
