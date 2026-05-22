@@ -56,7 +56,7 @@ export default function ChatPage() {
 
   return (
     <div
-      className="-m-4 md:-m-6 lg:-m-8 h-full flex overflow-hidden bg-background text-foreground"
+      className="-m-4 md:-m-6 lg:-m-8 h-full flex bg-background text-foreground"
       style={{
         background: 'var(--background)',
         ['--chat-surface' as string]: 'var(--secondary)',
