@@ -112,19 +112,32 @@ function DropdownPortal({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    let listener: (() => void) | null = null;
+    const t = setTimeout(() => {
+      listener = () => onCloseRef.current();
+      document.addEventListener('click', listener, { once: true });
+    }, 0);
+    return () => {
+      clearTimeout(t);
+      if (listener) document.removeEventListener('click', listener);
+    };
+  }, []);
+
   if (typeof document === 'undefined') return null;
   const rect = anchorRef.current?.getBoundingClientRect();
   if (!rect) return null;
   return createPortal(
-    <>
-      <div className="fixed inset-0 z-[998]" onMouseDown={() => onClose()} />
-      <div
-        className="fixed z-[999] bg-card border border-border rounded-xl shadow-xl overflow-hidden"
-        style={{ top: rect.bottom + 4, left: rect.left, width: rect.width }}
-      >
-        {children}
-      </div>
-    </>,
+    <div
+      className="fixed z-[9999] bg-card border border-border rounded-xl shadow-xl overflow-hidden"
+      style={{ top: rect.bottom + 4, left: rect.left, width: rect.width }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {children}
+    </div>,
     document.body
   );
 }
