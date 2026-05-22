@@ -106,10 +106,10 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 // ── portal dropdown ─────────────────────────────────────────────────
 function DropdownPortal({
-  anchorRef, panelRef, children,
+  anchorRef, name, children,
 }: {
   anchorRef: { current: HTMLElement | null };
-  panelRef: React.RefObject<HTMLDivElement | null>;
+  name: string;
   children: React.ReactNode;
 }) {
   if (typeof document === 'undefined') return null;
@@ -117,7 +117,7 @@ function DropdownPortal({
   if (!rect) return null;
   return createPortal(
     <div
-      ref={panelRef}
+      data-portal={name}
       className="fixed z-[9999] bg-card border border-border rounded-xl shadow-xl overflow-hidden"
       style={{ top: rect.bottom + 4, left: rect.left, width: rect.width }}
     >
@@ -161,23 +161,31 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const agentDropRef = useRef<HTMLDivElement>(null);
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
   const agentTriggerRef = useRef<HTMLButtonElement>(null);
-  const statusPanelRef = useRef<HTMLDivElement>(null);
-  const agentPanelRef = useRef<HTMLDivElement>(null);
-
-  // Outside-click: check the portal panel element directly (not the trigger container)
+  // Outside-click: use closest() on live DOM — immune to React async ref assignment
   useEffect(() => {
+    if (!statusDropOpen && !agentDropOpen && !tagsOpen) return;
     const handler = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (statusDropOpen && statusPanelRef.current && !statusPanelRef.current.contains(t) && !statusTriggerRef.current?.contains(t)) {
-        setStatusDropOpen(false);
+      const target = e.target as Element;
+      if (statusDropOpen) {
+        const inPortal = target.closest?.('[data-portal="status-drop"]');
+        const inTrigger = statusTriggerRef.current?.contains(target as Node);
+        if (!inPortal && !inTrigger) setStatusDropOpen(false);
       }
-      if (agentDropOpen && agentPanelRef.current && !agentPanelRef.current.contains(t) && !agentTriggerRef.current?.contains(t)) {
-        setAgentDropOpen(false);
+      if (agentDropOpen) {
+        const inPortal = target.closest?.('[data-portal="agent-drop"]');
+        const inTrigger = agentTriggerRef.current?.contains(target as Node);
+        const inQuick = !!(target as Element).closest?.('[data-assign-trigger]');
+        if (!inPortal && !inTrigger && !inQuick) setAgentDropOpen(false);
+      }
+      if (tagsOpen) {
+        const inPortal = target.closest?.('[data-portal="tags-drop"]');
+        const inTrigger = !!(target as Element).closest?.('[data-tag-trigger]');
+        if (!inPortal && !inTrigger) setTagsOpen(false);
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [statusDropOpen, agentDropOpen]);
+  }, [statusDropOpen, agentDropOpen, tagsOpen]);
 
   const PREDEFINED_TAGS = ['VIP', 'Follow-up', 'Complaint', 'Booking', 'Pricing', 'Interested', 'Not interested', 'Spam'];
 
@@ -396,14 +404,14 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
           <div className="grid grid-cols-4 gap-1.5">
             {([
               {
-                icon: UserPlus, label: 'Assign',
+                icon: UserPlus, label: 'Assign', dataAttr: 'data-assign-trigger',
                 action: () => {
                   setAgentDropOpen(true);
                   agentTriggerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }
               },
               {
-                icon: Tag, label: 'Tag',
+                icon: Tag, label: 'Tag', dataAttr: 'data-tag-trigger',
                 action: () => setTagsOpen(v => !v)
               },
               {
@@ -420,10 +428,11 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 icon: Workflow, label: 'Flow',
                 action: () => window.location.href = '/dashboard/flows'
               },
-            ]).map(({ icon: Icon, label, action }) => (
+            ]).map(({ icon: Icon, label, action, dataAttr }: any) => (
               <button
                 key={label}
                 onClick={action}
+                {...(dataAttr ? { [dataAttr]: 'true' } : {})}
                 className="group flex flex-col items-center gap-1 py-2 rounded-xl hover:bg-black/[0.03] dark:hover:bg-white/[0.04] transition-colors cursor-pointer"
               >
                 <Icon className="w-3.5 h-3.5 text-muted-foreground/70 group-hover:text-foreground transition-colors" />
@@ -441,7 +450,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 exit={{ height: 0, opacity: 0 }}
                 transition={{ duration: 0.18, ease: 'easeInOut' }}
               >
-                <div className="bg-muted/40 rounded-xl p-3 mb-1" onMouseDown={(e: React.MouseEvent) => e.stopPropagation()}>
+                <div data-portal="tags-drop" className="bg-muted/40 rounded-xl p-3 mb-1">
                   <p className="text-[9.5px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">Quick Tags</p>
                   <div className="flex flex-wrap gap-1.5">
                     {PREDEFINED_TAGS.map(tag => {
@@ -594,7 +603,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                       <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground/50 transition-transform duration-200', statusDropOpen && 'rotate-180')} />
                     </button>
                     {statusDropOpen && (
-                      <DropdownPortal anchorRef={statusTriggerRef} panelRef={statusPanelRef}>
+                      <DropdownPortal anchorRef={statusTriggerRef} name="status-drop">
                         {STATUS_OPTIONS.map(opt => (
                           <button
                             type="button"
@@ -648,7 +657,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                           <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground/50 transition-transform duration-200', agentDropOpen && 'rotate-180')} />
                         </button>
                         {agentDropOpen && (
-                          <DropdownPortal anchorRef={agentTriggerRef} panelRef={agentPanelRef}>
+                          <DropdownPortal anchorRef={agentTriggerRef} name="agent-drop">
                             <button
                               type="button"
                             onClick={() => { assignAgent(null); setAgentDropOpen(false); }}
