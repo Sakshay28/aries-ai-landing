@@ -106,35 +106,20 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 // ── portal dropdown ─────────────────────────────────────────────────
 function DropdownPortal({
-  anchorRef, onClose, children,
+  anchorRef, panelRef, children,
 }: {
   anchorRef: { current: HTMLElement | null };
-  onClose: () => void;
+  panelRef: React.RefObject<HTMLDivElement | null>;
   children: React.ReactNode;
 }) {
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  useEffect(() => {
-    let listener: (() => void) | null = null;
-    const t = setTimeout(() => {
-      listener = () => onCloseRef.current();
-      document.addEventListener('click', listener, { once: true });
-    }, 0);
-    return () => {
-      clearTimeout(t);
-      if (listener) document.removeEventListener('click', listener);
-    };
-  }, []);
-
   if (typeof document === 'undefined') return null;
   const rect = anchorRef.current?.getBoundingClientRect();
   if (!rect) return null;
   return createPortal(
     <div
+      ref={panelRef}
       className="fixed z-[9999] bg-card border border-border rounded-xl shadow-xl overflow-hidden"
       style={{ top: rect.bottom + 4, left: rect.left, width: rect.width }}
-      onClick={(e) => e.stopPropagation()}
     >
       {children}
     </div>,
@@ -176,6 +161,23 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const agentDropRef = useRef<HTMLDivElement>(null);
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
   const agentTriggerRef = useRef<HTMLButtonElement>(null);
+  const statusPanelRef = useRef<HTMLDivElement>(null);
+  const agentPanelRef = useRef<HTMLDivElement>(null);
+
+  // Outside-click: check the portal panel element directly (not the trigger container)
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (statusDropOpen && statusPanelRef.current && !statusPanelRef.current.contains(t) && !statusTriggerRef.current?.contains(t)) {
+        setStatusDropOpen(false);
+      }
+      if (agentDropOpen && agentPanelRef.current && !agentPanelRef.current.contains(t) && !agentTriggerRef.current?.contains(t)) {
+        setAgentDropOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [statusDropOpen, agentDropOpen]);
 
   const PREDEFINED_TAGS = ['VIP', 'Follow-up', 'Complaint', 'Booking', 'Pricing', 'Interested', 'Not interested', 'Spam'];
 
@@ -592,9 +594,10 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                       <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground/50 transition-transform duration-200', statusDropOpen && 'rotate-180')} />
                     </button>
                     {statusDropOpen && (
-                      <DropdownPortal anchorRef={statusTriggerRef} onClose={() => setStatusDropOpen(false)}>
+                      <DropdownPortal anchorRef={statusTriggerRef} panelRef={statusPanelRef}>
                         {STATUS_OPTIONS.map(opt => (
                           <button
+                            type="button"
                             key={opt.value}
                             onClick={() => { updateLeadStatus(opt.value); setStatusDropOpen(false); }}
                             className={cn(
@@ -645,9 +648,10 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                           <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground/50 transition-transform duration-200', agentDropOpen && 'rotate-180')} />
                         </button>
                         {agentDropOpen && (
-                          <DropdownPortal anchorRef={agentTriggerRef} onClose={() => setAgentDropOpen(false)}>
+                          <DropdownPortal anchorRef={agentTriggerRef} panelRef={agentPanelRef}>
                             <button
-                              onClick={() => { assignAgent(null); setAgentDropOpen(false); }}
+                              type="button"
+                            onClick={() => { assignAgent(null); setAgentDropOpen(false); }}
                               className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60', !localLead?.assigned_to ? 'bg-muted/80' : '')}
                             >
                               <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
@@ -662,6 +666,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                               return (
                                 <button
                                   key={u.id}
+                                  type="button"
                                   onClick={() => { assignAgent(u.id); setAgentDropOpen(false); }}
                                   className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60', isSelected ? 'bg-muted/80' : '')}
                                 >
