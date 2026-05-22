@@ -162,27 +162,25 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   // Close dropdowns on outside click
   useEffect(() => {
     if (!statusDropOpen && !agentDropOpen && !tagsOpen) return;
-    // Use setTimeout so the portal has time to mount and attach refs
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
-      setTimeout(() => {
-        if (statusDropOpen) {
-          const inPortal = statusPortalRef.current?.contains(target);
-          const inTrigger = statusTriggerRef.current?.contains(target);
-          if (!inPortal && !inTrigger) setStatusDropOpen(false);
+      if (statusDropOpen && statusPortalRef.current) {
+        if (!statusPortalRef.current.contains(target) && !statusTriggerRef.current?.contains(target)) {
+          setStatusDropOpen(false);
         }
-        if (agentDropOpen) {
-          const inPortal = agentPortalRef.current?.contains(target);
-          const inTrigger = agentTriggerRef.current?.contains(target);
-          const inQuick = agentQuickTriggerRef.current?.contains(target);
-          if (!inPortal && !inTrigger && !inQuick) setAgentDropOpen(false);
+      }
+      if (agentDropOpen && agentPortalRef.current) {
+        if (!agentPortalRef.current.contains(target) && 
+            !agentTriggerRef.current?.contains(target) && 
+            !agentQuickTriggerRef.current?.contains(target)) {
+          setAgentDropOpen(false);
         }
-        if (tagsOpen) {
-          const inPortal = tagsPortalRef.current?.contains(target);
-          const inTrigger = tagsTriggerRef.current?.contains(target);
-          if (!inPortal && !inTrigger) setTagsOpen(false);
+      }
+      if (tagsOpen && tagsPortalRef.current) {
+        if (!tagsPortalRef.current.contains(target) && !tagsTriggerRef.current?.contains(target)) {
+          setTagsOpen(false);
         }
-      }, 0);
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
