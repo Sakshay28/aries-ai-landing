@@ -707,6 +707,8 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
             left: Math.max(10, Math.min(statusRect.left, typeof window !== 'undefined' ? window.innerWidth - 230 : statusRect.left)),
             width: Math.max(statusRect.width, 220),
             zIndex: 9999,
+            pointerEvents: 'auto',
+            isolation: 'isolate',
           }}
           className="bg-white dark:bg-[#0A0A0A] border border-border rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150"
         >
@@ -740,6 +742,8 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
             left: Math.max(10, Math.min(agentRect.left, typeof window !== 'undefined' ? window.innerWidth - 230 : agentRect.left)),
             width: Math.max(agentRect.width, 220),
             zIndex: 9999,
+            pointerEvents: 'auto',
+            isolation: 'isolate',
           }}
           className="bg-white dark:bg-[#0A0A0A] border border-border rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150"
         >
@@ -781,6 +785,8 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
             left: Math.max(10, Math.min(tagsRect.left - 60, typeof window !== 'undefined' ? window.innerWidth - 280 : tagsRect.left - 60)),
             width: 260,
             zIndex: 9999,
+            pointerEvents: 'auto',
+            isolation: 'isolate',
           }}
           className="bg-white dark:bg-[#0A0A0A] border border-border rounded-xl shadow-2xl p-3 animate-in fade-in slide-in-from-top-1 duration-150"
         >
