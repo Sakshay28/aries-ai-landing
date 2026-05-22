@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   Phone, Tag, Bot, User,
   MessageSquare, ChevronDown, Plus, Trash2,
@@ -103,6 +104,31 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 
+// ── portal dropdown ─────────────────────────────────────────────────
+function DropdownPortal({
+  anchorRef, onClose, children,
+}: {
+  anchorRef: { current: HTMLElement | null };
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  if (typeof document === 'undefined') return null;
+  const rect = anchorRef.current?.getBoundingClientRect();
+  if (!rect) return null;
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[998]" onMouseDown={() => onClose()} />
+      <div
+        className="fixed z-[999] bg-card border border-border rounded-xl shadow-xl overflow-hidden"
+        style={{ top: rect.bottom + 4, left: rect.left, width: rect.width }}
+      >
+        {children}
+      </div>
+    </>,
+    document.body
+  );
+}
+
 // ── note type ────────────────────────────────────────────────────────
 interface Note { id: string; text: string; createdAt: string; }
 
@@ -135,16 +161,8 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const [agentDropOpen, setAgentDropOpen] = useState(false);
   const statusDropRef = useRef<HTMLDivElement>(null);
   const agentDropRef = useRef<HTMLDivElement>(null);
-
-  // Close dropdowns on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (statusDropRef.current && !statusDropRef.current.contains(e.target as Node)) setStatusDropOpen(false);
-      if (agentDropRef.current && !agentDropRef.current.contains(e.target as Node)) setAgentDropOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  const statusTriggerRef = useRef<HTMLButtonElement>(null);
+  const agentTriggerRef = useRef<HTMLButtonElement>(null);
 
   const PREDEFINED_TAGS = ['VIP', 'Follow-up', 'Complaint', 'Booking', 'Pricing', 'Interested', 'Not interested', 'Spam'];
 
@@ -366,8 +384,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 icon: UserPlus, label: 'Assign',
                 action: () => {
                   setAgentDropOpen(true);
-                  // scroll to agent section
-                  agentDropRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  agentTriggerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }
               },
               {
@@ -408,7 +425,6 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 animate={{ height: 'auto', opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
                 transition={{ duration: 0.18, ease: 'easeInOut' }}
-                className="overflow-hidden"
               >
                 <div className="bg-muted/40 rounded-xl p-3 mb-1" onMouseDown={(e: React.MouseEvent) => e.stopPropagation()}>
                   <p className="text-[9.5px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">Quick Tags</p>
@@ -549,9 +565,10 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 ];
                 const current = STATUS_OPTIONS.find(o => o.value === (localLead?.lead_status || 'new')) || STATUS_OPTIONS[0];
                 return (
-                  <div className="flex flex-col gap-0.5" ref={statusDropRef}>
+                  <div className="flex flex-col gap-0.5">
                     <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1">Lead Status</p>
                     <button
+                      ref={statusTriggerRef}
                       onClick={() => setStatusDropOpen(v => !v)}
                       className="w-full flex items-center justify-between px-2.5 py-2 bg-secondary/60 hover:bg-secondary border border-border hover:border-indigo-400 rounded-xl text-[12.5px] font-semibold transition-all"
                     >
@@ -561,33 +578,24 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                       </span>
                       <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground/50 transition-transform duration-200', statusDropOpen && 'rotate-180')} />
                     </button>
-                    <AnimatePresence>
-                      {statusDropOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, y: -4, scale: 0.97 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: -4, scale: 0.97 }}
-                          transition={{ duration: 0.14 }}
-                          onMouseDown={(e: React.MouseEvent) => e.stopPropagation()}
-                          className="mt-1 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-50"
-                        >
-                          {STATUS_OPTIONS.map(opt => (
-                            <button
-                              key={opt.value}
-                              onClick={() => { updateLeadStatus(opt.value); setStatusDropOpen(false); }}
-                              className={cn(
-                                'w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60',
-                                opt.value === current.value ? 'bg-muted/80' : ''
-                              )}
-                            >
-                              <span className="text-[14px]">{opt.emoji}</span>
-                              <span className={opt.color}>{opt.label}</span>
-                              {opt.value === current.value && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
-                            </button>
-                          ))}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                    {statusDropOpen && (
+                      <DropdownPortal anchorRef={statusTriggerRef} onClose={() => setStatusDropOpen(false)}>
+                        {STATUS_OPTIONS.map(opt => (
+                          <button
+                            key={opt.value}
+                            onClick={() => { updateLeadStatus(opt.value); setStatusDropOpen(false); }}
+                            className={cn(
+                              'w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60',
+                              opt.value === current.value ? 'bg-muted/80' : ''
+                            )}
+                          >
+                            <span className="text-[14px]">{opt.emoji}</span>
+                            <span className={opt.color}>{opt.label}</span>
+                            {opt.value === current.value && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
+                          </button>
+                        ))}
+                      </DropdownPortal>
+                    )}
                   </div>
                 );
               })()}
@@ -598,7 +606,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 const currentLabel = currentAgent ? (currentAgent.full_name || currentAgent.email) : 'Unassigned';
                 const currentInitial = currentAgent ? (currentAgent.full_name || currentAgent.email || '?').charAt(0).toUpperCase() : null;
                 return (
-                  <div className="flex flex-col gap-0.5" ref={agentDropRef}>
+                  <div className="flex flex-col gap-0.5">
                     <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1">Assigned Agent</p>
                     {loadingTeam ? (
                       <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
@@ -607,6 +615,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                     ) : (
                       <>
                         <button
+                          ref={agentTriggerRef}
                           onClick={() => setAgentDropOpen(v => !v)}
                           className="w-full flex items-center justify-between px-2.5 py-2 bg-secondary/60 hover:bg-secondary border border-border hover:border-indigo-400 rounded-xl text-[12.5px] font-semibold transition-all"
                         >
@@ -622,44 +631,35 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                           </span>
                           <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground/50 transition-transform duration-200', agentDropOpen && 'rotate-180')} />
                         </button>
-                        <AnimatePresence>
-                          {agentDropOpen && (
-                            <motion.div
-                              initial={{ opacity: 0, y: -4, scale: 0.97 }}
-                              animate={{ opacity: 1, y: 0, scale: 1 }}
-                              exit={{ opacity: 0, y: -4, scale: 0.97 }}
-                              transition={{ duration: 0.14 }}
-                              onMouseDown={(e: React.MouseEvent) => e.stopPropagation()}
-                              className="mt-1 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-50"
+                        {agentDropOpen && (
+                          <DropdownPortal anchorRef={agentTriggerRef} onClose={() => setAgentDropOpen(false)}>
+                            <button
+                              onClick={() => { assignAgent(null); setAgentDropOpen(false); }}
+                              className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60', !localLead?.assigned_to ? 'bg-muted/80' : '')}
                             >
-                              <button
-                                onClick={() => { assignAgent(null); setAgentDropOpen(false); }}
-                                className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60', !localLead?.assigned_to ? 'bg-muted/80' : '')}
-                              >
-                                <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                                  <User className="w-3 h-3 text-muted-foreground/50" />
-                                </span>
-                                <span className="text-muted-foreground">Unassigned</span>
-                                {!localLead?.assigned_to && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
-                              </button>
-                              {team.map((u: any) => {
-                                const initial = (u.full_name || u.email || '?').charAt(0).toUpperCase();
-                                const isSelected = u.id === localLead?.assigned_to;
-                                return (
-                                  <button
-                                    key={u.id}
-                                    onClick={() => { assignAgent(u.id); setAgentDropOpen(false); }}
-                                    className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60', isSelected ? 'bg-muted/80' : '')}
-                                  >
-                                    <span className="w-5 h-5 rounded-full bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">{initial}</span>
-                                    <span className="truncate">{u.full_name || u.email}</span>
-                                    {isSelected && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
-                                  </button>
-                                );
-                              })}
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
+                              <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                                <User className="w-3 h-3 text-muted-foreground/50" />
+                              </span>
+                              <span className="text-muted-foreground">Unassigned</span>
+                              {!localLead?.assigned_to && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
+                            </button>
+                            {team.map((u: any) => {
+                              const initial = (u.full_name || u.email || '?').charAt(0).toUpperCase();
+                              const isSelected = u.id === localLead?.assigned_to;
+                              return (
+                                <button
+                                  key={u.id}
+                                  onClick={() => { assignAgent(u.id); setAgentDropOpen(false); }}
+                                  className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60', isSelected ? 'bg-muted/80' : '')}
+                                >
+                                  <span className="w-5 h-5 rounded-full bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">{initial}</span>
+                                  <span className="truncate">{u.full_name || u.email}</span>
+                                  {isSelected && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
+                                </button>
+                              );
+                            })}
+                          </DropdownPortal>
+                        )}
                       </>
                     )}
                   </div>
