@@ -454,7 +454,7 @@ export async function sendStaffAlert(
         token,
         tenant.wa_phone_number_id,
         phone,
-        text
+        `🔔 STAFF ALERT:\n\n${text}`
       );
     } catch (err) {
       console.error(`Failed to send staff alert to ${phone} via Meta:`, err);

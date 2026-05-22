@@ -46,16 +46,9 @@ export async function POST(
     }
 
     // Update the bot_paused flag
-    const updatePayload: any = { bot_paused };
-    if (!bot_paused) {
-      updatePayload.escalated = false;
-      updatePayload.escalated_at = null;
-      updatePayload.escalation_reason = null;
-    }
-
     await supabaseAdmin
       .from('conversations')
-      .update(updatePayload)
+      .update({ bot_paused })
       .eq('id', id);
 
     return NextResponse.json({ success: true });

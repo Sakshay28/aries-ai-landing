@@ -61,72 +61,6 @@ export async function processIncomingIGMessage(igPageId: string, senderId: strin
     return;
   }
 
-  // ── Step 4.5: AI Auto-Resume Trigger Check ──
-  const normalText = (messageText || '').toLowerCase().trim();
-  const aiResumeTriggers = [
-    'want to talk to ai',
-    'want to speak to ai',
-    'want to talk to the ai',
-    'want to speak to the ai',
-    'talk to ai',
-    'speak to ai',
-    'talk to the ai',
-    'speak to the ai',
-    'connect to ai',
-    'connect to the ai',
-    'connect me to ai',
-    'connect me to the ai',
-    'ai only',
-    'switch to ai',
-    'switch back to ai',
-    'resume ai',
-    'unpause ai',
-    'start ai',
-    'talk to bot',
-    'speak to bot',
-    'talk to the bot',
-    'speak to the bot',
-    'connect to bot',
-    'connect to the bot',
-    'connect me to bot',
-    'connect me to the bot',
-    'bot only',
-    'switch to bot',
-    'switch back to bot',
-    'resume bot',
-    'unpause bot',
-    'start bot'
-  ];
-
-  const isAiResumeTrigger = aiResumeTriggers.some(trigger => normalText.includes(trigger)) || 
-    /talk to (?:the )?(?:ai|bot)/i.test(normalText) || 
-    /speak to (?:the )?(?:ai|bot)/i.test(normalText) ||
-    /connect (?:me )?(?:back )?to (?:the )?(?:ai|bot)/i.test(normalText);
-
-  if (isAiResumeTrigger && (conversation.bot_paused || conversation.escalated)) {
-    console.log(`🤖 IG AI Auto-Resume Triggered for conversation ${conversation.id}. Resetting bot_paused & escalated.`);
-    
-    // Update DB
-    const { error: resetErr } = await supabaseAdmin
-      .from('conversations')
-      .update({
-        bot_paused: false,
-        escalated: false,
-        escalated_at: null,
-        escalation_reason: null
-      })
-      .eq('id', conversation.id);
-      
-    if (resetErr) {
-      console.error('❌ Failed to auto-resume conversation in DB:', resetErr.message);
-    } else {
-      conversation.bot_paused = false;
-      conversation.escalated = false;
-      conversation.escalated_at = null;
-      conversation.escalation_reason = null;
-    }
-  }
-
   // ── Step 5: Handle Human Handoff (bot_paused) ──
   if (conversation.bot_paused) {
     await logMessage(tenant.id, conversation.id, 'inbound', messageText, 'instagram_dm', senderId);
@@ -262,7 +196,7 @@ async function handleEscalation(
   aiResponse: Awaited<ReturnType<typeof processMessageWithAI>>,
 ) {
   await supabaseAdmin.from('conversations').update({ escalated: true, escalated_at: new Date().toISOString(), escalation_reason: aiResponse.escalationReason }).eq('id', conversationId);
-  await sendStaffAlert(tenant, `⚠️ IG Handoff Requested!\n👤 User (${senderId})\n💬 "${aiResponse.escalationReason || 'Human support requested'}"`);
+  await sendStaffAlert(tenant, `🔔 IG ESCALATION\n\n👤 IG User (${senderId})\n⚠️ Reason: ${aiResponse.escalationReason}\n🏢 ${tenant.business_name}`);
 }
 
 async function saveLead(tenant: Tenant, conversation: Record<string, unknown>, context: ConversationContext, senderId: string) {

@@ -83,14 +83,6 @@ export default function ChatSidebar() {
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<'active' | 'requesting' | 'intervened'>('active');
   const [tenantId, setTenantId] = useState<string | null>(null);
-  const [mutedIds, setMutedIds] = useState<string[]>([]);
-
-  // Load muted ids from localStorage
-  useEffect(() => {
-    try {
-      setMutedIds(JSON.parse(localStorage.getItem('muted-conversations') || '[]'));
-    } catch { setMutedIds([]); }
-  }, []);
 
   const supabaseRef = useRef(createBrowserSupabaseClient());
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -167,20 +159,6 @@ export default function ChatSidebar() {
           }
         }
       )
-      // Lead updates: updates name/phone/agent/status changes
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "leads"
-        },
-        (payload) => {
-          if (payload.new && (payload.new as any).tenant_id === tenantId) {
-            load();
-          }
-        }
-      )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           console.log('[Sidebar Realtime] ✅ Subscribed for tenant:', tenantId);
@@ -212,66 +190,19 @@ export default function ChatSidebar() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // ─── Custom event listeners ───────────────────────────────────────────────
-  useEffect(() => {
-    const onMuteUpdated = () => {
-      try {
-        setMutedIds(JSON.parse(localStorage.getItem('muted-conversations') || '[]'));
-      } catch { setMutedIds([]); }
-    };
-
-    const onConversationUpdated = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { conversationId?: string; is_active?: boolean };
-      if (detail?.conversationId && detail.is_active !== undefined) {
-        setConvos(prev => prev.map(c =>
-          c.id === detail.conversationId ? { ...c, is_active: detail.is_active! } : c
-        ));
-      }
-    };
-
-    const onLeadUpdated = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { lead?: any; conversationId?: string };
-      if (!detail?.conversationId || !detail?.lead) return;
-      setConvos(prev => prev.map(c => {
-        if (c.id !== detail.conversationId) return c;
-        return {
-          ...c,
-          leads: {
-            name: detail.lead.name ?? c.leads?.name ?? null,
-            phone: detail.lead.phone ?? c.leads?.phone ?? null,
-          }
-        };
-      }));
-    };
-
-    window.addEventListener('mute-updated', onMuteUpdated);
-    window.addEventListener('conversation-updated', onConversationUpdated);
-    window.addEventListener('lead-updated', onLeadUpdated);
-    return () => {
-      window.removeEventListener('mute-updated', onMuteUpdated);
-      window.removeEventListener('conversation-updated', onConversationUpdated);
-      window.removeEventListener('lead-updated', onLeadUpdated);
-    };
-  }, []);
-
   const filtered = convos.filter(c => {
-    // Show resolved chats too — they stay visible with a ✅ badge
-    // Only filter by tab and search
     if (activeTab === 'requesting') {
       if (!c.escalated) return false;
     } else if (activeTab === 'intervened') {
       if (!c.bot_paused) return false;
+    } else {
+      if (c.bot_paused) return false;
     }
 
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return getDisplayName(c).toLowerCase().includes(q) ||
       (c.last_message_preview ?? '').toLowerCase().includes(q);
-  }).sort((a, b) => {
-    // Push resolved to the bottom
-    if (a.is_active === false && b.is_active !== false) return 1;
-    if (a.is_active !== false && b.is_active === false) return -1;
-    return 0;
   });
 
   return (
@@ -284,10 +215,9 @@ export default function ChatSidebar() {
         <div className="flex gap-1 p-0.5 bg-secondary rounded-lg mb-3">
           {(['active', 'requesting', 'intervened'] as const).map((tab) => {
             const count = convos.filter(c => {
-              if (c.is_active === false) return false;
               if (tab === 'requesting') return c.escalated;
               if (tab === 'intervened') return c.bot_paused;
-              return true;
+              return !c.bot_paused;
             }).length;
 
             return (
@@ -348,14 +278,13 @@ export default function ChatSidebar() {
         ) : (
           filtered.map((conv) => {
             const isActive = conv.id === activeId;
-            const isResolved = conv.is_active === false;
             const name = getDisplayName(conv);
             const preview = conv.last_message_preview ?? "";
             const phone = conv.leads?.phone ?? '';
             const isRecent = conv.last_message_at
               ? (Date.now() - new Date(conv.last_message_at).getTime()) < 5 * 60_000
               : false;
-            const isUnreadFeel = isRecent && !isActive && !isResolved;
+            const isUnreadFeel = isRecent && !isActive;
 
             return (
               <button
@@ -365,8 +294,7 @@ export default function ChatSidebar() {
                   "w-full flex items-center gap-3 px-4 py-3 text-left transition-all duration-150 relative group",
                   isActive
                     ? "bg-[#EEF2F7] dark:bg-white/8 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] border-y border-black/5 dark:border-white/5"
-                    : "hover:bg-[#F5F7FA] dark:hover:bg-white/4",
-                  isResolved && !isActive ? "opacity-55" : ""
+                    : "hover:bg-[#F5F7FA] dark:hover:bg-white/4"
                 )}
               >
                 {isActive && (
@@ -401,12 +329,6 @@ export default function ChatSidebar() {
                       isUnreadFeel ? "font-bold text-foreground" : isActive ? "font-semibold text-foreground" : "font-semibold text-foreground/85"
                     )}>
                       {name}
-                      {isResolved && (
-                        <span className="ml-1.5 text-[11px]" title="Resolved">✅</span>
-                      )}
-                      {!isResolved && mutedIds.includes(conv.id) && (
-                        <span className="ml-1.5 text-[11px]" title="Notifications muted">🔇</span>
-                      )}
                     </span>
                     <span className={cn(
                       "text-[11px] flex-shrink-0 ml-2 font-normal",
