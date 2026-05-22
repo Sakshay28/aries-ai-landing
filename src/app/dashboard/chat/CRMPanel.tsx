@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
 import {
   Phone, Tag, Bot, User,
   MessageSquare, ChevronDown, Plus, Trash2,
@@ -104,29 +103,6 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 
-// ── portal dropdown ─────────────────────────────────────────────────
-function DropdownPortal({
-  anchorRef, name, children,
-}: {
-  anchorRef: { current: HTMLElement | null };
-  name: string;
-  children: React.ReactNode;
-}) {
-  if (typeof document === 'undefined') return null;
-  const rect = anchorRef.current?.getBoundingClientRect();
-  if (!rect) return null;
-  return createPortal(
-    <div
-      data-portal={name}
-      className="fixed z-[9999] bg-card border border-border rounded-xl shadow-xl overflow-hidden"
-      style={{ top: rect.bottom + 4, left: rect.left, width: rect.width }}
-    >
-      {children}
-    </div>,
-    document.body
-  );
-}
-
 // ── note type ────────────────────────────────────────────────────────
 interface Note { id: string; text: string; createdAt: string; }
 
@@ -155,37 +131,18 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const notesSectionRef = useRef<HTMLDivElement>(null);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(true);
-  const [statusDropOpen, setStatusDropOpen] = useState(false);
-  const [agentDropOpen, setAgentDropOpen] = useState(false);
-  const statusDropRef = useRef<HTMLDivElement>(null);
-  const agentDropRef = useRef<HTMLDivElement>(null);
-  const statusTriggerRef = useRef<HTMLButtonElement>(null);
-  const agentTriggerRef = useRef<HTMLButtonElement>(null);
-  // Outside-click: use closest() on live DOM — immune to React async ref assignment
+  // Outside-click for tags inline panel
   useEffect(() => {
-    if (!statusDropOpen && !agentDropOpen && !tagsOpen) return;
+    if (!tagsOpen) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as Element;
-      if (statusDropOpen) {
-        const inPortal = target.closest?.('[data-portal="status-drop"]');
-        const inTrigger = statusTriggerRef.current?.contains(target as Node);
-        if (!inPortal && !inTrigger) setStatusDropOpen(false);
-      }
-      if (agentDropOpen) {
-        const inPortal = target.closest?.('[data-portal="agent-drop"]');
-        const inTrigger = agentTriggerRef.current?.contains(target as Node);
-        const inQuick = !!(target as Element).closest?.('[data-assign-trigger]');
-        if (!inPortal && !inTrigger && !inQuick) setAgentDropOpen(false);
-      }
-      if (tagsOpen) {
-        const inPortal = target.closest?.('[data-portal="tags-drop"]');
-        const inTrigger = !!(target as Element).closest?.('[data-tag-trigger]');
-        if (!inPortal && !inTrigger) setTagsOpen(false);
-      }
+      const inPanel = !!target.closest?.('[data-tags-panel]');
+      const inTrigger = !!(target as Element).closest?.('[data-tag-trigger]');
+      if (!inPanel && !inTrigger) setTagsOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [statusDropOpen, agentDropOpen, tagsOpen]);
+  }, [tagsOpen]);
 
   const PREDEFINED_TAGS = ['VIP', 'Follow-up', 'Complaint', 'Booking', 'Pricing', 'Interested', 'Not interested', 'Spam'];
 
@@ -406,8 +363,8 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
               {
                 icon: UserPlus, label: 'Assign', dataAttr: 'data-assign-trigger',
                 action: () => {
-                  setAgentDropOpen(true);
-                  agentTriggerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  agentSelectRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  setTimeout(() => agentSelectRef.current?.focus(), 300);
                 }
               },
               {
@@ -450,7 +407,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 exit={{ height: 0, opacity: 0 }}
                 transition={{ duration: 0.18, ease: 'easeInOut' }}
               >
-                <div data-portal="tags-drop" className="bg-muted/40 rounded-xl p-3 mb-1">
+                <div data-tags-panel className="bg-muted/40 rounded-xl p-3 mb-1">
                   <p className="text-[9.5px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">Quick Tags</p>
                   <div className="flex flex-wrap gap-1.5">
                     {PREDEFINED_TAGS.map(tag => {
@@ -578,120 +535,49 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 )}
               </div>
 
-              {/* Status Row — custom dropdown */}
-              {(() => {
-                const STATUS_OPTIONS = [
-                  { value: 'new',       label: 'New',       emoji: '🆕', color: 'text-foreground' },
-                  { value: 'hot',       label: 'Hot',       emoji: '🔥', color: 'text-red-600 dark:text-red-400' },
-                  { value: 'warm',      label: 'Warm',      emoji: '☀️', color: 'text-orange-600 dark:text-orange-400' },
-                  { value: 'cold',      label: 'Cold',      emoji: '❄️', color: 'text-blue-600 dark:text-blue-400' },
-                  { value: 'converted', label: 'Converted', emoji: '👑', color: 'text-emerald-600 dark:text-emerald-400' },
-                ];
-                const current = STATUS_OPTIONS.find(o => o.value === (localLead?.lead_status || 'new')) || STATUS_OPTIONS[0];
-                return (
-                  <div className="flex flex-col gap-0.5">
-                    <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1">Lead Status</p>
-                    <button
-                      ref={statusTriggerRef}
-                      onClick={() => setStatusDropOpen(v => !v)}
-                      className="w-full flex items-center justify-between px-2.5 py-2 bg-secondary/60 hover:bg-secondary border border-border hover:border-indigo-400 rounded-xl text-[12.5px] font-semibold transition-all"
-                    >
-                      <span className={cn('flex items-center gap-2', current.color)}>
-                        <span className="text-[14px]">{current.emoji}</span>
-                        {current.label}
-                      </span>
-                      <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground/50 transition-transform duration-200', statusDropOpen && 'rotate-180')} />
-                    </button>
-                    {statusDropOpen && (
-                      <DropdownPortal anchorRef={statusTriggerRef} name="status-drop">
-                        {STATUS_OPTIONS.map(opt => (
-                          <button
-                            type="button"
-                            key={opt.value}
-                            onClick={() => { updateLeadStatus(opt.value); setStatusDropOpen(false); }}
-                            className={cn(
-                              'w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60',
-                              opt.value === current.value ? 'bg-muted/80' : ''
-                            )}
-                          >
-                            <span className="text-[14px]">{opt.emoji}</span>
-                            <span className={opt.color}>{opt.label}</span>
-                            {opt.value === current.value && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
-                          </button>
-                        ))}
-                      </DropdownPortal>
-                    )}
-                  </div>
-                );
-              })()}
+              {/* Status Row — native select */}
+              <div className="flex flex-col gap-0.5">
+                <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1">Lead Status</p>
+                <div className="relative">
+                  <select
+                    value={localLead?.lead_status || 'new'}
+                    onChange={(e) => updateLeadStatus(e.target.value)}
+                    className="w-full appearance-none px-2.5 py-2 bg-secondary/60 hover:bg-secondary border border-border hover:border-indigo-400 focus:border-indigo-400 rounded-xl text-[12.5px] font-semibold transition-all cursor-pointer outline-none pr-8 text-foreground"
+                  >
+                    <option value="new">🆕 New</option>
+                    <option value="hot">🔥 Hot</option>
+                    <option value="warm">☀️ Warm</option>
+                    <option value="cold">❄️ Cold</option>
+                    <option value="converted">👑 Converted</option>
+                  </select>
+                  <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none" />
+                </div>
+              </div>
 
-              {/* Agent Assignment — custom dropdown */}
-              {(() => {
-                const currentAgent = team.find((u: any) => u.id === localLead?.assigned_to);
-                const currentLabel = currentAgent ? (currentAgent.full_name || currentAgent.email) : 'Unassigned';
-                const currentInitial = currentAgent ? (currentAgent.full_name || currentAgent.email || '?').charAt(0).toUpperCase() : null;
-                return (
-                  <div className="flex flex-col gap-0.5">
-                    <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1">Assigned Agent</p>
-                    {loadingTeam ? (
-                      <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading team...
-                      </div>
-                    ) : (
-                      <>
-                        <button
-                          ref={agentTriggerRef}
-                          onClick={() => setAgentDropOpen(v => !v)}
-                          className="w-full flex items-center justify-between px-2.5 py-2 bg-secondary/60 hover:bg-secondary border border-border hover:border-indigo-400 rounded-xl text-[12.5px] font-semibold transition-all"
-                        >
-                          <span className="flex items-center gap-2 text-foreground">
-                            {currentInitial ? (
-                              <span className="w-5 h-5 rounded-full bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">{currentInitial}</span>
-                            ) : (
-                              <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                                <User className="w-3 h-3 text-muted-foreground/50" />
-                              </span>
-                            )}
-                            <span className={cn(currentAgent ? 'text-foreground' : 'text-muted-foreground')}>{currentLabel}</span>
-                          </span>
-                          <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground/50 transition-transform duration-200', agentDropOpen && 'rotate-180')} />
-                        </button>
-                        {agentDropOpen && (
-                          <DropdownPortal anchorRef={agentTriggerRef} name="agent-drop">
-                            <button
-                              type="button"
-                            onClick={() => { assignAgent(null); setAgentDropOpen(false); }}
-                              className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60', !localLead?.assigned_to ? 'bg-muted/80' : '')}
-                            >
-                              <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                                <User className="w-3 h-3 text-muted-foreground/50" />
-                              </span>
-                              <span className="text-muted-foreground">Unassigned</span>
-                              {!localLead?.assigned_to && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
-                            </button>
-                            {team.map((u: any) => {
-                              const initial = (u.full_name || u.email || '?').charAt(0).toUpperCase();
-                              const isSelected = u.id === localLead?.assigned_to;
-                              return (
-                                <button
-                                  key={u.id}
-                                  type="button"
-                                  onClick={() => { assignAgent(u.id); setAgentDropOpen(false); }}
-                                  className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60', isSelected ? 'bg-muted/80' : '')}
-                                >
-                                  <span className="w-5 h-5 rounded-full bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">{initial}</span>
-                                  <span className="truncate">{u.full_name || u.email}</span>
-                                  {isSelected && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
-                                </button>
-                              );
-                            })}
-                          </DropdownPortal>
-                        )}
-                      </>
-                    )}
+              {/* Agent Assignment — native select */}
+              <div className="flex flex-col gap-0.5">
+                <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1">Assigned Agent</p>
+                {loadingTeam ? (
+                  <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading team...
                   </div>
-                );
-              })()}
+                ) : (
+                  <div className="relative">
+                    <select
+                      ref={agentSelectRef}
+                      value={localLead?.assigned_to || ''}
+                      onChange={(e) => assignAgent(e.target.value || null)}
+                      className="w-full appearance-none px-2.5 py-2 bg-secondary/60 hover:bg-secondary border border-border hover:border-indigo-400 focus:border-indigo-400 rounded-xl text-[12.5px] font-semibold transition-all cursor-pointer outline-none pr-8 text-foreground"
+                    >
+                      <option value="">Unassigned</option>
+                      {team.map((u: any) => (
+                        <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none" />
+                  </div>
+                )}
+              </div>
 
               {localLead?.tags && localLead.tags.length > 0 && (
                 <div>
