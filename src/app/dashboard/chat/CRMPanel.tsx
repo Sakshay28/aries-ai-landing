@@ -59,10 +59,14 @@ function Section({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [animating, setAnimating] = useState(false);
+  const openRef = useRef(open);
+  openRef.current = open;
+
   return (
     <div className="mb-1">
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={() => { setOpen(o => !o); setAnimating(true); }}
         className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors rounded-lg"
       >
         <div className="flex items-center gap-1.5">
@@ -78,7 +82,8 @@ function Section({
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.18, ease: "easeInOut" }}
-            className="overflow-hidden"
+            onAnimationComplete={() => { if (openRef.current) setAnimating(false); }}
+            className={animating ? "overflow-hidden" : ""}
           >
             <div className="px-4 pb-3 space-y-2.5">{children}</div>
           </motion.div>
@@ -144,7 +149,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const PREDEFINED_TAGS = ['VIP', 'Follow-up', 'Complaint', 'Booking', 'Pricing', 'Interested', 'Not interested', 'Spam'];
 
   const toggleTag = async (tag: string) => {
-    if (!localLead?.id) return;
+    if (!localLead?.id) { toast.error("No lead linked to this conversation"); return; }
     const current: string[] = localLead.tags || [];
     const updated = current.includes(tag) ? current.filter((t: string) => t !== tag) : [...current, tag];
     setLocalLead((prev: any) => prev ? { ...prev, tags: updated } : null);
@@ -171,7 +176,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   }, []);
 
   const updateLeadStatus = async (status: string) => {
-    if (!localLead?.id) return;
+    if (!localLead?.id) { toast.error("No lead linked to this conversation"); return; }
     const originalStatus = localLead.lead_status;
     setLocalLead((prev: any) => prev ? { ...prev, lead_status: status } : null);
     const supabase = createBrowserSupabaseClient();
@@ -205,7 +210,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   };
 
   const assignAgent = async (userId: string | null) => {
-    if (!localLead?.id) return;
+    if (!localLead?.id) { toast.error("No lead linked to this conversation"); return; }
     const originalAgent = localLead.assigned_to;
     setLocalLead((prev: any) => prev ? { ...prev, assigned_to: userId } : null);
     try {
@@ -405,7 +410,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 transition={{ duration: 0.18, ease: 'easeInOut' }}
                 className="overflow-hidden"
               >
-                <div className="bg-muted/40 rounded-xl p-3 mb-1">
+                <div className="bg-muted/40 rounded-xl p-3 mb-1" onMouseDown={(e: React.MouseEvent) => e.stopPropagation()}>
                   <p className="text-[9.5px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">Quick Tags</p>
                   <div className="flex flex-wrap gap-1.5">
                     {PREDEFINED_TAGS.map(tag => {
@@ -563,6 +568,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: -4, scale: 0.97 }}
                           transition={{ duration: 0.14 }}
+                          onMouseDown={(e: React.MouseEvent) => e.stopPropagation()}
                           className="mt-1 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-50"
                         >
                           {STATUS_OPTIONS.map(opt => (
@@ -623,6 +629,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                               animate={{ opacity: 1, y: 0, scale: 1 }}
                               exit={{ opacity: 0, y: -4, scale: 0.97 }}
                               transition={{ duration: 0.14 }}
+                              onMouseDown={(e: React.MouseEvent) => e.stopPropagation()}
                               className="mt-1 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-50"
                             >
                               <button
