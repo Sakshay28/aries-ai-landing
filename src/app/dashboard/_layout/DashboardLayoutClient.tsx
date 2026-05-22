@@ -20,8 +20,8 @@ export default function DashboardLayoutClient({
         <Backdrop />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <AppHeader />
-          <main className="flex-1 overflow-hidden">
-            <div className="w-full h-full overflow-auto p-4 md:p-6 lg:p-8">{children}</div>
+          <main className="flex-1 overflow-auto">
+            <div className="w-full p-4 md:p-6 lg:p-8">{children}</div>
           </main>
         </div>
       </div>
