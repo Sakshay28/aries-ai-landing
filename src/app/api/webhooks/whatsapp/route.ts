@@ -12,7 +12,7 @@ import { isDuplicateMessage, getRedisClient } from '@/lib/redis/client';
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
 import { appendLeadRow } from '@/lib/integrations/google-sheets';
-import { parseMetaWebhook, sendTextMessage, getMediaUrl, verifySignature } from '@/lib/meta/service';
+import { parseMetaWebhook, sendTextMessage, getMediaUrl, verifySignature, sendStaffAlert } from '@/lib/meta/service';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
 import { decryptToken } from '@/lib/utils/crypto';
@@ -404,6 +404,72 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     }).catch(e => console.error('Outbound webhook error:', e.message));
   }
 
+  // 9.5 AI Auto-Resume Trigger Check
+  const normalText = (content || '').toLowerCase().trim();
+  const aiResumeTriggers = [
+    'want to talk to ai',
+    'want to speak to ai',
+    'want to talk to the ai',
+    'want to speak to the ai',
+    'talk to ai',
+    'speak to ai',
+    'talk to the ai',
+    'speak to the ai',
+    'connect to ai',
+    'connect to the ai',
+    'connect me to ai',
+    'connect me to the ai',
+    'ai only',
+    'switch to ai',
+    'switch back to ai',
+    'resume ai',
+    'unpause ai',
+    'start ai',
+    'talk to bot',
+    'speak to bot',
+    'talk to the bot',
+    'speak to the bot',
+    'connect to bot',
+    'connect to the bot',
+    'connect me to bot',
+    'connect me to the bot',
+    'bot only',
+    'switch to bot',
+    'switch back to bot',
+    'resume bot',
+    'unpause bot',
+    'start bot'
+  ];
+
+  const isAiResumeTrigger = aiResumeTriggers.some(trigger => normalText.includes(trigger)) || 
+    /talk to (?:the )?(?:ai|bot)/i.test(normalText) || 
+    /speak to (?:the )?(?:ai|bot)/i.test(normalText) ||
+    /connect (?:me )?(?:back )?to (?:the )?(?:ai|bot)/i.test(normalText);
+
+  if (isAiResumeTrigger && (conversation.bot_paused || conversation.escalated)) {
+    console.log(`🤖 AI Auto-Resume Triggered for conversation ${conversation.id}. Resetting bot_paused & escalated.`);
+    
+    // Update DB
+    const { error: resetErr } = await supabaseAdmin
+      .from('conversations')
+      .update({
+        bot_paused: false,
+        escalated: false,
+        escalated_at: null,
+        escalation_reason: null
+      })
+      .eq('id', conversation.id);
+      
+    if (resetErr) {
+      console.error('❌ Failed to auto-resume conversation in DB:', resetErr.message);
+    } else {
+      conversation.bot_paused = false;
+      conversation.escalated = false;
+      conversation.escalated_at = null;
+      conversation.escalation_reason = null;
+    }
+  }
+
   // 10. Pause / Escalated checks
   if (conversation.bot_paused || conversation.escalated) {
     console.log(`🔇 Meta: bot paused for conversation ${conversation.id}, skipping AI`);
@@ -446,13 +512,36 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     .order('created_at', { ascending: false })
     .limit(10);
 
-  const history = (recentMsgs || [])
+  const rawHistory = (recentMsgs || [])
     .reverse()
     .slice(0, -1) // Exclude current message
     .map(m => ({
       role: m.direction === 'inbound' ? 'user' as const : 'assistant' as const,
       content: m.content,
     }));
+
+  // Filter history to exclude resolved escalation context if conversation is active for AI
+  let history = rawHistory;
+  if (!conversation.escalated && !conversation.bot_paused) {
+    const escalationKeywords = [
+      'human', 'real person', 'agent', 'staff', 'speak to', 'representative', 'connect me',
+      'angry', 'upset', 'terrible', 'worst', 'complaint', 'manager', 'refund'
+    ];
+    
+    let lastEscalationIdx = -1;
+    for (let i = rawHistory.length - 1; i >= 0; i--) {
+      const contentLower = rawHistory[i].content.toLowerCase();
+      if (escalationKeywords.some(keyword => contentLower.includes(keyword))) {
+        lastEscalationIdx = i;
+        break;
+      }
+    }
+    
+    if (lastEscalationIdx !== -1) {
+      console.log(`🧹 Filtering out ${lastEscalationIdx + 1} history messages prior to resolved escalation`);
+      history = rawHistory.slice(lastEscalationIdx + 1);
+    }
+  }
 
   const storedMsgCount = conversation.message_count ?? 0;
   const isFirstMessageForAI = storedMsgCount === 0 && history.length === 0;
@@ -581,10 +670,28 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       current_step: aiResponse.nextStep,
       last_message_at: new Date().toISOString(),
       escalated: aiResponse.shouldEscalate,
+      bot_paused: aiResponse.shouldEscalate ? true : conversation.bot_paused,
       escalated_at: aiResponse.shouldEscalate ? new Date().toISOString() : null,
-      escalation_reason: aiResponse.escalationReason || null,
+      escalation_reason: aiResponse.shouldEscalate ? (aiResponse.escalationReason || 'Human support requested') : null,
     })
     .eq('id', conversation.id);
+
+  // 17.5 Trigger WhatsApp Staff Alert if escalated
+  if (aiResponse.shouldEscalate) {
+    const reason = aiResponse.escalationReason || 'Human support requested';
+    const alertText = `⚠️ Handoff Requested!
+👤 +${cleanPhone} (${lead?.name || 'Customer'})
+💬 "${content.length > 60 ? content.slice(0, 57) + '...' : content}"`;
+
+    after(async () => {
+      try {
+        await sendStaffAlert(tenant, alertText);
+        console.log(`🔔 Staff alert dispatched for tenant ${tenant.id} via WABA`);
+      } catch (err) {
+        console.error('❌ Failed to dispatch WABA staff alert:', err);
+      }
+    });
+  }
 
   // 18. Update Lead Score
   if (lead?.id && aiResponse.intent) {

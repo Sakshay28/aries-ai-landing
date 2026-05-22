@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   Phone, Tag, Bot, User,
   MessageSquare, ChevronDown, Plus, Trash2,
@@ -12,6 +13,17 @@ import { motion, AnimatePresence } from "framer-motion";
 import type { Message } from "@/lib/types";
 import type { SharedConversationMeta } from "./page";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+
+// ── Module-level constants ────────────────────────────────────────────
+const STATUS_OPTIONS = [
+  { value: 'new',       label: 'New',       emoji: '🆕', color: 'text-foreground' },
+  { value: 'hot',       label: 'Hot',       emoji: '🔥', color: 'text-red-600 dark:text-red-400' },
+  { value: 'warm',      label: 'Warm',      emoji: '☀️', color: 'text-orange-600 dark:text-orange-400' },
+  { value: 'cold',      label: 'Cold',      emoji: '❄️', color: 'text-blue-600 dark:text-blue-400' },
+  { value: 'converted', label: 'Converted', emoji: '👑', color: 'text-emerald-600 dark:text-emerald-400' },
+];
+
+const PREDEFINED_TAGS_LIST = ['VIP', 'Follow-up', 'Complaint', 'Booking', 'Pricing', 'Interested', 'Not interested', 'Spam'];
 
 // ── helpers ────────────────────────────────────────────────────────
 // Same palette & hash as ChatSidebar / ChatArea — ensures avatar color is identical everywhere
@@ -128,28 +140,76 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const [notesOpen, setNotesOpen] = useState(true);
   const [statusDropOpen, setStatusDropOpen] = useState(false);
   const [agentDropOpen, setAgentDropOpen] = useState(false);
-  const statusDropRef = useRef<HTMLDivElement>(null);
-  const agentDropRef = useRef<HTMLDivElement>(null);
+
+  // Portal refs — track trigger button positions for fixed-position dropdowns
+  const statusTriggerRef = useRef<HTMLButtonElement>(null);
+  const agentTriggerRef = useRef<HTMLButtonElement>(null);
+  const tagsTriggerRef = useRef<HTMLButtonElement>(null);
+  const [statusRect, setStatusRect] = useState<DOMRect | null>(null);
+  const [agentRect, setAgentRect]   = useState<DOMRect | null>(null);
+  const [tagsRect, setTagsRect]     = useState<DOMRect | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  // Content portal refs to check for clicks outside
+  const statusPortalRef = useRef<HTMLDivElement>(null);
+  const agentPortalRef = useRef<HTMLDivElement>(null);
+  const tagsPortalRef = useRef<HTMLDivElement>(null);
+
+  // Quick Action trigger refs for robust outside-click checking
+  const agentQuickTriggerRef = useRef<HTMLButtonElement>(null);
 
   // Close dropdowns on outside click
   useEffect(() => {
+    if (!statusDropOpen && !agentDropOpen && !tagsOpen) return;
     const handler = (e: MouseEvent) => {
-      if (statusDropRef.current && !statusDropRef.current.contains(e.target as Node)) setStatusDropOpen(false);
-      if (agentDropRef.current && !agentDropRef.current.contains(e.target as Node)) setAgentDropOpen(false);
+      const target = e.target as Node;
+      if (statusDropOpen && statusPortalRef.current) {
+        if (!statusPortalRef.current.contains(target) && !statusTriggerRef.current?.contains(target)) {
+          setStatusDropOpen(false);
+        }
+      }
+      if (agentDropOpen && agentPortalRef.current) {
+        if (!agentPortalRef.current.contains(target) && 
+            !agentTriggerRef.current?.contains(target) && 
+            !agentQuickTriggerRef.current?.contains(target)) {
+          setAgentDropOpen(false);
+        }
+      }
+      if (tagsOpen && tagsPortalRef.current) {
+        if (!tagsPortalRef.current.contains(target) && !tagsTriggerRef.current?.contains(target)) {
+          setTagsOpen(false);
+        }
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const PREDEFINED_TAGS = ['VIP', 'Follow-up', 'Complaint', 'Booking', 'Pricing', 'Interested', 'Not interested', 'Spam'];
+  }, [statusDropOpen, agentDropOpen, tagsOpen]);
 
   const toggleTag = async (tag: string) => {
-    if (!localLead?.id) return;
+    console.log('[CRM] toggleTag called, localLead:', localLead?.id, 'tag:', tag);
+    if (!localLead?.id) { toast.error('No lead found — please reload the page'); return; }
     const current: string[] = localLead.tags || [];
     const updated = current.includes(tag) ? current.filter((t: string) => t !== tag) : [...current, tag];
     setLocalLead((prev: any) => prev ? { ...prev, tags: updated } : null);
-    const supabase = createBrowserSupabaseClient();
-    await supabase.from('leads').update({ tags: updated }).eq('id', localLead.id);
+    setTagsOpen(false); // close tags portal after click
+    try {
+      const res = await fetch(`/api/dashboard/leads/${localLead.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: updated })
+      });
+      const data = await res.json();
+      console.log('[CRM] toggleTag response:', data);
+      if (!data.success) throw new Error(data.error || 'Failed to update tags');
+      setLocalLead(data.lead);
+      window.dispatchEvent(new CustomEvent('lead-updated', { detail: { lead: data.lead, conversationId: meta?.id } }));
+      toast.success("Tag updated ✅");
+    } catch (err: any) {
+      console.error('[CRM] toggleTag error:', err);
+      toast.error(err.message || "Failed to update tags");
+      setLocalLead((prev: any) => prev ? { ...prev, tags: current } : null);
+    }
   };
 
   useEffect(() => {
@@ -171,19 +231,27 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   }, []);
 
   const updateLeadStatus = async (status: string) => {
-    if (!localLead?.id) return;
+    console.log('[CRM] updateLeadStatus called, localLead:', localLead?.id, 'status:', status);
+    if (!localLead?.id) { toast.error('No lead found — please reload the page'); return; }
     const originalStatus = localLead.lead_status;
     setLocalLead((prev: any) => prev ? { ...prev, lead_status: status } : null);
-    const supabase = createBrowserSupabaseClient();
-    const { error } = await supabase
-      .from('leads')
-      .update({ lead_status: status })
-      .eq('id', localLead.id);
-    if (error) {
-      toast.error("Failed to update status");
+    setStatusDropOpen(false);
+    try {
+      const res = await fetch(`/api/dashboard/leads/${localLead.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_status: status })
+      });
+      const data = await res.json();
+      console.log('[CRM] updateLeadStatus response:', data);
+      if (!data.success) throw new Error(data.error || 'Failed to update status');
+      setLocalLead(data.lead);
+      window.dispatchEvent(new CustomEvent('lead-updated', { detail: { lead: data.lead, conversationId: meta?.id } }));
+      toast.success("Status updated to " + status + " ✅");
+    } catch (err: any) {
+      console.error('[CRM] updateLeadStatus error:', err);
+      toast.error(err.message || "Failed to update status");
       setLocalLead((prev: any) => prev ? { ...prev, lead_status: originalStatus } : null);
-    } else {
-      toast.success("Lead status updated to " + status);
     }
   };
 
@@ -191,35 +259,43 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
     if (!localLead?.id) return;
     const originalScore = localLead.lead_score;
     setLocalLead((prev: any) => prev ? { ...prev, lead_score: score } : null);
-    const supabase = createBrowserSupabaseClient();
-    const { error } = await supabase
-      .from('leads')
-      .update({ lead_score: score })
-      .eq('id', localLead.id);
-    if (error) {
-      toast.error("Failed to update lead score");
-      setLocalLead((prev: any) => prev ? { ...prev, lead_score: originalScore } : null);
-    } else {
+    try {
+      const res = await fetch(`/api/dashboard/leads/${localLead.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_score: score })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Failed to update lead score');
+      setLocalLead(data.lead);
+      window.dispatchEvent(new CustomEvent('lead-updated', { detail: { lead: data.lead, conversationId: meta?.id } }));
       toast.success("Lead score updated to " + score);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update lead score");
+      setLocalLead((prev: any) => prev ? { ...prev, lead_score: originalScore } : null);
     }
   };
 
   const assignAgent = async (userId: string | null) => {
-    if (!localLead?.id) return;
+    console.log('[CRM] assignAgent called, localLead:', localLead?.id, 'userId:', userId);
+    if (!localLead?.id) { toast.error('No lead found — please reload the page'); return; }
     const originalAgent = localLead.assigned_to;
     setLocalLead((prev: any) => prev ? { ...prev, assigned_to: userId } : null);
+    setAgentDropOpen(false);
     try {
-      const res = await fetch(`/api/dashboard/leads/${localLead.id}/assign`, {
+      const res = await fetch(`/api/dashboard/leads/${localLead.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assigned_to: userId })
       });
       const data = await res.json();
-      if (!res.ok || data.error) {
-        throw new Error(data.error || 'Failed to assign');
-      }
-      toast.success(userId ? "Lead assigned to agent" : "Lead unassigned");
+      console.log('[CRM] assignAgent response:', data);
+      if (!data.success) throw new Error(data.error || 'Failed to assign agent');
+      setLocalLead(data.lead);
+      window.dispatchEvent(new CustomEvent('lead-updated', { detail: { lead: data.lead, conversationId: meta?.id } }));
+      toast.success(userId ? "Agent assigned ✅" : "Lead unassigned");
     } catch (err: any) {
+      console.error('[CRM] assignAgent error:', err);
       toast.error(err.message || "Failed to assign agent");
       setLocalLead((prev: any) => prev ? { ...prev, assigned_to: originalAgent } : null);
     }
@@ -229,16 +305,20 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
     if (!localLead?.id) return;
     const originalVal = localLead[field];
     setLocalLead((prev: any) => prev ? { ...prev, [field]: value || null } : null);
-    const supabase = createBrowserSupabaseClient();
-    const { error } = await supabase
-      .from('leads')
-      .update({ [field]: value || null })
-      .eq('id', localLead.id);
-    if (error) {
-      toast.error(`Failed to update ${field}`);
-      setLocalLead((prev: any) => prev ? { ...prev, [field]: originalVal } : null);
-    } else {
+    try {
+      const res = await fetch(`/api/dashboard/leads/${localLead.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: value || null })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || `Failed to update ${field}`);
+      setLocalLead(data.lead);
+      window.dispatchEvent(new CustomEvent('lead-updated', { detail: { lead: data.lead, conversationId: meta?.id } }));
       toast.success(`Lead ${field} updated`);
+    } catch (err: any) {
+      toast.error(err.message || `Failed to update ${field}`);
+      setLocalLead((prev: any) => prev ? { ...prev, [field]: originalVal } : null);
     }
   };
 
@@ -359,15 +439,19 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
             {([
               {
                 icon: UserPlus, label: 'Assign',
-                action: () => {
-                  setAgentDropOpen(true);
-                  // scroll to agent section
-                  agentDropRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                action: (e: React.MouseEvent<HTMLButtonElement>) => {
+                  const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                  setAgentRect(r);
+                  setAgentDropOpen(v => !v);
                 }
               },
               {
                 icon: Tag, label: 'Tag',
-                action: () => setTagsOpen(v => !v)
+                action: (e: React.MouseEvent<HTMLButtonElement>) => {
+                  const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                  setTagsRect(r);
+                  setTagsOpen(v => !v);
+                }
               },
               {
                 icon: StickyNote, label: 'Note',
@@ -386,7 +470,8 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
             ]).map(({ icon: Icon, label, action }) => (
               <button
                 key={label}
-                onClick={action}
+                ref={label === 'Tag' ? tagsTriggerRef : label === 'Assign' ? agentQuickTriggerRef : null}
+                onClick={action as any}
                 className="group flex flex-col items-center gap-1 py-2 rounded-xl hover:bg-black/[0.03] dark:hover:bg-white/[0.04] transition-colors cursor-pointer"
               >
                 <Icon className="w-3.5 h-3.5 text-muted-foreground/70 group-hover:text-foreground transition-colors" />
@@ -394,43 +479,6 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
               </button>
             ))}
           </div>
-
-          {/* Tag picker */}
-          <AnimatePresence>
-            {tagsOpen && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.18, ease: 'easeInOut' }}
-                className="overflow-hidden"
-              >
-                <div className="bg-muted/40 rounded-xl p-3 mb-1">
-                  <p className="text-[9.5px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">Quick Tags</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {PREDEFINED_TAGS.map(tag => {
-                      const active = (localLead?.tags || []).includes(tag);
-                      return (
-                        <button
-                          key={tag}
-                          onClick={() => toggleTag(tag)}
-                          className={cn(
-                            'flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all border',
-                            active
-                              ? 'bg-indigo-500 text-white border-indigo-500 shadow-sm'
-                              : 'bg-card text-foreground/70 border-border hover:border-indigo-400 hover:text-indigo-600 dark:hover:bg-indigo-950/30'
-                          )}
-                        >
-                          {active && <Check className="w-2.5 h-2.5" />}
-                          {tag}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
 
           {/* subtle separator */}
           <div className="mx-4 h-px bg-border mb-1 mt-1" />
@@ -488,66 +536,21 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 )}
               </div>
 
-              {/* Email Row */}
-              <div className="flex flex-col gap-0.5 group">
-                <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Email</p>
-                {isEditingEmail ? (
-                  <input
-                    type="email"
-                    value={editEmail}
-                    onChange={e => setEditEmail(e.target.value)}
-                    onBlur={() => {
-                      setIsEditingEmail(false);
-                      if (editEmail.trim() !== localLead?.email) {
-                        saveField('email', editEmail.trim());
-                      }
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        setIsEditingEmail(false);
-                        if (editEmail.trim() !== localLead?.email) {
-                          saveField('email', editEmail.trim());
-                        }
-                      } else if (e.key === 'Escape') {
-                        setIsEditingEmail(false);
-                      }
-                    }}
-                    autoFocus
-                    className="text-[12.5px] bg-secondary border border-indigo-500/50 rounded px-1.5 py-0.5 text-foreground outline-none w-full"
-                  />
-                ) : (
-                  <div className="flex items-center justify-between">
-                    <span className="text-[12.5px] text-foreground/85 font-medium truncate">
-                      {localLead?.email || "—"}
-                    </span>
-                    <button
-                      onClick={() => {
-                        setEditEmail(localLead?.email || "");
-                        setIsEditingEmail(true);
-                      }}
-                      className="text-[10px] text-indigo-500 hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      Edit
-                    </button>
-                  </div>
-                )}
-              </div>
+
 
               {/* Status Row — custom dropdown */}
-              {(() => {
-                const STATUS_OPTIONS = [
-                  { value: 'new',       label: 'New',       emoji: '🆕', color: 'text-foreground' },
-                  { value: 'hot',       label: 'Hot',       emoji: '🔥', color: 'text-red-600 dark:text-red-400' },
-                  { value: 'warm',      label: 'Warm',      emoji: '☀️', color: 'text-orange-600 dark:text-orange-400' },
-                  { value: 'cold',      label: 'Cold',      emoji: '❄️', color: 'text-blue-600 dark:text-blue-400' },
-                  { value: 'converted', label: 'Converted', emoji: '👑', color: 'text-emerald-600 dark:text-emerald-400' },
-                ];
-                const current = STATUS_OPTIONS.find(o => o.value === (localLead?.lead_status || 'new')) || STATUS_OPTIONS[0];
-                return (
-                  <div className="flex flex-col gap-0.5" ref={statusDropRef}>
-                    <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1">Lead Status</p>
+              <div className="flex flex-col gap-0.5">
+                <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1">Lead Status</p>
+                {(() => {
+                  const current = STATUS_OPTIONS.find(o => o.value === (localLead?.lead_status || 'new')) || STATUS_OPTIONS[0];
+                  return (
                     <button
-                      onClick={() => setStatusDropOpen(v => !v)}
+                      ref={statusTriggerRef}
+                      onClick={() => {
+                        const r = statusTriggerRef.current?.getBoundingClientRect();
+                        if (r) setStatusRect(r);
+                        setStatusDropOpen(v => !v);
+                      }}
                       className="w-full flex items-center justify-between px-2.5 py-2 bg-secondary/60 hover:bg-secondary border border-border hover:border-indigo-400 rounded-xl text-[12.5px] font-semibold transition-all"
                     >
                       <span className={cn('flex items-center gap-2', current.color)}>
@@ -556,108 +559,48 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                       </span>
                       <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground/50 transition-transform duration-200', statusDropOpen && 'rotate-180')} />
                     </button>
-                    <AnimatePresence>
-                      {statusDropOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, y: -4, scale: 0.97 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: -4, scale: 0.97 }}
-                          transition={{ duration: 0.14 }}
-                          className="mt-1 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-50"
-                        >
-                          {STATUS_OPTIONS.map(opt => (
-                            <button
-                              key={opt.value}
-                              onClick={() => { updateLeadStatus(opt.value); setStatusDropOpen(false); }}
-                              className={cn(
-                                'w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60',
-                                opt.value === current.value ? 'bg-muted/80' : ''
-                              )}
-                            >
-                              <span className="text-[14px]">{opt.emoji}</span>
-                              <span className={opt.color}>{opt.label}</span>
-                              {opt.value === current.value && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
-                            </button>
-                          ))}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                );
-              })()}
+                  );
+                })()}
+              </div>
 
               {/* Agent Assignment — custom dropdown */}
-              {(() => {
-                const currentAgent = team.find((u: any) => u.id === localLead?.assigned_to);
-                const currentLabel = currentAgent ? (currentAgent.full_name || currentAgent.email) : 'Unassigned';
-                const currentInitial = currentAgent ? (currentAgent.full_name || currentAgent.email || '?').charAt(0).toUpperCase() : null;
-                return (
-                  <div className="flex flex-col gap-0.5" ref={agentDropRef}>
-                    <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1">Assigned Agent</p>
-                    {loadingTeam ? (
-                      <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading team...
-                      </div>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => setAgentDropOpen(v => !v)}
-                          className="w-full flex items-center justify-between px-2.5 py-2 bg-secondary/60 hover:bg-secondary border border-border hover:border-indigo-400 rounded-xl text-[12.5px] font-semibold transition-all"
-                        >
-                          <span className="flex items-center gap-2 text-foreground">
-                            {currentInitial ? (
-                              <span className="w-5 h-5 rounded-full bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">{currentInitial}</span>
-                            ) : (
-                              <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                                <User className="w-3 h-3 text-muted-foreground/50" />
-                              </span>
-                            )}
-                            <span className={cn(currentAgent ? 'text-foreground' : 'text-muted-foreground')}>{currentLabel}</span>
-                          </span>
-                          <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground/50 transition-transform duration-200', agentDropOpen && 'rotate-180')} />
-                        </button>
-                        <AnimatePresence>
-                          {agentDropOpen && (
-                            <motion.div
-                              initial={{ opacity: 0, y: -4, scale: 0.97 }}
-                              animate={{ opacity: 1, y: 0, scale: 1 }}
-                              exit={{ opacity: 0, y: -4, scale: 0.97 }}
-                              transition={{ duration: 0.14 }}
-                              className="mt-1 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-50"
-                            >
-                              <button
-                                onClick={() => { assignAgent(null); setAgentDropOpen(false); }}
-                                className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60', !localLead?.assigned_to ? 'bg-muted/80' : '')}
-                              >
-                                <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                                  <User className="w-3 h-3 text-muted-foreground/50" />
-                                </span>
-                                <span className="text-muted-foreground">Unassigned</span>
-                                {!localLead?.assigned_to && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
-                              </button>
-                              {team.map((u: any) => {
-                                const initial = (u.full_name || u.email || '?').charAt(0).toUpperCase();
-                                const isSelected = u.id === localLead?.assigned_to;
-                                return (
-                                  <button
-                                    key={u.id}
-                                    onClick={() => { assignAgent(u.id); setAgentDropOpen(false); }}
-                                    className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60', isSelected ? 'bg-muted/80' : '')}
-                                  >
-                                    <span className="w-5 h-5 rounded-full bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">{initial}</span>
-                                    <span className="truncate">{u.full_name || u.email}</span>
-                                    {isSelected && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
-                                  </button>
-                                );
-                              })}
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </>
-                    )}
+              <div className="flex flex-col gap-0.5">
+                <p className="text-[9.5px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1">Assigned Agent</p>
+                {loadingTeam ? (
+                  <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading team...
                   </div>
-                );
-              })()}
+                ) : (
+                  <button
+                    ref={agentTriggerRef}
+                    onClick={() => {
+                      const r = agentTriggerRef.current?.getBoundingClientRect();
+                      if (r) setAgentRect(r);
+                      setAgentDropOpen(v => !v);
+                    }}
+                    className="w-full flex items-center justify-between px-2.5 py-2 bg-secondary/60 hover:bg-secondary border border-border hover:border-indigo-400 rounded-xl text-[12.5px] font-semibold transition-all"
+                  >
+                    {(() => {
+                      const currentAgent = team.find((u: any) => u.id === localLead?.assigned_to);
+                      const currentLabel = currentAgent ? (currentAgent.full_name || currentAgent.email) : 'Unassigned';
+                      const currentInitial = currentAgent ? (currentAgent.full_name || currentAgent.email || '?').charAt(0).toUpperCase() : null;
+                      return (
+                        <span className="flex items-center gap-2 text-foreground">
+                          {currentInitial ? (
+                            <span className="w-5 h-5 rounded-full bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">{currentInitial}</span>
+                          ) : (
+                            <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                              <User className="w-3 h-3 text-muted-foreground/50" />
+                            </span>
+                          )}
+                          <span className={cn(currentAgent ? 'text-foreground' : 'text-muted-foreground')}>{currentLabel}</span>
+                        </span>
+                      );
+                    })()}
+                    <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground/50 transition-transform duration-200', agentDropOpen && 'rotate-180')} />
+                  </button>
+                )}
+              </div>
 
               {localLead?.tags && localLead.tags.length > 0 && (
                 <div>
@@ -751,6 +694,118 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
           </div>
         )}
       </div>
+
+      {/* ── Portal Dropdowns (fixed position, breaks out of overflow containers) ── */}
+      {mounted && statusDropOpen && statusRect && createPortal(
+        <div
+          ref={statusPortalRef}
+          style={{
+            position: 'fixed',
+            top: statusRect.bottom + 4,
+            left: Math.max(10, Math.min(statusRect.left, typeof window !== 'undefined' ? window.innerWidth - 230 : statusRect.left)),
+            width: Math.max(statusRect.width, 220),
+            zIndex: 9999,
+          }}
+          className="bg-white dark:bg-[#0A0A0A] border border-border rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150"
+        >
+          {STATUS_OPTIONS.map(opt => {
+            const isSelected = opt.value === (localLead?.lead_status || 'new');
+            return (
+              <button
+                key={opt.value}
+                onClick={() => { updateLeadStatus(opt.value); setStatusDropOpen(false); }}
+                className={cn(
+                  'w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60 text-left cursor-pointer',
+                  isSelected ? 'bg-muted/80' : ''
+                )}
+              >
+                <span className="text-[14px]">{opt.emoji}</span>
+                <span className={opt.color}>{opt.label}</span>
+                {isSelected && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
+              </button>
+            );
+          })}
+        </div>,
+        document.body
+      )}
+
+      {mounted && agentDropOpen && agentRect && createPortal(
+        <div
+          ref={agentPortalRef}
+          style={{
+            position: 'fixed',
+            top: agentRect.bottom + 4,
+            left: Math.max(10, Math.min(agentRect.left, typeof window !== 'undefined' ? window.innerWidth - 230 : agentRect.left)),
+            width: Math.max(agentRect.width, 220),
+            zIndex: 9999,
+          }}
+          className="bg-white dark:bg-[#0A0A0A] border border-border rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150"
+        >
+          <button
+            onClick={() => { assignAgent(null); setAgentDropOpen(false); }}
+            className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60 cursor-pointer', !localLead?.assigned_to ? 'bg-muted/80' : '')}
+          >
+            <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+              <User className="w-3 h-3 text-muted-foreground/50" />
+            </span>
+            <span className="text-muted-foreground">Unassigned</span>
+            {!localLead?.assigned_to && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
+          </button>
+          {team.map((u: any) => {
+            const initial = (u.full_name || u.email || '?').charAt(0).toUpperCase();
+            const isSelected = u.id === localLead?.assigned_to;
+            return (
+              <button
+                key={u.id}
+                onClick={() => { assignAgent(u.id); setAgentDropOpen(false); }}
+                className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 text-[12.5px] font-medium transition-colors hover:bg-muted/60 cursor-pointer', isSelected ? 'bg-muted/80' : '')}
+              >
+                <span className="w-5 h-5 rounded-full bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">{initial}</span>
+                <span className="truncate">{u.full_name || u.email}</span>
+                {isSelected && <Check className="w-3 h-3 ml-auto text-indigo-500" />}
+              </button>
+            );
+          })}
+        </div>,
+        document.body
+      )}
+
+      {mounted && tagsOpen && tagsRect && createPortal(
+        <div
+          ref={tagsPortalRef}
+          style={{
+            position: 'fixed',
+            top: tagsRect.bottom + 8,
+            left: Math.max(10, Math.min(tagsRect.left - 60, typeof window !== 'undefined' ? window.innerWidth - 280 : tagsRect.left - 60)),
+            width: 260,
+            zIndex: 9999,
+          }}
+          className="bg-white dark:bg-[#0A0A0A] border border-border rounded-xl shadow-2xl p-3 animate-in fade-in slide-in-from-top-1 duration-150"
+        >
+          <p className="text-[9.5px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">Quick Tags</p>
+          <div className="flex flex-wrap gap-1.5">
+            {PREDEFINED_TAGS_LIST.map(tag => {
+              const active = (localLead?.tags || []).includes(tag);
+              return (
+                <button
+                  key={tag}
+                  onClick={() => toggleTag(tag)}
+                  className={cn(
+                    'flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all border cursor-pointer',
+                    active
+                      ? 'bg-indigo-500 text-white border-indigo-500 shadow-sm'
+                      : 'bg-secondary text-foreground/70 border-border hover:border-indigo-400 hover:text-indigo-600 dark:hover:bg-indigo-950/30'
+                  )}
+                >
+                  {active && <Check className="w-2.5 h-2.5" />}
+                  {tag}
+                </button>
+              );
+            })}
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

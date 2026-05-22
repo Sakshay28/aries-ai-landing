@@ -2,11 +2,11 @@
 
 import {
   Send, Bot, User, Check, CheckCheck, Clock, AlertCircle, ArrowDown, Paperclip, Smile,
-  Mic, Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal, X,
+  Mic, Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal, X, BellOff, Bell,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -117,6 +117,10 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [activeMsgMenuId, setActiveMsgMenuId] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const router = useRouter();
   const searchParams = useSearchParams();
   const conversationId = searchParams.get('conversationId');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -127,6 +131,19 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const optimisticIdRef = useRef(0);
   const recognitionRef = useRef<any>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const msgMenuRef = useRef<HTMLDivElement>(null);
+
+  const messagesRef = useRef(messages);
+  const onDataLoadedRef = useRef(onDataLoaded);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    onDataLoadedRef.current = onDataLoaded;
+  }, [onDataLoaded]);
 
   // Common emojis for the picker
   const [emojiCategory, setEmojiCategory] = useState(0);
@@ -248,6 +265,92 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     setShowScrollBtn(el.scrollHeight - el.scrollTop - el.clientHeight > 120);
   }, []);
 
+  // Load mute state from localStorage when conversationId changes
+  useEffect(() => {
+    if (!conversationId) { setIsMuted(false); return; }
+    try {
+      const muted = JSON.parse(localStorage.getItem('muted-conversations') || '[]') as string[];
+      setIsMuted(muted.includes(conversationId));
+    } catch { setIsMuted(false); }
+  }, [conversationId]);
+
+  // Close more menu and msg menu on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setMoreMenuOpen(false);
+      }
+      if (msgMenuRef.current && !msgMenuRef.current.contains(e.target as Node)) {
+        setActiveMsgMenuId(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const toggleMute = () => {
+    if (!conversationId) return;
+    try {
+      const muted = JSON.parse(localStorage.getItem('muted-conversations') || '[]') as string[];
+      let updated: string[];
+      if (muted.includes(conversationId)) {
+        updated = muted.filter(id => id !== conversationId);
+        setIsMuted(false);
+        toast.success('Notifications unmuted');
+      } else {
+        updated = [...muted, conversationId];
+        setIsMuted(true);
+        toast.success('🔇 Notifications muted');
+      }
+      localStorage.setItem('muted-conversations', JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('mute-updated'));
+    } catch { /* ignore */ }
+  };
+
+  const markResolved = async () => {
+    if (!conversationId) return;
+    try {
+      const res = await fetch(`/api/dashboard/chat/conversation?id=${conversationId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: false }),
+      });
+      if ((await res.json()).success) {
+        toast.success('✅ Conversation marked as resolved');
+        setConversationMeta(prev => prev ? { ...prev, is_active: false } : prev);
+        window.dispatchEvent(new CustomEvent('conversation-updated', {
+          detail: { conversationId, is_active: false }
+        }));
+      } else {
+        toast.error('Failed to resolve conversation');
+      }
+    } catch {
+      toast.error('Failed to resolve conversation');
+    }
+  };
+
+  const markUnresolved = async () => {
+    if (!conversationId) return;
+    try {
+      const res = await fetch(`/api/dashboard/chat/conversation?id=${conversationId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: true }),
+      });
+      if ((await res.json()).success) {
+        toast.success('🔓 Conversation reopened');
+        setConversationMeta(prev => prev ? { ...prev, is_active: true } : prev);
+        window.dispatchEvent(new CustomEvent('conversation-updated', {
+          detail: { conversationId, is_active: true }
+        }));
+      } else {
+        toast.error('Failed to reopen conversation');
+      }
+    } catch {
+      toast.error('Failed to reopen conversation');
+    }
+  };
+
   // Open search panel
   useEffect(() => {
     if (searchOpen) setTimeout(() => searchInputRef.current?.focus(), 60);
@@ -314,9 +417,34 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             return prev.map(m => m.id === updatedMsg.id ? { ...m, status: updatedMsg.status } : m);
           });
         })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations' },
+        (payload) => {
+          if (!payload.new || !('id' in payload.new)) return;
+          const updatedConv = payload.new as any;
+          if (updatedConv.id !== conversationId) return;
+          setConversationMeta(prev => {
+            if (!prev) return prev;
+            if (prev.bot_paused === updatedConv.bot_paused && prev.escalated === updatedConv.escalated) {
+              return prev;
+            }
+            const updated = {
+              ...prev,
+              bot_paused: updatedConv.bot_paused,
+              escalated: updatedConv.escalated,
+              is_active: updatedConv.is_active,
+              sender_name: updatedConv.sender_name ?? prev.sender_name,
+              sender_id: updatedConv.sender_id ?? prev.sender_id,
+              lead_id: updatedConv.lead_id ?? prev.lead_id,
+            };
+            setTimeout(() => {
+              onDataLoadedRef.current?.(updated, messagesRef.current);
+            }, 0);
+            return updated;
+          });
+        })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
-          console.log('[Realtime] ✅ Subscribed to messages for conversation:', conversationId);
+          console.log('[Realtime] ✅ Subscribed to messages & conversation updates for:', conversationId);
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           console.error('[Realtime] ❌ Channel error/timeout for conversation:', conversationId, status);
         }
@@ -325,6 +453,82 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     return () => { supabase.removeChannel(channel); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
+
+  // ── Effect: Listen to 'lead-updated' custom event to keep conversationMeta state in sync ──
+  useEffect(() => {
+    const handleLeadUpdated = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { lead?: any; conversationId?: string };
+      if (!detail?.lead || !detail?.conversationId) return;
+      if (detail.conversationId === conversationId) {
+        setConversationMeta(prev => {
+          if (!prev) return null;
+          return { ...prev, leads: detail.lead };
+        });
+      }
+    };
+    window.addEventListener('lead-updated', handleLeadUpdated);
+    return () => window.removeEventListener('lead-updated', handleLeadUpdated);
+  }, [conversationId]);
+
+  // ── Effect: Supabase Realtime for lead changes ──
+  useEffect(() => {
+    if (!conversationId || !conversationMeta?.lead_id) return;
+    const supabase = supabaseRef.current;
+    const leadId = conversationMeta.lead_id;
+
+    const channel = supabase
+      .channel(`realtime-lead-${leadId}-${Date.now()}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'leads',
+          filter: `id=eq.${leadId}`
+        },
+        (payload) => {
+          if (!payload.new) return;
+          const updatedLead = payload.new as any;
+          
+          // Parse tags and notes from notes JSON column
+          let parsedTags: string[] = [];
+          let parsedNotes = '';
+          if (updatedLead.notes && updatedLead.notes.trim().startsWith('{')) {
+            try {
+              const parsed = JSON.parse(updatedLead.notes);
+              parsedTags = parsed.tags || [];
+              parsedNotes = parsed.notes || '';
+            } catch {}
+          } else {
+            parsedNotes = updatedLead.notes || '';
+          }
+
+          const formattedLead = {
+            ...updatedLead,
+            tags: parsedTags,
+            notes: parsedNotes
+          };
+
+          // Update ChatArea state
+          setConversationMeta(prev => {
+            if (!prev || prev.lead_id !== leadId) return prev;
+            return { ...prev, leads: formattedLead };
+          });
+
+          // Broadcast to other components (CRMPanel, ChatPage, etc.)
+          window.dispatchEvent(
+            new CustomEvent('lead-updated', {
+              detail: { lead: formattedLead, conversationId }
+            })
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [conversationId, conversationMeta?.lead_id]);
 
   // Status polling: every 3s, always run — picks up delivered/read from Gupshup webhook DB updates
   useEffect(() => {
@@ -411,7 +615,13 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
   const handleSend = async () => {
     if (!inputMsg.trim() || !conversationId || sending) return;
-    const text = inputMsg.trim();
+    let text = inputMsg.trim();
+    // If replying, prefix with the reply quote
+    if (replyingTo) {
+      const preview = replyingTo.content.length > 60 ? replyingTo.content.slice(0, 60) + '…' : replyingTo.content;
+      text = `> ${preview}\n${text}`;
+      setReplyingTo(null);
+    }
     setInputMsg('');
     setSending(true);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -486,7 +696,11 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         body: JSON.stringify({ bot_paused: newPaused }),
       });
       if ((await res.json()).success) {
-        const updated = { ...conversationMeta, bot_paused: newPaused };
+        const updated = {
+          ...conversationMeta,
+          bot_paused: newPaused,
+          ...(newPaused ? {} : { escalated: false, escalated_at: null, escalation_reason: null })
+        };
         setConversationMeta(updated);
         onDataLoaded?.(updated, messages);
       }
@@ -594,7 +808,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
 
           {/* More options */}
-          <div className="relative">
+          <div className="relative" ref={moreMenuRef}>
             <button
               title="More options"
               onClick={() => setMoreMenuOpen(v => !v)}
@@ -609,17 +823,34 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.92, y: -4 }}
                   transition={{ duration: 0.12 }}
-                  className="absolute right-0 top-10 z-50 bg-card border border-border rounded-xl shadow-xl py-1 min-w-[160px]"
+                  className="absolute right-0 top-10 z-50 bg-card border border-border rounded-xl shadow-xl py-1 min-w-[170px]"
                 >
-                  {[
-                    { label: '✅ Mark resolved', action: () => { toggleHumanMode(); setMoreMenuOpen(false); } },
-                    { label: '📋 Copy chat link', action: () => { navigator.clipboard.writeText(window.location.href); toast.success('Chat link copied!'); setMoreMenuOpen(false); } },
-                    { label: '🔇 Mute notifications', action: () => { toast.success('Conversation muted for 24h'); setMoreMenuOpen(false); } },
-                  ].map(item => (
-                    <button key={item.label} onClick={item.action}
-                      className="w-full text-left px-4 py-2 text-[12.5px] hover:bg-muted transition-colors"
-                    >{item.label}</button>
-                  ))}
+                  {conversationMeta?.is_active === false ? (
+                    <button
+                      onClick={() => { markUnresolved(); setMoreMenuOpen(false); }}
+                      className="w-full text-left px-4 py-2.5 text-[12.5px] hover:bg-muted transition-colors flex items-center gap-2"
+                    >🔓 Reopen conversation</button>
+                  ) : (
+                    <button
+                      onClick={() => { markResolved(); setMoreMenuOpen(false); }}
+                      className="w-full text-left px-4 py-2.5 text-[12.5px] hover:bg-muted transition-colors flex items-center gap-2"
+                    >✅ Mark resolved</button>
+                  )}
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(window.location.href);
+                      toast.success('Chat link copied!');
+                      setMoreMenuOpen(false);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-[12.5px] hover:bg-muted transition-colors"
+                  >📋 Copy chat link</button>
+                  <button
+                    onClick={() => { toggleMute(); setMoreMenuOpen(false); }}
+                    className="w-full text-left px-4 py-2.5 text-[12.5px] hover:bg-muted transition-colors flex items-center gap-2"
+                  >
+                    {isMuted ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
+                    {isMuted ? 'Unmute notifications' : '🔇 Mute notifications'}
+                  </button>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -656,6 +887,63 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           </motion.button>
         </div>
       </div>
+
+      {/* ── Resolved banner ── */}
+      <AnimatePresence>
+        {conversationMeta && conversationMeta.is_active === false && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="flex-shrink-0 overflow-hidden"
+          >
+            <div className="flex items-center justify-between gap-3 px-4 py-2 bg-emerald-50 dark:bg-emerald-950/30 border-b border-emerald-200/50 dark:border-emerald-800/30">
+              <div className="flex items-center gap-2">
+                <span className="text-[13px]">✅</span>
+                <p className="text-[12px] font-medium text-emerald-700 dark:text-emerald-300">
+                  This conversation has been marked as resolved
+                </p>
+              </div>
+              <button
+                onClick={markUnresolved}
+                className="flex-shrink-0 text-[11.5px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40 hover:bg-emerald-200 dark:hover:bg-emerald-800/50 border border-emerald-300/50 dark:border-emerald-700/40 px-2.5 py-1 rounded-lg transition-colors"
+              >
+                🔓 Reopen
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Bot Paused banner ── */}
+      <AnimatePresence>
+        {conversationMeta && conversationMeta.is_active !== false && conversationMeta.bot_paused === true && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="flex-shrink-0 overflow-hidden"
+          >
+            <div className="flex items-center justify-between gap-3 px-4 py-2 bg-blue-50 dark:bg-blue-950/30 border-b border-blue-200/50 dark:border-blue-800/30">
+              <div className="flex items-center gap-2">
+                <span className="text-[13px]">⚠️</span>
+                <p className="text-[12px] font-medium text-blue-700 dark:text-blue-300">
+                  Human mode active — AI automation is currently paused for this customer
+                </p>
+              </div>
+              <button
+                onClick={toggleHumanMode}
+                disabled={togglingMode}
+                className="flex-shrink-0 text-[11.5px] font-semibold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/40 hover:bg-blue-200 dark:hover:bg-blue-800/50 border border-blue-300/50 dark:border-blue-700/40 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1"
+              >
+                🤖 Resume AI
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Inline Search Bar ── */}
       <AnimatePresence>
@@ -736,15 +1024,73 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
                   const hoverToolbar = (
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center gap-0.5 bg-white dark:bg-[#1F2B3E] rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.1)] ring-1 ring-black/[0.04] dark:ring-white/[0.06] px-0.5 py-0.5 flex-shrink-0 self-center">
-                      <button onClick={() => copyMessage(msg.content)} title="Copy" className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors">
+                      <button
+                        onClick={() => copyMessage(msg.content)}
+                        title="Copy"
+                        className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                      >
                         <Copy className="w-3 h-3" />
                       </button>
-                      <button onClick={() => toast('Reply', { description: 'Coming soon' })} title="Reply" className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors">
+                      <button
+                        onClick={() => {
+                          setReplyingTo(msg);
+                          setTimeout(() => textareaRef.current?.focus(), 50);
+                        }}
+                        title="Reply"
+                        className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                      >
                         <Reply className="w-3 h-3" />
                       </button>
-                      <button onClick={() => toast('More', { description: 'Coming soon' })} title="More" className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors">
-                        <MoreHorizontal className="w-3 h-3" />
-                      </button>
+                      <div className="relative" ref={activeMsgMenuId === msg.id ? msgMenuRef : undefined}>
+                        <button
+                          onClick={() => setActiveMsgMenuId(v => v === msg.id ? null : msg.id)}
+                          title="More"
+                          className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                        >
+                          <MoreHorizontal className="w-3 h-3" />
+                        </button>
+                        <AnimatePresence>
+                          {activeMsgMenuId === msg.id && (
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.9, y: 4 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.9, y: 4 }}
+                              transition={{ duration: 0.1 }}
+                              className={cn(
+                                'absolute bottom-8 z-50 bg-card border border-border rounded-xl shadow-xl py-1 min-w-[140px]',
+                                isInbound ? 'left-0' : 'right-0'
+                              )}
+                            >
+                              <button
+                                onClick={() => { copyMessage(msg.content); setActiveMsgMenuId(null); }}
+                                className="w-full text-left px-3 py-2 text-[12px] hover:bg-muted transition-colors flex items-center gap-2"
+                              >
+                                <Copy className="w-3 h-3" /> Copy text
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setReplyingTo(msg);
+                                  setActiveMsgMenuId(null);
+                                  setTimeout(() => textareaRef.current?.focus(), 50);
+                                }}
+                                className="w-full text-left px-3 py-2 text-[12px] hover:bg-muted transition-colors flex items-center gap-2"
+                              >
+                                <Reply className="w-3 h-3" /> Reply
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const ts = new Date(msg.created_at).toLocaleString('en-IN');
+                                  copyMessage(`[${ts}] ${msg.content}`);
+                                  setActiveMsgMenuId(null);
+                                }}
+                                className="w-full text-left px-3 py-2 text-[12px] hover:bg-muted transition-colors flex items-center gap-2"
+                              >
+                                📋 Copy with timestamp
+                              </button>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
                     </div>
                   );
 
@@ -824,6 +1170,33 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* ── Reply-to banner ── */}
+      <AnimatePresence>
+        {replyingTo && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="flex-shrink-0 overflow-hidden"
+          >
+            <div className="flex items-center gap-3 px-4 py-2 bg-indigo-50 dark:bg-indigo-950/30 border-t border-indigo-200/50 dark:border-indigo-800/30">
+              <Reply className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0" />
+              <p className="flex-1 text-[12px] text-indigo-700 dark:text-indigo-300 truncate">
+                <span className="font-semibold">Replying: </span>
+                {replyingTo.content.length > 80 ? replyingTo.content.slice(0, 80) + '…' : replyingTo.content}
+              </p>
+              <button
+                onClick={() => setReplyingTo(null)}
+                className="w-5 h-5 rounded-full flex items-center justify-center text-indigo-400 hover:text-indigo-600 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Scroll to bottom FAB ── */}
       <AnimatePresence>

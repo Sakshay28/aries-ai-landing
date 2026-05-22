@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useCallback } from "react";
+import { Suspense, useState, useCallback, useEffect } from "react";
 import ChatSidebar from "./ChatSidebar";
 import ChatArea from "./ChatArea";
 import CRMPanel from "./CRMPanel";
@@ -10,6 +10,10 @@ export interface SharedConversationMeta {
   id: string;
   is_active: boolean;
   bot_paused: boolean;
+  escalated?: boolean;
+  escalated_at?: string | null;
+  escalation_reason?: string | null;
+  lead_id?: string | null;
   sender_name: string | null;
   sender_id: string | null;
   leads?: {
@@ -29,6 +33,21 @@ export interface SharedConversationMeta {
 export default function ChatPage() {
   const [meta, setMeta] = useState<SharedConversationMeta | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+
+  useEffect(() => {
+    const handleLeadUpdated = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { lead?: any; conversationId?: string };
+      if (!detail?.lead || !detail?.conversationId) return;
+      setMeta(prev => {
+        if (prev && prev.id === detail.conversationId) {
+          return { ...prev, leads: detail.lead };
+        }
+        return prev;
+      });
+    };
+    window.addEventListener('lead-updated', handleLeadUpdated);
+    return () => window.removeEventListener('lead-updated', handleLeadUpdated);
+  }, []);
 
   const handleDataLoaded = useCallback((m: SharedConversationMeta | null, msgs: Message[]) => {
     setMeta(m);

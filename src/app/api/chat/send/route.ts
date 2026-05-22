@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { sendTextMessage } from '@/lib/meta/service';
@@ -19,10 +18,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
-    const supabase = await createServerSupabaseClient();
-
     // Verify conversation belongs to this tenant and get the recipient phone
-    const { data: conv, error: convErr } = await supabase
+    const { data: conv, error: convErr } = await supabaseAdmin
       .from('conversations')
       .select('id, sender_id, tenant_id, channel, leads(phone)')
       .eq('id', conversationId)

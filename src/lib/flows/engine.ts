@@ -25,7 +25,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { sendTextMessage, sendMediaMessage, MetaMediaType } from '@/lib/meta/service';
+import { sendTextMessage, sendMediaMessage, MetaMediaType, sendStaffAlert } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { processMessageWithAI, TenantAIConfig } from '@/lib/ai/engine';
 import { getTenantConfig } from '@/lib/tenant/manager';
@@ -79,6 +79,9 @@ interface ExecContext {
   variables: Record<string, unknown>; // inter-node data bag — persisted across wait_for_reply
   dryRun?:  boolean;       // if true: skip all side-effects (no WhatsApp sends, no DB writes)
   trace?:   TraceStep[];   // populated during dry-run to describe what would happen
+  staffPhone?: string | null;
+  managerPhone?: string | null;
+  rawAccessToken?: string | null;
 }
 
 // ── Fuzzy keyword match: word-boundary aware ─────────────────
@@ -134,7 +137,7 @@ export async function runFlowsForMessage(
   const [{ data: tenant }, { data: lead }] = await Promise.all([
     supabaseAdmin
       .from('tenants')
-      .select('wa_access_token, wa_phone_number_id')
+      .select('wa_access_token, wa_phone_number_id, staff_phone, manager_phone, business_name')
       .eq('id', tenantId)
       .single(),
     leadId
@@ -163,6 +166,9 @@ export async function runFlowsForMessage(
     messageText,
     isFirstMessage,
     variables: {},
+    staffPhone: tenant.staff_phone,
+    managerPhone: tenant.manager_phone,
+    rawAccessToken: tenant.wa_access_token as string,
   };
 
   // ── Check for a pending wait_for_reply node from a previous flow run ──
@@ -248,7 +254,7 @@ async function executeFlowGraph(nodes: FlowNode[], edges: FlowEdge[], ctx: ExecC
     currentId = result.nextId ?? null;
   }
 
-  return messageSent;
+  return messageSent || steps > 1;
 }
 
 async function executeFlowFromNode(flow: FlowRecord, ctx: ExecContext, startNodeId: string): Promise<boolean> {
@@ -410,8 +416,29 @@ async function executeNode(
     try {
       await supabaseAdmin
         .from('conversations')
-        .update({ bot_paused: true })
+        .update({
+          bot_paused: true,
+          escalated: true,
+          escalated_at: new Date().toISOString(),
+          escalation_reason: 'Flow Handoff Triggered'
+        })
         .eq('id', ctx.conversationId);
+
+      // Trigger Staff Alert
+      if (ctx.staffPhone || ctx.managerPhone) {
+        const alertText = `⚠️ Handoff Requested!
+👤 +${ctx.phone} (${ctx.leadName || 'Customer'})
+💬 "${ctx.messageText.length > 60 ? ctx.messageText.slice(0, 57) + '...' : ctx.messageText}"`;
+
+        void sendStaffAlert({
+          wa_phone_number_id: ctx.phoneNumberId,
+          wa_access_token: ctx.rawAccessToken || ctx.accessToken,
+          staff_phone: ctx.staffPhone,
+          manager_phone: ctx.managerPhone
+        }, alertText).catch(err => {
+          console.error('Flow engine: failed to dispatch staff alert:', err);
+        });
+      }
     } catch (e) {
       console.error('Flow engine: handoff pause failed:', e);
     }
