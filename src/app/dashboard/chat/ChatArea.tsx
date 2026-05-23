@@ -2,7 +2,7 @@
 
 import {
   Send, Bot, User, Check, CheckCheck, Clock, AlertCircle, ArrowDown, Paperclip, Smile,
-  Mic, Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal, X,
+  Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal, X, Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -13,6 +13,8 @@ import { toast } from "sonner";
 import type { Message } from "@/lib/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { SharedConversationMeta } from "./page";
+import AIAssistPanel from "./AIAssistPanel";
+import AttachmentBubble, { PendingAttachment } from "./AttachmentBubble";
 
 // ── helpers ────────────────────────────────────────────────────────────
 // Consistent with ChatSidebar: same palette, same seed strategy
@@ -115,8 +117,9 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
   const searchParams = useSearchParams();
   const conversationId = searchParams.get('conversationId');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -126,7 +129,10 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const optimisticIdRef = useRef(0);
-  const recognitionRef = useRef<any>(null);
+
+  const scrollToBottom = useCallback((smooth = true) => {
+    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' });
+  }, []);
 
   // Common emojis for the picker
   const [emojiCategory, setEmojiCategory] = useState(0);
@@ -141,54 +147,18 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     { label: '🍕', name: 'Food', emojis: ['🍕','🍔','🍟','🌭','🍿','🧂','🥓','🥚','🍳','🧇','🥞','🧈','🍞','🥐','🥨','🥯','🧀','🥗','🥙','🥪','🌮','🌯','🫔','🥫','🍝','🍜','🍲','🍛','🍣','🍱','🥟','🦪','🍤','🍙','🍚','🍘','🍥','🥮','🍢','🧁','🍰','🎂','🍮','🍭','🍬','🍫','🍿','🍩','🍪','🌰','🥜','🍯','🧃','🥤','🧋','☕','🍵','🧉','🍶','🍺','🍻','🥂','🍷','🥃','🍸','🍹','🧊'] },
   ];
 
-  const handleEnhanceText = async () => {
-    if (aiLoading) return;
-    const draft = inputMsg.trim();
-    if (!draft) {
-      toast.error('Type something first, then tap ✨ to enhance it.');
-      return;
-    }
-    setAiLoading(true);
-    try {
-      const res = await fetch('/api/ai/enhance-text', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: draft }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.enhanced) {
-          setInputMsg(data.enhanced);
-          setTimeout(() => textareaRef.current?.focus(), 50);
-          setAiLoading(false);
-          return;
-        }
+  const handleAIInsert = useCallback((text: string) => {
+    setInputMsg(text);
+    // Resize textarea
+    setTimeout(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight, 128) + 'px';
+        el.focus();
       }
-    } catch { /* fall through to local enhancement */ }
-    // Local enhancement fallback — fix grammar, capitalise, add punctuation
-    let enhanced = draft.charAt(0).toUpperCase() + draft.slice(1);
-    if (!/[.!?]$/.test(enhanced)) enhanced += '.';
-    // Make it more professional
-    enhanced = enhanced
-      .replace(/\bi\b/g, 'I')
-      .replace(/\bdont\b/gi, "don't")
-      .replace(/\bcant\b/gi, "can't")
-      .replace(/\bwont\b/gi, "won't")
-      .replace(/\bim\b/gi, "I'm")
-      .replace(/\bits\b(?!')/gi, "it's")
-      .replace(/\bu\b/g, 'you')
-      .replace(/\bur\b/g, 'your')
-      .replace(/\bpls\b/gi, 'please')
-      .replace(/\bthx\b/gi, 'thanks')
-      .replace(/\bthanku\b/gi, 'thank you')
-      .replace(/\basap\b/gi, 'as soon as possible')
-      .replace(/  +/g, ' ')
-      .trim();
-    setInputMsg(enhanced);
-    setTimeout(() => textareaRef.current?.focus(), 50);
-    toast.success('Text enhanced ✨');
-    setAiLoading(false);
-  };
+    }, 30);
+  }, []);
 
   const handleEmojiInsert = (emoji: string) => {
     const el = textareaRef.current;
@@ -204,43 +174,105 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     setEmojiOpen(false);
   };
 
-  const handleVoiceInput = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) { toast.error('Voice input not supported in this browser. Try Chrome.'); return; }
-    if (isRecording) {
-      recognitionRef.current?.stop();
-      setIsRecording(false);
-      return;
-    }
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-IN';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognitionRef.current = recognition;
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setInputMsg(prev => prev ? prev + ' ' + transcript : transcript);
-      setTimeout(() => textareaRef.current?.focus(), 50);
-    };
-    recognition.onerror = () => { toast.error('Voice input error. Please try again.'); };
-    recognition.onend = () => setIsRecording(false);
-    recognition.start();
-    setIsRecording(true);
-    toast('🎤 Listening…', { description: 'Speak now. Tap mic again to stop.' });
-  };
 
+
+
+  // ── File attach: store as pending (DO NOT convert to text) ───────────────
   const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setInputMsg(prev => prev ? prev + ` [📎 ${file.name}]` : `[📎 ${file.name}]`);
-      toast('File attached', { description: `${file.name} — send the message to share it.` });
+    if (!file) return;
+
+    const MAX_SIZE = 50 * 1024 * 1024; // 50 MB
+    if (file.size > MAX_SIZE) {
+      toast.error('File too large', { description: 'Maximum file size is 50 MB.' });
+      e.target.value = '';
+      return;
     }
+
+    console.log('[attachment] File selected:', file.name, file.type, file.size);
+    setPendingFile(file);
     e.target.value = '';
   };
 
-  const scrollToBottom = useCallback((smooth = true) => {
-    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' });
-  }, []);
+  // ── Send attachment: real upload pipeline ─────────────────────────────────
+  const handleSendAttachment = useCallback(async () => {
+    if (!pendingFile || !conversationId || uploading) return;
+
+    const file = pendingFile;
+    setPendingFile(null);
+    setUploading(true);
+
+    // Optimistic message bubble
+    const optimisticId = `__optimistic__${++optimisticIdRef.current}`;
+    const optimisticMsg: Message = {
+      id: optimisticId,
+      conversation_id: conversationId,
+      tenant_id: '',
+      content: file.name,
+      direction: 'outbound',
+      message_type: file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'document',
+      channel: 'whatsapp',
+      sender_id: null,
+      wa_message_id: null,
+      status: 'pending',
+      error_message: null,
+      ai_generated: false,
+      ai_latency_ms: null,
+      created_at: new Date().toISOString(),
+      media_url: URL.createObjectURL(file), // local preview while uploading
+      file_name: file.name,
+      file_size: file.size,
+      mime_type: file.type,
+      media_caption: inputMsg.trim() || null,
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+    setTimeout(() => scrollToBottom(true), 30);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('conversationId', conversationId);
+      if (inputMsg.trim()) formData.append('caption', inputMsg.trim());
+
+      console.log('[attachment] Uploading:', file.name, file.type, file.size);
+
+      const res = await fetch('/api/chat/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      console.log('[attachment] Upload response:', data);
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Upload failed');
+      }
+
+      // Replace optimistic with real message
+      const realMsg: Message = data.message;
+      setMessages(prev => {
+        const withoutOpt = prev.filter(m => m.id !== optimisticId);
+        const exists = withoutOpt.some(m => m.id === realMsg.id);
+        if (exists) return withoutOpt;
+        return [...withoutOpt, realMsg];
+      });
+
+      // Clear caption after successful send
+      setInputMsg('');
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+
+      console.log('[attachment] ✅ Sent successfully:', realMsg.id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Upload failed';
+      console.error('[attachment] ❌ Upload error:', err);
+      toast.error('Attachment failed', { description: msg });
+      setMessages(prev => prev.map(m =>
+        m.id === optimisticId ? { ...m, status: 'failed' as Message['status'] } : m
+      ));
+    } finally {
+      setUploading(false);
+    }
+  }, [pendingFile, conversationId, uploading, inputMsg, scrollToBottom]);
 
   const handleScroll = useCallback(() => {
     const el = scrollAreaRef.current;
@@ -409,7 +441,13 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, scrollToBottom]);
 
+  // Modified handleSend: also handles attachment send
   const handleSend = async () => {
+    // If there's a pending file, send it as attachment
+    if (pendingFile) {
+      await handleSendAttachment();
+      return;
+    }
     if (!inputMsg.trim() || !conversationId || sending) return;
     const text = inputMsg.trim();
     setInputMsg('');
@@ -780,38 +818,81 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                       {/* Outbound: toolbar floats LEFT of bubble */}
                       {!isInbound && hoverToolbar}
 
-                      <div className={cn(
-                        'max-w-[65%] px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150',
-                        isInbound
-                          ? cn(
-                            'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10 text-foreground',
-                            isFirst ? 'rounded-2xl rounded-tl-sm' : 'rounded-2xl',
-                            isLast && !isFirst ? 'rounded-bl-sm' : ''
-                          )
-                          : cn(
-                            isOptimistic
-                              ? 'bg-gradient-to-r from-indigo-400/70 to-violet-500/70 border-indigo-400/10'
-                              : 'bg-gradient-to-r from-indigo-500/90 to-violet-600/90 border-indigo-400/20',
-                            'text-white shadow-[0_0_12px_rgba(99,102,241,0.15)]',
-                            isFirst ? 'rounded-2xl rounded-tr-sm' : 'rounded-2xl',
-                            isLast && !isFirst ? 'rounded-br-sm' : '',
-                            msg.status === 'failed' ? 'ring-1 ring-red-300 dark:ring-red-800 opacity-80' : ''
-                          )
-                      )}>
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
-
-                        {/* Timestamp + ticks — shown on every bubble */}
-                        <div className={cn('flex items-center gap-1 mt-0.5', isInbound ? 'justify-start' : 'justify-end')}>
-                          <span className={cn(
-                            'text-[10.5px]',
-                            isInbound ? 'text-black/30 dark:text-white/30' : 'text-white/60'
-                          )}>
-                            {formatTime(msg.created_at)}
-                          </span>
-                          {/* Only show ticks for outbound messages — no bot icon, no extras */}
-                          {!isInbound && tickIcon}
+                      {msg.media_url ? (
+                        /* ── Attachment bubble ── */
+                        <div className={cn(
+                          'max-w-[65%] px-2.5 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150',
+                          isInbound
+                            ? cn(
+                              'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10',
+                              isFirst ? 'rounded-2xl rounded-tl-sm' : 'rounded-2xl',
+                              isLast && !isFirst ? 'rounded-bl-sm' : ''
+                            )
+                            : cn(
+                              isOptimistic
+                                ? 'bg-gradient-to-r from-indigo-400/70 to-violet-500/70 border-indigo-400/10'
+                                : 'bg-gradient-to-r from-indigo-500/90 to-violet-600/90 border-indigo-400/20',
+                              'shadow-[0_0_12px_rgba(99,102,241,0.15)]',
+                              isFirst ? 'rounded-2xl rounded-tr-sm' : 'rounded-2xl',
+                              isLast && !isFirst ? 'rounded-br-sm' : '',
+                              msg.status === 'failed' ? 'ring-1 ring-red-300 dark:ring-red-800 opacity-80' : ''
+                            )
+                        )}>
+                          <AttachmentBubble
+                            mediaUrl={msg.media_url}
+                            fileName={msg.file_name || msg.content || 'file'}
+                            fileSize={msg.file_size}
+                            mimeType={msg.mime_type || 'application/octet-stream'}
+                            caption={msg.media_caption}
+                            isOutbound={!isInbound}
+                            isOptimistic={isOptimistic}
+                          />
+                          {/* Timestamp + ticks */}
+                          <div className={cn('flex items-center gap-1 mt-1', isInbound ? 'justify-start' : 'justify-end')}>
+                            <span className={cn(
+                              'text-[10.5px]',
+                              isInbound ? 'text-black/30 dark:text-white/30' : 'text-white/60'
+                            )}>
+                              {formatTime(msg.created_at)}
+                            </span>
+                            {!isInbound && tickIcon}
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        /* ── Text bubble ── */
+                        <div className={cn(
+                          'max-w-[65%] px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150',
+                          isInbound
+                            ? cn(
+                              'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10 text-foreground',
+                              isFirst ? 'rounded-2xl rounded-tl-sm' : 'rounded-2xl',
+                              isLast && !isFirst ? 'rounded-bl-sm' : ''
+                            )
+                            : cn(
+                              isOptimistic
+                                ? 'bg-gradient-to-r from-indigo-400/70 to-violet-500/70 border-indigo-400/10'
+                                : 'bg-gradient-to-r from-indigo-500/90 to-violet-600/90 border-indigo-400/20',
+                              'text-white shadow-[0_0_12px_rgba(99,102,241,0.15)]',
+                              isFirst ? 'rounded-2xl rounded-tr-sm' : 'rounded-2xl',
+                              isLast && !isFirst ? 'rounded-br-sm' : '',
+                              msg.status === 'failed' ? 'ring-1 ring-red-300 dark:ring-red-800 opacity-80' : ''
+                            )
+                        )}>
+                          <p className="whitespace-pre-wrap">{msg.content}</p>
+
+                          {/* Timestamp + ticks — shown on every bubble */}
+                          <div className={cn('flex items-center gap-1 mt-0.5', isInbound ? 'justify-start' : 'justify-end')}>
+                            <span className={cn(
+                              'text-[10.5px]',
+                              isInbound ? 'text-black/30 dark:text-white/30' : 'text-white/60'
+                            )}>
+                              {formatTime(msg.created_at)}
+                            </span>
+                            {/* Only show ticks for outbound messages — no bot icon, no extras */}
+                            {!isInbound && tickIcon}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Inbound: toolbar floats RIGHT of bubble */}
                       {isInbound && hoverToolbar}
@@ -839,7 +920,15 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       </AnimatePresence>
 
       {/* ── Composer ── */}
-      <div className="flex-shrink-0 px-4 pb-4 pt-3">
+      <div className="flex-shrink-0 px-4 pb-4 pt-3 relative">
+        {/* AI Assist floating panel */}
+        <AIAssistPanel
+          open={aiPanelOpen}
+          onClose={() => setAiPanelOpen(false)}
+          currentText={inputMsg}
+          messages={messages}
+          onInsert={handleAIInsert}
+        />
         {/* Hidden file input */}
         <input
           ref={fileInputRef}
@@ -848,6 +937,25 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           className="hidden"
           onChange={handleFileAttach}
         />
+
+        {/* Pending attachment preview strip */}
+        <AnimatePresence>
+          {pendingFile && (
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 4 }}
+              transition={{ duration: 0.15 }}
+              className="mb-2"
+            >
+              <PendingAttachment
+                file={pendingFile}
+                onRemove={() => setPendingFile(null)}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="flex items-end gap-1 bg-white dark:bg-[#1C2333] rounded-2xl px-2 py-2 shadow-[0_2px_16px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.04] dark:ring-white/[0.04]">
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -857,14 +965,16 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             <Paperclip className="w-4 h-4" />
           </button>
           <button
-            onClick={handleEnhanceText}
-            disabled={aiLoading}
-            title="Enhance with AI ✨"
-            className="w-8 h-8 rounded-full flex items-center justify-center text-violet-500/70 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30 transition-colors flex-shrink-0 mb-0.5 disabled:opacity-40"
+            onClick={() => { setAiPanelOpen(v => !v); setEmojiOpen(false); }}
+            title="AI Assistant ✨"
+            className={cn(
+              "w-8 h-8 rounded-full flex items-center justify-center transition-all flex-shrink-0 mb-0.5",
+              aiPanelOpen
+                ? "bg-violet-100 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400 shadow-[0_0_0_2px_rgba(139,92,246,0.2)]"
+                : "text-violet-500/70 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30"
+            )}
           >
-            {aiLoading
-              ? <div className="w-3.5 h-3.5 border-2 border-violet-400/40 border-t-violet-500 rounded-full animate-spin" />
-              : <Sparkles className="w-4 h-4" />}
+            <Sparkles className={cn("w-4 h-4", aiPanelOpen && "fill-current opacity-80")} />
           </button>
           <textarea
             ref={textareaRef}
@@ -877,9 +987,9 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
               }
             }}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder="Type a message…"
+            placeholder={pendingFile ? 'Add a caption… (optional)' : 'Type a message…'}
             rows={1}
-            disabled={sending}
+            disabled={sending || uploading}
             className="flex-1 bg-transparent border-0 resize-none outline-none text-[13.5px] text-foreground placeholder:text-muted-foreground/50 py-1.5 px-1 min-h-[36px] max-h-32"
           />
 
@@ -943,45 +1053,23 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             </AnimatePresence>
           </div>
 
-          {/* Mic ↔ Send swap */}
-          <AnimatePresence mode="wait" initial={false}>
-            {inputMsg.trim() ? (
-              <motion.button
-                key="send"
-                initial={{ scale: 0.7, opacity: 0, rotate: -30 }}
-                animate={{ scale: 1, opacity: 1, rotate: 0 }}
-                exit={{ scale: 0.7, opacity: 0, rotate: 30 }}
-                transition={{ duration: 0.15 }}
-                whileTap={{ scale: 0.92 }}
-                disabled={sending}
-                onClick={handleSend}
-                className="w-8 h-8 rounded-full bg-[#00A884] text-white hover:bg-[#009874] flex items-center justify-center flex-shrink-0 mb-0.5 transition-colors"
-              >
-                {sending
-                  ? <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  : <Send className="w-3.5 h-3.5" />
-                }
-              </motion.button>
-            ) : (
-              <motion.button
-                key="mic"
-                initial={{ scale: 0.7, opacity: 0, rotate: 30 }}
-                animate={{ scale: 1, opacity: 1, rotate: 0 }}
-                exit={{ scale: 0.7, opacity: 0, rotate: -30 }}
-                transition={{ duration: 0.15 }}
-                whileTap={{ scale: 0.92 }}
-                onClick={handleVoiceInput}
-                className={cn(
-                  "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mb-0.5 transition-colors",
-                  isRecording
-                    ? "bg-red-500 text-white animate-pulse"
-                    : "text-muted-foreground/60 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
-                )}
-              >
-                <Mic className="w-4 h-4" />
-              </motion.button>
+          {/* Send button — active when text typed OR file pending */}
+          <button
+            disabled={(!inputMsg.trim() && !pendingFile) || sending || uploading}
+            onClick={() => handleSend()}
+            className={cn(
+              "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mb-0.5 transition-all duration-150",
+              (inputMsg.trim() || pendingFile) && !sending && !uploading
+                ? "bg-[#00A884] text-white hover:bg-[#009874]"
+                : "text-muted-foreground/30 cursor-not-allowed"
             )}
-          </AnimatePresence>
+          >
+            {(sending || uploading) ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Send className="w-3.5 h-3.5" />
+            )}
+          </button>
         </div>
       </div>
     </div>

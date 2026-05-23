@@ -310,6 +310,9 @@ export interface ParsedMetaMessage {
   reactedToMessageId?: string;
   status?: string;    // "sent" | "delivered" | "read" | "failed"
   mediaId?: string;
+  mediaMimeType?: string;
+  mediaFilename?: string;
+  mediaCaption?: string;
   referral?: {        // Ad click tracking
     source_type?: string;
     source_id?: string;
@@ -356,6 +359,9 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
 
       let text = '';
       let mediaId: string | undefined;
+      let mediaMimeType: string | undefined;
+      let mediaFilename: string | undefined;
+      let mediaCaption: string | undefined;
 
       if (msgType === 'text') {
         text = msg.text?.body || '';
@@ -377,6 +383,9 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
         const mediaObj = msg[msgType];
         mediaId = mediaObj?.id;
         text = mediaObj?.caption || `[${msgType}]`;
+        mediaMimeType = mediaObj?.mime_type;
+        mediaFilename = mediaObj?.filename;
+        mediaCaption = mediaObj?.caption;
       } else if (msgType === 'location') {
         const loc = msg.location;
         text = loc ? `📍 Location: ${loc.latitude}, ${loc.longitude}` : '📍 Location shared';
@@ -420,6 +429,9 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
         timestamp,
         isStatusUpdate: false,
         mediaId,
+        mediaMimeType,
+        mediaFilename,
+        mediaCaption,
         referral,
       };
     }

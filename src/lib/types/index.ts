@@ -196,6 +196,12 @@ export interface Message {
   ai_generated: boolean;
   ai_latency_ms: number | null;
   created_at: string;
+  // Media / Attachment fields (nullable — only set for media messages)
+  media_url?: string | null;
+  file_name?: string | null;
+  file_size?: number | null;
+  mime_type?: string | null;
+  media_caption?: string | null;
 }
 
 export type MessageType = 'text' | 'interactive' | 'template' | 'image' | 'video' | 'audio' | 'document' | 'location' | 'reaction';
