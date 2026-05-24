@@ -147,104 +147,49 @@ export default function FlowsDashboardPage() {
             Create Flow
           </h1>
           <p className="font-sans text-[15px] text-white/50 max-w-xl leading-relaxed">
-            Select a business model to begin. We'll automatically configure your workspace with industry-specific templates and tools.
+            Start from a blank canvas to design custom automated response flows tailored to your business needs.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-20">
-          {mainCards.map((card) => {
-            const Icon = card.Icon;
-            const isLoading = loadingType === card.id;
-
-            return (
-              <div
-                key={card.id}
-                onClick={() => handleSelect(card.id)}
-                className="relative flex flex-col bg-[#111111] border border-white/[0.04] rounded-2xl p-6 h-[260px] cursor-pointer group transition-all duration-300 ease-out hover:bg-[#151515] hover:border-white/[0.08] hover:shadow-[0_8px_32px_-8px_rgba(0,0,0,0.5)] hover:-translate-y-1 overflow-hidden outline-none focus-visible:border-[#06B6D4]/50 focus-visible:ring-1 focus-visible:ring-[#06B6D4]/20"
-                role="button"
-                aria-label={`Select ${card.name}`}
-                tabIndex={0}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSelect(card.id); }}
-              >
-                {/* Subtle top illumination on hover */}
-                <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[#06B6D4]/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                
-                {isLoading ? (
-                  <div className="absolute inset-0 flex items-center justify-center bg-[#111111]/80 backdrop-blur-sm z-10 rounded-2xl">
-                    <Loader2 className="w-6 h-6 animate-spin text-[#06B6D4]" />
-                  </div>
-                ) : null}
-
-                <div className="flex justify-between items-start mb-5">
-                  <div className="w-10 h-10 rounded-[10px] bg-white/[0.03] flex items-center justify-center border border-white/[0.05] group-hover:bg-[#06B6D4]/10 group-hover:border-[#06B6D4]/20 transition-all duration-300">
-                    <Icon className="w-5 h-5 text-white/60 group-hover:text-[#06B6D4] transition-colors duration-300" />
-                  </div>
-                  
-                  <span className="font-sans text-[11px] font-medium tracking-wide opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-1 group-hover:translate-x-0 text-white/40 group-hover:text-white/60 uppercase">
-                    Select
-                  </span>
-                </div>
-
-                <h3 className="font-sans text-[16px] font-medium text-white/90 tracking-tight">
-                  {card.name}
-                </h3>
-                
-                <p className="font-sans text-[13px] text-white/40 leading-relaxed mt-1.5 line-clamp-2">
-                  {card.description}
-                </p>
-
-                <div className="mt-auto pt-4 flex flex-col gap-1.5">
-                  {(card.capabilities || []).map((cap: string, i: number) => (
-                    <div key={i} className="flex items-center gap-2 text-[12px] text-white/50 group-hover:text-white/60 transition-colors">
-                      <div className="w-3 flex items-center justify-center">
-                        <div className="w-[3px] h-[3px] rounded-full bg-[#06B6D4]/40 group-hover:bg-[#06B6D4] transition-colors" />
-                      </div>
-                      <span className="truncate">{cap}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-
+        <div className="max-w-xl pb-20">
           {blankCard && (
             <div
               onClick={() => handleSelect(blankCard.id)}
-              className="relative flex flex-col bg-transparent border border-dashed border-white/[0.08] rounded-2xl p-6 h-[260px] cursor-pointer group transition-all duration-300 ease-out hover:bg-white/[0.02] hover:border-white/[0.15] hover:shadow-[0_8px_32px_-8px_rgba(0,0,0,0.5)] hover:-translate-y-1 overflow-hidden outline-none focus-visible:border-[#06B6D4]/50 focus-visible:ring-1 focus-visible:ring-[#06B6D4]/20"
+              className="relative flex flex-col bg-[#111111] border border-white/[0.05] rounded-2xl p-8 h-[240px] cursor-pointer group transition-all duration-300 ease-out hover:bg-[#151515] hover:border-white/[0.09] hover:shadow-[0_8px_32px_-8px_rgba(0,0,0,0.5)] hover:-translate-y-1 overflow-hidden outline-none focus-visible:border-[#06B6D4]/50 focus-visible:ring-1 focus-visible:ring-[#06B6D4]/20"
               role="button"
               aria-label="Start from blank canvas"
               tabIndex={0}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSelect(blankCard.id); }}
             >
+              {/* Subtle top illumination on hover */}
+              <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[#06B6D4]/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
               {loadingType === blankCard.id ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0A]/80 backdrop-blur-sm z-10 rounded-2xl">
                   <Loader2 className="w-6 h-6 animate-spin text-[#06B6D4]" />
                 </div>
               ) : null}
 
-              <div className="flex justify-between items-start mb-5">
-                <div className="w-10 h-10 rounded-[10px] bg-white/[0.02] flex items-center justify-center border border-white/[0.04] group-hover:bg-white/[0.06] transition-colors duration-300">
-                  <LayoutTemplate className="w-5 h-5 text-white/40 group-hover:text-white/70 transition-colors duration-300" />
+              <div className="flex justify-between items-start mb-6">
+                <div className="w-12 h-12 rounded-xl bg-white/[0.03] flex items-center justify-center border border-white/[0.05] group-hover:bg-[#06B6D4]/10 group-hover:border-[#06B6D4]/20 transition-all duration-300">
+                  <LayoutTemplate className="w-6 h-6 text-white/50 group-hover:text-[#06B6D4] transition-colors duration-300" />
                 </div>
+                <span className="font-sans text-[11px] font-medium tracking-wide opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-1 group-hover:translate-x-0 text-white/40 group-hover:text-white/60 uppercase">
+                  Select
+                </span>
               </div>
 
-              <h3 className="font-sans text-[16px] font-medium text-white/90 tracking-tight">
+              <h3 className="font-sans text-[18px] font-semibold text-white/90 tracking-tight">
                 {blankCard.name}
               </h3>
               
-              <p className="font-sans text-[13px] text-white/40 leading-relaxed mt-1.5 line-clamp-2">
+              <p className="font-sans text-[13.5px] text-white/45 leading-relaxed mt-2">
                 {blankCard.description}
               </p>
 
-              <div className="mt-auto pt-4 flex flex-col gap-1.5">
-                {(blankCard.capabilities || []).map((cap: string, i: number) => (
-                  <div key={i} className="flex items-center gap-2 text-[12px] text-white/50 group-hover:text-white/60 transition-colors">
-                    <div className="w-3 flex items-center justify-center">
-                      <div className="w-[3px] h-[3px] rounded-full bg-white/20 group-hover:bg-white/40 transition-colors" />
-                    </div>
-                    <span className="truncate">{cap}</span>
-                  </div>
-                ))}
+              <div className="mt-auto flex items-center gap-6 text-[12px] text-white/40">
+                <span className="flex items-center gap-1.5"><Zap className="w-3.5 h-3.5 text-[#06B6D4]" /> Full 150+ node toolkit</span>
+                <span className="flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> 100% customizable</span>
               </div>
             </div>
           )}
