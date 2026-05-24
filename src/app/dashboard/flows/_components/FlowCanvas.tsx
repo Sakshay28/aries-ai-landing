@@ -168,7 +168,7 @@ export default function FlowCanvas() {
   );
 
   return (
-    <div className="flex-1 h-full bg-[#030303] relative" ref={reactFlowWrapper}>
+    <div className="flex-1 h-full bg-[#1E1E20] relative" ref={reactFlowWrapper}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -194,19 +194,19 @@ export default function FlowCanvas() {
         zoomOnScroll={false}
         panOnDrag={true}
         fitView
-        className="bg-[#030303]"
+        className="bg-[#1E1E20]"
         minZoom={0.2}
         proOptions={{ hideAttribution: true }}
       >
         <Background 
           variant={BackgroundVariant.Dots} 
           gap={24} 
-          size={2} 
-          color="rgba(6, 182, 212, 0.25)"
-          className="opacity-60"
+          size={1.5} 
+          color="rgba(255, 255, 255, 0.35)"
+          className="opacity-100"
         />
         <MiniMap 
-          className="!bg-[#030303]/40 !border !border-white/[0.02] !rounded-lg opacity-10 hover:opacity-100 transition-all duration-500 scale-90 origin-bottom-right"
+          className="!bg-[#1E1E20]/40 !border !border-white/[0.02] !rounded-lg opacity-10 hover:opacity-100 transition-all duration-500 scale-90 origin-bottom-right"
           maskColor="rgba(0, 0, 0, 0.3)"
           nodeColor="rgba(255, 255, 255, 0.1)"
         />
@@ -229,8 +229,8 @@ export default function FlowCanvas() {
       }} />
 
       {/* Decorative gradients */}
-      <div className="absolute top-0 left-0 w-full h-[150px] bg-gradient-to-b from-[#030303] to-transparent pointer-events-none" />
-      <div className="absolute bottom-0 left-0 w-full h-[100px] bg-gradient-to-t from-[#030303] to-transparent pointer-events-none" />
+      <div className="absolute top-0 left-0 w-full h-[150px] bg-gradient-to-b from-[#1E1E20] to-transparent pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-full h-[100px] bg-gradient-to-t from-[#1E1E20] to-transparent pointer-events-none" />
     </div>
   );
 }
