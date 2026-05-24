@@ -1716,10 +1716,7 @@ function UseCases() {
 
 function Integrations() {
   const ref = useRef<HTMLDivElement>(null);
-  const [inView, setInView] = useState(false);
-  useEffect(() => {
-    setInView(true);
-  }, []);
+  const inView = true;
   const [hoveredIntegration, setHoveredIntegration] = useState<string | null>(null);
 
   const leftIntegrations = [
