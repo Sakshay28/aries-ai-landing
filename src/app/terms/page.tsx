@@ -106,8 +106,9 @@ export default function TermsPage() {
         <Section title="13. Contact">
           For questions about these Terms, contact us at:
           <div style={{ marginTop: 12, padding: "16px 20px", background: "#f8fafb", borderRadius: 12, border: "1px solid #eee" }}>
-            <strong>Aries AI (by Nexora)</strong><br />
-            Email: <a href="mailto:sakshayajwani@gmail.com" style={{ color: "#25D366" }}>sakshayajwani@gmail.com</a><br />
+            <strong>Aries AI Support Team</strong><br />
+            General Information: <a href="mailto:info@ariesai.in" style={{ color: "#25D366" }}>info@ariesai.in</a><br />
+            Technical Support: <a href="mailto:support@ariesai.in" style={{ color: "#25D366" }}>support@ariesai.in</a><br />
             Website: <a href="https://ariesai.in" style={{ color: "#25D366" }}>ariesai.in</a>
           </div>
         </Section>

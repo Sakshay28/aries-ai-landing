@@ -74,6 +74,8 @@ const CSS = `
   .hero-cta { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 40px; }
 
   /* ─── Section padding ─── */
+  .section { padding: 96px 40px; }
+  .section-sm { padding: 64px 40px; }
   .section-pad { padding: 64px 40px 100px; }
   .section-pad-sm { padding: 80px 40px; }
 
@@ -82,6 +84,7 @@ const CSS = `
   .industries-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 20px; }
   .industries-grid:last-of-type { margin-bottom: 0; }
   .pricing-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; max-width: 1280px; margin: 0 auto; }
+  .trust-grid { display: grid; grid-template-columns: repeat(4, 1fr); max-width: 1280px; margin: 0 auto; width: 100%; }
   .setup-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 64px; align-items: center; max-width: 1300px; margin: 0 auto; }
   .hiw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 40px; }
 
@@ -108,7 +111,7 @@ const CSS = `
   .pc:hover .pf { color: #ddd; }
   .pc .pf-highlight { color: #25D366; font-weight: 700; }
   .pc:hover .pf-highlight { color: #4ade80; }
-  .pc .pop-badge { opacity: 0; transition: opacity 0.4s; }
+  .pc .pop-badge { opacity: 1; transition: opacity 0.4s; }
   .pc:hover .pop-badge { opacity: 1; }
   .pc .sep { border-color: #f0f0f0; transition: border-color 0.4s; }
   .pc:hover .sep { border-color: #333; }
@@ -141,6 +144,7 @@ const CSS = `
   /* ─── Tablet (≤1024px) ─── */
   @media (max-width: 1024px) {
     .pricing-grid { grid-template-columns: repeat(2, 1fr); }
+    .trust-grid { grid-template-columns: repeat(2, 1fr); }
     .industries-grid { grid-template-columns: repeat(2, 1fr); }
     .hero-grid { grid-template-columns: 1fr; gap: 0; }
     .hero-image-wrap { display: none; }
@@ -159,10 +163,13 @@ const CSS = `
     .hero-cta { flex-direction: column; }
     .hero-cta a, .hero-cta-outline { width: 100%; text-align: center; justify-content: center; }
 
+    .section { padding: 64px 20px; }
+    .section-sm { padding: 48px 20px; }
     .section-pad { padding: 48px 20px 64px; }
     .section-pad-sm { padding: 48px 20px; }
 
     .pricing-grid { grid-template-columns: 1fr; }
+    .trust-grid { grid-template-columns: 1fr; }
     .industries-grid { grid-template-columns: 1fr; }
     .hiw-grid { grid-template-columns: 1fr; gap: 32px; }
     .step-connector { display: none !important; }
@@ -405,13 +412,18 @@ function Navbar() {
 
   return (
     <>
-      <nav style={{
-        position: "fixed", top: 0, left: 0, right: 0, zIndex: 999,
-        background: scrolled ? "rgba(255,255,255,0.97)" : "#fff",
-        backdropFilter: "blur(12px)",
-        borderBottom: "1px solid #eee",
-        transition: "all 0.3s",
-      }}>
+      <motion.nav
+        initial={{ y: -72, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.6, ease: EASE_OUT }}
+        style={{
+          position: "fixed", top: 0, left: 0, right: 0, zIndex: 999,
+          background: scrolled ? "rgba(255,255,255,0.97)" : "#fff",
+          backdropFilter: "blur(12px)",
+          borderBottom: "1px solid #eee",
+          transition: "background 0.3s, border-bottom 0.3s",
+        }}
+      >
         <div className="nav-inner">
           <Link href="/" style={{ display: "flex", alignItems: "center", textDecoration: "none" }}>
             <img src="/logo.png" alt="Aries AI" style={{ height: 40 }} />
@@ -427,9 +439,13 @@ function Navbar() {
                 </a>
               ))}
             </div>
-            <div className="nav-actions">
-              <Link href="/login" className="btn-anim" style={{ background: G, color: "#fff", padding: "10px 22px", borderRadius: 8, fontSize: 14, fontWeight: 700, textDecoration: "none", minWidth: 80, textAlign: "center" }}>Login</Link>
-              <Link href="/signup" className="btn-anim" style={{ background: G, color: "#fff", padding: "10px 22px", borderRadius: 8, fontSize: 14, fontWeight: 700, textDecoration: "none", minWidth: 140, textAlign: "center" }}>Start Free Trial →</Link>
+            <div className="nav-actions" style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <motion.div whileTap={{ scale: 0.96 }}>
+                <Link href="/login" className="btn-anim" style={{ display: "block", background: G, color: "#fff", padding: "10px 22px", borderRadius: 8, fontSize: 14, fontWeight: 700, textDecoration: "none", minWidth: 80, textAlign: "center" }}>Login</Link>
+              </motion.div>
+              <motion.div whileTap={{ scale: 0.96 }}>
+                <Link href="/signup" className="btn-anim" style={{ display: "block", background: G, color: "#fff", padding: "10px 22px", borderRadius: 8, fontSize: 14, fontWeight: 700, textDecoration: "none", minWidth: 140, textAlign: "center" }}>Start Free Trial →</Link>
+              </motion.div>
             </div>
           </div>
 
@@ -440,7 +456,7 @@ function Navbar() {
             <span style={{ transform: menuOpen ? "rotate(-45deg) translate(5px, -5px)" : "none" }} />
           </button>
         </div>
-      </nav>
+      </motion.nav>
 
       {/* Mobile menu */}
       <div className={`mobile-menu${menuOpen ? " open" : ""}`}>
@@ -463,49 +479,103 @@ function Navbar() {
 /* ─────────────────────────────────────────────────────────────────────────
    HERO — left-aligned, asymmetric split (anti-center-bias per taste-skill) 
 ───────────────────────────────────────────────────────────────────────── */
+const heroTextVariants = {
+  hidden: { opacity: 0, y: 24, scale: 0.98 },
+  visible: (i: number) => ({
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: {
+      duration: 0.75,
+      delay: i * 0.12,
+      ease: EASE_OUT,
+    },
+  }),
+};
+
 function Hero() {
   return (
-    <section style={{ minHeight: "100vh", display: "flex", alignItems: "center", background: "linear-gradient(135deg, #f0fdf4 0%, #fff 50%, #f0fdf4 100%)", paddingTop: 80 }}>
+    <section style={{ minHeight: "100dvh", display: "flex", alignItems: "center", background: "linear-gradient(135deg, #f0fdf4 0%, #fff 50%, #f0fdf4 100%)", paddingTop: 80, overflow: "hidden" }}>
       <div className="hero-grid">
         <div>
-          <h1 style={{ fontSize: "clamp(32px, 4vw, 56px)", fontWeight: 900, lineHeight: 1.1, letterSpacing: "-2px", marginBottom: 20 }}>
+          <motion.h1
+            custom={0}
+            initial="hidden"
+            animate="visible"
+            variants={heroTextVariants}
+            style={{ fontSize: "clamp(32px, 4vw, 56px)", fontWeight: 900, lineHeight: 1.1, letterSpacing: "-2px", marginBottom: 20 }}
+          >
             Automate Your<br />
             <span style={{ color: G }}>WhatsApp Business</span><br />
             With AI
-          </h1>
-          <p style={{ fontSize: 18, color: "#555", lineHeight: 1.7, marginBottom: 36, maxWidth: 480 }}>
+          </motion.h1>
+          <motion.p
+            custom={1}
+            initial="hidden"
+            animate="visible"
+            variants={heroTextVariants}
+            style={{ fontSize: 18, color: "#555", lineHeight: 1.7, marginBottom: 36, maxWidth: 480 }}
+          >
             Your AI assistant replies to customer enquiries, takes bookings, captures leads, and follows up — 24/7. While you sleep.
-          </p>
-          <div className="hero-cta">
-            <Link href="/signup" className="btn-anim" style={{ background: G, color: "#fff", padding: "16px 32px", borderRadius: 10, fontSize: 16, fontWeight: 700, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8 }}>
-              Start Free 14-Day Trial →
-            </Link>
-            <a href="#how-it-works" className="btn-anim-outline hero-cta-outline" style={{ background: "#fff", color: "#111", padding: "16px 28px", borderRadius: 10, fontSize: 16, fontWeight: 600, textDecoration: "none", border: "1.5px solid #ddd", textAlign: "center" }}>
-              See How It Works
-            </a>
+          </motion.p>
+          <div className="hero-cta" style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 40 }}>
+            <motion.div
+              custom={2}
+              initial="hidden"
+              animate="visible"
+              variants={heroTextVariants}
+            >
+              <Link href="/signup" className="btn-anim" style={{ background: G, color: "#fff", padding: "16px 32px", borderRadius: 10, fontSize: 16, fontWeight: 700, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8 }}>
+                Start Free 14-Day Trial →
+              </Link>
+            </motion.div>
+            <motion.div
+              custom={3}
+              initial="hidden"
+              animate="visible"
+              variants={heroTextVariants}
+            >
+              <a href="#how-it-works" className="btn-anim-outline hero-cta-outline" style={{ background: "#fff", color: "#111", padding: "16px 28px", borderRadius: 10, fontSize: 16, fontWeight: 600, textDecoration: "none", border: "1.5px solid #ddd", textAlign: "center", display: "block" }}>
+                See How It Works
+              </a>
+            </motion.div>
           </div>
-          <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+          <motion.div
+            custom={4}
+            initial="hidden"
+            animate="visible"
+            variants={heroTextVariants}
+            style={{ display: "flex", gap: 20, flexWrap: "wrap" }}
+          >
             {["Free 14-day trial", "Pay with UPI later", "Setup in under 10 minutes"].map(t => (
               <span key={t} style={{ fontSize: 13, color: "#777", fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ width: 5, height: 5, borderRadius: "50%", background: G, display: "inline-block", flexShrink: 0 }} />
                 {t}
               </span>
             ))}
-          </div>
+          </motion.div>
         </div>
         <div className="hero-image-wrap" style={{ display: "flex", justifyContent: "center", position: "relative" }}>
-          <img
-            src="/page.png"
-            alt="WhatsApp AI automation in action"
-            style={{
-              width: "100%", maxWidth: 960,
-              transform: "scale(1.3) translateX(100px)",
-              transformOrigin: "center right",
-              height: "auto", position: "relative", zIndex: 1,
-              WebkitMaskImage: "radial-gradient(ellipse 80% 80% at center, black 50%, transparent 100%)",
-              maskImage: "radial-gradient(ellipse 80% 80% at center, black 50%, transparent 100%)",
-            }}
-          />
+          <motion.div
+            animate={{ y: [0, -12, 0] }}
+            transition={{ duration: 6, ease: "easeInOut", repeat: Infinity }}
+            style={{ width: "100%", height: "auto", display: "flex", justifyContent: "center" }}
+          >
+            <motion.img
+              src="/page.png"
+              alt="WhatsApp AI automation in action"
+              initial={{ opacity: 0, scale: 1.2, x: 180 }}
+              animate={{ opacity: 1, scale: 1.3, x: 100 }}
+              transition={{ duration: 1.2, delay: 0.35, ease: EASE_OUT }}
+              style={{
+                width: "100%", maxWidth: 960,
+                transformOrigin: "center right",
+                height: "auto", position: "relative", zIndex: 1,
+                WebkitMaskImage: "radial-gradient(ellipse 80% 80% at center, black 50%, transparent 100%)",
+                maskImage: "radial-gradient(ellipse 80% 80% at center, black 50%, transparent 100%)",
+              }}
+            />
+          </motion.div>
         </div>
       </div>
     </section>
@@ -537,7 +607,7 @@ function TrustBar() {
       ),
       title: "Built in India",
       desc: "Designed for Indian businesses",
-      tag: "🇮🇳 India",
+      tag: "India",
     },
     {
       icon: (
@@ -564,11 +634,18 @@ function TrustBar() {
   ];
 
   return (
-    <section style={{ background: "#0c0e14", borderTop: "1px solid rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-      <div style={{
-        maxWidth: 1280, margin: "0 auto",
-        display: "grid", gridTemplateColumns: "repeat(4,1fr)",
-      }}>
+    <section style={{
+      background: "#0c0e14",
+      borderTopLeftRadius: "50% 30px",
+      borderTopRightRadius: "50% 30px",
+      borderTop: "1px solid rgba(255,255,255,0.06)",
+      marginTop: "-30px",
+      position: "relative",
+      zIndex: 10,
+      paddingTop: 10,
+      overflow: "hidden"
+    }}>
+      <div className="trust-grid" style={{ padding: "0 40px" }}>
         {items.map((item, i) => (
           <motion.div
             key={item.title}
@@ -639,14 +716,26 @@ function TrustBar() {
    STATS — numbers with borders instead of cards (Impeccable flat rule)     
 ───────────────────────────────────────────────────────────────────────── */
 function Stats() {
+  const ref = useRef<HTMLDivElement>(null);
+  const inView = useInView(ref, { once: true, margin: "-100px" });
+
   const stats = [
     { n: "3 min", label: "Average setup time" },
     { n: "24/7", label: "Always on, never sleeps" },
     { n: "11+", label: "Indian languages" },
     { n: "94%", label: "CSAT on day one" },
   ];
+
   return (
-    <section className="section" style={{ background: "#0c0e14", color: "#fff" }}>
+    <section className="section" style={{
+      background: "#0c0e14",
+      color: "#fff",
+      borderBottomLeftRadius: "50% 30px",
+      borderBottomRightRadius: "50% 30px",
+      paddingBottom: 80,
+      position: "relative",
+      zIndex: 10
+    }}>
       <div className="container">
         <Reveal>
           <div style={{ textAlign: "center", marginBottom: 48 }}>
@@ -664,22 +753,29 @@ function Stats() {
             </p>
           </div>
         </Reveal>
-        <Reveal delay={0.1}>
-          <div className="stats-row">
-            {stats.map((s, i) => (
-              <div key={s.n} className="stat-item">
-                <div style={{
-                  fontSize: "clamp(32px,3.5vw,52px)",
-                  fontWeight: 900, color: G,
-                  letterSpacing: "-1.5px", lineHeight: 1,
-                  marginBottom: 8,
-                  fontFamily: "'Geist Mono', monospace",
-                }}>{s.n}</div>
-                <div style={{ fontSize: 13, color: "#999", fontWeight: 500 }}>{s.label}</div>
+        
+        <div ref={ref} className="stats-row">
+          {stats.map((s, i) => (
+            <motion.div
+              key={s.n}
+              initial={{ opacity: 0, y: 16, scale: 0.97 }}
+              animate={inView ? { opacity: 1, y: 0, scale: 1 } : {}}
+              transition={{ duration: 0.55, delay: i * 0.1, ease: EASE_OUT }}
+              className="stat-item"
+            >
+              <div style={{
+                fontSize: "clamp(32px,3.5vw,52px)",
+                fontWeight: 900, color: G,
+                letterSpacing: "-1.5px", lineHeight: 1,
+                marginBottom: 8,
+                fontFamily: "'Geist Mono', monospace",
+              }}>
+                <AnimatedCounter value={s.n} trigger={inView} />
               </div>
-            ))}
-          </div>
-        </Reveal>
+              <div style={{ fontSize: 13, color: "#999", fontWeight: 500 }}>{s.label}</div>
+            </motion.div>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -850,7 +946,14 @@ function SheetsSyncVisual({ isHovered }: { isHovered?: boolean }) {
               borderRadius: 3,
             }}
           >
-            {cell}
+            {cell === "⏳ Pending" ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <svg viewBox="0 0 24 24" width="10" height="10" style={{ stroke: "#f59e0b", fill: "none", strokeWidth: 2.5, strokeLinecap: "round", strokeLinejoin: "round", flexShrink: 0 }}>
+                  <path d="M5 2h14M5 22h14M19 2v4c0 3-2 5-5 7 3 2 5 4 5 7v4M5 2v4c0 3 2 5 5 7-3 2-5 4-5 7v4" />
+                </svg>
+                Pending
+              </span>
+            ) : cell}
           </motion.div>
         ))}
       </div>
@@ -887,9 +990,12 @@ function AlertsVisual({ isHovered }: { isHovered?: boolean }) {
         }}
         transition={{ duration: 0.6, repeat: isHovered ? Infinity : 0, repeatDelay: 1 }}
         style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#25D366,#128C7E)",
-          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 14 }}
+          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
       >
-        🔔
+        <svg viewBox="0 0 24 24" width="16" height="16" style={{ stroke: "#fff", fill: "none", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }}>
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
       </motion.div>
       <div>
         <div style={{ fontSize: 11.5, fontWeight: 700, color: "#111", marginBottom: 2 }}>New HOT Lead!</div>
@@ -1716,7 +1822,7 @@ function UseCases() {
 
 function Integrations() {
   const ref = useRef<HTMLDivElement>(null);
-  const inView = true;
+  const inView = useInView(ref, { once: true, margin: "-120px" });
   const [hoveredIntegration, setHoveredIntegration] = useState<string | null>(null);
 
   const leftIntegrations = [
@@ -1756,8 +1862,15 @@ function Integrations() {
   return (
     <section style={{
       background: "#0c0e14",
-      padding: "100px 40px",
+      borderTopLeftRadius: "50% 30px",
+      borderTopRightRadius: "50% 30px",
+      borderBottomLeftRadius: "50% 30px",
+      borderBottomRightRadius: "50% 30px",
+      borderTop: "1px solid rgba(255,255,255,0.06)",
+      marginTop: "-30px",
+      padding: "120px 40px 140px",
       position: "relative",
+      zIndex: 10,
       overflow: "hidden",
     }}>
       {/* ambient glow */}
@@ -2148,20 +2261,7 @@ function Integrations() {
           </svg>
         </div>
 
-        {/* Legend + footnote */}
-        <Reveal>
-          <div style={{ textAlign: "center", marginTop: 32, display: "flex", alignItems: "center", justifyContent: "center", gap: 28, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#9ca3af" }}>
-              <svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="#25d366" /></svg>
-              Available now
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#4b5563" }}>
-              <svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="rgba(255,255,255,0.2)" /></svg>
-              Coming soon
-            </div>
-            <div style={{ color: "#374151", fontSize: 13 }}>+ more via webhooks &amp; API</div>
-          </div>
-        </Reveal>
+
       </div>
     </section>
   );
@@ -2516,16 +2616,14 @@ function HowItWorks() {
 
                   {/* Detail tag */}
                   <div style={{
-                    display: "inline-flex", alignItems: "center", gap: 5,
-                    fontSize: 11.5, fontWeight: 600,
+                    fontSize: 12,
+                    fontWeight: 700,
                     color: GD,
-                    background: "rgba(37,211,102,0.08)",
-                    border: "1px solid rgba(37,211,102,0.15)",
-                    borderRadius: 20, padding: "4px 12px",
+                    letterSpacing: "0.04em",
+                    textTransform: "uppercase",
                     position: "relative",
                     zIndex: 1,
                   }}>
-                    <svg viewBox="0 0 24 24" width="11" height="11" style={{ stroke: G, fill: "none", strokeWidth: 2.5, strokeLinecap: "round", strokeLinejoin: "round" }}><polyline points="20 6 9 17 4 12"/></svg>
                     {step.detail}
                   </div>
                 </motion.div>
@@ -2547,30 +2645,92 @@ function Pricing() {
   const plans = [
     {
       name: "Starter", price: "3,999", oldPrice: "",
-      desc: "For small businesses starting with WhatsApp marketing",
+      desc: "For small businesses starting on WhatsApp",
       caps: ["1 Agent Seat", "2,000 conversations/month"],
-      features: ["WhatsApp Business API", "Blue Tick Application", "₹100 Free Credits", "Manual Live Chat", "Broadcast Campaigns", "Contact Management"],
+      features: [
+        "1 Team Member / Agent",
+        "2,000 Conversations / month",
+        "WhatsApp Business API Access",
+        "Shared Inbox",
+        "Manual Live Chat",
+        "Contact Management",
+        "Broadcast Campaigns",
+        "Basic Customer Segmentation",
+        "Chat Labels / Tags",
+        "AI FAQ Assistant (Basic)",
+        "Basic Analytics Dashboard",
+        "Click-to-WhatsApp Widget",
+        "Blue Tick Guidance Support",
+        "₹100 Trial Credits"
+      ],
       cta: "Start Free Trial", popular: false,
     },
     {
       name: "Growth", price: "5,999", oldPrice: "",
-      desc: "Scale customer support with AI FAQ automation",
-      caps: ["2 Agent Seats", "10,000 conversations/month"],
-      features: ["Everything in Starter", "AI FAQ Chatbot", "Hindi + English + Hinglish", "Smart Segments", "Custom Attributes", "Priority Email Support"],
-      cta: "Start Free Trial", popular: false,
-    },
-    {
-      name: "Pro", price: "7,999", oldPrice: "",
-      desc: "Advanced workflows and visual flow builder",
-      caps: ["5 Agent Seats", "25,000 conversations/month"],
-      features: ["Everything in Growth", "Visual Flow Builder", "5 Active Chatbot Flows", "Google Sheets Sync", "Lead Scoring & Alerts", "CRM Integrations"],
+      desc: "Everything in Starter +",
+      caps: ["3 Team Members", "10,000 conversations/month"],
+      features: [
+        "3 Team Members",
+        "10,000 Conversations / month",
+        "Advanced AI FAQ Chatbot",
+        "Hindi + English + Hinglish AI",
+        "Smart Customer Segments",
+        "Auto Replies & Smart Workflows",
+        "Drip Campaigns / Follow-ups",
+        "Lead Capture Forms",
+        "Custom Attributes & Tags",
+        "Broadcast Scheduling",
+        "Priority Support",
+        "Appointment Reminders",
+        "Cart Recovery / Follow-up Automation",
+        "AI Lead Qualification",
+        "Basic CRM Sync"
+      ],
       cta: "Start Free Trial", popular: true,
     },
     {
+      name: "Pro", price: "7,999", oldPrice: "",
+      desc: "For businesses scaling operations and automations",
+      caps: ["5 Team Members", "25,000 conversations/month"],
+      features: [
+        "5 Team Members",
+        "25,000 Conversations / month",
+        "Visual Workflow Builder",
+        "Unlimited Automation Flows",
+        "CRM Integrations",
+        "Google Sheets Sync",
+        "Lead Scoring & Alerts",
+        "Conversion Analytics",
+        "Advanced Customer Journey Builder",
+        "AI Intent Detection",
+        "Team Assignment Rules",
+        "Sales Pipeline Tracking",
+        "API/Webhook Access",
+        "Advanced Analytics Dashboard",
+        "Custom Automation Rules"
+      ],
+      cta: "Start Free Trial", popular: false,
+    },
+    {
       name: "Ultra", price: "Custom", oldPrice: "",
-      desc: "AI Voice Calling + custom integrations for high-volume brands",
-      caps: ["Unlimited Seats", "Unlimited conversations"],
-      features: ["Everything in Pro", "Dedicated LLM Fine-tuning", "AI Voice Calling (150 calls)", "White-label Reports", "Custom Integrations", "1-hour SLA + Account Manager"],
+      desc: "Everything in Pro +",
+      caps: ["Unlimited Team Members", "Unlimited conversations"],
+      features: [
+        "Unlimited Team Members",
+        "Unlimited Conversations",
+        "Dedicated AI Model Training",
+        "AI Voice Calling Agent",
+        "Custom Integrations",
+        "White-label Reports",
+        "SLA + Dedicated Account Manager",
+        "Enterprise Security Controls",
+        "Multi-Branch Management",
+        "Priority Infrastructure",
+        "Custom Workflows",
+        "Dedicated Success Manager",
+        "Custom API Limits",
+        "WhatsApp Commerce Automation"
+      ],
       cta: "Contact Sales", popular: false,
     },
   ];
@@ -2622,7 +2782,10 @@ function Pricing() {
                     background: G, color: "#fff", padding: "4px 18px", borderRadius: 100,
                     fontSize: 10, fontWeight: 700, whiteSpace: "nowrap", letterSpacing: "0.06em",
                     textTransform: "uppercase",
-                  }}>Most Popular</div>
+                  }}><svg viewBox="0 0 24 24" width="10" height="10" style={{ fill: "#fff", stroke: "none" }}>
+                      <path d="M12 2c0 0 6 5.5 6 10a6 6 0 0 1-12 0c0-4.5 6-10 6-10z" />
+                    </svg>
+                    Most Popular</div>
                 )}
                 <h3 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>{plan.name}</h3>
                 <p className="pd" style={{ fontSize: 13, marginBottom: 20, lineHeight: 1.5 }}>{plan.desc}</p>
@@ -2640,9 +2803,11 @@ function Pricing() {
                     <div style={{ fontSize: 12, color: G, fontWeight: 600, marginTop: 4 }}>Billed annually</div>
                   )}
                 </div>
-                <Link href={plan.price === "Custom" ? "#contact-us" : "/signup"} className="pb">
-                  {plan.cta}
-                </Link>
+                <motion.div whileTap={{ scale: 0.98 }}>
+                  <Link href={plan.price === "Custom" ? "#contact-us" : "/signup"} className="pb" style={{ display: "block" }}>
+                    {plan.cta}
+                  </Link>
+                </motion.div>
                 <hr className="sep" style={{ border: "none", borderTop: "1px solid", margin: "20px 0 16px" }} />
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
                   {plan.caps.map(c => (
@@ -2660,6 +2825,26 @@ function Pricing() {
                     </li>
                   ))}
                 </ul>
+
+                <div className="tmpl-section">
+                  <div className="tmpl-title">Per Template Message Charges</div>
+                  <div className="tmpl-item">
+                    <svg viewBox="0 0 24 24" width="14" height="14" style={{ stroke: "#25D366", fill: "none", strokeWidth: 3, strokeLinecap: "round", strokeLinejoin: "round", flexShrink: 0 }}><polyline points="20 6 9 17 4 12"/></svg>
+                    <span>Marketing: <strong style={{ fontWeight: 800 }}>₹1.09</strong></span>
+                  </div>
+                  <div className="tmpl-item">
+                    <svg viewBox="0 0 24 24" width="14" height="14" style={{ stroke: "#25D366", fill: "none", strokeWidth: 3, strokeLinecap: "round", strokeLinejoin: "round", flexShrink: 0 }}><polyline points="20 6 9 17 4 12"/></svg>
+                    <span>Utility: <strong style={{ fontWeight: 800 }}>₹0.145</strong></span>
+                  </div>
+                  <div className="tmpl-item">
+                    <svg viewBox="0 0 24 24" width="14" height="14" style={{ stroke: "#25D366", fill: "none", strokeWidth: 3, strokeLinecap: "round", strokeLinejoin: "round", flexShrink: 0 }}><polyline points="20 6 9 17 4 12"/></svg>
+                    <span>Authentication: <strong style={{ fontWeight: 800 }}>₹0.145</strong></span>
+                  </div>
+                  <div className="tmpl-item">
+                    <svg viewBox="0 0 24 24" width="14" height="14" style={{ stroke: "#25D366", fill: "none", strokeWidth: 3, strokeLinecap: "round", strokeLinejoin: "round", flexShrink: 0 }}><polyline points="20 6 9 17 4 12"/></svg>
+                    <span>Service: <strong style={{ fontWeight: 800 }}>Unlimited Free</strong></span>
+                  </div>
+                </div>
               </div>
             </Reveal>
           ))}
@@ -2668,12 +2853,44 @@ function Pricing() {
         <Reveal delay={0.1}>
           <div style={{ display: "flex", justifyContent: "center", gap: 32, flexWrap: "wrap", paddingTop: 40 }}>
             {[
-              { icon: "🔒", text: "Secure Payments" },
-              { icon: "📱", text: "Cancel Anytime" },
-              { icon: "💬", text: "14-Day Free Trial" },
-              { icon: "🇮🇳", text: "UPI, Cards & Net Banking" },
+              {
+                icon: (
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#888" }}>
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
+                ),
+                text: "Secure Payments"
+              },
+              {
+                icon: (
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#888" }}>
+                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+                    <line x1="12" y1="18" x2="12.01" y2="18" />
+                  </svg>
+                ),
+                text: "Cancel Anytime"
+              },
+              {
+                icon: (
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#888" }}>
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                ),
+                text: "14-Day Free Trial"
+              },
+              {
+                icon: (
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#888" }}>
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="2" y1="12" x2="22" y2="12" />
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                  </svg>
+                ),
+                text: "UPI, Cards & Net Banking"
+              },
             ].map(t => (
-              <span key={t.text} style={{ fontSize: 13, color: "#aaa", fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
+              <span key={t.text} style={{ fontSize: 13, color: "#aaa", fontWeight: 500, display: "flex", alignItems: "center", gap: 8 }}>
                 {t.icon} {t.text}
               </span>
             ))}
@@ -2824,53 +3041,32 @@ function FAQ() {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   CTA — dark with a single ambient glow (not glassmorphism)                 
+   CTA — original live website full-bleed solid green layout
 ───────────────────────────────────────────────────────────────────────── */
 function CTA() {
   return (
-    <section className="cta-section" id="contact-us">
-      <div className="cta-glow" />
-      <div style={{ position: "relative", zIndex: 1, maxWidth: 680, margin: "0 auto" }}>
+    <section style={{ padding: "80px 24px 90px", background: G, position: "relative", zIndex: 1 }} id="contact-us">
+      <div style={{ maxWidth: 720, margin: "0 auto", textAlign: "center" }}>
         <Reveal>
-          <h2 style={{
-            fontSize: "clamp(28px,3.5vw,52px)",
-            fontWeight: 800, color: "#fff",
-            letterSpacing: "-1.5px", marginTop: 0, marginBottom: 16,
-          }}>
-            Ready to automate your<br />
-            <span style={{ color: G }}>WhatsApp business?</span>
+          <h2 style={{ fontSize: "clamp(28px,4vw,48px)", fontWeight: 900, color: "#fff", letterSpacing: "-1.5px", marginBottom: 16, marginTop: 0, lineHeight: 1.15 }}>
+            Ready to Automate Your Business?
           </h2>
-          <p style={{ color: "rgba(255,255,255,0.6)", fontSize: 17, marginBottom: 36 }}>
+          <p style={{ color: "rgba(255,255,255,0.95)", fontSize: 17, marginBottom: 36, marginTop: 0, maxWidth: 580, margin: "0 auto 36px", lineHeight: 1.6 }}>
             Be one of the first to turn WhatsApp into your smartest revenue channel — fully automated, 24/7.
           </p>
-          <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-            <Link href="/signup" style={{
-              background: G, color: "#fff",
-              padding: "15px 36px", borderRadius: 12,
-              fontWeight: 800, fontSize: 16, textDecoration: "none",
-              display: "inline-flex", alignItems: "center", gap: 8,
-              transition: "background 200ms var(--ease-out), transform 160ms var(--ease-out)",
-            }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ""; }}
-            >
-              Start Your Free Trial <IconArrow />
-            </Link>
-            <a href="mailto:hello@ariesai.in" style={{
-              background: "rgba(255,255,255,0.1)", color: "#fff",
-              border: "1px solid rgba(255,255,255,0.15)",
-              padding: "15px 28px", borderRadius: 12,
-              fontWeight: 600, fontSize: 16, textDecoration: "none",
-              display: "inline-flex", alignItems: "center", gap: 8,
-              transition: "background 200ms var(--ease-out), transform 160ms var(--ease-out)",
-            }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.15)"; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.1)"; }}
-            >
-              Contact Sales
-            </a>
+          <div className="cta-buttons" style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
+            <motion.div whileTap={{ scale: 0.96 }}>
+              <Link className="btn-anim-white" style={{ background: "#fff", color: G, padding: "16px 36px", borderRadius: 12, fontWeight: 800, fontSize: 16, textDecoration: "none", display: "inline-block" }} href="/signup">
+                Start Your Free Trial →
+              </Link>
+            </motion.div>
+            <motion.div whileTap={{ scale: 0.96 }}>
+              <Link className="btn-anim-white" style={{ background: "#fff", color: G, padding: "16px 36px", borderRadius: 12, fontWeight: 800, fontSize: 16, textDecoration: "none", display: "inline-block" }} href="/support">
+                Contact Us
+              </Link>
+            </motion.div>
           </div>
-          <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, marginTop: 20 }}>
+          <p style={{ color: "rgba(255,255,255,0.75)", fontSize: 13, marginTop: 20, marginBottom: 0 }}>
             Pay with UPI later · Cancel anytime
           </p>
         </Reveal>
@@ -2880,23 +3076,40 @@ function CTA() {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   FOOTER                                                                    
+   FOOTER — original live website flat black container
 ───────────────────────────────────────────────────────────────────────── */
 function Footer() {
   return (
-    <footer style={{ background: "#0a0a0a", padding: "36px 40px", color: "#666" }}>
-      <div className="footer-inner">
-        <img src="/logo.png" alt="Aries AI" style={{ height: 30, filter: "brightness(0) invert(0.6)" }} />
+    <footer style={{
+      background: "#0c0e14",
+      padding: "48px 40px",
+      color: "#666",
+      borderTop: "1px solid rgba(255,255,255,0.06)",
+      position: "relative",
+      zIndex: 10
+    }}>
+      <div className="footer-inner" style={{ maxWidth: 1280, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 20 }}>
+        <Link href="/" style={{ display: "flex", alignItems: "center", textDecoration: "none" }}>
+          <img src="/logo.png" alt="Aries AI" style={{ height: 32, filter: "brightness(0) invert(1)" }} />
+        </Link>
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 13 }}>
-          {["Privacy Policy", "Terms of Service", "Support"].map(l => (
-            <a key={l} href="#" style={{ color: "#666", textDecoration: "none", transition: "color 150ms" }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "#fff"; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "#666"; }}>
-              {l}
-            </a>
-          ))}
+          <Link href="/privacy" style={{ color: "#aaa", textDecoration: "none", transition: "color 150ms" }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "#fff"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "#aaa"; }}>
+            Privacy Policy
+          </Link>
+          <Link href="/terms" style={{ color: "#aaa", textDecoration: "none", transition: "color 150ms" }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "#fff"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "#aaa"; }}>
+            Terms of Service
+          </Link>
+          <Link href="/support" style={{ color: "#aaa", textDecoration: "none", transition: "color 150ms" }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "#fff"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "#aaa"; }}>
+            Support
+          </Link>
         </div>
-        <p style={{ fontSize: 13, margin: 0 }}>© 2026 Aries AI. All rights reserved.</p>
+        <p style={{ fontSize: 13, margin: 0, color: "#666" }}>© 2026 Aries AI. All rights reserved.</p>
       </div>
     </footer>
   );
@@ -2909,20 +3122,28 @@ function ShowcaseSection() {
   return (
     <section style={{ background: "#fff", padding: "80px 40px", overflow: "hidden" }}>
       <div style={{ maxWidth: 1200, margin: "0 auto", textAlign: "center" }}>
-        <p style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.12em", color: G, textTransform: "uppercase", marginBottom: 12 }}>
-          See It In Action
-        </p>
-        <h2 style={{ fontSize: "clamp(26px, 3.5vw, 48px)", fontWeight: 800, letterSpacing: "-1.5px", marginBottom: 16, color: "#111", lineHeight: 1.15 }}>
-          Turn Every Conversation Into a Sale
-        </h2>
-        <p style={{ fontSize: 17, color: "#666", maxWidth: 520, margin: "0 auto 40px", lineHeight: 1.7 }}>
-          From product enquiries to checkout — your AI handles the entire customer journey on WhatsApp, automatically.
-        </p>
-        <div style={{ display: "flex", justifyContent: "center" }}>
-          <img src="/hero.png" alt="WhatsApp Business Automation in action"
-            style={{ width: "100%", maxWidth: 1100, height: "auto", WebkitMaskImage: "linear-gradient(to bottom, black 70%, transparent 100%)", maskImage: "linear-gradient(to bottom, black 70%, transparent 100%)" }}
-          />
-        </div>
+        <Reveal delay={0}>
+          <p style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.12em", color: G, textTransform: "uppercase", marginBottom: 12 }}>
+            See It In Action
+          </p>
+        </Reveal>
+        <Reveal delay={0.1}>
+          <h2 style={{ fontSize: "clamp(26px, 3.5vw, 48px)", fontWeight: 800, letterSpacing: "-1.5px", marginBottom: 16, color: "#111", lineHeight: 1.15 }}>
+            Turn Every Conversation Into a Sale
+          </h2>
+        </Reveal>
+        <Reveal delay={0.2}>
+          <p style={{ fontSize: 17, color: "#666", maxWidth: 520, margin: "0 auto 40px", lineHeight: 1.7 }}>
+            From product enquiries to checkout — your AI handles the entire customer journey on WhatsApp, automatically.
+          </p>
+        </Reveal>
+        <Reveal delay={0.3} y={24}>
+          <div style={{ display: "flex", justifyContent: "center" }}>
+            <img src="/hero.png" alt="WhatsApp Business Automation in action"
+              style={{ width: "100%", maxWidth: 1100, height: "auto", WebkitMaskImage: "linear-gradient(to bottom, black 70%, transparent 100%)", maskImage: "linear-gradient(to bottom, black 70%, transparent 100%)" }}
+            />
+          </div>
+        </Reveal>
       </div>
     </section>
   );
@@ -2933,7 +3154,7 @@ function ShowcaseSection() {
 ───────────────────────────────────────────────────────────────────────── */
 export default function LandingPageClient() {
   return (
-    <div style={{ fontFamily: "'Inter', 'Segoe UI', sans-serif", background: "#fff", color: "#111", margin: 0 }}>
+    <div style={{ fontFamily: "'Inter', 'Segoe UI', sans-serif", background: "#fff", color: "#111", margin: 0, overflowX: "hidden" }}>
       <style>{CSS}</style>
       <Navbar />
       <Hero />
@@ -2941,9 +3162,9 @@ export default function LandingPageClient() {
       <TrustBar />
       <Stats />
       <Features />
-      <UseCases />
       <HowItWorks />
       <Integrations />
+      <UseCases />
       <Pricing />
       <FAQ />
       <CTA />
