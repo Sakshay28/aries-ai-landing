@@ -1,11 +1,58 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { motion, useInView, useMotionValue, useSpring, AnimatePresence } from "framer-motion";
 
-const G = "#25D366";
+/* ─────────────────────────────────────────────────────────────────────────
+   BRAND                                                                     
+───────────────────────────────────────────────────────────────────────── */
+const G  = "#25D366";   // WhatsApp green — the ONE accent
 const GD = "#128C7E";
 
-const GLOBAL_CSS = `
+/* ─────────────────────────────────────────────────────────────────────────
+   EASING  (Emil Kowalski approved)                                          
+───────────────────────────────────────────────────────────────────────── */
+const EASE_OUT       = [0.23, 1, 0.32, 1] as const;   // strong expo-out
+const EASE_IN_OUT    = [0.77, 0, 0.175, 1] as const;
+
+/* ─────────────────────────────────────────────────────────────────────────
+   SCROLL-REVEAL WRAPPER                                                     
+   - starts at scale(0.96)+opacity 0 (never scale(0)) per Emil Kowalski     
+   - 30-80 ms stagger between siblings                                       
+───────────────────────────────────────────────────────────────────────── */
+function Reveal({
+  children,
+  delay = 0,
+  y = 16,
+  className = "",
+}: {
+  children: React.ReactNode;
+  delay?: number;
+  y?: number;
+  className?: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const inView = useInView(ref, { once: true, margin: "-80px" });
+  return (
+    <motion.div
+      ref={ref}
+      className={className}
+      initial={{ opacity: 0, y, scale: 0.97 }}
+      animate={inView ? { opacity: 1, y: 0, scale: 1 } : {}}
+      transition={{ duration: 0.55, delay, ease: EASE_OUT }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   GLOBAL CSS  (injected once — keeps the file self-contained)              
+   No "transition: all", no border-left stripes, no glassmorphism           
+───────────────────────────────────────────────────────────────────────── */
+const CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap');
+
   *, *::before, *::after { box-sizing: border-box; }
 
   /* ─── Navbar ─── */
@@ -129,8 +176,215 @@ const GLOBAL_CSS = `
 
     .footer-inner { flex-direction: column; align-items: flex-start; gap: 20px; }
   }
+
+  /* Define variables used by components */
+  :root {
+    --g:  #25D366;
+    --gd: #128C7E;
+    --mist: #f7f8fa;
+    --ink3: #6b7280;
+    --ease-out: cubic-bezier(0.23,1,0.32,1);
+    --rule: rgba(0,0,0,0.07);
+  }
+
+  /* ─ Feature bento ────────────────────────────────────────────── */
+  .feat-bento {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    grid-template-rows: repeat(3, auto);
+    gap: 16px;
+  }
+  .feat-bento .f-wide { grid-column: 1; grid-row: 1 / 4; }
+  .feat-bento .f-std  { }
+  @media (max-width: 1024px) {
+    .feat-bento { grid-template-columns: 1fr 1fr; }
+    .feat-bento .f-wide { grid-column: span 2; grid-row: auto; }
+  }
+  @media (max-width: 640px) {
+    .feat-bento { grid-template-columns: 1fr; }
+    .feat-bento .f-wide { grid-column: 1; }
+  }
+
+  /* ─ Feature card ────────────────────────────────────────────── */
+  .feat-card {
+    background: var(--mist);
+    border-radius: 20px;
+    padding: 32px;
+    border: 1px solid transparent;
+    transition: border-color 200ms var(--ease-out),
+                background 200ms var(--ease-out),
+                transform 200ms var(--ease-out),
+                box-shadow 200ms var(--ease-out);
+    cursor: default;
+  }
+  .feat-card:hover {
+    background: #fff;
+    border-color: rgba(0,0,0,0.06);
+    box-shadow: 0 4px 24px -4px rgba(0,0,0,0.10);
+    transform: translateY(-2px);
+  }
+  .feat-icon {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 20px;
+  }
+  .feat-icon svg {
+    width: 22px; height: 22px;
+    stroke: currentColor; fill: none;
+    stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+  }
+
+  /* ─ Industry zig-zag ─────────────────────────────────────────── */
+  .industry-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    align-items: center;
+    padding: 40px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .industry-row:first-child { border-top: 1px solid var(--rule); }
+  .industry-row.reverse .industry-text { order: 2; }
+  .industry-row.reverse .industry-visual { order: 1; }
+  @media (max-width: 768px) {
+    .industry-row { grid-template-columns: 1fr; gap: 24px; }
+    .industry-row.reverse .industry-text { order: 0; }
+    .industry-row.reverse .industry-visual { order: 0; }
+  }
+
+  /* ─ Steps ─────────────────────────────────────────────────────── */
+  .steps-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 48px;
+  }
+  @media (max-width: 768px) {
+    .steps-grid { grid-template-columns: 1fr; gap: 32px; }
+    .step-connector { display: none !important; }
+  }
+
+  /* ─ FAQ ──────────────────────────────────────────────────────── */
+  .faq-question-text {
+    transition: color 200ms var(--ease-out);
+  }
+  .faq-question-text:hover {
+    color: var(--g) !important;
+  }
+
+  /* ─ Stats ────────────────────────────────────────────────────── */
+  .stats-row {
+    display: flex; justify-content: center;
+    gap: 0;
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 20px;
+    overflow: hidden;
+  }
+  .stat-item {
+    flex: 1; text-align: center; padding: 32px 24px;
+    border-right: 1px solid rgba(0,0,0,0.08);
+  }
+  .stat-item:last-child { border-right: none; }
+  @media (max-width: 640px) {
+    .stats-row { flex-direction: column; }
+    .stat-item { border-right: none; border-bottom: 1px solid rgba(0,0,0,0.08); }
+    .stat-item:last-child { border-bottom: none; }
+  }
+
+  /* ─ CTA section ─────────────────────────────────────────────── */
+  .cta-section {
+    background: linear-gradient(135deg, #0f1117 0%, #1a2235 100%);
+    padding: 96px 40px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .cta-glow {
+    position: absolute;
+    width: 600px; height: 400px;
+    background: radial-gradient(ellipse, rgba(37,211,102,0.12) 0%, transparent 70%);
+    top: 50%; left: 50%; transform: translate(-50%,-50%);
+    pointer-events: none;
+  }
+
+  /* ─ Footer ───────────────────────────────────────────────────── */
+  .footer-inner {
+    max-width: 1280px; margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 20px;
+  }
+  @media (max-width: 768px) {
+    .footer-inner { flex-direction: column; align-items: flex-start; }
+    .cta-section { padding: 64px 24px; }
+  }
+
+  /* ─ Scrollbar ────────────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 3px; }
+
+  /* ─ Reduced motion ───────────────────────────────────────────── */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 `;
 
+/* ─────────────────────────────────────────────────────────────────────────
+   SECTION LABEL — tasteful pill                                             
+───────────────────────────────────────────────────────────────────────── */
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <span style={{
+      display: "inline-block",
+      fontSize: 11, fontWeight: 500,
+      letterSpacing: "0.12em", textTransform: "uppercase",
+      color: "#9ca3af",
+      fontFamily: "'Geist Mono', monospace",
+      marginBottom: 2,
+    }}>
+      {children}
+    </span>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   SVG ICONS  (no emojis per taste-skill)                                    
+───────────────────────────────────────────────────────────────────────── */
+function IconBrain() {
+  return <svg viewBox="0 0 24 24"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>;
+}
+function IconMessage() {
+  return <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
+}
+function IconTrendUp() {
+  return <svg viewBox="0 0 24 24"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>;
+}
+function IconClock() {
+  return <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
+}
+function IconSheet() {
+  return <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>;
+}
+function IconBell() {
+  return <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>;
+}
+function IconArrow() {
+  return <svg viewBox="0 0 24 24" width="16" height="16" style={{stroke:"currentColor",fill:"none",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round"}}><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>;
+}
+function IconCheck() {
+  return <svg viewBox="0 0 24 24" width="14" height="14" style={{stroke:G,fill:"none",strokeWidth:2.5,strokeLinecap:"round",strokeLinejoin:"round",flexShrink:0}}><polyline points="20 6 9 17 4 12"/></svg>;
+}
+function IconPhone() {
+  return <svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13 19.79 19.79 0 0 1 1.61 4.44 2 2 0 0 1 3.59 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.18 6.18l1.22-1.22a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   NAVBAR                                                                    
+───────────────────────────────────────────────────────────────────────── */
 function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -206,6 +460,9 @@ function Navbar() {
   );
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   HERO — left-aligned, asymmetric split (anti-center-bias per taste-skill) 
+───────────────────────────────────────────────────────────────────────── */
 function Hero() {
   return (
     <section style={{ minHeight: "100vh", display: "flex", alignItems: "center", background: "linear-gradient(135deg, #f0fdf4 0%, #fff 50%, #f0fdf4 100%)", paddingTop: 80 }}>
@@ -255,6 +512,2399 @@ function Hero() {
   );
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   TRUST BAR — dark strip with grid layout                                   
+───────────────────────────────────────────────────────────────────────── */
+function TrustBar() {
+  const items = [
+    {
+      icon: (
+        <svg viewBox="0 0 24 24" width="26" height="26" style={{stroke:"#4ade80",fill:"none",strokeWidth:1.6,strokeLinecap:"round",strokeLinejoin:"round"}}>
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+      ),
+      title: "Official Meta API",
+      desc: "Direct WhatsApp Cloud API",
+      tag: "Verified",
+    },
+    {
+      icon: (
+        <svg viewBox="0 0 24 24" width="26" height="26" style={{stroke:"#4ade80",fill:"none",strokeWidth:1.6,strokeLinecap:"round",strokeLinejoin:"round"}}>
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="2" y1="12" x2="22" y2="12"/>
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+        </svg>
+      ),
+      title: "Built in India",
+      desc: "Designed for Indian businesses",
+      tag: "🇮🇳 India",
+    },
+    {
+      icon: (
+        <svg viewBox="0 0 24 24" width="26" height="26" style={{stroke:"#4ade80",fill:"none",strokeWidth:1.6,strokeLinecap:"round",strokeLinejoin:"round"}}>
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+      ),
+      title: "Bank-Grade Security",
+      desc: "AES-256 + row-level isolation",
+      tag: "Encrypted",
+    },
+    {
+      icon: (
+        <svg viewBox="0 0 24 24" width="26" height="26" style={{stroke:"#4ade80",fill:"none",strokeWidth:1.6,strokeLinecap:"round",strokeLinejoin:"round"}}>
+          <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+          <line x1="1" y1="10" x2="23" y2="10"/>
+        </svg>
+      ),
+      title: "14-Day Free Trial",
+      desc: "No credit card required",
+      tag: "Free",
+    },
+  ];
+
+  return (
+    <section style={{ background: "#0c0e14", borderTop: "1px solid rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+      <div style={{
+        maxWidth: 1280, margin: "0 auto",
+        display: "grid", gridTemplateColumns: "repeat(4,1fr)",
+      }}>
+        {items.map((item, i) => (
+          <motion.div
+            key={item.title}
+            initial={{ opacity: 0, y: 14 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-60px" }}
+            transition={{ duration: 0.5, delay: i * 0.09, ease: EASE_OUT }}
+            whileHover={{ backgroundColor: "rgba(255,255,255,0.03)" }}
+            style={{
+              padding: "40px 32px",
+              borderRight: i < 3 ? "1px solid rgba(255,255,255,0.05)" : "none",
+              display: "flex", flexDirection: "column", alignItems: "flex-start",
+              gap: 0, cursor: "default",
+              transition: "background 200ms",
+            }}
+          >
+            {/* Icon with glow ring */}
+            <motion.div
+              whileHover={{ scale: 1.08 }}
+              transition={{ duration: 0.2, ease: EASE_OUT }}
+              style={{
+                width: 52, height: 52,
+                borderRadius: 14,
+                background: "rgba(74,222,128,0.08)",
+                border: "1px solid rgba(74,222,128,0.15)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                marginBottom: 20,
+                position: "relative",
+              }}
+            >
+              {item.icon}
+              {/* subtle pulsing glow */}
+              <motion.div
+                animate={{ opacity: [0.4, 0.7, 0.4], scale: [1, 1.15, 1] }}
+                transition={{ duration: 2.8, repeat: Infinity, delay: i * 0.4 }}
+                style={{
+                  position: "absolute", inset: -4,
+                  borderRadius: 18,
+                  background: "rgba(74,222,128,0.08)",
+                  pointerEvents: "none",
+                }}
+              />
+            </motion.div>
+
+            {/* Tag pill */}
+            <div style={{
+              fontFamily: "'Geist Mono', monospace",
+              fontSize: 10, fontWeight: 600,
+              letterSpacing: "0.08em", textTransform: "uppercase",
+              color: "#4ade80",
+              marginBottom: 8,
+            }}>{item.tag}</div>
+
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 6, letterSpacing: "-0.3px" }}>
+              {item.title}
+            </div>
+            <div style={{ fontSize: 13, color: "#4b5563", lineHeight: 1.6 }}>
+              {item.desc}
+            </div>
+          </motion.div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   STATS — numbers with borders instead of cards (Impeccable flat rule)     
+───────────────────────────────────────────────────────────────────────── */
+function Stats() {
+  const stats = [
+    { n: "3 min", label: "Average setup time" },
+    { n: "24/7", label: "Always on, never sleeps" },
+    { n: "11+", label: "Indian languages" },
+    { n: "94%", label: "CSAT on day one" },
+  ];
+  return (
+    <section className="section" style={{ background: "#0c0e14", color: "#fff" }}>
+      <div className="container">
+        <Reveal>
+          <div style={{ textAlign: "center", marginBottom: 48 }}>
+            <h2 style={{
+              fontSize: "clamp(34px,4vw,56px)",
+              fontWeight: 900, letterSpacing: "-2px",
+              marginTop: 16, marginBottom: 16,
+              lineHeight: 1.1,
+            }}>
+              The AI that knows your business<br />
+              <span style={{ color: "#a1a1aa", fontWeight: 700 }}>better than your staff.</span>
+            </h2>
+            <p style={{ fontSize: 19, color: "#9ca3af", maxWidth: 680, margin: "0 auto", lineHeight: 1.7 }}>
+              Every business is unique. Aries AI learns your menu, prices, FAQs, and tone — then answers like a trained team member.
+            </p>
+          </div>
+        </Reveal>
+        <Reveal delay={0.1}>
+          <div className="stats-row">
+            {stats.map((s, i) => (
+              <div key={s.n} className="stat-item">
+                <div style={{
+                  fontSize: "clamp(32px,3.5vw,52px)",
+                  fontWeight: 900, color: G,
+                  letterSpacing: "-1.5px", lineHeight: 1,
+                  marginBottom: 8,
+                  fontFamily: "'Geist Mono', monospace",
+                }}>{s.n}</div>
+                <div style={{ fontSize: 13, color: "#999", fontWeight: 500 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   FEATURES — asymmetric bento grid (anti-3-column rule)                     
+───────────────────────────────────────────────────────────────────────── */
+/* Animated typing indicator for the chat bubble */
+function TypingDots() {
+  return (
+    <div style={{ display: "flex", gap: 3, alignItems: "center", padding: "6px 10px" }}>
+      {[0, 1, 2].map(i => (
+        <motion.div key={i}
+          animate={{ y: [0, -4, 0] }}
+          transition={{ duration: 0.7, delay: i * 0.15, repeat: Infinity, ease: "easeInOut" }}
+          style={{ width: 5, height: 5, borderRadius: "50%", background: "#aaa" }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* Mini lead score pill */
+function LeadPill({ label, score, color }: { label: string; score: string; color: string }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "7px 10px",
+      background: "#fff", borderRadius: 8,
+      border: "1px solid rgba(0,0,0,0.07)",
+      marginBottom: 5,
+    }}>
+      <span style={{ fontSize: 12, color: "#444", fontWeight: 500 }}>{label}</span>
+      <span style={{
+        fontSize: 11, fontWeight: 700, color,
+        background: `${color}18`, borderRadius: 5, padding: "2px 7px",
+        fontFamily: "'Geist Mono', monospace",
+      }}>{score}</span>
+    </div>
+  );
+}
+
+function WhatsAppApiVisual({ color, isHovered }: { color: string; isHovered?: boolean }) {
+  return (
+    <motion.div 
+      animate={{
+        scale: isHovered ? 1.02 : 1,
+        borderColor: isHovered ? `${color}35` : "rgba(0,0,0,0.05)",
+      }}
+      style={{ 
+        marginTop: 14, display: "flex", alignItems: "center", gap: 8,
+        background: "rgba(37,211,102,0.07)", borderRadius: 10, padding: "10px 12px",
+        border: "1px solid transparent",
+        transition: "border-color 0.3s"
+      }}
+    >
+      <motion.div 
+        animate={isHovered ? { scale: [1, 1.15, 1] } : {}}
+        transition={{ duration: 1.5, repeat: Infinity }}
+        style={{ width: 28, height: 28, borderRadius: "50%", background: color,
+          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+      >
+        <svg viewBox="0 0 24 24" width="14" height="14" style={{ stroke: "#fff", fill: "none", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }}><polyline points="20 6 9 17 4 12"/></svg>
+      </motion.div>
+      <span style={{ fontSize: 11.5, color: "#444", fontWeight: 500 }}>Meta Verified · Active</span>
+      <motion.div animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 1.5, repeat: Infinity }}
+        style={{ width: 7, height: 7, borderRadius: "50%", background: color, marginLeft: "auto", flexShrink: 0 }} />
+    </motion.div>
+  );
+}
+
+function LeadPipelineVisual({ isHovered }: { isHovered?: boolean }) {
+  return (
+    <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 5 }}>
+      {[
+        { label: "Rahul — Table booking", score: "HOT", color: "#ef4444", delay: 0 },
+        { label: "Priya — Menu inquiry", score: "WARM", color: "#f59e0b", delay: 0.15 },
+        { label: "Ankit — Just browsing", score: "COLD", color: "#6b7280", delay: 0.3 },
+      ].map((item, idx) => (
+        <motion.div 
+          key={idx}
+          animate={{
+            scale: isHovered ? 1.02 : 1,
+            x: isHovered ? 4 : 0,
+            borderColor: isHovered && item.score === "HOT" ? `${item.color}45` : "rgba(0,0,0,0.07)",
+          }}
+          transition={{ duration: 0.25, delay: idx * 0.05 }}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "7px 10px",
+            background: "#fff", borderRadius: 8,
+            border: "1px solid rgba(0,0,0,0.07)",
+          }}
+        >
+          <span style={{ fontSize: 12, color: "#444", fontWeight: 500 }}>{item.label}</span>
+          <motion.span 
+            animate={{
+              scale: isHovered && item.score === "HOT" ? [1, 1.1, 1] : 1,
+            }}
+            transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut", delay: item.delay }}
+            style={{
+              fontSize: 11, fontWeight: 700, color: item.color,
+              background: `${item.color}18`, borderRadius: 5, padding: "2px 7px",
+              fontFamily: "'Geist Mono', monospace",
+            }}
+          >
+            {item.score}
+          </motion.span>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
+function FollowUpsVisual({ isHovered }: { isHovered?: boolean }) {
+  const items2 = [["30 min", "First reminder"], ["3 hrs", "Soft nudge"], ["24 hrs", "Final follow-up"]];
+  return (
+    <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 5 }}>
+      {items2.map((item, j) => (
+        <motion.div 
+          key={j} 
+          animate={{
+            x: isHovered ? 6 : 0,
+          }}
+          transition={{ duration: 0.25, delay: j * 0.05 }}
+          style={{ display: "flex", alignItems: "center", gap: 8 }}
+        >
+          <motion.div 
+            animate={{
+              scale: isHovered ? [1, 1.35, 1] : 1,
+            }}
+            transition={{ duration: 1.5, repeat: Infinity, delay: j * 0.2 }}
+            style={{ width: 6, height: 6, borderRadius: "50%", background: "#EC4899", flexShrink: 0 }} 
+          />
+          <span style={{ fontFamily: "'Geist Mono', monospace", fontSize: 11, color: "#EC4899", fontWeight: 600, minWidth: 34 }}>{item[0]}</span>
+          <span style={{ fontSize: 11.5, color: "#888" }}>{item[1]}</span>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
+function SheetsSyncVisual({ isHovered }: { isHovered?: boolean }) {
+  const cells = ["Name", "Phone", "Status", "Rahul S.", "98765...", "✓ Sent", "Priya M.", "87654...", "⏳ Pending"];
+  return (
+    <motion.div 
+      animate={{
+        borderColor: isHovered ? "rgba(16,185,129,0.3)" : "rgba(16,185,129,0.15)",
+        scale: isHovered ? 1.02 : 1,
+      }}
+      style={{ marginTop: 14, background: "rgba(16,185,129,0.06)", borderRadius: 10, padding: "10px 12px", border: "1px solid rgba(16,185,129,0.15)", transition: "border-color 0.3s" }}
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 2 }}>
+        {cells.map((cell, ci) => (
+          <motion.div 
+            key={ci} 
+            animate={{
+              background: isHovered && ci >= 3 && ci < 6 ? "rgba(16,185,129,0.1)" : ci < 3 ? "rgba(16,185,129,0.15)" : "transparent",
+            }}
+            transition={{ duration: 0.3 }}
+            style={{
+              fontSize: ci < 3 ? 9 : 10.5, padding: "3px 5px",
+              background: ci < 3 ? "rgba(16,185,129,0.15)" : "transparent",
+              color: ci < 3 ? "#10B981" : "#555",
+              fontWeight: ci < 3 ? 700 : 400,
+              fontFamily: "'Geist Mono', monospace",
+              borderRadius: 3,
+            }}
+          >
+            {cell}
+          </motion.div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+function AlertsVisual({ isHovered }: { isHovered?: boolean }) {
+  return (
+    <motion.div
+      animate={{ 
+        y: isHovered ? [0, -4, 0] : [0, -2, 0],
+        scale: isHovered ? 1.02 : 1,
+        borderColor: isHovered ? "rgba(59,130,246,0.3)" : "rgba(59,130,246,0.12)",
+        boxShadow: isHovered ? "0 8px 24px rgba(59,130,246,0.2)" : "0 4px 16px rgba(59,130,246,0.15)",
+      }}
+      transition={{ 
+        y: { duration: isHovered ? 1.5 : 2, repeat: Infinity, ease: "easeInOut" },
+        scale: { duration: 0.3 },
+        borderColor: { duration: 0.3 },
+        boxShadow: { duration: 0.3 }
+      }}
+      style={{
+        marginTop: 14, background: "#fff",
+        borderRadius: 12, padding: "10px 12px",
+        boxShadow: "0 4px 16px rgba(59,130,246,0.15)",
+        border: "1px solid rgba(59,130,246,0.12)",
+        display: "flex", gap: 10, alignItems: "flex-start",
+      }}
+    >
+      <motion.div 
+        animate={{
+          rotate: isHovered ? [0, -12, 12, -12, 12, 0] : 0,
+        }}
+        transition={{ duration: 0.6, repeat: isHovered ? Infinity : 0, repeatDelay: 1 }}
+        style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#25D366,#128C7E)",
+          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 14 }}
+      >
+        🔔
+      </motion.div>
+      <div>
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: "#111", marginBottom: 2 }}>New HOT Lead!</div>
+        <div style={{ fontSize: 11, color: "#888" }}>Rahul wants a table for 7PM · Respond now</div>
+      </div>
+    </motion.div>
+  );
+}
+
+function IconCreditCard() {
+  return (
+    <svg viewBox="0 0 24 24">
+      <rect x="2" y="5" width="20" height="14" rx="2" ry="2" />
+      <line x1="2" y1="10" x2="22" y2="10" />
+    </svg>
+  );
+}
+
+function RazorpayVisual({ isHovered }: { isHovered?: boolean }) {
+  return (
+    <motion.div
+      animate={{ 
+        y: isHovered ? [0, -4, 0] : [0, -2, 0],
+        scale: isHovered ? 1.02 : 1,
+        borderColor: isHovered ? "rgba(51,149,255,0.3)" : "rgba(51,149,255,0.12)",
+        boxShadow: isHovered ? "0 8px 24px rgba(51,149,255,0.2)" : "0 4px 16px rgba(51,149,255,0.12)",
+      }}
+      transition={{ 
+        y: { duration: isHovered ? 1.5 : 2, repeat: Infinity, ease: "easeInOut" },
+        scale: { duration: 0.3 },
+        borderColor: { duration: 0.3 },
+        boxShadow: { duration: 0.3 }
+      }}
+      style={{
+        marginTop: 14, background: "#fff",
+        borderRadius: 12, padding: "10px 12px",
+        boxShadow: "0 4px 16px rgba(51,149,255,0.12)",
+        border: "1px solid rgba(51,149,255,0.12)",
+        display: "flex", gap: 10, alignItems: "center",
+      }}
+    >
+      <motion.div 
+        animate={{
+          scale: isHovered ? [1, 1.1, 1] : 1,
+        }}
+        transition={{ duration: 1.5, repeat: isHovered ? Infinity : 0 }}
+        style={{ 
+          width: 32, height: 32, borderRadius: "50%", 
+          background: "linear-gradient(135deg,#3395FF,#0052FF)",
+          display: "flex", alignItems: "center", justifyItems: "center", justifyContent: "center",
+          flexShrink: 0 
+        }}
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" style={{ stroke: "#fff", fill: "none", strokeWidth: 3, strokeLinecap: "round", strokeLinejoin: "round" }}>
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </motion.div>
+      <div style={{ flex: 1 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: "#111" }}>Payment Received!</div>
+          <div style={{ 
+            fontSize: 10, fontWeight: 700, color: "#10B981", 
+            background: "rgba(16,185,129,0.1)", borderRadius: 5, padding: "1px 6px",
+            fontFamily: "'Geist Mono', monospace"
+          }}>PAID</div>
+        </div>
+        <div style={{ fontSize: 10.5, color: "#888", display: "flex", justifyContent: "space-between" }}>
+          <span>Rahul Sharma · Deposit</span>
+          <span style={{ fontWeight: 600, color: "#111" }}>₹500.00</span>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function ChatWindow({ 
+  avatarColor, 
+  name, 
+  status, 
+  messages, 
+  activeMsg, 
+  isWideHovered 
+}: { 
+  avatarColor: string; 
+  name: string; 
+  status: string; 
+  messages: { role: string; text: string }[]; 
+  activeMsg: number; 
+  isWideHovered: boolean; 
+}) {
+  return (
+    <div style={{
+      background: "#fff",
+      border: "1px solid rgba(0,0,0,0.07)",
+      borderRadius: 14, padding: "14px 14px 10px",
+      boxShadow: "0 2px 12px rgba(0,0,0,0.05)",
+      display: "flex",
+      flexDirection: "column",
+      flex: 1,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+        <div style={{ width: 28, height: 28, borderRadius: "50%", background: avatarColor, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <svg viewBox="0 0 24 24" width="14" height="14" style={{ stroke: "#fff", fill: "none", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#111" }}>{name}</div>
+          <motion.div 
+            animate={isWideHovered ? { scale: [1, 1.15, 1], opacity: [1, 0.7, 1] } : {}}
+            transition={{ duration: 1.5, repeat: Infinity }}
+            style={{ fontSize: 10, color: "#25D366", fontWeight: 500 }}
+          >
+            ● {status}
+          </motion.div>
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, minHeight: 180, justifyContent: "flex-start" }}>
+        {messages.slice(0, activeMsg + 1).map((m, i) => (
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, y: 6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.3, ease: EASE_OUT }}
+            style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}
+          >
+            <div style={{
+              background: m.role === "user" ? G : "#f0f0f0",
+              color: m.role === "user" ? "#fff" : "#222",
+              padding: "7px 12px", borderRadius: m.role === "user" ? "12px 12px 3px 12px" : "12px 12px 12px 3px",
+              fontSize: 12.5, lineHeight: 1.5, maxWidth: "85%",
+            }}>{m.text}</div>
+          </motion.div>
+        ))}
+        {activeMsg < messages.length - 1 && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            style={{ display: "flex", justifyContent: "flex-start" }}
+          >
+            <div style={{ background: "#f0f0f0", borderRadius: "12px 12px 12px 3px", padding: "6px 12px" }}>
+              <TypingDots />
+            </div>
+          </motion.div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Features() {
+  const [activeMsg, setActiveMsg] = useState(0);
+  const [hoveredBentoIndex, setHoveredBentoIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    const t = setInterval(() => setActiveMsg(p => (p + 1) % 4), 2200);
+    return () => clearInterval(t);
+  }, []);
+
+  const hinglishMsgs = [
+    { role: "user", text: "Bhai kal 7 baje table milegi?" },
+    { role: "ai",   text: "Haan bilkul! Kal 7:00 PM pe table free hai. Kitne log honge?" },
+    { role: "user", text: "4 log hain bro, confirm kar do." },
+    { role: "ai",   text: "Done! 4 logon ke liye table reserve ho gayi hai. See you tomorrow!" },
+  ];
+
+  const englishMsgs = [
+    { role: "user", text: "Hi! Do you have a table free tomorrow at 7 PM?" },
+    { role: "ai",   text: "Hello! Yes, we have a table available at 7:00 PM tomorrow. For how many guests?" },
+    { role: "user", text: "It will be for 4 people, please confirm." },
+    { role: "ai",   text: "Perfect! Your table for 4 is confirmed for tomorrow at 7:00 PM. See you!" },
+  ];
+
+  const smallCards = [
+    {
+      icon: <IconMessage />, color: G,
+      title: "Direct WhatsApp API",
+      desc: "Official Meta Cloud API. Your number, your data.",
+      VisualComponent: WhatsAppApiVisual,
+    },
+    {
+      icon: <IconTrendUp />, color: "#F59E0B",
+      title: "Smart Lead Pipeline",
+      desc: "Every chat automatically scored — hot, warm, cold.",
+      VisualComponent: LeadPipelineVisual,
+    },
+    {
+      icon: <IconClock />, color: "#EC4899",
+      title: "Auto Follow-Ups",
+      desc: "30 min, 3 hours, 24 hours. All configurable.",
+      VisualComponent: FollowUpsVisual,
+    },
+    {
+      icon: <IconSheet />, color: "#10B981",
+      title: "Google Sheets Sync",
+      desc: "Every lead in a Sheet instantly. Share with your team.",
+      VisualComponent: SheetsSyncVisual,
+    },
+    {
+      icon: <IconBell />, color: "#3B82F6",
+      title: "Instant Staff Alerts",
+      desc: "Hot lead? Staff pinged on WhatsApp immediately.",
+      VisualComponent: AlertsVisual,
+    },
+    {
+      icon: <IconCreditCard />, color: "#3395FF",
+      title: "Razorpay Payments",
+      desc: "Generate payment links and collect booking deposits instantly.",
+      VisualComponent: RazorpayVisual,
+    },
+  ];
+
+  const isWideHovered = hoveredBentoIndex === 0;
+  const isOtherBentoHovered = hoveredBentoIndex !== null && hoveredBentoIndex !== 0;
+
+  return (
+    <section id="features" className="section" style={{ background: "#f7f8fa", scrollMarginTop: 68 }}>
+      <div className="container">
+        <Reveal>
+          <div style={{ textAlign: "center", marginBottom: 56 }}>
+            <h2 style={{
+              fontSize: "clamp(34px,4vw,56px)",
+              fontWeight: 900, letterSpacing: "-2px",
+              marginTop: 16,
+              lineHeight: 1.1,
+            }}>
+              Everything to <span style={{ color: G }}>close more leads</span>
+            </h2>
+            <p style={{ color: "#374151", fontSize: 19, marginTop: 16, maxWidth: 640, margin: "16px auto 0", lineHeight: 1.7, fontWeight: 500 }}>
+              Built for restaurants, salons, clinics, and any business getting WhatsApp enquiries.
+            </p>
+          </div>
+        </Reveal>
+
+        {/* BENTO: asymmetric 2fr 1fr 1fr */}
+        <div className="feat-bento">
+
+          {/* WIDE CARD — AI chat demo */}
+          <Reveal className="f-wide">
+            <motion.div
+              className="feat-card"
+              onMouseEnter={() => setHoveredBentoIndex(0)}
+              onMouseLeave={() => setHoveredBentoIndex(null)}
+              animate={{
+                scale: isWideHovered ? 1.04 : isOtherBentoHovered ? 0.96 : 1,
+                y: isWideHovered ? -8 : 0,
+                opacity: isOtherBentoHovered ? 0.45 : 1,
+                filter: isOtherBentoHovered ? "blur(1.5px)" : "blur(0px)"
+              }}
+              transition={{ duration: 0.3, ease: EASE_OUT }}
+              style={{ 
+                height: "100%",
+                border: isWideHovered ? "1px solid rgba(139,92,246,0.3)" : "1px solid rgba(0,0,0,0.06)",
+                boxShadow: isWideHovered 
+                  ? "0 20px 40px rgba(139,92,246,0.12), 0 0 20px rgba(139,92,246,0.06)"
+                  : "0 2px 12px rgba(0,0,0,0.04)",
+                cursor: "pointer",
+                transition: "border 0.3s, box-shadow 0.3s",
+                position: "relative",
+                overflow: "visible",
+              }}
+            >
+              {/* Spotlight shine overlay */}
+              {isWideHovered && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.3 }}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: "radial-gradient(circle at 50% 0%, rgba(139,92,246,0.05) 0%, transparent 70%)",
+                    pointerEvents: "none",
+                    borderRadius: 20,
+                    zIndex: 0,
+                  }}
+                />
+              )}
+              {/* Content */}
+              <div style={{ position: "relative", zIndex: 1 }}>
+                <div className="feat-icon" style={{ background: "rgba(139,92,246,0.1)", color: "#8B5CF6" }}>
+                  <IconBrain />
+                </div>
+                <h3 style={{ fontSize: 22, fontWeight: 700, marginBottom: 10, letterSpacing: "-0.4px" }}>
+                  AI That Truly Understands
+                </h3>
+                <p style={{ fontSize: 14, color: "#777", lineHeight: 1.7, marginBottom: 20 }}>
+                  Not a rigid chatbot. Real language understanding that gets &apos;bhai kal 4 baje table milega?&apos; in Hindi, English, or Hinglish. Trains on your business once — handles everything 24/7.
+                </p>
+
+                {/* Dual live animated chats */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                  gap: 16,
+                }}>
+                  <ChatWindow 
+                    avatarColor="linear-gradient(135deg,#25D366,#128C7E)"
+                    name="Aries AI · Your Business"
+                    status="Online"
+                    messages={hinglishMsgs}
+                    activeMsg={activeMsg}
+                    isWideHovered={isWideHovered}
+                  />
+                  <ChatWindow 
+                    avatarColor="linear-gradient(135deg,#3B82F6,#1D4ED8)"
+                    name="Aries AI · Your Business"
+                    status="Online"
+                    messages={englishMsgs}
+                    activeMsg={activeMsg}
+                    isWideHovered={isWideHovered}
+                  />
+                </div>
+              </div>
+            </motion.div>
+          </Reveal>
+
+          {/* SMALL CARDS */}
+          {smallCards.map((f, i) => {
+            const cardIdx = i + 1;
+            const isHovered = hoveredBentoIndex === cardIdx;
+            const isOtherBentoHovered = hoveredBentoIndex !== null && hoveredBentoIndex !== cardIdx;
+            return (
+              <Reveal key={f.title} delay={0.07 + i * 0.06} className="f-std">
+                <motion.div
+                  className="feat-card"
+                  onMouseEnter={() => setHoveredBentoIndex(cardIdx)}
+                  onMouseLeave={() => setHoveredBentoIndex(null)}
+                  animate={{
+                    scale: isHovered ? 1.04 : isOtherBentoHovered ? 0.96 : 1,
+                    y: isHovered ? -8 : 0,
+                    opacity: isOtherBentoHovered ? 0.45 : 1,
+                    filter: isOtherBentoHovered ? "blur(1.5px)" : "blur(0px)"
+                  }}
+                  transition={{ duration: 0.3, ease: EASE_OUT }}
+                  style={{ 
+                    height: "100%",
+                    border: isHovered ? `1px solid ${f.color}40` : "1px solid rgba(0,0,0,0.06)",
+                    boxShadow: isHovered 
+                      ? `0 20px 40px ${f.color}12, 0 0 24px ${f.color}06`
+                      : "0 2px 12px rgba(0,0,0,0.04)",
+                    cursor: "pointer",
+                    transition: "border 0.3s, box-shadow 0.3s",
+                    position: "relative",
+                    overflow: "visible",
+                  }}
+                >
+                  {/* Spotlight shine overlay */}
+                  {isHovered && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.3 }}
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        background: `radial-gradient(circle at 50% 0%, ${f.color}06 0%, transparent 70%)`,
+                        pointerEvents: "none",
+                        borderRadius: 20,
+                        zIndex: 0,
+                      }}
+                    />
+                  )}
+                  <div style={{ position: "relative", zIndex: 1 }}>
+                    <div className="feat-icon" style={{ background: `${f.color}14`, color: f.color }}>
+                      {f.icon}
+                    </div>
+                    <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 7, letterSpacing: "-0.3px" }}>
+                      {f.title}
+                    </h3>
+                    <p style={{ fontSize: 13, color: "#777", lineHeight: 1.65, margin: 0 }}>
+                      {f.desc}
+                    </p>
+                    <f.VisualComponent isHovered={isHovered} color={f.color} />
+                  </div>
+                </motion.div>
+              </Reveal>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
+
+/* ─────────────────────────────────────────────────────────────────────────
+   USE CASES — zig-zag rows (anti-3-column-identical-grid)                   
+───────────────────────────────────────────────────────────────────────── */
+/* Industry visual mockups — replace the blank coloured square */
+
+
+function EcommerceVisual({ color, isHovered }: { color: string; isHovered?: boolean }) {
+  const items = ["Cart Reminder", "Order Shipped", "COD Confirm"];
+  return (
+    <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
+      {items.map((label, i) => (
+        <motion.div key={label}
+          initial={{ opacity: 0, x: 12 }}
+          whileInView={{ opacity: 1, x: 0 }}
+          viewport={{ once: true }}
+          transition={{ delay: 0.2 + i * 0.12, duration: 0.4, ease: EASE_OUT }}
+          animate={{
+            scale: isHovered ? 1.03 : 1,
+            x: isHovered ? 6 : 0,
+            borderColor: isHovered ? `${color}35` : "rgba(0,0,0,0.06)",
+            boxShadow: isHovered ? `0 4px 12px ${color}0d` : "0 1px 6px rgba(0,0,0,0.06)",
+          }}
+          style={{
+            display: "flex", alignItems: "center", gap: 10,
+            background: "#fff", borderRadius: 10,
+            padding: "10px 14px",
+            border: "1px solid rgba(0,0,0,0.06)",
+            transition: "border-color 0.3s ease, box-shadow 0.3s ease",
+          }}
+        >
+          <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+          <span style={{ fontSize: 12.5, fontWeight: 500, color: "#333", flex: 1 }}>{label}</span>
+          <motion.span 
+            animate={{
+              scale: isHovered ? [1, 1.1, 1] : 1,
+            }}
+            transition={{
+              duration: 1.2,
+              repeat: isHovered ? Infinity : 0,
+              ease: "easeInOut",
+              delay: i * 0.2
+            }}
+            style={{ fontFamily: "'Geist Mono', monospace", fontSize: 10, color: color, fontWeight: 700,
+              background: `${color}12`, borderRadius: 4, padding: "2px 6px" }}
+          >
+            Sent ✓
+          </motion.span>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
+function HealthVisual({ color, isHovered }: { color: string; isHovered?: boolean }) {
+  const slots = [
+    { time: "10:00 AM", name: "Dr. Priya", free: false },
+    { time: "11:30 AM", name: "Available", free: true },
+    { time: "2:00 PM",  name: "Dr. Mehta", free: false },
+    { time: "3:30 PM",  name: "Available", free: true },
+  ];
+  return (
+    <div style={{ width: "100%" }}>
+      <div style={{ fontFamily: "'Geist Mono', monospace", fontSize: 10, color: "#999", marginBottom: 8, letterSpacing: "0.06em" }}>TODAY&apos;S SLOTS</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {slots.map((s, i) => (
+          <motion.div key={i}
+            initial={{ opacity: 0, x: -10 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.15 + i * 0.1, duration: 0.4, ease: EASE_OUT }}
+            animate={{
+              scale: isHovered && s.free ? 1.03 : 1,
+              x: isHovered && s.free ? 6 : 0,
+              borderColor: isHovered && s.free ? `${color}45` : s.free ? `${color}25` : "rgba(0,0,0,0.06)",
+              boxShadow: isHovered && s.free ? `0 4px 12px ${color}0d` : "none",
+            }}
+            style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "8px 12px", borderRadius: 8,
+              background: s.free ? `${color}0d` : "rgba(0,0,0,0.03)",
+              border: `1px solid ${s.free ? `${color}25` : "rgba(0,0,0,0.06)"}`,
+              transition: "border-color 0.3s ease, box-shadow 0.3s ease",
+            }}
+          >
+            <span style={{ fontFamily: "'Geist Mono', monospace", fontSize: 10.5, color: "#888", minWidth: 60 }}>{s.time}</span>
+            <span style={{ fontSize: 12, fontWeight: 500, color: s.free ? color : "#555", flex: 1 }}>{s.name}</span>
+            {s.free && (
+              <motion.span 
+                animate={{
+                  scale: isHovered ? [1, 1.15, 1] : 1,
+                }}
+                transition={{
+                  duration: 1.5,
+                  repeat: isHovered ? Infinity : 0,
+                  ease: "easeInOut",
+                  delay: i * 0.25
+                }}
+                style={{ fontSize: 10, fontWeight: 700, color, background: `${color}15`, borderRadius: 4, padding: "2px 6px" }}
+              >
+                Book
+              </motion.span>
+            )}
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RealEstateVisual({ color, isHovered }: { color: string; isHovered?: boolean }) {
+  const leads = [
+    { name: "Amit K.", query: "3 BHK · Bandra", score: 92, hot: true },
+    { name: "Sunita R.", query: "2 BHK · Andheri", score: 74, hot: false },
+    { name: "Deepak M.", query: "Villa · Juhu", score: 88, hot: true },
+  ];
+  return (
+    <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 7 }}>
+      {leads.map((l, i) => (
+        <motion.div key={l.name}
+          initial={{ opacity: 0, y: 8 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ delay: 0.15 + i * 0.1, duration: 0.4, ease: EASE_OUT }}
+          animate={{
+            scale: isHovered ? 1.03 : 1,
+            x: isHovered ? 6 : 0,
+            borderColor: isHovered && l.hot ? `${color}60` : l.hot ? `${color}30` : "rgba(0,0,0,0.06)",
+            boxShadow: isHovered ? `0 4px 12px ${color}0d` : "0 1px 6px rgba(0,0,0,0.06)",
+          }}
+          style={{
+            display: "flex", alignItems: "center", gap: 10,
+            background: "#fff", borderRadius: 10,
+            padding: "9px 12px",
+            border: l.hot ? `1px solid ${color}30` : "1px solid rgba(0,0,0,0.06)",
+            transition: "border-color 0.3s ease, box-shadow 0.3s ease",
+          }}
+        >
+          <motion.div 
+            animate={{
+              scale: isHovered && l.hot ? [1, 1.1, 1] : 1,
+            }}
+            transition={{
+              duration: 2,
+              repeat: isHovered ? Infinity : 0,
+              ease: "easeInOut",
+              delay: i * 0.3
+            }}
+            style={{ width: 30, height: 30, borderRadius: "50%",
+              background: `${color}18`, color, fontWeight: 700,
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}
+          >
+            {l.name[0]}
+          </motion.div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#222" }}>{l.name}</div>
+            <div style={{ fontSize: 11, color: "#888" }}>{l.query}</div>
+          </div>
+          <motion.div 
+            animate={{
+              scale: isHovered && l.hot ? 1.1 : 1,
+            }}
+            style={{ fontFamily: "'Geist Mono', monospace", fontSize: 13, fontWeight: 800, color: l.hot ? "#ef4444" : color }}
+          >
+            {l.score}
+          </motion.div>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
+function CafeVisual({ color, isHovered }: { color: string; isHovered?: boolean }) {
+  const [count, setCount] = useState(0);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isHovered) {
+      setCount(0);
+      return;
+    }
+    let n = 0;
+    const t = setInterval(() => {
+      n += 3;
+      setCount(Math.min(n, 47));
+      if (n >= 47) clearInterval(t);
+    }, 35);
+    return () => clearInterval(t);
+  }, [isHovered]);
+
+  return (
+    <div ref={ref} style={{ width: "100%", display: "flex", flexDirection: "column", gap: 12 }}>
+      <motion.div 
+        animate={{
+          borderColor: isHovered ? `${color}40` : "rgba(0,0,0,0.07)",
+          boxShadow: isHovered ? `0 8px 24px ${color}0d` : "none",
+        }}
+        style={{ background: "#fff", borderRadius: 12, padding: "14px", border: "1px solid rgba(0,0,0,0.07)", transition: "border-color 0.3s, box-shadow 0.3s" }}
+      >
+        <div style={{ fontFamily: "'Geist Mono', monospace", fontSize: 10, color: "#999", marginBottom: 6 }}>BOOKINGS TODAY</div>
+        <div style={{ fontSize: 38, fontWeight: 900, color, letterSpacing: "-2px", fontFamily: "'Geist Mono', monospace", lineHeight: 1 }}>{count}</div>
+        <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>tables confirmed via WhatsApp</div>
+        <div style={{ marginTop: 10, height: 4, background: "rgba(0,0,0,0.05)", borderRadius: 2, overflow: "hidden" }}>
+          <motion.div style={{ height: "100%", background: color, borderRadius: 2 }}
+            animate={{ width: `${(count / 47) * 100}%` }}
+            transition={{ duration: 0.3, ease: EASE_OUT }} />
+        </div>
+      </motion.div>
+      <div style={{ display: "flex", gap: 7 }}>
+        {["Breakfast", "Lunch", "Dinner"].map((slot, i) => (
+          <motion.div key={slot}
+            animate={{
+              scale: isHovered && i === 2 ? 1.05 : 1,
+            }}
+            transition={{ duration: 0.25 }}
+            style={{ flex: 1, background: i === 2 ? color : "rgba(0,0,0,0.04)",
+              borderRadius: 8, padding: "8px", textAlign: "center" }}
+          >
+            <div style={{ fontSize: 10, fontWeight: 600, color: i === 2 ? "#fff" : "#888" }}>{slot}</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: i === 2 ? "#fff" : "#333", fontFamily: "'Geist Mono', monospace" }}>
+              {[8, 14, 25][i]}
+            </div>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AnimatedCounter({ 
+  value, 
+  trigger = false,
+  duration = 1500 
+}: { 
+  value: string; 
+  trigger?: boolean;
+  duration?: number; 
+}) {
+  const [displayVal, setDisplayVal] = useState("");
+
+  useEffect(() => {
+    const raw = value.replace(/[^\d.]/g, "");
+    const num = parseFloat(raw);
+    
+    if (!trigger) {
+      if (isNaN(num)) {
+        setDisplayVal(value);
+      } else {
+        const isDecimal = raw.includes(".");
+        const decimalPlaces = isDecimal ? raw.split(".")[1].length : 0;
+        const zeroWithDecimals = (0).toFixed(decimalPlaces);
+        const formattedZero = value.replace(raw, zeroWithDecimals);
+        setDisplayVal(formattedZero);
+      }
+      return;
+    }
+
+    // Extract numbers and decimals
+    const match = value.match(/([\d.]+)/);
+    if (!match) {
+      setDisplayVal(value);
+      return;
+    }
+
+    const rawNumStr = match[1];
+    const target = parseFloat(rawNumStr);
+    if (isNaN(target)) {
+      setDisplayVal(value);
+      return;
+    }
+
+    const prefix = value.substring(0, value.indexOf(rawNumStr));
+    const suffix = value.substring(value.indexOf(rawNumStr) + rawNumStr.length);
+    const isDecimal = rawNumStr.includes(".");
+    const decimalPlaces = isDecimal ? rawNumStr.split(".")[1].length : 0;
+
+    let startTimestamp: number | null = null;
+    let animationFrameId: number;
+
+    const step = (timestamp: number) => {
+      if (!startTimestamp) startTimestamp = timestamp;
+      const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+      const current = progress * target;
+      
+      const formattedNum = current.toFixed(decimalPlaces);
+      setDisplayVal(`${prefix}${formattedNum}${suffix}`);
+
+      if (progress < 1) {
+        animationFrameId = window.requestAnimationFrame(step);
+      }
+    };
+    animationFrameId = window.requestAnimationFrame(step);
+
+    return () => {
+      if (animationFrameId) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [value, trigger, duration]);
+
+  return <span>{displayVal}</span>;
+}
+
+function UseCases() {
+  const [hoveredIndustryIndex, setHoveredIndustryIndex] = useState<number | null>(null);
+  const industries = [
+    {
+      title: "E-Commerce & Retail",
+      desc: "Automate abandoned cart recovery, send order updates, handle product inquiries and COD confirmations without lifting a finger. Aries runs your post-sale flow while you sleep.",
+      color: "#10B981",
+      stat: { n: "3.2×", label: "conversion lift on cart recovery" },
+      Visual: EcommerceVisual,
+    },
+    {
+      title: "Healthcare & Clinics",
+      desc: "Manage appointment bookings, send automated reminders, handle patient FAQs. Patients get instant answers; your staff handles only the cases that need human attention.",
+      color: "#8B5CF6",
+      stat: { n: "60%", label: "reduction in no-shows" },
+      reverse: true,
+      Visual: HealthVisual,
+    },
+    {
+      title: "Real Estate",
+      desc: "Qualify high-intent buyers automatically, answer property queries, and schedule site visits 24/7. Never let a hot lead sit unanswered on a Sunday morning again.",
+      color: "#3B82F6",
+      stat: { n: "4×", label: "more qualified site visits per week" },
+      Visual: RealEstateVisual,
+    },
+    {
+      title: "Cafes & Restaurants",
+      desc: "Accept table reservations, send daily menu updates, run loyalty offers. Your WhatsApp becomes a direct booking channel that costs less than any aggregator.",
+      color: "#D97706",
+      reverse: true,
+      Visual: CafeVisual,
+    },
+  ];
+
+  return (
+    <section id="use-cases" className="section" style={{ background: "#fff", scrollMarginTop: 68 }}>
+      <div className="container">
+        <Reveal>
+          <div style={{ marginBottom: 56 }}>
+            <h2 style={{
+              fontSize: "clamp(34px,4vw,56px)",
+              fontWeight: 900, letterSpacing: "-2px",
+              marginTop: 16, maxWidth: 680,
+              lineHeight: 1.1,
+            }}>
+              Built for <span style={{ color: G }}>modern businesses</span>
+            </h2>
+            <p style={{ fontSize: 19, color: "#374151", maxWidth: 580, marginTop: 16, lineHeight: 1.7, fontWeight: 500 }}>
+              Whatever your industry, Aries adapts to your workflows.
+            </p>
+          </div>
+        </Reveal>
+
+        {industries.map((ind, i) => {
+          const isRowHovered = hoveredIndustryIndex === i;
+          const isOtherRowHovered = hoveredIndustryIndex !== null && hoveredIndustryIndex !== i;
+          return (
+            <Reveal key={ind.title} delay={0.05}>
+              <motion.div 
+                className={`industry-row${ind.reverse ? " reverse" : ""}`}
+                onMouseEnter={() => setHoveredIndustryIndex(i)}
+                onMouseLeave={() => setHoveredIndustryIndex(null)}
+                animate={{ 
+                  opacity: isOtherRowHovered ? 0.45 : 1,
+                  filter: isOtherRowHovered ? "blur(1.5px)" : "blur(0px)"
+                }}
+                transition={{ duration: 0.35, ease: EASE_OUT }}
+                style={{ 
+                  cursor: "pointer",
+                  transition: "opacity 0.35s ease, filter 0.35s ease",
+                  marginBottom: i === industries.length - 1 ? 0 : 36
+                }}
+              >
+                <div className="industry-text">
+                  <h3 style={{
+                    fontSize: "clamp(20px,2.5vw,30px)",
+                    fontWeight: 700, letterSpacing: "-0.5px",
+                    marginBottom: 14,
+                    color: isRowHovered ? ind.color : "inherit",
+                    transition: "color 0.3s ease",
+                  }}>
+                    {ind.title}
+                  </h3>
+                  <p style={{ fontSize: 15.5, color: "#666", lineHeight: 1.75, marginBottom: 24 }}>
+                    {ind.desc}
+                  </p>
+                  {ind.stat && (
+                    <motion.div
+                      whileHover={{ scale: 1.02 }}
+                      transition={{ duration: 0.18, ease: EASE_OUT }}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 12,
+                        background: isRowHovered ? `${ind.color}15` : `${ind.color}0a`,
+                        border: isRowHovered ? `1px solid ${ind.color}35` : `1px solid ${ind.color}22`,
+                        borderRadius: 12, padding: "12px 20px", cursor: "default",
+                        transition: "background 0.3s ease, border 0.3s ease",
+                      }}
+                    >
+                      <span style={{
+                        fontSize: 30, fontWeight: 900, color: ind.color,
+                        letterSpacing: "-1px", fontFamily: "'Geist Mono', monospace",
+                      }}><AnimatedCounter value={ind.stat.n} trigger={isRowHovered} /></span>
+                      <span style={{ fontSize: 13, color: "#888", maxWidth: 140, lineHeight: 1.4 }}>{ind.stat.label}</span>
+                    </motion.div>
+                  )}
+                </div>
+
+                {/* Visual mockup card wrapper */}
+                <motion.div 
+                  animate={{
+                    scale: isRowHovered ? 1.05 : 1,
+                    y: isRowHovered ? -8 : 0,
+                  }}
+                  transition={{ duration: 0.3, ease: EASE_OUT }}
+                  style={{
+                    background: isRowHovered ? `${ind.color}0c` : `${ind.color}06`,
+                    border: isRowHovered ? `1px solid ${ind.color}45` : `1px solid ${ind.color}18`,
+                    borderRadius: 20, padding: "28px 24px",
+                    minHeight: 220,
+                    display: "flex", alignItems: "center",
+                    position: "relative",
+                    overflow: "visible", // for absolute glow overlays
+                    boxShadow: isRowHovered 
+                      ? `0 20px 40px ${ind.color}15, 0 0 24px ${ind.color}0a`
+                      : "none",
+                    transition: "background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease",
+                  }}
+                >
+                  <ind.Visual color={ind.color} isHovered={isRowHovered} />
+                </motion.div>
+              </motion.div>
+            </Reveal>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function Integrations() {
+  const ref = useRef<HTMLDivElement>(null);
+  const inView = useInView(ref, { once: true, margin: "-80px" });
+  const [hoveredIntegration, setHoveredIntegration] = useState<string | null>(null);
+
+  const leftIntegrations = [
+    { name: "Google Sheets", color: "#34A853", initial: "GS", live: true },
+    { name: "Google Calendar", color: "#4285F4", initial: "GC", live: true },
+    { name: "Pabbly Connect", color: "#FF6B35", initial: "PB", live: true },
+  ];
+
+  const rightIntegrations = [
+    { name: "Meta Ads & Pixel", color: "#1877F2", initial: "MB", live: true },
+    { name: "Razorpay", color: "#3395FF", initial: "RZ", live: true },
+    { name: "Shiprocket", color: "#2D9CDB", initial: "SR", live: true },
+  ];
+
+  const allIntegrations = [...leftIntegrations, ...rightIntegrations];
+  const hoveredItem = allIntegrations.find(it => it.name === hoveredIntegration);
+
+  // SVG canvas dimensions
+  const W = 1200;
+  const H = 700;
+  const CX = W / 2;
+  const CY = H / 2;
+
+  // Left node positions (spread vertically for 3 nodes across 700px)
+  const leftY  = [120, 350, 580];
+  const rightY = [120, 350, 580];
+
+  // Build curved path string from a side node to center
+  const makePath = (x: number, y: number, side: "left" | "right") => {
+    const cp1x = side === "left" ? x + (CX - x) * 0.55 : x - (x - CX) * 0.55;
+    const cp2x = side === "left" ? CX - 120 : CX + 120;
+    return `M ${x} ${y} C ${cp1x} ${y}, ${cp2x} ${CY}, ${CX} ${CY}`;
+  };
+
+  const pathColors = ["#25d366", "#25d366", "#25d366"];
+
+  return (
+    <section style={{
+      background: "#0c0e14",
+      padding: "100px 40px",
+      position: "relative",
+      overflow: "hidden",
+    }}>
+      {/* ambient glow */}
+      <motion.div 
+        animate={{
+          background: hoveredItem 
+            ? `radial-gradient(ellipse, ${hoveredItem.color}0a 0%, transparent 65%)`
+            : "radial-gradient(ellipse, rgba(37,211,102,0.07) 0%, transparent 65%)"
+        }}
+        transition={{ duration: 0.4 }}
+        style={{
+          position: "absolute", top: "50%", left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: 600, height: 600,
+          pointerEvents: "none",
+        }} 
+      />
+
+      <div style={{ maxWidth: 1200, margin: "0 auto", position: "relative", zIndex: 1 }}>
+        {/* Header */}
+        <Reveal>
+          <div style={{ textAlign: "center", marginBottom: 64 }}>
+            <h2 style={{
+              fontSize: "clamp(34px,4vw,56px)",
+              fontWeight: 900, letterSpacing: "-2.5px",
+              color: "#fff", marginBottom: 16,
+              lineHeight: 1.1,
+            }}>
+              Connect Aries with your
+              <span style={{ color: G }}> existing stack</span>
+            </h2>
+            <p style={{ fontSize: 19, color: "#9ca3af", maxWidth: 640, margin: "0 auto", lineHeight: 1.7 }}>
+              Plug into the tools your team already uses — CRM, payments, sheets, automation and more.
+            </p>
+          </div>
+        </Reveal>
+
+        {/* Hub diagram */}
+        <div ref={ref} style={{ position: "relative", width: "100%", maxWidth: 1200, margin: "0 auto" }}>
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            style={{ width: "100%", height: "auto", overflow: "visible" }}
+          >
+            <defs>
+              {/* Animated dash for path draw-on */}
+              <style>{`
+                @keyframes flowDot {
+                  0%   { stroke-dashoffset: 600; opacity: 0; }
+                  5%   { opacity: 1; }
+                  95%  { opacity: 1; }
+                  100% { stroke-dashoffset: 0;   opacity: 0; }
+                }
+                @keyframes drawPath {
+                  from { stroke-dashoffset: 600; }
+                  to   { stroke-dashoffset: 0; }
+                }
+              `}</style>
+              <filter id="glow">
+                <feGaussianBlur stdDeviation="2.5" result="blur" />
+                <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+              
+              {/* Radial spotlight gradients for each integration */}
+              {allIntegrations.map(item => (
+                <radialGradient
+                  key={item.name}
+                  id={`glow-${item.name.replace(/[^a-zA-Z0-9]/g, "-")}`}
+                  cx="50%" cy="0%" r="60%"
+                >
+                  <stop offset="0%" stopColor={item.color} stopOpacity="0.22" />
+                  <stop offset="100%" stopColor={item.color} stopOpacity="0" />
+                </radialGradient>
+              ))}
+            </defs>
+
+            {/* LEFT paths + nodes */}
+            {leftIntegrations.map((item, i) => {
+              const x = 180, y = leftY[i];
+              const d = makePath(x + 116, y, "left");
+              const delay = i * 0.18;
+              const dotDelay = i * 0.4;
+              
+              const isHovered = hoveredIntegration === item.name;
+              const isOtherHovered = hoveredIntegration !== null && hoveredIntegration !== item.name;
+              
+              return (
+                <g key={item.name}>
+                  {/* Curved Connection Path */}
+                  <motion.path
+                    d={d}
+                    fill="none"
+                    animate={{
+                      stroke: isHovered ? item.color : isOtherHovered ? "rgba(37,211,102,0.06)" : pathColors[i],
+                      strokeWidth: isHovered ? 2.5 : isOtherHovered ? 1.0 : 1.5,
+                      opacity: isHovered ? 1.0 : isOtherHovered ? 0.2 : 0.7,
+                    }}
+                    transition={{ duration: 0.35, ease: EASE_OUT }}
+                    strokeDasharray="600"
+                    strokeDashoffset={inView ? "0" : "600"}
+                    style={{
+                      transition: `stroke-dashoffset 1.1s cubic-bezier(0.23,1,0.32,1) ${delay}s`,
+                    }}
+                  />
+                  {/* Staggered Train of 3 Flowing Dots */}
+                  {inView && (
+                    <motion.g
+                      initial={{ opacity: 0.8 }}
+                      animate={{
+                        opacity: isHovered ? 1.0 : isOtherHovered ? 0.15 : 0.8,
+                      }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      {[0, 1, 2].map((dotIndex) => {
+                        const startDelay = dotDelay + (dotIndex * 0.8);
+                        return (
+                          <circle 
+                            key={dotIndex} 
+                            r={isHovered ? 4.5 : 3.5} 
+                            fill={isHovered ? item.color : "#25d366"} 
+                            filter="url(#glow)"
+                            visibility="hidden"
+                          >
+                            <set 
+                              attributeName="visibility" 
+                              to="visible" 
+                              begin={`${startDelay}s`} 
+                            />
+                            <animateMotion
+                              dur="2.4s"
+                              repeatCount="indefinite"
+                              begin={`${startDelay}s`}
+                              path={d}
+                            />
+                          </circle>
+                        );
+                      })}
+                    </motion.g>
+                  )}
+                  {/* Integration chip */}
+                  <motion.g
+                    onMouseEnter={() => setHoveredIntegration(item.name)}
+                    onMouseLeave={() => setHoveredIntegration(null)}
+                    style={{
+                      opacity: inView ? 1 : 0,
+                      transformOrigin: `${x}px ${y}px`,
+                      cursor: "pointer",
+                    }}
+                    animate={{
+                      scale: isHovered ? 1.06 : isOtherHovered ? 0.94 : 1,
+                      opacity: inView ? (isOtherHovered ? 0.45 : 1) : 0,
+                      filter: isOtherHovered ? "blur(1.5px)" : "blur(0px)",
+                    }}
+                    transition={{
+                      scale: { duration: 0.3, ease: EASE_OUT },
+                      opacity: { duration: 0.3 },
+                      filter: { duration: 0.3 }
+                    }}
+                  >
+                    <motion.rect
+                      x={x - 140} y={y - 34}
+                      width={280} height={68}
+                      rx={18}
+                      animate={{
+                        fill: isHovered ? `${item.color}1c` : isOtherHovered ? "rgba(37,211,102,0.02)" : "rgba(37,211,102,0.06)",
+                        stroke: isHovered ? item.color : isOtherHovered ? "rgba(37,211,102,0.08)" : "rgba(37,211,102,0.25)",
+                        strokeWidth: isHovered ? 2.0 : 1.2,
+                      }}
+                      transition={{ duration: 0.3 }}
+                    />
+                    {/* Spotlight glow overlay */}
+                    {isHovered && (
+                      <rect
+                        x={x - 140} y={y - 34}
+                        width={280} height={68}
+                        rx={18}
+                        fill={`url(#glow-${item.name.replace(/[^a-zA-Z0-9]/g, "-")})`}
+                        pointerEvents="none"
+                      />
+                    )}
+                    <motion.text
+                      x={x} y={y}
+                      textAnchor="middle" dominantBaseline="central"
+                      animate={{
+                        fill: isHovered ? "#ffffff" : isOtherHovered ? "rgba(255,255,255,0.3)" : "#ffffff",
+                        scale: isHovered ? 1.02 : 1,
+                      }}
+                      transition={{ duration: 0.3 }}
+                      style={{
+                        fontSize: 22, fontWeight: 700,
+                        fontFamily: "Geist, Inter, sans-serif",
+                        letterSpacing: "-0.5px"
+                      }}
+                    >{item.name}</motion.text>
+                    {/* Live / Soon badge */}
+                    <circle cx={x + 116} cy={y} r={5.5}
+                      fill="#25d366"
+                    />
+                    <circle cx={x + 116} cy={y} r={5.5} fill="#25d366" opacity={0.4}>
+                      <animate attributeName="r" values="5.5;9.5;5.5" dur="2s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0.4;0;0.4" dur="2s" repeatCount="indefinite" />
+                    </circle>
+                  </motion.g>
+                </g>
+              );
+            })}
+
+            {/* RIGHT paths + nodes */}
+            {rightIntegrations.map((item, i) => {
+              const x = W - 180, y = rightY[i];
+              const d = makePath(x - 116, y, "right");
+              const delay = i * 0.18 + 0.1;
+              const dotDelay = i * 0.4 + 0.5;
+              
+              const isHovered = hoveredIntegration === item.name;
+              const isOtherHovered = hoveredIntegration !== null && hoveredIntegration !== item.name;
+              
+              return (
+                <g key={item.name}>
+                  {/* Curved Connection Path */}
+                  <motion.path
+                    d={d}
+                    fill="none"
+                    animate={{
+                      stroke: isHovered ? item.color : isOtherHovered ? "rgba(37,211,102,0.06)" : pathColors[i],
+                      strokeWidth: isHovered ? 2.5 : isOtherHovered ? 1.0 : 1.5,
+                      opacity: isHovered ? 1.0 : isOtherHovered ? 0.2 : 0.7,
+                    }}
+                    transition={{ duration: 0.35, ease: EASE_OUT }}
+                    strokeDasharray="600"
+                    strokeDashoffset={inView ? "0" : "600"}
+                    style={{
+                      transition: `stroke-dashoffset 1.1s cubic-bezier(0.23,1,0.32,1) ${delay}s`,
+                    }}
+                  />
+                  {/* Staggered Train of 3 Flowing Dots */}
+                  {inView && (
+                    <motion.g
+                      initial={{ opacity: 0.8 }}
+                      animate={{
+                        opacity: isHovered ? 1.0 : isOtherHovered ? 0.15 : 0.8,
+                      }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      {[0, 1, 2].map((dotIndex) => {
+                        const startDelay = dotDelay + (dotIndex * 0.8);
+                        return (
+                          <circle 
+                            key={dotIndex} 
+                            r={isHovered ? 4.5 : 3.5} 
+                            fill={isHovered ? item.color : "#25d366"} 
+                            filter="url(#glow)"
+                            visibility="hidden"
+                          >
+                            <set 
+                              attributeName="visibility" 
+                              to="visible" 
+                              begin={`${startDelay}s`} 
+                            />
+                            <animateMotion
+                              dur="2.4s"
+                              repeatCount="indefinite"
+                              begin={`${startDelay}s`}
+                              path={d}
+                              keyPoints="1;0"
+                              keyTimes="0;1"
+                              calcMode="linear"
+                            />
+                          </circle>
+                        );
+                      })}
+                    </motion.g>
+                  )}
+                  <motion.g
+                    onMouseEnter={() => setHoveredIntegration(item.name)}
+                    onMouseLeave={() => setHoveredIntegration(null)}
+                    style={{
+                      opacity: inView ? 1 : 0,
+                      transformOrigin: `${x}px ${y}px`,
+                      cursor: "pointer",
+                    }}
+                    animate={{
+                      scale: isHovered ? 1.06 : isOtherHovered ? 0.94 : 1,
+                      opacity: inView ? (isOtherHovered ? 0.45 : 1) : 0,
+                      filter: isOtherHovered ? "blur(1.5px)" : "blur(0px)",
+                    }}
+                    transition={{
+                      scale: { duration: 0.3, ease: EASE_OUT },
+                      opacity: { duration: 0.3 },
+                      filter: { duration: 0.3 }
+                    }}
+                  >
+                    <motion.rect
+                      x={x - 140} y={y - 34}
+                      width={280} height={68}
+                      rx={18}
+                      animate={{
+                        fill: isHovered ? `${item.color}1c` : isOtherHovered ? "rgba(37,211,102,0.02)" : "rgba(37,211,102,0.06)",
+                        stroke: isHovered ? item.color : isOtherHovered ? "rgba(37,211,102,0.08)" : "rgba(37,211,102,0.25)",
+                        strokeWidth: isHovered ? 2.0 : 1.2,
+                      }}
+                      transition={{ duration: 0.3 }}
+                    />
+                    {/* Spotlight glow overlay */}
+                    {isHovered && (
+                      <rect
+                        x={x - 140} y={y - 34}
+                        width={280} height={68}
+                        rx={18}
+                        fill={`url(#glow-${item.name.replace(/[^a-zA-Z0-9]/g, "-")})`}
+                        pointerEvents="none"
+                      />
+                    )}
+                    <motion.text
+                      x={x} y={y}
+                      textAnchor="middle" dominantBaseline="central"
+                      animate={{
+                        fill: isHovered ? "#ffffff" : isOtherHovered ? "rgba(255,255,255,0.3)" : "#ffffff",
+                        scale: isHovered ? 1.02 : 1,
+                      }}
+                      transition={{ duration: 0.3 }}
+                      style={{
+                        fontSize: 22, fontWeight: 700,
+                        fontFamily: "Geist, Inter, sans-serif",
+                        letterSpacing: "-0.5px"
+                      }}
+                    >{item.name}</motion.text>
+                    <circle cx={x - 116} cy={y} r={5.5}
+                      fill="#25d366"
+                    />
+                    <circle cx={x - 116} cy={y} r={5.5} fill="#25d366" opacity={0.4}>
+                      <animate attributeName="r" values="5.5;9.5;5.5" dur="2s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0.4;0;0.4" dur="2s" repeatCount="indefinite" />
+                    </circle>
+                  </motion.g>
+                </g>
+              );
+            })}
+
+            {/* Center hub */}
+            <g>
+              {/* Outer pulse ring */}
+              <motion.circle 
+                cx={CX} cy={CY} r={80} fill="none" 
+                animate={{
+                  stroke: hoveredItem ? `${hoveredItem.color}1e` : "rgba(37,211,102,0.12)"
+                }}
+                transition={{ duration: 0.3 }}
+                strokeWidth={36} 
+              />
+              <motion.circle 
+                cx={CX} cy={CY} r={68} fill="rgba(37,211,102,0.08)" 
+                animate={{
+                  stroke: hoveredItem ? `${hoveredItem.color}3f` : "rgba(37,211,102,0.25)"
+                }}
+                transition={{ duration: 0.3 }}
+                strokeWidth={2} 
+              />
+              <motion.circle 
+                cx={CX} cy={CY} r={56} fill="#ffffff" 
+                animate={{
+                  stroke: hoveredItem ? hoveredItem.color : "#25d366"
+                }}
+                transition={{ duration: 0.3 }}
+                strokeWidth={4} 
+                style={{ filter: 'drop-shadow(0 0 12px rgba(37,211,102,0.25))' }} 
+              />
+              {/* Branded Favicon PNG Icon */}
+              <image
+                href="/favicon.png"
+                x={CX - 40}
+                y={CY - 40}
+                width={80}
+                height={80}
+              />
+            </g>
+
+            {/* Concentric expanding pulse rings in center */}
+            {inView && [
+              { r: 76, dur: "2.4s", begin: "0s" },
+              { r: 84, dur: "2.4s", begin: "0.8s" },
+              { r: 92, dur: "2.4s", begin: "1.6s" },
+            ].map((ring, ri) => (
+              <circle key={ri} cx={CX} cy={CY} r={ring.r} fill="none" stroke={hoveredItem ? hoveredItem.color : G} strokeWidth={1.5}>
+                <animate attributeName="opacity" values="0.6;0" dur={ring.dur} repeatCount="indefinite" begin={ring.begin} />
+                <animate attributeName="r" values={`${ring.r};${ring.r + 40}`} dur={ring.dur} repeatCount="indefinite" begin={ring.begin} />
+              </circle>
+            ))}
+          </svg>
+        </div>
+
+        {/* Legend + footnote */}
+        <Reveal>
+          <div style={{ textAlign: "center", marginTop: 32, display: "flex", alignItems: "center", justifyContent: "center", gap: 28, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#9ca3af" }}>
+              <svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="#25d366" /></svg>
+              Available now
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#4b5563" }}>
+              <svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="rgba(255,255,255,0.2)" /></svg>
+              Coming soon
+            </div>
+            <div style={{ color: "#374151", fontSize: 13 }}>+ more via webhooks &amp; API</div>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   HOW IT WORKS — 3 steps (acceptable because steps aren't cards)           
+───────────────────────────────────────────────────────────────────────── */
+function HowItWorks() {
+  const ref = useRef<HTMLDivElement>(null);
+  const inView = useInView(ref, { once: true, margin: "-100px" });
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
+  const steps = [
+    {
+      n: "01",
+      Icon: <IconPhone />,
+      title: "Connect WhatsApp",
+      desc: "Link your WhatsApp Business number. Step-by-step guidance gets you live in 5 minutes.",
+      detail: "No tech skills needed",
+    },
+    {
+      n: "02",
+      Icon: <IconBrain />,
+      title: "Configure Your AI",
+      desc: "Tell us your business, services, and FAQs. Aries learns your business instantly.",
+      detail: "Trained in minutes",
+    },
+    {
+      n: "03",
+      Icon: <IconTrendUp />,
+      title: "Watch Leads Flow",
+      desc: "Your AI replies 24/7. Track everything in real-time from your dashboard.",
+      detail: "Live analytics",
+    },
+  ];
+
+  return (
+    <section id="how-it-works" className="section" style={{ background: "#f7f8fa", scrollMarginTop: 68 }}>
+      <div className="container">
+        <Reveal>
+          <div style={{ textAlign: "center", marginBottom: 72 }}>
+            <h2 style={{
+              fontSize: "clamp(34px,4vw,56px)",
+              fontWeight: 900, letterSpacing: "-2px",
+              marginBottom: 16,
+              lineHeight: 1.1,
+            }}>
+              Live in <span style={{ color: G }}>under 5 minutes</span>
+            </h2>
+            <p style={{ fontSize: 19, color: "#4b5563", maxWidth: 500, margin: "0 auto", fontWeight: 500 }}>
+              Three simple steps. No developer. No waiting.
+            </p>
+          </div>
+        </Reveal>
+
+        {/* Animated progress bar — Ultra Premium Crossing Wave Paths */}
+        <div ref={ref} style={{ position: "relative", marginBottom: 56, maxWidth: 480, width: "100%", height: 80, margin: "0 auto 64px" }}>
+          <svg
+            width="100%"
+            height="100%"
+            viewBox="0 0 480 80"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            style={{ overflow: "visible" }}
+          >
+            <defs>
+              {/* Premium Glow Filters */}
+              <filter id="glow-accent" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="4" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+              <filter id="glow-particle" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 2 0" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+              {/* Gradients */}
+              <linearGradient id="wave-grad-1" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor={G} />
+                <stop offset="50%" stopColor="#4ade80" />
+                <stop offset="100%" stopColor="#3b82f6" />
+              </linearGradient>
+              <linearGradient id="wave-grad-2" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#3b82f6" />
+                <stop offset="50%" stopColor={G} />
+                <stop offset="100%" stopColor="#10b981" />
+              </linearGradient>
+            </defs>
+
+            {/* Gray baseline path 1 */}
+            <path
+              d="M 24 40 C 78 15, 186 65, 240 40 C 294 15, 402 65, 456 40"
+              stroke="rgba(0,0,0,0.05)"
+              strokeWidth="3"
+              strokeLinecap="round"
+            />
+            {/* Gray baseline path 2 */}
+            <path
+              d="M 24 40 C 78 65, 186 15, 240 40 C 294 65, 402 15, 456 40"
+              stroke="rgba(0,0,0,0.05)"
+              strokeWidth="3"
+              strokeLinecap="round"
+            />
+
+            {/* Glowing active path 1 (Framer motion pathLength reveal) */}
+            <motion.path
+              d="M 24 40 C 78 15, 186 65, 240 40 C 294 15, 402 65, 456 40"
+              stroke="url(#wave-grad-1)"
+              strokeWidth="3"
+              strokeLinecap="round"
+              initial={{ pathLength: 0 }}
+              animate={inView ? { pathLength: 1 } : {}}
+              transition={{ duration: 1.6, ease: EASE_IN_OUT, delay: 0.2 }}
+            />
+            {/* Glowing neon shadow path 1 */}
+            <motion.path
+              d="M 24 40 C 78 15, 186 65, 240 40 C 294 15, 402 65, 456 40"
+              stroke="url(#wave-grad-1)"
+              strokeWidth="6"
+              strokeLinecap="round"
+              opacity="0.3"
+              filter="url(#glow-accent)"
+              initial={{ pathLength: 0 }}
+              animate={inView ? { pathLength: 1 } : {}}
+              transition={{ duration: 1.6, ease: EASE_IN_OUT, delay: 0.2 }}
+            />
+
+            {/* Glowing active path 2 (Framer motion pathLength reveal) */}
+            <motion.path
+              d="M 24 40 C 78 65, 186 15, 240 40 C 294 65, 402 15, 456 40"
+              stroke="url(#wave-grad-2)"
+              strokeWidth="3"
+              strokeLinecap="round"
+              initial={{ pathLength: 0 }}
+              animate={inView ? { pathLength: 1 } : {}}
+              transition={{ duration: 1.6, ease: EASE_IN_OUT, delay: 0.2 }}
+            />
+            {/* Glowing neon shadow path 2 */}
+            <motion.path
+              d="M 24 40 C 78 65, 186 15, 240 40 C 294 65, 402 15, 456 40"
+              stroke="url(#wave-grad-2)"
+              strokeWidth="6"
+              strokeLinecap="round"
+              opacity="0.3"
+              filter="url(#glow-accent)"
+              initial={{ pathLength: 0 }}
+              animate={inView ? { pathLength: 1 } : {}}
+              transition={{ duration: 1.6, ease: EASE_IN_OUT, delay: 0.2 }}
+            />
+
+            {/* Energy Particle Spark 1 (Infinitely flows along Path 1) */}
+            {inView && (
+              <g filter="url(#glow-particle)">
+                <circle r="4.5" fill="#4ade80">
+                  <animateMotion
+                    dur="4s"
+                    repeatCount="indefinite"
+                    path="M 24 40 C 78 15, 186 65, 240 40 C 294 15, 402 65, 456 40"
+                  />
+                </circle>
+              </g>
+            )}
+
+            {/* Energy Particle Spark 2 (Infinitely flows along Path 2, staggered) */}
+            {inView && (
+              <g filter="url(#glow-particle)">
+                <circle r="4.5" fill="#25D366">
+                  <animateMotion
+                    dur="4s"
+                    begin="2s"
+                    repeatCount="indefinite"
+                    path="M 24 40 C 78 65, 186 15, 240 40 C 294 65, 402 15, 456 40"
+                  />
+                </circle>
+              </g>
+            )}
+
+            {/* Milestones: Step 1, Step 2, Step 3 */}
+            {[
+              { cx: 24, delay: 0.3 },
+              { cx: 240, delay: 0.75 },
+              { cx: 456, delay: 1.2 },
+            ].map((milestone, idx) => {
+              const isCardHovered = hoveredIndex === idx;
+              return (
+                <g key={idx}>
+                  {/* Outer Glassmorphic boundary ring */}
+                  <motion.circle
+                    cx={milestone.cx}
+                    cy="40"
+                    r="14"
+                    fill="#ffffff"
+                    stroke={isCardHovered ? "rgba(37,211,102,0.4)" : "rgba(0,0,0,0.06)"}
+                    strokeWidth="1.5"
+                    style={{ filter: "drop-shadow(0 2px 5px rgba(0,0,0,0.04))" }}
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={inView ? { scale: isCardHovered ? 1.25 : 1, opacity: 1 } : {}}
+                    transition={{ duration: 0.35, delay: inView ? 0 : milestone.delay, ease: EASE_OUT }}
+                  />
+
+                  {/* Pulsing ring */}
+                  {inView && (
+                    <motion.circle
+                      cx={milestone.cx}
+                      cy="40"
+                      r={isCardHovered ? 12 : 10}
+                      stroke={G}
+                      strokeWidth="1.5"
+                      fill="none"
+                      animate={{ 
+                        scale: isCardHovered ? [1, 2.1, 1] : [1, 1.7, 1], 
+                        opacity: isCardHovered ? [0.9, 0, 0.9] : [0.7, 0, 0.7] 
+                      }}
+                      transition={{ 
+                        duration: isCardHovered ? 1.5 : 2.2, 
+                        repeat: Infinity, 
+                        ease: "easeInOut", 
+                        delay: isCardHovered ? 0 : milestone.delay 
+                      }}
+                    />
+                  )}
+
+                  {/* Inner solid milestone dot */}
+                  <motion.circle
+                    cx={milestone.cx}
+                    cy="40"
+                    r={isCardHovered ? 8 : 6.5}
+                    fill={G}
+                    initial={{ scale: 0 }}
+                    animate={inView ? { scale: isCardHovered ? 1.25 : 1 } : {}}
+                    transition={{ duration: 0.3, ease: EASE_OUT }}
+                    style={{ filter: `drop-shadow(0 0 ${isCardHovered ? 8 : 4}px ${G})` }}
+                  />
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+
+        <div className="steps-grid">
+          {steps.map((step, i) => {
+            const isHovered = hoveredIndex === i;
+            const isOtherHovered = hoveredIndex !== null && hoveredIndex !== i;
+            return (
+              <Reveal key={step.n} delay={i * 0.12}>
+                <motion.div
+                  onMouseEnter={() => setHoveredIndex(i)}
+                  onMouseLeave={() => setHoveredIndex(null)}
+                  animate={{ 
+                    scale: isHovered ? 1.05 : isOtherHovered ? 0.95 : 1, 
+                    y: isHovered ? -12 : 0,
+                    opacity: isOtherHovered ? 0.35 : 1,
+                    filter: isOtherHovered ? "blur(1.5px)" : "blur(0px)"
+                  }}
+                  transition={{ duration: 0.3, ease: EASE_OUT }}
+                  style={{
+                    background: "#fff",
+                    borderRadius: 20,
+                    padding: "32px 28px",
+                    border: isHovered ? "1px solid rgba(37,211,102,0.4)" : "1px solid rgba(0,0,0,0.06)",
+                    textAlign: "center",
+                    position: "relative",
+                    boxShadow: isHovered 
+                      ? "0 24px 48px rgba(37,211,102,0.14), 0 0 24px rgba(37,211,102,0.08)"
+                      : "0 2px 12px rgba(0,0,0,0.04)",
+                    cursor: "pointer",
+                    transition: "border 0.3s ease, box-shadow 0.3s ease",
+                    overflow: "visible",
+                  }}
+                >
+                  {/* Subtle top spotlight shine overlay */}
+                  {isHovered && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.3 }}
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        background: "radial-gradient(circle at 50% 0%, rgba(37,211,102,0.06) 0%, transparent 70%)",
+                        pointerEvents: "none",
+                        borderRadius: 20,
+                        zIndex: 0,
+                      }}
+                    />
+                  )}
+
+                  {/* Number badge */}
+                  <div style={{
+                    position: "absolute", top: -14, left: "50%", transform: "translateX(-50%)",
+                    fontFamily: "'Geist Mono', monospace",
+                    fontSize: 11, fontWeight: 700, letterSpacing: "0.08em",
+                    background: isHovered ? "#128C7E" : G, color: "#fff",
+                    padding: "3px 12px", borderRadius: 100,
+                    boxShadow: isHovered ? "0 0 12px rgba(37,211,102,0.4)" : "none",
+                    transition: "background-color 0.3s, box-shadow 0.3s",
+                    zIndex: 1,
+                  }}>STEP {step.n}</div>
+
+                  {/* Animated icon circle */}
+                  <motion.div
+                    animate={{ 
+                      boxShadow: isHovered 
+                        ? ["0 0 0 0px rgba(37,211,102,0.5)", "0 0 0 14px rgba(37,211,102,0.12)", "0 0 0 0px rgba(37,211,102,0.0)"] 
+                        : ["0 0 0 0px rgba(37,211,102,0.3)", "0 0 0 8px rgba(37,211,102,0.08)", "0 0 0 0px rgba(37,211,102,0.0)"],
+                      scale: isHovered ? 1.1 : 1
+                    }}
+                    transition={{ 
+                      boxShadow: { duration: isHovered ? 1.8 : 2.5, repeat: Infinity, delay: i * 0.3 },
+                      scale: { duration: 0.3, ease: EASE_OUT }
+                    }}
+                    style={{
+                      width: 64, height: 64, borderRadius: "50%",
+                      background: isHovered ? "rgba(37,211,102,0.15)" : "rgba(37,211,102,0.08)",
+                      border: isHovered ? `2px solid rgba(37,211,102,0.5)` : `2px solid rgba(37,211,102,0.25)`,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      margin: "20px auto 20px",
+                      position: "relative",
+                      zIndex: 1,
+                    }}
+                  >
+                    <div style={{ width: 26, height: 26, color: G, stroke: G, fill: "none",
+                      strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" }}>
+                      {step.Icon}
+                    </div>
+                  </motion.div>
+
+                  <h3 style={{ 
+                    fontSize: 19, 
+                    fontWeight: 700, 
+                    marginBottom: 10, 
+                    letterSpacing: "-0.4px",
+                    color: isHovered ? "#111" : "#1f2937",
+                    transform: isHovered ? "scale(1.02)" : "scale(1)",
+                    transition: "color 0.3s, transform 0.3s",
+                    transformOrigin: "center",
+                    position: "relative",
+                    zIndex: 1,
+                  }}>
+                    {step.title}
+                  </h3>
+                  <p style={{ fontSize: 13.5, color: "#777", lineHeight: 1.7, marginBottom: 16, position: "relative", zIndex: 1 }}>
+                    {step.desc}
+                  </p>
+
+                  {/* Detail tag */}
+                  <div style={{
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                    fontSize: 11.5, fontWeight: 600,
+                    color: GD,
+                    background: "rgba(37,211,102,0.08)",
+                    border: "1px solid rgba(37,211,102,0.15)",
+                    borderRadius: 20, padding: "4px 12px",
+                    position: "relative",
+                    zIndex: 1,
+                  }}>
+                    <svg viewBox="0 0 24 24" width="11" height="11" style={{ stroke: G, fill: "none", strokeWidth: 2.5, strokeLinecap: "round", strokeLinejoin: "round" }}><polyline points="20 6 9 17 4 12"/></svg>
+                    {step.detail}
+                  </div>
+                </motion.div>
+              </Reveal>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   PRICING                                                                   
+───────────────────────────────────────────────────────────────────────── */
+function Pricing() {
+  const [billing, setBilling] = useState<"monthly" | "annual">("monthly");
+
+  const plans = [
+    {
+      name: "Starter", price: "3,999", oldPrice: "",
+      desc: "For small businesses starting with WhatsApp marketing",
+      caps: ["1 Agent Seat", "2,000 conversations/month"],
+      features: ["WhatsApp Business API", "Blue Tick Application", "₹100 Free Credits", "Manual Live Chat", "Broadcast Campaigns", "Contact Management"],
+      cta: "Start Free Trial", popular: false,
+    },
+    {
+      name: "Growth", price: "5,999", oldPrice: "",
+      desc: "Scale customer support with AI FAQ automation",
+      caps: ["2 Agent Seats", "10,000 conversations/month"],
+      features: ["Everything in Starter", "AI FAQ Chatbot", "Hindi + English + Hinglish", "Smart Segments", "Custom Attributes", "Priority Email Support"],
+      cta: "Start Free Trial", popular: false,
+    },
+    {
+      name: "Pro", price: "7,999", oldPrice: "",
+      desc: "Advanced workflows and visual flow builder",
+      caps: ["5 Agent Seats", "25,000 conversations/month"],
+      features: ["Everything in Growth", "Visual Flow Builder", "5 Active Chatbot Flows", "Google Sheets Sync", "Lead Scoring & Alerts", "CRM Integrations"],
+      cta: "Start Free Trial", popular: true,
+    },
+    {
+      name: "Ultra", price: "Custom", oldPrice: "",
+      desc: "AI Voice Calling + custom integrations for high-volume brands",
+      caps: ["Unlimited Seats", "Unlimited conversations"],
+      features: ["Everything in Pro", "Dedicated LLM Fine-tuning", "AI Voice Calling (150 calls)", "White-label Reports", "Custom Integrations", "1-hour SLA + Account Manager"],
+      cta: "Contact Sales", popular: false,
+    },
+  ];
+
+  const getPrice = (p: string) => {
+    if (p === "Custom") return "Custom";
+    const n = parseInt(p.replace(",", ""));
+    if (isNaN(n)) return p;
+    return billing === "annual" ? Math.round(n * 0.8).toLocaleString("en-IN") : p;
+  };
+
+  return (
+    <section id="pricing" className="section" style={{ background: "#fff", scrollMarginTop: 68 }}>
+      <div style={{ maxWidth: 1300, margin: "0 auto", padding: "0 40px" }}>
+        <Reveal>
+          <div style={{ textAlign: "center", marginBottom: 40 }}>
+            <h2 style={{ fontSize: "clamp(34px,4vw,56px)", fontWeight: 900, letterSpacing: "-2.5px", marginTop: 0, lineHeight: 1.1 }}>
+              Simple, <span style={{ color: G }}>transparent</span> pricing
+            </h2>
+            <p style={{ color: "#374151", fontSize: 19, marginTop: 16, fontWeight: 500 }}>
+              No hidden charges. All plans include WhatsApp Business API.
+            </p>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.05}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginBottom: 40 }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: billing === "monthly" ? "#111" : "#999", cursor: "pointer" }}
+              onClick={() => setBilling("monthly")}>Monthly</span>
+            <button className={`t-switch${billing === "annual" ? " on" : ""}`}
+              onClick={() => setBilling(b => b === "monthly" ? "annual" : "monthly")}
+              aria-label="Toggle billing">
+              <span className="t-thumb" />
+            </button>
+            <span style={{ fontSize: 14, fontWeight: 600, color: billing === "annual" ? "#111" : "#999", cursor: "pointer" }}
+              onClick={() => setBilling("annual")}>
+              Annual <span style={{ background: "#dcfce7", color: GD, fontSize: 11, fontWeight: 700, borderRadius: 100, padding: "2px 8px", marginLeft: 4 }}>Save 20%</span>
+            </span>
+          </div>
+        </Reveal>
+
+        <div className="pricing-grid">
+          {plans.map((plan, i) => (
+            <Reveal key={plan.name} delay={i * 0.06}>
+              <div className="pc" style={{ height: "100%" }}>
+                {plan.popular && (
+                  <div className="pop-badge" style={{
+                    position: "absolute", top: -13, left: "50%", transform: "translateX(-50%)",
+                    background: G, color: "#fff", padding: "4px 18px", borderRadius: 100,
+                    fontSize: 10, fontWeight: 700, whiteSpace: "nowrap", letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                  }}>Most Popular</div>
+                )}
+                <h3 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>{plan.name}</h3>
+                <p className="pd" style={{ fontSize: 13, marginBottom: 20, lineHeight: 1.5 }}>{plan.desc}</p>
+                <div style={{ marginBottom: 20 }}>
+                  {plan.price !== "Custom" && (
+                    <span className="ps" style={{ fontSize: 14 }}>₹</span>
+                  )}
+                  <span style={{ fontSize: 42, fontWeight: 900, letterSpacing: "-2px" }}>
+                    {getPrice(plan.price)}
+                  </span>
+                  {plan.price !== "Custom" && (
+                    <span className="ps" style={{ fontSize: 13 }}>/month</span>
+                  )}
+                  {billing === "annual" && plan.price !== "Custom" && (
+                    <div style={{ fontSize: 12, color: G, fontWeight: 600, marginTop: 4 }}>Billed annually</div>
+                  )}
+                </div>
+                <Link href={plan.price === "Custom" ? "#contact-us" : "/signup"} className="pb">
+                  {plan.cta}
+                </Link>
+                <hr className="sep" style={{ border: "none", borderTop: "1px solid", margin: "20px 0 16px" }} />
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+                  {plan.caps.map(c => (
+                    <div key={c} style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "flex", gap: 6, alignItems: "center" }}>
+                      <svg viewBox="0 0 24 24" width="12" height="12" style={{ stroke: G, fill: "none", strokeWidth: 2.5, flexShrink: 0 }}><polyline points="20 6 9 17 4 12"/></svg>
+                      {c}
+                    </div>
+                  ))}
+                </div>
+                <hr className="sep" style={{ border: "none", borderTop: "1px solid", margin: "0 0 16px" }} />
+                <ul style={{ listStyle: "none", display: "flex", flexDirection: "column", gap: 9, padding: 0 }}>
+                  {plan.features.map(f => (
+                    <li key={f} className="pf" style={{ display: "flex", gap: 8, fontSize: 13, alignItems: "flex-start", lineHeight: 1.5 }}>
+                      <IconCheck />{f}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </Reveal>
+          ))}
+        </div>
+
+        <Reveal delay={0.1}>
+          <div style={{ display: "flex", justifyContent: "center", gap: 32, flexWrap: "wrap", paddingTop: 40 }}>
+            {[
+              { icon: "🔒", text: "Secure Payments" },
+              { icon: "📱", text: "Cancel Anytime" },
+              { icon: "💬", text: "14-Day Free Trial" },
+              { icon: "🇮🇳", text: "UPI, Cards & Net Banking" },
+            ].map(t => (
+              <span key={t.text} style={{ fontSize: 13, color: "#aaa", fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
+                {t.icon} {t.text}
+              </span>
+            ))}
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   FAQ                                                                       
+───────────────────────────────────────────────────────────────────────── */
+function FAQItem({ question, answer }: { question: string; answer: React.ReactNode }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div style={{
+      borderBottom: "1px solid var(--rule)",
+      paddingTop: 20,
+      paddingBottom: 20,
+    }}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          width: "100%",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          background: "none",
+          border: "none",
+          padding: 0,
+          margin: 0,
+          cursor: "pointer",
+          textAlign: "left",
+          color: "var(--ink)",
+          gap: 16,
+        }}
+      >
+        <span style={{ fontSize: 17, fontWeight: 600, letterSpacing: "-0.3px" }}
+          className="faq-question-text"
+        >
+          {question}
+        </span>
+        <motion.span
+          animate={{ rotate: isOpen ? 180 : 0 }}
+          transition={{ duration: 0.25, ease: EASE_OUT }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 24,
+            height: 24,
+            borderRadius: "50%",
+            background: isOpen ? "rgba(37,211,102,0.08)" : "transparent",
+            color: isOpen ? "var(--g)" : "var(--ink3)",
+            flexShrink: 0,
+          }}
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </motion.span>
+      </button>
+      
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0, marginTop: 0 }}
+            animate={{ height: "auto", opacity: 1, marginTop: 12 }}
+            exit={{ height: 0, opacity: 0, marginTop: 0 }}
+            transition={{ duration: 0.3, ease: EASE_OUT }}
+            style={{ overflow: "hidden" }}
+          >
+            <p style={{
+              fontSize: 15,
+              color: "var(--ink3)",
+              lineHeight: 1.65,
+            }}>
+              {answer}
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function FAQ() {
+  const faqs = [
+    {
+      q: "How does the AI work? Does it need pre-configured templates?",
+      a: "No. Aries AI uses state-of-the-art Large Language Models (LLMs) that understand natural language dynamically. You simply connect your website, upload PDFs, or link Google Sheets, and the AI constructs contextual, accurate responses in real-time. No rigid, complex flowcharts or pre-written templates needed for standard chats."
+    },
+    {
+      q: "Will my WhatsApp Business number get banned?",
+      a: "Absolutely not. Aries AI works 100% via the Official Meta Cloud API. By adhering to Meta's strict policies (e.g., using pre-approved templates for outbound broadcasts and dynamically answering incoming support chats), your business remains fully compliant and safe from standard platform bans."
+    },
+    {
+      q: "Does it support multiple Indian languages and Hinglish?",
+      a: "Yes! Aries AI is specifically trained for the Indian market. It responds flawlessly in Hindi (written in either Devanagari or English alphabets), English, and Hinglish (slang blend of Hindi/English). It also supports Tamil, Telugu, Marathi, Gujarati, Kannada, and Bengali seamlessly."
+    },
+    {
+      q: "How do I train the AI on my product information?",
+      a: "Training takes less than two minutes. You can enter your website URL, paste text, link a live Google Sheet, or upload documents (like PDFs, TXT, or Word files). The AI crawls this data automatically and is immediately ready to answer user questions about pricing, features, or support."
+    },
+    {
+      q: "Does it integrate with my existing tools (CRMs, sheets)?",
+      a: "Yes. Aries AI has first-class integrations with Google Sheets, Google Calendar, Meta Pixel, Shiprocket, and Razorpay. Additionally, you can trigger webhooks or connect it to tools like Pabbly Connect or Zapier to push lead data directly into any CRM or database."
+    },
+    {
+      q: "Is there a free trial? Do I need a credit card to sign up?",
+      a: "Yes, we offer a 14-day fully-featured free trial. You do not need to enter any credit card or billing information to start. Simply sign up, connect a phone number (or use our sandbox number), and start automating immediately."
+    }
+  ];
+
+  return (
+    <section id="faq" className="section" style={{ background: "#f7f8fa", borderTop: "1px solid var(--rule)", scrollMarginTop: 68 }}>
+      <div style={{ maxWidth: 840, margin: "0 auto", padding: "0 40px" }}>
+        <Reveal>
+          <div style={{ textAlign: "center", marginBottom: 44 }}>
+            <Label>Frequently Asked Questions</Label>
+            <h2 style={{ fontSize: "clamp(34px,4vw,56px)", fontWeight: 900, letterSpacing: "-2.5px", marginTop: 16, lineHeight: 1.1 }}>
+              Everything you need to <span style={{ color: G }}>know</span>
+            </h2>
+            <p style={{ color: "#4b5563", fontSize: 19, marginTop: 16, fontWeight: 500 }}>
+              Can't find what you are looking for? Reach out to our 24/7 support.
+            </p>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.05}>
+          <div style={{
+            background: "#ffffff",
+            borderRadius: 24,
+            padding: "16px 36px 16px",
+            border: "1px solid rgba(0,0,0,0.04)",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.02)",
+          }}>
+            {faqs.map((faq, i) => (
+              <FAQItem key={i} question={faq.q} answer={faq.a} />
+            ))}
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   CTA — dark with a single ambient glow (not glassmorphism)                 
+───────────────────────────────────────────────────────────────────────── */
+function CTA() {
+  return (
+    <section className="cta-section" id="contact-us">
+      <div className="cta-glow" />
+      <div style={{ position: "relative", zIndex: 1, maxWidth: 680, margin: "0 auto" }}>
+        <Reveal>
+          <h2 style={{
+            fontSize: "clamp(28px,3.5vw,52px)",
+            fontWeight: 800, color: "#fff",
+            letterSpacing: "-1.5px", marginTop: 0, marginBottom: 16,
+          }}>
+            Ready to automate your<br />
+            <span style={{ color: G }}>WhatsApp business?</span>
+          </h2>
+          <p style={{ color: "rgba(255,255,255,0.6)", fontSize: 17, marginBottom: 36 }}>
+            Be one of the first to turn WhatsApp into your smartest revenue channel — fully automated, 24/7.
+          </p>
+          <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+            <Link href="/signup" style={{
+              background: G, color: "#fff",
+              padding: "15px 36px", borderRadius: 12,
+              fontWeight: 800, fontSize: 16, textDecoration: "none",
+              display: "inline-flex", alignItems: "center", gap: 8,
+              transition: "background 200ms var(--ease-out), transform 160ms var(--ease-out)",
+            }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ""; }}
+            >
+              Start Your Free Trial <IconArrow />
+            </Link>
+            <a href="mailto:hello@ariesai.in" style={{
+              background: "rgba(255,255,255,0.1)", color: "#fff",
+              border: "1px solid rgba(255,255,255,0.15)",
+              padding: "15px 28px", borderRadius: 12,
+              fontWeight: 600, fontSize: 16, textDecoration: "none",
+              display: "inline-flex", alignItems: "center", gap: 8,
+              transition: "background 200ms var(--ease-out), transform 160ms var(--ease-out)",
+            }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.15)"; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.1)"; }}
+            >
+              Contact Sales
+            </a>
+          </div>
+          <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, marginTop: 20 }}>
+            Pay with UPI later · Cancel anytime
+          </p>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   FOOTER                                                                    
+───────────────────────────────────────────────────────────────────────── */
+function Footer() {
+  return (
+    <footer style={{ background: "#0a0a0a", padding: "36px 40px", color: "#666" }}>
+      <div className="footer-inner">
+        <img src="/logo.png" alt="Aries AI" style={{ height: 30, filter: "brightness(0) invert(0.6)" }} />
+        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 13 }}>
+          {["Privacy Policy", "Terms of Service", "Support"].map(l => (
+            <a key={l} href="#" style={{ color: "#666", textDecoration: "none", transition: "color 150ms" }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "#fff"; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "#666"; }}>
+              {l}
+            </a>
+          ))}
+        </div>
+        <p style={{ fontSize: 13, margin: 0 }}>© 2026 Aries AI. All rights reserved.</p>
+      </div>
+    </footer>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   SHOWCASE — product screenshot section                                      
+───────────────────────────────────────────────────────────────────────── */
 function ShowcaseSection() {
   return (
     <section style={{ background: "#fff", padding: "80px 40px", overflow: "hidden" }}>
@@ -278,421 +2928,24 @@ function ShowcaseSection() {
   );
 }
 
-function TrustBar() {
-  const items = [
-    { icon: "🛡️", title: "Official Meta API", desc: "Direct WhatsApp Cloud API integration" },
-    { icon: "🇮🇳", title: "Built in India", desc: "Designed for Indian businesses & languages" },
-    { icon: "🔐", title: "Bank-Grade Security", desc: "AES-256 encryption & RLS isolation" },
-    { icon: "🎁", title: "14-Day Free Trial", desc: "No credit card required to start" },
-  ];
-  return (
-    <section style={{ background: "#111", padding: "40px 20px" }}>
-      <div className="trust-items" style={{ maxWidth: 1100, margin: "0 auto", display: "flex", justifyContent: "space-around", flexWrap: "wrap", gap: 24 }}>
-        {items.map(s => (
-          <div key={s.title} style={{ textAlign: "center", maxWidth: 220 }}>
-            <div style={{ fontSize: 28, marginBottom: 6 }}>{s.icon}</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: G }}>{s.title}</div>
-            <div style={{ fontSize: 12, color: "#aaa", marginTop: 4, lineHeight: 1.5 }}>{s.desc}</div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function BoldStatement() {
-  return (
-    <section style={{ padding: "80px 20px", background: "linear-gradient(180deg, #ffffff 0%, #f0fdf4 50%, #ffffff 100%)", textAlign: "center", position: "relative", overflow: "hidden" }}>
-      <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: 600, height: 300, background: "radial-gradient(ellipse, rgba(37,211,102,0.08) 0%, transparent 70%)", pointerEvents: "none" }} />
-      <div style={{ maxWidth: 860, margin: "0 auto", position: "relative", zIndex: 1 }}>
-        <span style={{ display: "inline-block", background: "#dcfce7", color: GD, padding: "6px 18px", borderRadius: 100, fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 28 }}>What Makes Us Different</span>
-        <h2 style={{ fontSize: "clamp(32px, 5.5vw, 72px)", fontWeight: 900, lineHeight: 1.05, letterSpacing: "-2px", color: "#0a0a0a", margin: "0 0 24px" }}>
-          The AI that knows{" "}
-          <span style={{ color: G }}>your business</span>
-          <br />
-          <span style={{ color: "#555", fontWeight: 800 }}>better than your staff.</span>
-        </h2>
-        <p style={{ fontSize: "clamp(15px, 1.8vw, 20px)", color: "#666", lineHeight: 1.7, maxWidth: 600, margin: "0 auto 48px" }}>
-          Every business is unique. Aries AI learns your menu, your prices, your FAQs, your tone — and answers like a trained member of your team. 24/7.
-        </p>
-        <div className="bold-stats" style={{ display: "flex", justifyContent: "center", gap: 40, flexWrap: "wrap" }}>
-          {[{ n: "3 min", label: "Average setup time" }, { n: "24/7", label: "Always on, never sleeps" }, { n: "11+", label: "Indian languages supported" }].map(({ n, label }) => (
-            <div key={label} style={{ textAlign: "center" }}>
-              <div style={{ fontSize: "clamp(28px, 3vw, 44px)", fontWeight: 900, color: G, letterSpacing: "-1px" }}>{n}</div>
-              <div style={{ fontSize: 14, color: "#888", marginTop: 4, fontWeight: 500 }}>{label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function Features() {
-  const feats = [
-    { icon: "🧠", title: "AI That Truly Understands", desc: "Not a rigid chatbot. Real AI that gets 'bhai kal 4 baje table milega?' in Hindi, English, or Hinglish.", color: "#8B5CF6" },
-    { icon: "📲", title: "Direct WhatsApp API", desc: "Official Meta WhatsApp Cloud API. Your number, your conversations. No third-party restrictions.", color: G },
-    { icon: "📊", title: "Smart Lead Pipeline", desc: "Every chat is automatically scored. See hot, warm, cold leads. Never miss a booking.", color: "#F59E0B" },
-    { icon: "⏰", title: "Auto Follow-Ups", desc: "AI sends follow-up messages at the right time. 30 min, 3 hours, 24 hours — all configurable.", color: "#EC4899" },
-    { icon: "📋", title: "Google Sheets Sync", desc: "Every lead instantly appears in a Google Sheet. Share with your team. No dashboard needed.", color: "#10B981" },
-    { icon: "🔔", title: "Instant Staff Alerts", desc: "Hot lead comes in? Your staff gets a WhatsApp ping. Escalation? Manager notified instantly.", color: "#3B82F6" },
-  ];
-  return (
-    <section id="features" className="section-pad" style={{ background: "#f8fafb", scrollMarginTop: 20 }}>
-      <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-        <div style={{ textAlign: "center", marginBottom: 56 }}>
-          <span style={{ background: "#dcfce7", color: GD, padding: "6px 16px", borderRadius: 100, fontSize: 13, fontWeight: 600 }}>Features</span>
-          <h2 style={{ fontSize: "clamp(26px,3vw,44px)", fontWeight: 900, marginTop: 16, letterSpacing: "-1px" }}>
-            Everything You Need to <span style={{ color: G }}>Close More Leads</span>
-          </h2>
-          <p style={{ color: "#777", fontSize: 16, marginTop: 12, maxWidth: 540, margin: "12px auto 0" }}>
-            Built for restaurants, salons, clinics, real estate agents, and any business getting WhatsApp enquiries.
-          </p>
-        </div>
-        <div className="features-grid">
-          {feats.map(f => (
-            <div key={f.title} style={{ background: "#fff", borderRadius: 16, padding: 28, border: "1px solid #eee", transition: "box-shadow 0.2s" }}
-              onMouseEnter={e => (e.currentTarget.style.boxShadow = "0 12px 40px rgba(0,0,0,0.08)")}
-              onMouseLeave={e => (e.currentTarget.style.boxShadow = "none")}>
-              <div style={{ width: 48, height: 48, borderRadius: 12, background: `${f.color}15`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, marginBottom: 16 }}>{f.icon}</div>
-              <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>{f.title}</h3>
-              <p style={{ color: "#777", fontSize: 14, lineHeight: 1.7, margin: 0 }}>{f.desc}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function Industries() {
-  const list = [
-    { title: "E-Commerce & Retail", desc: "Automate abandoned cart recovery, send order updates, handle product inquiries and COD confirmations instantly.", color: "#10B981", bg: "#F0FDF4" },
-    { title: "Real Estate", desc: "Qualify high-intent buyers automatically, answer property queries and schedule site visits 24/7 without any manual effort.", color: "#3B82F6", bg: "#EFF6FF" },
-    { title: "Healthcare & Clinics", desc: "Manage appointment bookings, send automated reminders, handle patient FAQs and follow-ups seamlessly.", color: "#8B5CF6", bg: "#F5F3FF" },
-    { title: "Travel & Hospitality", desc: "Handle booking inquiries, share custom itineraries, send trip reminders and upsell premium packages instantly.", color: "#EC4899", bg: "#FDF2F8" },
-    { title: "Cafes & Restaurants", desc: "Accept table reservations, send daily menu updates, run loyalty offers and handle customer queries on WhatsApp.", color: "#D97706", bg: "#FFFBEB" },
-    { title: "Clubs & Nightlife", desc: "Send event announcements, manage guest list confirmations, promote exclusive offers and handle entry queries automatically.", color: "#EF4444", bg: "#FEF2F2" },
-  ];
-  return (
-    <section id="use-cases" className="section-pad" style={{ background: "#F7F8FA", scrollMarginTop: 20 }}>
-      <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-        <div style={{ textAlign: "center", marginBottom: 56 }}>
-          <h2 style={{ fontSize: "clamp(28px, 4vw, 52px)", fontWeight: 800, letterSpacing: "-1.5px", color: "#1a1a1a", margin: "0 0 16px" }}>
-            Built for <span style={{ color: G }}>Modern Businesses</span>
-          </h2>
-          <p style={{ fontSize: 17, color: "#6B7280", maxWidth: 580, margin: "0 auto", lineHeight: 1.65 }}>
-            Whatever your industry, Aries AI adapts to your unique workflows to turn conversations into revenue.
-          </p>
-        </div>
-        <div className="industries-grid">
-          {list.slice(0, 3).map(i => (
-            <div key={i.title} className="uc-card" style={{ background: "#fff", borderRadius: 16, padding: "24px 24px 24px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", borderLeft: `4px solid ${i.color}`, display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ width: 44, height: 44, borderRadius: 10, background: i.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <div style={{ width: 18, height: 18, borderRadius: 4, background: i.color, opacity: 0.85 }} />
-              </div>
-              <div>
-                <h3 style={{ fontSize: 16, fontWeight: 700, color: "#1a1a1a", margin: "0 0 6px" }}>{i.title}</h3>
-                <p style={{ fontSize: 14, color: "#6B7280", lineHeight: 1.65, margin: 0 }}>{i.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="industries-grid" style={{ marginTop: 20 }}>
-          {list.slice(3, 6).map(i => (
-            <div key={i.title} className="uc-card" style={{ background: "#fff", borderRadius: 16, padding: "24px 24px 24px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", borderLeft: `4px solid ${i.color}`, display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ width: 44, height: 44, borderRadius: 10, background: i.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <div style={{ width: 18, height: 18, borderRadius: 4, background: i.color, opacity: 0.85 }} />
-              </div>
-              <div>
-                <h3 style={{ fontSize: 16, fontWeight: 700, color: "#1a1a1a", margin: "0 0 6px" }}>{i.title}</h3>
-                <p style={{ fontSize: 14, color: "#6B7280", lineHeight: 1.65, margin: 0 }}>{i.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function HowItWorks() {
-  const steps = [
-    { n: "1", icon: "📱", title: "Connect WhatsApp", desc: "Link your WhatsApp Business number. Takes 5 minutes with step-by-step guidance." },
-    { n: "2", icon: "🤖", title: "Configure Your AI Bot", desc: "Tell us your business name, type, and services. AI learns your business instantly." },
-    { n: "3", icon: "🚀", title: "Go Live & Watch Leads Flow", desc: "Your AI starts replying to customers 24/7. You track everything in real-time." },
-  ];
-  return (
-    <section id="how-it-works" className="section-pad" style={{ background: "#f8fafb", scrollMarginTop: 80 }}>
-      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-        <div style={{ textAlign: "center", marginBottom: 56 }}>
-          <span style={{ background: "#dcfce7", color: GD, padding: "6px 16px", borderRadius: 100, fontSize: 13, fontWeight: 600 }}>How It Works</span>
-          <h2 style={{ fontSize: "clamp(26px,3vw,44px)", fontWeight: 900, marginTop: 16, letterSpacing: "-1px" }}>
-            Live in <span style={{ color: G }}>Under 5 Minutes</span>
-          </h2>
-        </div>
-        <div className="hiw-grid">
-          {steps.map((step, i) => (
-            <div key={i} style={{ textAlign: "center", position: "relative" }}>
-              {i < steps.length - 1 && (
-                <div className="step-connector" style={{ position: "absolute", top: 32, left: "calc(50% + 60px)", width: "calc(100% - 120px)", height: 2, background: "linear-gradient(to right, #25D366, #dcfce7)" }} />
-              )}
-              <div style={{ width: 64, height: 64, borderRadius: "50%", background: G, color: "#fff", fontSize: 28, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", boxShadow: "0 8px 24px rgba(37,211,102,0.35)" }}>
-                {step.icon}
-              </div>
-              <div style={{ display: "inline-block", background: "#dcfce7", color: GD, borderRadius: 100, padding: "2px 12px", fontSize: 12, fontWeight: 700, marginBottom: 12 }}>STEP {step.n}</div>
-              <h3 style={{ fontSize: 20, fontWeight: 700, marginBottom: 10 }}>{step.title}</h3>
-              <p style={{ color: "#777", fontSize: 14, lineHeight: 1.7 }}>{step.desc}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function SetupSection() {
-  const points = [
-    { icon: "✓", title: "Direct Meta API Connection", desc: "Your number, your data. No middlemen, no delays. Fully compliant with Meta's official WhatsApp policies." },
-    { icon: "✓", title: "AI Trained on Your Business", desc: "Tell us your services once. Aries AI handles every customer query 24/7 in Hindi, English, or Hinglish." },
-    { icon: "✓", title: "Zero Tech Skills Needed", desc: "If you can use WhatsApp, you can set up Aries AI. Step-by-step onboarding gets you live in minutes." },
-  ];
-  return (
-    <section className="section-pad-sm" style={{ background: "#fff" }}>
-      <div className="setup-grid">
-        <div>
-          <h2 style={{ fontSize: "clamp(26px, 3.5vw, 48px)", fontWeight: 900, color: "#1a1a1a", lineHeight: 1.15, letterSpacing: "-1px", marginBottom: 16 }}>
-            Get WhatsApp AI Running in{" "}
-            <span style={{ color: G }}>Under 10 Minutes</span>
-          </h2>
-          <p style={{ fontSize: 16, color: "#6B7280", lineHeight: 1.65, marginBottom: 36, maxWidth: 420 }}>
-            Aries AI connects directly to WhatsApp Business API — no coding, no third-party tools, no waiting.
-          </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-            {points.map(p => (
-              <div key={p.title} style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-                <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#dcfce7", color: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, flexShrink: 0, marginTop: 2 }}>
-                  {p.icon}
-                </div>
-                <div>
-                  <h4 style={{ fontSize: 16, fontWeight: 700, color: "#1a1a1a", margin: "0 0 4px" }}>{p.title}</h4>
-                  <p style={{ fontSize: 14, color: "#6B7280", margin: 0, lineHeight: 1.6 }}>{p.desc}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-          <Link href="/signup" className="btn-anim" style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 36, background: G, color: "#fff", padding: "14px 28px", borderRadius: 10, fontWeight: 700, fontSize: 15, textDecoration: "none" }}>
-            Start Free for 14 Days →
-          </Link>
-        </div>
-        <div className="setup-image-col" style={{ position: "relative" }}>
-          <div style={{ position: "absolute", inset: "-20px -20px -20px 20px", background: "#f0fdf4", borderRadius: 24, zIndex: 0 }} />
-          <img src="/setup-mockup.png" alt="Aries AI Setup Mockup"
-            style={{ width: "100%", height: "auto", objectFit: "contain", position: "relative", zIndex: 1, borderRadius: 16, filter: "drop-shadow(0 24px 48px rgba(0,0,0,0.12))" }}
-          />
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function Pricing() {
-  const [billing, setBilling] = useState<"monthly" | "annual">("monthly");
-  const plans = [
-    {
-      name: "Starter", price: "1,499", period: "/month", oldPrice: "2,000",
-      desc: "For single location or small businesses starting with WhatsApp marketing",
-      caps: ["1 Agent Seat included", "2,000 conversations/month"],
-      features: ["Free WhatsApp Business API Connection", "Free Blue Tick Application", "₹100 Free Conversation Credits", "Unlimited Free Service Conversations", "Manual Live Chat Inbox", "Create Template Messages", "Broadcast Campaigns & Scheduler", "Upload & Manage Contacts (up to 10 tags)"],
-      cta: "Start Free Trial", popular: false,
-      templateCharges: { marketing: "₹1.09", utility: "₹0.145", auth: "₹0.145", service: "Unlimited Free" },
-      voiceCalls: null as null,
-    },
-    {
-      name: "Growth", price: "2,990", period: "/month", oldPrice: "3,999",
-      desc: "Scale your customer support with AI FAQ automation",
-      caps: ["2 Agent Seats included (simultaneous login)", "10,000 conversations/month"],
-      features: ["Everything in Starter, plus:", "AI Chatbot FAQ Automator (1 Active Bot)", "Chatbot trained on website & custom FAQs", "Multi-lingual responses (Hindi, English, Hinglish)", "Smart User Attributes & Custom Segments", "Priority Email Support"],
-      cta: "Start Free Trial", popular: false,
-      templateCharges: { marketing: "₹1.09", utility: "₹0.145", auth: "₹0.145", service: "Unlimited Free" },
-      voiceCalls: null as null,
-    },
-    {
-      name: "Pro", price: "4,999", period: "/month", oldPrice: "5,999",
-      desc: "Advanced interactive workflows and flow builders",
-      caps: ["5 Agent Seats included", "25,000 conversations/month"],
-      features: ["Everything in Growth, plus:", "Visual WhatsApp Chatbot Flow Builder", "Up to 5 Active WhatsApp Chatbot Flows", "Google Sheets Live Sync", "Automatic Lead Scoring & Escalation Alerts", "Multi-Agent Routing & Chat Transfer", "CRM Integrations (Shopify, HubSpot, Salesforce)", "Priority WhatsApp & Email Support"],
-      cta: "Start Free Trial", popular: true,
-      templateCharges: { marketing: "₹1.09", utility: "₹0.145", auth: "₹0.145", service: "Unlimited Free" },
-      voiceCalls: null as null,
-    },
-    {
-      name: "Ultra Premium", price: "Custom", period: "", oldPrice: "",
-      desc: "AI Voice Calling + Custom integrations for high-volume brands",
-      caps: ["Custom Agent Seats", "Unlimited conversations"],
-      features: ["Everything in Pro, plus:", "Dedicated Custom LLM training & fine-tuning", "Custom system integrations & database sync", "White-label analytics reports & client portals", "🔥 AI Voice Calling for Booking Confirmation", "150 AI Voice Calls Included", "Auto WhatsApp Fallback on Missed Calls", "Dedicated Account Manager & SLA (under 1 hour)"],
-      cta: "Contact Sales", popular: false,
-      templateCharges: { marketing: "₹1.09", utility: "₹0.145", auth: "₹0.145", service: "Unlimited Free" },
-      voiceCalls: { included: 150, addon: "₹15/call after 150 calls", topup: "₹999 for 100 extra calls" } as { included: number; addon: string; topup: string },
-    },
-  ];
-
-  const getPrice = (price: string) => {
-    if (price === "Custom") return "Custom";
-    if (price === "0") return "0";
-    const num = parseInt(price.replace(",", ""));
-    if (isNaN(num)) return price;
-    if (billing === "annual") return Math.round(num * 0.8).toLocaleString("en-IN");
-    return price;
-  };
-
-  return (
-    <section id="pricing" className="section-pad" style={{ background: "#fff", scrollMarginTop: 20 }}>
-      <div style={{ maxWidth: 1300, margin: "0 auto" }}>
-        <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <span style={{ background: "#dcfce7", color: GD, padding: "6px 16px", borderRadius: 100, fontSize: 13, fontWeight: 600 }}>Pricing</span>
-          <h2 style={{ fontSize: "clamp(26px,3vw,44px)", fontWeight: 900, marginTop: 16, letterSpacing: "-1px" }}>
-            Simple, <span style={{ color: G }}>Transparent</span> Pricing
-          </h2>
-          <p style={{ color: "#999", fontSize: 15, marginTop: 12 }}>No hidden charges. Pay only for what you use. All plans include WhatsApp Business API.</p>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginBottom: 40 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: billing === "monthly" ? "#111" : "#999", cursor: "pointer" }} onClick={() => setBilling("monthly")}>Monthly</span>
-          <button className={`t-switch${billing === "annual" ? " on" : ""}`} onClick={() => setBilling(b => b === "monthly" ? "annual" : "monthly")} aria-label="Toggle billing cycle">
-            <span className="t-thumb" />
-          </button>
-          <span style={{ fontSize: 14, fontWeight: 600, color: billing === "annual" ? "#111" : "#999", cursor: "pointer" }} onClick={() => setBilling("annual")}>
-            Annual <span className="save-tag">Save 20%</span>
-          </span>
-        </div>
-
-        <div className="pricing-grid">
-          {plans.map(plan => (
-            <div key={plan.name} className="pc">
-              {plan.popular && (
-                <div className="pop-badge" style={{ position: "absolute", top: -14, left: "50%", transform: "translateX(-50%)", background: G, color: "#fff", padding: "5px 20px", borderRadius: 100, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap", letterSpacing: "0.5px" }}>
-                  MOST POPULAR
-                </div>
-              )}
-              <h3 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4, color: "inherit" }}>{plan.name}</h3>
-              <p className="pd" style={{ fontSize: 13, marginBottom: 20, lineHeight: 1.5 }}>{plan.desc}</p>
-              <div style={{ marginBottom: 20 }}>
-                {plan.oldPrice && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                    <span className="po" style={{ fontSize: 15, textDecoration: "line-through" }}>₹{plan.oldPrice}</span>
-                    <span style={{ background: "#FEF2F2", color: "#DC2626", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 100 }}>
-                      {Math.round((1 - parseInt(plan.price.replace(",", "")) / parseInt(plan.oldPrice.replace(",", ""))) * 100)}% OFF
-                    </span>
-                  </div>
-                )}
-                {plan.price !== "Custom" && <span className="ps" style={{ fontSize: 15 }}>₹</span>}
-                <span style={{ fontSize: 44, fontWeight: 900, letterSpacing: "-2px", color: "inherit" }}>{getPrice(plan.price)}</span>
-                {plan.price !== "Custom" && <span className="ps" style={{ fontSize: 14 }}> {plan.period}</span>}
-                {billing === "annual" && plan.price !== "0" && plan.price !== "Custom" && (
-                  <div style={{ fontSize: 12, color: G, fontWeight: 600, marginTop: 4 }}>Billed annually</div>
-                )}
-              </div>
-              <Link href={plan.price === "Custom" ? "#contact-us" : "/signup"} className="pb">{plan.cta}</Link>
-              <hr className="sep" style={{ border: "none", borderTop: "1px solid", margin: "20px 0 16px" }} />
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
-                {plan.caps.map(cap => (
-                  <div key={cap} className="cap-label" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 12 }}>📊</span> {cap}
-                  </div>
-                ))}
-              </div>
-              <hr className="sep" style={{ border: "none", borderTop: "1px solid", margin: "0 0 16px" }} />
-              <ul style={{ listStyle: "none", display: "flex", flexDirection: "column", gap: 10, padding: 0, margin: 0 }}>
-                {plan.features.map(f => (
-                  <li key={f} className={f.startsWith("🔥") ? "pf pf-highlight" : "pf"} style={{ display: "flex", gap: 10, fontSize: 13, alignItems: "flex-start", lineHeight: 1.5 }}>
-                    <span style={{ color: G, fontWeight: 700, fontSize: 13, flexShrink: 0 }}>✓</span>{f}
-                  </li>
-                ))}
-              </ul>
-              {plan.voiceCalls && (
-                <div className="voice-box">
-                  <div className="voice-title">📞 AI Voice Call Add-On</div>
-                  <div className="voice-detail">• {plan.voiceCalls.included} calls included free</div>
-                  <div className="voice-detail">• {plan.voiceCalls.addon}</div>
-                  <div className="voice-detail">• Top-up: {plan.voiceCalls.topup}</div>
-                </div>
-              )}
-              <div className="tmpl-section">
-                <div className="tmpl-title">Per Template Message Charges</div>
-                <div className="tmpl-item"><span style={{ color: G, fontWeight: 700 }}>✓</span> Marketing: <strong>{plan.templateCharges.marketing}</strong></div>
-                <div className="tmpl-item"><span style={{ color: G, fontWeight: 700 }}>✓</span> Utility: <strong>{plan.templateCharges.utility}</strong></div>
-                <div className="tmpl-item"><span style={{ color: G, fontWeight: 700 }}>✓</span> Authentication: <strong>{plan.templateCharges.auth}</strong></div>
-                <div className="tmpl-item"><span style={{ color: G, fontWeight: 700 }}>✓</span> Service: <strong>{plan.templateCharges.service}</strong></div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "center", gap: 28, flexWrap: "wrap", paddingTop: 40 }}>
-          {["🔒 Secure Payments", "📱 Cancel Anytime", "💬 14-Day Free Trial on Paid Plans", "🇮🇳 UPI, Cards & Net Banking"].map(t => (
-            <span key={t} style={{ fontSize: 13, color: "#999", fontWeight: 500 }}>{t}</span>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function CTA() {
-  return (
-    <section style={{ padding: "72px 24px", background: G }}>
-      <div style={{ maxWidth: 700, margin: "0 auto", textAlign: "center" }}>
-        <h2 style={{ fontSize: "clamp(26px,3vw,44px)", fontWeight: 900, color: "#fff", letterSpacing: "-1px", marginBottom: 16 }}>
-          Ready to Automate Your Business?
-        </h2>
-        <p style={{ color: "rgba(255,255,255,0.85)", fontSize: 17, marginBottom: 32 }}>
-          Be one of the first to turn WhatsApp into your smartest revenue channel — fully automated, 24/7.
-        </p>
-        <div className="cta-buttons" style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
-          <Link href="/signup" className="btn-anim-white" style={{ background: "#fff", color: G, padding: "16px 36px", borderRadius: 12, fontWeight: 800, fontSize: 16, textDecoration: "none", display: "inline-block" }}>
-            Start Your Free Trial →
-          </Link>
-          <a href="#contact-us" className="btn-anim-white" style={{ background: "#fff", color: G, padding: "16px 36px", borderRadius: 12, fontWeight: 800, fontSize: 16, textDecoration: "none", display: "inline-block" }}>
-            Contact Us
-          </a>
-        </div>
-        <p style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginTop: 16 }}>Pay with UPI later · Cancel anytime</p>
-      </div>
-    </section>
-  );
-}
-
-function Footer() {
-  return (
-    <footer id="contact-us" style={{ background: "#111", padding: "40px 24px", color: "#aaa" }}>
-      <div className="footer-inner" style={{ maxWidth: 1100, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 20 }}>
-        <img src="/logo.png" alt="Aries AI" style={{ height: 32, filter: "brightness(0) invert(1)" }} />
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 13 }}>
-          {["Privacy Policy", "Terms of Service", "Support"].map(l => (
-            <a key={l} href="#" style={{ color: "#aaa", textDecoration: "none" }}>{l}</a>
-          ))}
-        </div>
-        <p style={{ fontSize: 13, margin: 0 }}>© 2026 Aries AI. All rights reserved.</p>
-      </div>
-    </footer>
-  );
-}
-
+/* ─────────────────────────────────────────────────────────────────────────
+   EXPORT                                                                    
+───────────────────────────────────────────────────────────────────────── */
 export default function LandingPageClient() {
   return (
     <div style={{ fontFamily: "'Inter', 'Segoe UI', sans-serif", background: "#fff", color: "#111", margin: 0 }}>
-      <style>{GLOBAL_CSS}</style>
+      <style>{CSS}</style>
       <Navbar />
       <Hero />
       <ShowcaseSection />
       <TrustBar />
-      <BoldStatement />
+      <Stats />
       <Features />
-      <Industries />
+      <UseCases />
       <HowItWorks />
-      <SetupSection />
+      <Integrations />
       <Pricing />
+      <FAQ />
       <CTA />
       <Footer />
     </div>

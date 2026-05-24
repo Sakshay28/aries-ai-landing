@@ -130,34 +130,6 @@ const INTEGRATIONS: IntegrationDef[] = [
       { key: 'password', label: 'Password', type: 'password', placeholder: '••••••••', required: true, hint: 'Your Shiprocket login password' },
     ],
   },
-  {
-    id: 'zohocrm',
-    name: 'Zoho CRM',
-    description: 'Auto-create leads in Zoho CRM whenever a new contact messages you on WhatsApp.',
-    icon: Briefcase,
-    color: 'text-[#F0483E]',
-    bgColor: 'bg-[#F0483E]/10',
-    docsUrl: 'https://www.zoho.com/crm/developer/docs/api/v2/',
-    eventBadges: ['New lead'],
-    fields: [
-      { key: 'access_token', label: 'OAuth Access Token', type: 'password', placeholder: '1000.xxxxxx...', required: true, hint: 'Generate via Zoho API Console → Self Client → Scope: ZohoCRM.modules.leads.CREATE' },
-      { key: 'domain', label: 'Zoho Region', type: 'select', placeholder: '', required: true, options: [{ value: 'com', label: 'Global (.com)' }, { value: 'in', label: 'India (.in)' }, { value: 'eu', label: 'Europe (.eu)' }, { value: 'com.au', label: 'Australia (.com.au)' }] },
-    ],
-  },
-  {
-    id: 'webhooks',
-    name: 'Custom Webhooks',
-    description: 'Forward every event to Zapier, Make, or your own backend endpoint.',
-    icon: Webhook,
-    color: 'text-indigo-500',
-    bgColor: 'bg-indigo-500/10',
-    docsUrl: 'https://zapier.com/apps/webhook/integrations',
-    eventBadges: ['All events'],
-    fields: [
-      { key: 'webhook_url', label: 'Endpoint URL', type: 'url', placeholder: 'https://hooks.zapier.com/hooks/catch/...', required: true },
-      { key: 'events', label: 'Fire on events', type: 'select', placeholder: '', required: false, options: [{ value: 'new_lead,booking_confirmed,payment_requested', label: 'All events' }, { value: 'new_lead', label: 'New lead only' }, { value: 'booking_confirmed', label: 'Bookings only' }] },
-    ],
-  },
 ];
 
 // ── Types ────────────────────────────────────────────────────
