@@ -1822,7 +1822,7 @@ function UseCases() {
 
 function Integrations() {
   const ref = useRef<HTMLDivElement>(null);
-  const inView = useInView(ref, { once: true, margin: "-120px" });
+  const inView = useInView(ref, { once: true });
   const [hoveredIntegration, setHoveredIntegration] = useState<string | null>(null);
 
   const leftIntegrations = [
@@ -2014,12 +2014,12 @@ function Integrations() {
                     onMouseEnter={() => setHoveredIntegration(item.name)}
                     onMouseLeave={() => setHoveredIntegration(null)}
                     style={{
-                      opacity: inView ? 1 : 0,
                       transformOrigin: `${x}px ${y}px`,
                       cursor: "pointer",
                     }}
+                    initial={{ opacity: 0, scale: 0.95 }}
                     animate={{
-                      scale: isHovered ? 1.06 : isOtherHovered ? 0.94 : 1,
+                      scale: isHovered ? 1.06 : isOtherHovered ? 0.94 : (inView ? 1 : 0.95),
                       opacity: inView ? (isOtherHovered ? 0.45 : 1) : 0,
                       filter: isOtherHovered ? "blur(1.5px)" : "blur(0px)",
                     }}
@@ -2147,12 +2147,12 @@ function Integrations() {
                     onMouseEnter={() => setHoveredIntegration(item.name)}
                     onMouseLeave={() => setHoveredIntegration(null)}
                     style={{
-                      opacity: inView ? 1 : 0,
                       transformOrigin: `${x}px ${y}px`,
                       cursor: "pointer",
                     }}
+                    initial={{ opacity: 0, scale: 0.95 }}
                     animate={{
-                      scale: isHovered ? 1.06 : isOtherHovered ? 0.94 : 1,
+                      scale: isHovered ? 1.06 : isOtherHovered ? 0.94 : (inView ? 1 : 0.95),
                       opacity: inView ? (isOtherHovered ? 0.45 : 1) : 0,
                       filter: isOtherHovered ? "blur(1.5px)" : "blur(0px)",
                     }}
