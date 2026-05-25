@@ -1,281 +1,523 @@
 "use client";
 
-import { Settings2, Edit3, Tag } from "lucide-react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { Settings2, Edit3, X, Layers, Code2 } from "lucide-react";
 import { useFlowStore } from "../store";
+import { NODE_CATEGORY } from "./CustomNodes";
 
+// ─── STATIC STYLE CONSTANTS (never recreated in render) ────────────────────────
+const INPUT_CLS =
+  "w-full rounded-[12px] px-3.5 py-2.5 text-[13px] focus:outline-none focus:ring-0 border";
+const SELECT_CLS = INPUT_CLS + " appearance-none";
+const INP_STYLE: React.CSSProperties = {
+  background: "rgba(255,255,255,0.04)",
+  border: "1px solid rgba(255,255,255,0.07)",
+  color: "rgba(255,255,255,0.85)",
+};
+const INP_FOCUS_STYLE: React.CSSProperties = {
+  background: "rgba(255,255,255,0.07)",
+  border: "1px solid rgba(255,255,255,0.15)",
+  color: "rgba(255,255,255,0.92)",
+};
+
+type TabId = "general" | "content" | "advanced";
+
+// ─── FIELD WRAPPER ─────────────────────────────────────────────────────────────
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <label
+        className="text-[10.5px] font-semibold tracking-[0.08em] uppercase"
+        style={{ color: "rgba(255,255,255,0.3)" }}
+      >
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+// ─── HOOKS FOR FOCUS STYLING ───────────────────────────────────────────────────
+function useFocusStyle() {
+  const [focused, setFocused] = useState(false);
+  return {
+    style: focused ? INP_FOCUS_STYLE : INP_STYLE,
+    onFocus: () => setFocused(true),
+    onBlur: () => setFocused(false),
+  };
+}
+
+// ─── MAIN COMPONENT ────────────────────────────────────────────────────────────
+// ARCHITECTURE: Subscribe only to selectedNodeId (a string scalar).
+// ALL node/edge array state is read imperatively via getState() — never
+// subscribed. This means drag position updates (60/sec) do NOT rerender
+// this component. Local React state is used for all form fields.
 export default function FlowInspector() {
-  const { selectedNodeId, nodes, updateNodeData } = useFlowStore();
+  // ── Granular selectors — only scalars, never arrays ─────────────────────────
+  const selectedNodeId = useFlowStore(s => s.selectedNodeId);
+  const setSelectedNodeId = useFlowStore(s => s.setSelectedNodeId);
+  const nodeCount = useFlowStore(s => s.nodes.length);
+  const edgeCount = useFlowStore(s => s.edges.length);
 
-  const selectedNode = nodes.find(n => n.id === selectedNodeId);
+  // ── Local state buffer — decoupled from Zustand node array ─────────────────
+  const [activeTab, setActiveTab] = useState<TabId>("general");
+  const [nodeType, setNodeType] = useState("");
+  const [nodeIdStr, setNodeIdStr] = useState("");
+  const [localData, setLocalData] = useState<Record<string, any>>({});
+  const [inCount, setInCount] = useState(0);
+  const [outCount, setOutCount] = useState(0);
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  if (selectedNode) {
+  // ── Initialize local state when selected node changes ──────────────────────
+  // Only runs when selectedNodeId changes — NOT on every drag frame.
+  useEffect(() => {
+    if (!selectedNodeId) {
+      setLocalData({});
+      setNodeType("");
+      setNodeIdStr("");
+      setInCount(0);
+      setOutCount(0);
+      return;
+    }
+    const s = useFlowStore.getState();
+    const node = s.nodes.find(n => n.id === selectedNodeId);
+    if (!node) return;
+    setLocalData({ ...(node.data as Record<string, any>) });
+    setNodeType(node.type || "standard");
+    setNodeIdStr(node.id);
+    setActiveTab("general");
+    // Edge counts at snapshot time
+    setInCount(s.edges.filter(e => e.target === selectedNodeId).length);
+    setOutCount(s.edges.filter(e => e.source === selectedNodeId).length);
+  }, [selectedNodeId]);
+
+  // ── Debounced write to store — canvas does NOT rerender while typing ────────
+  const commitField = useCallback((field: string, value: any) => {
+    setLocalData(prev => ({ ...prev, [field]: value }));
+    if (commitTimer.current) clearTimeout(commitTimer.current);
+    commitTimer.current = setTimeout(() => {
+      const id = useFlowStore.getState().selectedNodeId;
+      if (id) useFlowStore.getState().updateNodeData(id, { [field]: value });
+    }, 350);
+  }, []);
+
+  // ── Immediate write on blur (ensures nothing is lost) ──────────────────────
+  const flushField = useCallback((field: string, value: any) => {
+    if (commitTimer.current) clearTimeout(commitTimer.current);
+    const id = useFlowStore.getState().selectedNodeId;
+    if (id) useFlowStore.getState().updateNodeData(id, { [field]: value });
+  }, []);
+
+  // ── No node selected: show canvas summary ──────────────────────────────────
+  if (!selectedNodeId) {
     return (
-      <div className="w-full flex-shrink-0 bg-transparent flex flex-col z-10 overflow-y-auto">
-        <div className="p-6 space-y-8">
-          <div>
-            <div className="flex items-center gap-2 mb-6 text-white/80">
-              <Edit3 className="w-3.5 h-3.5 text-white/50" />
-              <h2 className="text-[12px] font-medium tracking-tight">Node Configuration</h2>
+      <div className="w-full flex flex-col h-full overflow-hidden">
+        <div className="px-5 pt-6 pb-5">
+          <div className="flex items-center gap-2.5 mb-6">
+            <Settings2 className="w-3.5 h-3.5" style={{ color: "rgba(255,255,255,0.25)" }} />
+            <h2 className="text-[12.5px] font-semibold" style={{ color: "rgba(255,255,255,0.45)" }}>
+              Inspector
+            </h2>
+          </div>
+          <div
+            className="rounded-[14px] p-4 space-y-3"
+            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px]" style={{ color: "rgba(255,255,255,0.3)" }}>Total Nodes</span>
+              <span className="text-[13px] font-semibold" style={{ color: "rgba(255,255,255,0.7)" }}>{nodeCount}</span>
             </div>
-
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <label className="text-[11px] text-white/40 font-medium tracking-wide">Node Name</label>
-                <input 
-                  type="text"
-                  value={(selectedNode.data?.label as string) || ""}
-                  onChange={(e) => updateNodeData(selectedNode.id, { label: e.target.value })}
-                  className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 placeholder:text-white/20 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02]"
-                />
-              </div>
-
-              {(selectedNode.type === 'trigger' || selectedNode.type === 'keyword_trigger') && (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-[11px] text-white/40 font-medium tracking-wide">Trigger Type</label>
-                    <select
-                      value={(selectedNode.data?.triggerType as string) || 'keyword'}
-                      onChange={e => updateNodeData(selectedNode.id, { triggerType: e.target.value })}
-                      className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02] appearance-none"
-                    >
-                      <option value="keyword">Keyword Match</option>
-                      <option value="first_message">First Message (any)</option>
-                      <option value="all_messages">All Messages</option>
-                    </select>
-                  </div>
-                  {((selectedNode.data?.triggerType as string) || 'keyword') === 'keyword' && (
-                    <div className="space-y-2">
-                      <label className="text-[11px] text-white/40 font-medium tracking-wide flex items-center gap-1.5">
-                        <Tag className="w-3 h-3" /> Keywords <span className="text-white/20">(comma-separated)</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={(selectedNode.data?.keywords as string) || ''}
-                        onChange={e => updateNodeData(selectedNode.id, { keywords: e.target.value })}
-                        placeholder="book, appointment, price, help"
-                        className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 placeholder:text-white/20 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02]"
-                      />
-                      <p className="text-[10px] text-white/25 leading-relaxed">Flow activates when any of these words appear in the incoming message.</p>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {selectedNode.type === 'standard' && (
-                <div className="space-y-2">
-                  <label className="text-[11px] text-white/40 font-medium tracking-wide">Message Content</label>
-                  <textarea 
-                    value={(selectedNode.data?.content as string) || ""}
-                    onChange={(e) => updateNodeData(selectedNode.id, { content: e.target.value })}
-                    rows={4}
-                    className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 placeholder:text-white/20 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02] resize-none"
-                  />
-                </div>
-              )}
-
-              {(selectedNode.type === 'send_media' || selectedNode.type === 'send_audio') && (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-[11px] text-white/40 font-medium tracking-wide">Media Type</label>
-                    <select
-                      value={(selectedNode.data?.mediaType as string) || (selectedNode.type === 'send_audio' ? 'audio' : 'image')}
-                      onChange={e => updateNodeData(selectedNode.id, { mediaType: e.target.value })}
-                      className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02] appearance-none"
-                    >
-                      <option value="image">Image (JPG / PNG / WebP)</option>
-                      <option value="video">Video (MP4)</option>
-                      <option value="audio">Audio (MP3 / OGG)</option>
-                      <option value="file">File / Document (PDF etc.)</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[11px] text-white/40 font-medium tracking-wide">Media URL</label>
-                    <input
-                      type="url"
-                      value={(selectedNode.data?.mediaUrl as string) || ''}
-                      onChange={e => updateNodeData(selectedNode.id, { mediaUrl: e.target.value })}
-                      placeholder="https://cdn.example.com/image.jpg"
-                      className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 placeholder:text-white/20 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02]"
-                    />
-                    <p className="text-[10px] text-white/25 leading-relaxed">Publicly accessible URL. Supports {'{{variable}}'}-style interpolation.</p>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[11px] text-white/40 font-medium tracking-wide">Caption <span className="text-white/20">(optional)</span></label>
-                    <input
-                      type="text"
-                      value={(selectedNode.data?.caption as string) || ''}
-                      onChange={e => updateNodeData(selectedNode.id, { caption: e.target.value })}
-                      placeholder="Add a caption for this media..."
-                      className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 placeholder:text-white/20 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02]"
-                    />
-                  </div>
-                </>
-              )}
-
-              {selectedNode.type === 'interruption' && (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-[11px] text-white/40 font-medium tracking-wide">User Query Trigger</label>
-                    <input 
-                      type="text"
-                      value={(selectedNode.data?.userQuery as string) || ""}
-                      onChange={(e) => updateNodeData(selectedNode.id, { userQuery: e.target.value })}
-                      className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 placeholder:text-white/20 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02]"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[11px] text-white/40 font-medium tracking-wide">AI Auto-Response</label>
-                    <textarea 
-                      value={(selectedNode.data?.aiResponse as string) || ""}
-                      onChange={(e) => updateNodeData(selectedNode.id, { aiResponse: e.target.value })}
-                      className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 placeholder:text-white/20 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02] resize-none"
-                    />
-                  </div>
-                </>
-              )}
-
-              {selectedNode.type === 'condition' && (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-[11px] text-white/40 font-medium tracking-wide">Variable Field</label>
-                    <input 
-                      type="text"
-                      value={(selectedNode.data?.field as string) || ""}
-                      onChange={(e) => updateNodeData(selectedNode.id, { field: e.target.value })}
-                      className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 placeholder:text-white/20 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02]"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[11px] text-white/40 font-medium tracking-wide">Operator</label>
-                    <select 
-                      value={(selectedNode.data?.operator as string) || "=="}
-                      onChange={(e) => updateNodeData(selectedNode.id, { operator: e.target.value })}
-                      className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02] appearance-none"
-                    >
-                      <option value="==">Equals (==)</option>
-                      <option value="!=">Not Equals (!=)</option>
-                      <option value=">">Greater Than (&gt;)</option>
-                      <option value="<">Less Than (&lt;)</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[11px] text-white/40 font-medium tracking-wide">Target Value</label>
-                    <input 
-                      type="text"
-                      value={(selectedNode.data?.value as string) || ""}
-                      onChange={(e) => updateNodeData(selectedNode.id, { value: e.target.value })}
-                      className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 placeholder:text-white/20 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02]"
-                    />
-                  </div>
-                </>
-              )}
-
-              {selectedNode.type === 'webhook' && (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-[11px] text-white/40 font-medium tracking-wide">Method</label>
-                    <select 
-                      value={(selectedNode.data?.method as string) || "POST"}
-                      onChange={(e) => updateNodeData(selectedNode.id, { method: e.target.value })}
-                      className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02] appearance-none"
-                    >
-                      <option value="GET">GET</option>
-                      <option value="POST">POST</option>
-                      <option value="PUT">PUT</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[11px] text-white/40 font-medium tracking-wide">Endpoint URL</label>
-                    <input 
-                      type="url"
-                      value={(selectedNode.data?.url as string) || ""}
-                      onChange={(e) => updateNodeData(selectedNode.id, { url: e.target.value })}
-                      placeholder="https://api..."
-                      className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 placeholder:text-white/20 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02]"
-                    />
-                  </div>
-                </>
-              )}
-
-              {selectedNode.type === 'delay' && (
-                <div className="space-y-2">
-                  <label className="text-[11px] text-white/40 font-medium tracking-wide">Delay Duration (Seconds)</label>
-                  <input 
-                    type="number"
-                    min="1"
-                    value={(selectedNode.data?.duration as string) || "2"}
-                    onChange={(e) => updateNodeData(selectedNode.id, { duration: e.target.value })}
-                    className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 placeholder:text-white/20 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02]"
-                  />
-                </div>
-              )}
-
-              {selectedNode.type === 'handoff' && (
-                <div className="space-y-2">
-                  <label className="text-[11px] text-white/40 font-medium tracking-wide">Assign to Team</label>
-                  <select 
-                    value={(selectedNode.data?.team as string) || "Support Team"}
-                    onChange={(e) => updateNodeData(selectedNode.id, { team: e.target.value })}
-                    className="w-full bg-[#111] border border-transparent rounded-md px-3 py-2.5 text-[13px] text-white/90 focus:outline-none focus:border-white/10 focus:bg-white/5 transition-all hover:bg-white/[0.02] appearance-none"
-                  >
-                    <option value="Support Team">Support Team</option>
-                    <option value="Sales Team">Sales Team</option>
-                    <option value="Billing Team">Billing Team</option>
-                  </select>
-                </div>
-              )}
-
-              {selectedNode.type === 'knowledge' && (
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-white/40 tracking-wide uppercase">Knowledge Source</label>
-                  <select 
-                    value={(selectedNode.data?.source as string) || "Help Center Docs"}
-                    onChange={(e) => updateNodeData(selectedNode.id, { source: e.target.value })}
-                    className="w-full bg-[#111] border border-white/10 rounded-md px-3 py-2 text-[13px] text-white focus:outline-none focus:border-emerald-500/50 transition-colors"
-                  >
-                    <option value="Help Center Docs">Help Center Docs</option>
-                    <option value="Pricing Policies">Pricing Policies</option>
-                    <option value="Internal Knowledge Base">Internal Knowledge Base</option>
-                  </select>
-                </div>
-              )}
-
+            <div className="h-px" style={{ background: "rgba(255,255,255,0.04)" }} />
+            <div className="flex items-center justify-between">
+              <span className="text-[11px]" style={{ color: "rgba(255,255,255,0.3)" }}>Connections</span>
+              <span className="text-[13px] font-semibold" style={{ color: "rgba(255,255,255,0.7)" }}>{edgeCount}</span>
             </div>
+            <div className="h-px" style={{ background: "rgba(255,255,255,0.04)" }} />
+            <div className="flex items-center justify-between">
+              <span className="text-[11px]" style={{ color: "rgba(255,255,255,0.3)" }}>Status</span>
+              <span className="text-[11.5px] font-semibold" style={{ color: "rgba(52,211,153,0.85)" }}>Ready</span>
+            </div>
+          </div>
+          <div
+            className="mt-5 rounded-[14px] p-4"
+            style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}
+          >
+            <p className="text-[11.5px] leading-relaxed" style={{ color: "rgba(255,255,255,0.22)" }}>
+              Click a node on the canvas to configure its properties.
+            </p>
+            <p className="text-[10px] mt-2.5 leading-relaxed" style={{ color: "rgba(255,255,255,0.14)" }}>
+              F — fit view · Del — delete · ⌘D — duplicate · ⌘C/V — copy/paste
+            </p>
           </div>
         </div>
       </div>
     );
   }
 
-  // Default Global Inspector
+  const cat = NODE_CATEGORY[nodeType as keyof typeof NODE_CATEGORY] || {
+    color: "#3b82f6",
+    label: "NODE",
+  };
+
+  const TABS = [
+    { id: "general" as TabId, label: "General", icon: <Layers className="w-3 h-3" /> },
+    { id: "content" as TabId, label: "Content", icon: <Edit3 className="w-3 h-3" /> },
+    { id: "advanced" as TabId, label: "Advanced", icon: <Code2 className="w-3 h-3" /> },
+  ];
+
   return (
-    <div className="w-full flex-shrink-0 bg-transparent flex flex-col z-10 overflow-y-auto">
-      <div className="p-6 space-y-10">
-        
-        <div>
-          <div className="flex items-center gap-2 mb-6 text-white/80">
-            <Settings2 className="w-3.5 h-3.5 text-white/50" />
-            <h2 className="text-[12px] font-medium tracking-tight">Flow Inspector</h2>
-          </div>
-          <div className="space-y-4">
-            <div className="flex items-baseline justify-between">
-              <span className="text-[11px] text-white/40">Nodes</span>
-              <span className="text-[12px] text-white/80 font-medium">{nodes.length}</span>
+    <div className="w-full flex flex-col h-full overflow-hidden">
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div className="flex-shrink-0 px-5 pt-5 pb-0">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2.5">
+            <div
+              className="w-7 h-7 rounded-[9px] flex items-center justify-center"
+              style={{
+                background: `linear-gradient(135deg, ${cat.color}22 0%, ${cat.color}0a 100%)`,
+                border: `1px solid ${cat.color}30`,
+              }}
+            >
+              <div className="w-2 h-2 rounded-full" style={{ background: cat.color }} />
             </div>
-            <div className="flex items-baseline justify-between">
-              <span className="text-[11px] text-white/40">Status</span>
-              <span className="text-[12px] text-emerald-500 font-medium">Ready</span>
+            <div>
+              <h2 className="text-[13px] font-semibold" style={{ color: "rgba(255,255,255,0.85)" }}>
+                Configure
+              </h2>
+              <p className="text-[10px] mt-0.5" style={{ color: cat.color + "bb" }}>{cat.label}</p>
             </div>
           </div>
-        </div>
-        <div className="h-px w-full bg-white/5" />
-        <div>
-          <p className="text-[11px] text-white/25 leading-relaxed">
-            Click any node on the canvas to configure it. Set trigger keywords on the trigger node so the flow activates on the right messages.
-          </p>
+          <button
+            onClick={() => setSelectedNodeId(null)}
+            className="p-1.5 rounded-lg"
+            style={{ color: "rgba(255,255,255,0.25)" }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
 
+        {/* Tabs */}
+        <div
+          className="flex p-1 rounded-[14px]"
+          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.05)" }}
+        >
+          {TABS.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-[10px] text-[11.5px] font-medium"
+              style={{
+                background: activeTab === tab.id ? "rgba(255,255,255,0.09)" : "transparent",
+                color: activeTab === tab.id ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.3)",
+                boxShadow: activeTab === tab.id ? "0 1px 4px rgba(0,0,0,0.3)" : "none",
+                transition: "background 0.12s, color 0.12s",
+              }}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="h-px mx-5 mt-4" style={{ background: "rgba(255,255,255,0.05)" }} />
+
+      {/* ── Content ────────────────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        {activeTab === "general" && (
+          <GeneralTab
+            localData={localData}
+            nodeType={nodeType}
+            nodeIdStr={nodeIdStr}
+            cat={cat}
+            commitField={commitField}
+            flushField={flushField}
+          />
+        )}
+        {activeTab === "content" && (
+          <ContentTab
+            nodeType={nodeType}
+            localData={localData}
+            commitField={commitField}
+            flushField={flushField}
+          />
+        )}
+        {activeTab === "advanced" && (
+          <AdvancedTab
+            nodeIdStr={nodeIdStr}
+            inCount={inCount}
+            outCount={outCount}
+          />
+        )}
       </div>
     </div>
+  );
+}
+
+// ─── GENERAL TAB ───────────────────────────────────────────────────────────────
+function GeneralTab({
+  localData, nodeType, nodeIdStr, cat, commitField, flushField,
+}: {
+  localData: Record<string, any>;
+  nodeType: string;
+  nodeIdStr: string;
+  cat: { color: string; label: string };
+  commitField: (field: string, value: any) => void;
+  flushField: (field: string, value: any) => void;
+}) {
+  const focus = useFocusStyle();
+  return (
+    <>
+      <Field label="Node Name">
+        <input
+          type="text"
+          value={(localData.label as string) || ""}
+          onChange={e => commitField("label", e.target.value)}
+          onBlur={e => flushField("label", e.target.value)}
+          className={INPUT_CLS}
+          style={focus.style}
+          onFocus={focus.onFocus}
+          placeholder="Node name..."
+        />
+      </Field>
+      <Field label="Type">
+        <div
+          className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-[12px]"
+          style={{ background: `${cat.color}12`, border: `1px solid ${cat.color}25` }}
+        >
+          <span className="text-[12px] font-bold tracking-wide" style={{ color: cat.color }}>{cat.label}</span>
+          <span className="text-[11px]" style={{ color: "rgba(255,255,255,0.25)" }}>{nodeType}</span>
+        </div>
+      </Field>
+      <Field label="Node ID">
+        <div
+          className="px-3.5 py-2.5 rounded-[12px] text-[11px] font-mono select-all"
+          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.28)" }}
+        >
+          {nodeIdStr}
+        </div>
+      </Field>
+    </>
+  );
+}
+
+// ─── CONTENT TAB ───────────────────────────────────────────────────────────────
+function ContentTab({
+  nodeType, localData, commitField, flushField,
+}: {
+  nodeType: string;
+  localData: Record<string, any>;
+  commitField: (field: string, value: any) => void;
+  flushField: (field: string, value: any) => void;
+}) {
+  const f1 = useFocusStyle();
+  const f2 = useFocusStyle();
+  const f3 = useFocusStyle();
+
+  if (nodeType === "trigger" || nodeType === "keyword_trigger") {
+    return (
+      <>
+        <Field label="Trigger Type">
+          <select
+            value={(localData.triggerType as string) || "keyword"}
+            onChange={e => commitField("triggerType", e.target.value)}
+            className={SELECT_CLS}
+            style={INP_STYLE}
+          >
+            <option value="keyword">Keyword Match</option>
+            <option value="first_message">First Message (any)</option>
+            <option value="all_messages">All Messages</option>
+          </select>
+        </Field>
+        {((localData.triggerType as string) || "keyword") === "keyword" && (
+          <Field label="Keywords">
+            <input
+              type="text"
+              value={(localData.keywords as string) || ""}
+              onChange={e => commitField("keywords", e.target.value)}
+              onBlur={e => flushField("keywords", e.target.value)}
+              placeholder="book, appointment, price"
+              className={INPUT_CLS}
+              style={f1.style}
+              onFocus={f1.onFocus}
+            />
+            <p className="text-[10px] mt-1.5" style={{ color: "rgba(255,255,255,0.2)" }}>
+              Comma-separated. Any match activates the flow.
+            </p>
+          </Field>
+        )}
+      </>
+    );
+  }
+
+  if (nodeType === "standard") {
+    return (
+      <Field label="Message Content">
+        <textarea
+          value={(localData.content as string) || ""}
+          onChange={e => commitField("content", e.target.value)}
+          onBlur={e => flushField("content", e.target.value)}
+          rows={5}
+          className={INPUT_CLS + " resize-none"}
+          placeholder="Type your message here..."
+          style={f1.style}
+          onFocus={f1.onFocus}
+        />
+      </Field>
+    );
+  }
+
+  if (nodeType === "send_media" || nodeType === "send_audio") {
+    return (
+      <>
+        <Field label="Media Type">
+          <select
+            value={(localData.mediaType as string) || (nodeType === "send_audio" ? "audio" : "image")}
+            onChange={e => commitField("mediaType", e.target.value)}
+            className={SELECT_CLS}
+            style={INP_STYLE}
+          >
+            <option value="image">Image (JPG / PNG / WebP)</option>
+            <option value="video">Video (MP4)</option>
+            <option value="audio">Audio (MP3 / OGG)</option>
+            <option value="file">File / Document (PDF)</option>
+          </select>
+        </Field>
+        <Field label="Media URL">
+          <input type="url" value={(localData.mediaUrl as string) || ""} onChange={e => commitField("mediaUrl", e.target.value)} onBlur={e => flushField("mediaUrl", e.target.value)} placeholder="https://cdn.example.com/image.jpg" className={INPUT_CLS} style={f1.style} onFocus={f1.onFocus} />
+        </Field>
+        <Field label="Caption">
+          <input type="text" value={(localData.caption as string) || ""} onChange={e => commitField("caption", e.target.value)} onBlur={e => flushField("caption", e.target.value)} placeholder="Optional caption..." className={INPUT_CLS} style={f2.style} onFocus={f2.onFocus} />
+        </Field>
+      </>
+    );
+  }
+
+  if (nodeType === "interruption") {
+    return (
+      <>
+        <Field label="User Query Trigger">
+          <input type="text" value={(localData.userQuery as string) || ""} onChange={e => commitField("userQuery", e.target.value)} onBlur={e => flushField("userQuery", e.target.value)} className={INPUT_CLS} style={f1.style} onFocus={f1.onFocus} />
+        </Field>
+        <Field label="AI Auto-Response">
+          <textarea value={(localData.aiResponse as string) || ""} onChange={e => commitField("aiResponse", e.target.value)} onBlur={e => flushField("aiResponse", e.target.value)} rows={3} className={INPUT_CLS + " resize-none"} style={f2.style} onFocus={f2.onFocus} />
+        </Field>
+      </>
+    );
+  }
+
+  if (nodeType === "condition") {
+    return (
+      <>
+        <Field label="Variable Field">
+          <input type="text" value={(localData.field as string) || ""} onChange={e => commitField("field", e.target.value)} onBlur={e => flushField("field", e.target.value)} className={INPUT_CLS} style={f1.style} onFocus={f1.onFocus} />
+        </Field>
+        <Field label="Operator">
+          <select value={(localData.operator as string) || "=="} onChange={e => commitField("operator", e.target.value)} className={SELECT_CLS} style={INP_STYLE}>
+            <option value="==">Equals (==)</option>
+            <option value="!=">Not Equals (!=)</option>
+            <option value=">">&gt; Greater Than</option>
+            <option value="<">&lt; Less Than</option>
+          </select>
+        </Field>
+        <Field label="Target Value">
+          <input type="text" value={(localData.value as string) || ""} onChange={e => commitField("value", e.target.value)} onBlur={e => flushField("value", e.target.value)} className={INPUT_CLS} style={f2.style} onFocus={f2.onFocus} />
+        </Field>
+      </>
+    );
+  }
+
+  if (nodeType === "webhook") {
+    return (
+      <>
+        <Field label="Method">
+          <select value={(localData.method as string) || "POST"} onChange={e => commitField("method", e.target.value)} className={SELECT_CLS} style={INP_STYLE}>
+            <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option>
+          </select>
+        </Field>
+        <Field label="Endpoint URL">
+          <input type="url" value={(localData.url as string) || ""} onChange={e => commitField("url", e.target.value)} onBlur={e => flushField("url", e.target.value)} placeholder="https://api..." className={INPUT_CLS} style={f1.style} onFocus={f1.onFocus} />
+        </Field>
+      </>
+    );
+  }
+
+  if (nodeType === "delay") {
+    return (
+      <Field label="Delay (seconds)">
+        <input type="number" min="1" value={(localData.duration as string) || "2"} onChange={e => commitField("duration", e.target.value)} onBlur={e => flushField("duration", e.target.value)} className={INPUT_CLS} style={f1.style} onFocus={f1.onFocus} />
+      </Field>
+    );
+  }
+
+  if (nodeType === "handoff") {
+    return (
+      <Field label="Assign to Team">
+        <select value={(localData.team as string) || "Support Team"} onChange={e => commitField("team", e.target.value)} className={SELECT_CLS} style={INP_STYLE}>
+          <option>Support Team</option><option>Sales Team</option><option>Billing Team</option>
+        </select>
+      </Field>
+    );
+  }
+
+  if (nodeType === "knowledge") {
+    return (
+      <Field label="Knowledge Source">
+        <select value={(localData.source as string) || "Help Center Docs"} onChange={e => commitField("source", e.target.value)} className={SELECT_CLS} style={INP_STYLE}>
+          <option>Help Center Docs</option><option>Pricing Policies</option><option>Internal Knowledge Base</option>
+        </select>
+      </Field>
+    );
+  }
+
+  return (
+    <div
+      className="rounded-[12px] p-4"
+      style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}
+    >
+      <p className="text-[11px] leading-relaxed" style={{ color: "rgba(255,255,255,0.28)" }}>
+        No additional configuration for this node type.
+      </p>
+    </div>
+  );
+}
+
+// ─── ADVANCED TAB ──────────────────────────────────────────────────────────────
+function AdvancedTab({
+  nodeIdStr, inCount, outCount,
+}: {
+  nodeIdStr: string;
+  inCount: number;
+  outCount: number;
+}) {
+  return (
+    <>
+      <Field label="Connections">
+        <div
+          className="rounded-[12px] p-3.5 space-y-2.5"
+          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px]" style={{ color: "rgba(255,255,255,0.35)" }}>Incoming</span>
+            <span className="text-[13px] font-semibold" style={{ color: "rgba(255,255,255,0.75)" }}>{inCount}</span>
+          </div>
+          <div className="h-px" style={{ background: "rgba(255,255,255,0.04)" }} />
+          <div className="flex items-center justify-between">
+            <span className="text-[11px]" style={{ color: "rgba(255,255,255,0.35)" }}>Outgoing</span>
+            <span className="text-[13px] font-semibold" style={{ color: "rgba(255,255,255,0.75)" }}>{outCount}</span>
+          </div>
+        </div>
+      </Field>
+      <Field label="Node ID">
+        <div
+          className="px-3.5 py-2.5 rounded-[12px] text-[11px] font-mono select-all"
+          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.28)" }}
+        >
+          {nodeIdStr}
+        </div>
+      </Field>
+    </>
   );
 }

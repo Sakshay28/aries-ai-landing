@@ -473,7 +473,17 @@ export function Navbar() {
         }}
       >
         <div className="nav-inner">
-          <Link href="/" style={{ display: "flex", alignItems: "center", textDecoration: "none" }}>
+          <Link 
+            href="/" 
+            onClick={(e) => {
+              if (window.location.pathname === "/") {
+                e.preventDefault();
+                window.scrollTo({ top: 0, behavior: "smooth" });
+                window.history.pushState("", document.title, window.location.pathname);
+              }
+            }}
+            style={{ display: "flex", alignItems: "center", textDecoration: "none" }}
+          >
             <img src="/logo.png" alt="Aries AI" style={{ height: 40 }} />
           </Link>
 
@@ -3146,7 +3156,17 @@ export function Footer() {
       zIndex: 10
     }}>
       <div className="footer-inner" style={{ maxWidth: 1280, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 20 }}>
-        <Link href="/" style={{ display: "flex", alignItems: "center", textDecoration: "none" }}>
+         <Link 
+          href="/" 
+          onClick={(e) => {
+            if (window.location.pathname === "/") {
+              e.preventDefault();
+              window.scrollTo({ top: 0, behavior: "smooth" });
+              window.history.pushState("", document.title, window.location.pathname);
+            }
+          }}
+          style={{ display: "flex", alignItems: "center", textDecoration: "none" }}
+        >
           <img src="/logo.png" alt="Aries AI" style={{ height: 32, filter: "brightness(0) invert(1)" }} />
         </Link>
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 13 }}>

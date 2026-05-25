@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
       welcome_message,
       whatsapp_number_requested,
       business_description,
+      plan,
     } = body;
 
     if (!business_name?.trim()) {
@@ -32,6 +33,10 @@ export async function POST(req: NextRequest) {
     const finalWelcome = welcome_message?.trim() ||
       `Hey! 👋 Welcome to ${business_name.trim()}! How can I help you today?`;
 
+    const selectedPlan = plan || 'starter';
+    const msgLimit = selectedPlan === 'pro' ? 10000 : selectedPlan === 'growth' ? 5000 : 1000;
+    const aiLimit = selectedPlan === 'pro' ? 1000 : selectedPlan === 'growth' ? 500 : 100;
+
     // Save to tenants table
     const { error } = await supabaseAdmin
       .from('tenants')
@@ -44,8 +49,12 @@ export async function POST(req: NextRequest) {
         welcome_message: finalWelcome,
         onboarding_completed: true,
         updated_at: new Date().toISOString(),
+        plan: selectedPlan,
+        message_limit: msgLimit,
+        ai_conversation_limit: aiLimit,
       })
       .eq('id', tenantId);
+
 
     if (error) {
       console.error('Onboard save error:', error);

@@ -1,5 +1,6 @@
 import { Metadata } from 'next';
 import { AutomationsClient } from './_components/AutomationsClient';
+import { FeaturePageGate } from '../_layout/FeaturePageGate';
 
 export const metadata: Metadata = {
   title: 'Automations | Aries AI',
@@ -8,8 +9,10 @@ export const metadata: Metadata = {
 
 export default function AutomationsPage() {
   return (
-    <div className="h-[calc(100vh-3.5rem)]">
-      <AutomationsClient />
-    </div>
+    <FeaturePageGate feature="Smart Rules" allowedPlans={['growth', 'pro', 'enterprise']}>
+      <div className="h-[calc(100vh-3.5rem)]">
+        <AutomationsClient />
+      </div>
+    </FeaturePageGate>
   );
 }

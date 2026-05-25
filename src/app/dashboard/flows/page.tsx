@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { BUSINESS_TYPE_CONFIG } from "./config";
+import { FeaturePageGate } from "../_layout/FeaturePageGate";
 
 interface SavedFlow {
   id: string;
@@ -79,122 +80,125 @@ export default function FlowsDashboardPage() {
   const blankCard = businessTypes.find(t => t.id === 'blank');
 
   return (
-    <div className="h-[calc(100vh-64px)] lg:h-screen flex flex-col bg-[#0A0A0A] text-white selection:bg-[#06B6D4]/30 overflow-y-auto">
-      {/* Top Bar */}
-      <header className="h-[52px] flex-shrink-0 border-b border-white/5 bg-[#0A0A0A]/80 backdrop-blur-md flex items-center justify-between px-8 z-20 sticky top-0">
-        <div className="flex items-center gap-2 text-[13px]">
-          <span className="text-white/90 font-medium tracking-wide">Automations & Flows</span>
-        </div>
-      </header>
+    <FeaturePageGate feature="AI Flows" allowedPlans={["pro", "enterprise"]}>
+      <div className="h-[calc(100vh-64px)] lg:h-screen flex flex-col bg-[#0A0A0A] text-white selection:bg-[#06B6D4]/30 overflow-y-auto">
+        {/* Top Bar */}
+        <header className="h-[52px] flex-shrink-0 border-b border-white/5 bg-[#0A0A0A]/80 backdrop-blur-md flex items-center justify-between px-8 z-20 sticky top-0">
+          <div className="flex items-center gap-2 text-[13px]">
+            <span className="text-white/90 font-medium tracking-wide">Automations & Flows</span>
+          </div>
+        </header>
 
-      {/* Main Content */}
-      <div className="flex-1 px-8 md:px-12 py-12 max-w-6xl w-full animate-in fade-in duration-500 ease-out">
+        {/* Main Content */}
+        <div className="flex-1 px-8 md:px-12 py-12 max-w-6xl w-full animate-in fade-in duration-500 ease-out">
 
-        {/* ── My Flows section ─────────────────────────────── */}
-        {savedFlows.length > 0 && (
-          <div className="mb-14">
-            <h2 className="text-[13px] font-bold tracking-widest text-white/40 uppercase mb-5">My Flows</h2>
-            <div className="flex flex-col gap-2">
-              {savedFlows.map(flow => (
-                <div key={flow.id} className="flex items-center justify-between bg-[#111111] border border-white/[0.05] rounded-xl px-5 py-4 group hover:border-white/[0.09] transition-colors">
-                  <div className="flex items-center gap-4">
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${flow.is_active ? 'bg-[#12B76A]' : 'bg-white/20'}`} />
-                    <div>
-                      <p className="text-[14px] font-medium text-white/90">{flow.name}</p>
-                      <p className="text-[11px] text-white/35 mt-0.5 capitalize">
-                        {flow.trigger_type.replace('_', ' ')}
-                        {flow.trigger_keywords?.length > 0 && ` · ${flow.trigger_keywords.slice(0, 3).join(', ')}`}
-                      </p>
+          {/* ── My Flows section ─────────────────────────────── */}
+          {savedFlows.length > 0 && (
+            <div className="mb-14">
+              <h2 className="text-[13px] font-bold tracking-widest text-white/40 uppercase mb-5">My Flows</h2>
+              <div className="flex flex-col gap-2">
+                {savedFlows.map(flow => (
+                  <div key={flow.id} className="flex items-center justify-between bg-[#111111] border border-white/[0.05] rounded-xl px-5 py-4 group hover:border-white/[0.09] transition-colors">
+                    <div className="flex items-center gap-4">
+                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${flow.is_active ? 'bg-[#12B76A]' : 'bg-white/20'}`} />
+                      <div>
+                        <p className="text-[14px] font-medium text-white/90">{flow.name}</p>
+                        <p className="text-[11px] text-white/35 mt-0.5 capitalize">
+                          {flow.trigger_type.replace('_', ' ')}
+                          {flow.trigger_keywords?.length > 0 && ` · ${flow.trigger_keywords.slice(0, 3).join(', ')}`}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase ${
+                        flow.is_active
+                          ? 'bg-[#12B76A]/10 text-[#12B76A] border border-[#12B76A]/20'
+                          : 'bg-white/5 text-white/30 border border-white/10'
+                      }`}>
+                        {flow.is_active ? 'Live' : 'Draft'}
+                      </span>
+                      <button
+                        onClick={() => handleToggleActive(flow)}
+                        title={flow.is_active ? 'Pause flow' : 'Activate flow'}
+                        className="p-1.5 rounded hover:bg-white/5 text-white/30 hover:text-white/70 transition-colors"
+                      >
+                        {flow.is_active ? <PauseCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+                      </button>
+                      <Link
+                        href={`/dashboard/flows/editor/${flow.id}`}
+                        className="p-1.5 rounded hover:bg-white/5 text-white/30 hover:text-white/70 transition-colors"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </Link>
+                      <button
+                        onClick={() => handleDelete(flow.id)}
+                        disabled={deletingId === flow.id}
+                        className="p-1.5 rounded hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-colors disabled:opacity-50"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase ${
-                      flow.is_active
-                        ? 'bg-[#12B76A]/10 text-[#12B76A] border border-[#12B76A]/20'
-                        : 'bg-white/5 text-white/30 border border-white/10'
-                    }`}>
-                      {flow.is_active ? 'Live' : 'Draft'}
-                    </span>
-                    <button
-                      onClick={() => handleToggleActive(flow)}
-                      title={flow.is_active ? 'Pause flow' : 'Activate flow'}
-                      className="p-1.5 rounded hover:bg-white/5 text-white/30 hover:text-white/70 transition-colors"
-                    >
-                      {flow.is_active ? <PauseCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
-                    </button>
-                    <Link
-                      href={`/dashboard/flows/editor/${flow.id}`}
-                      className="p-1.5 rounded hover:bg-white/5 text-white/30 hover:text-white/70 transition-colors"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </Link>
-                    <button
-                      onClick={() => handleDelete(flow.id)}
-                      disabled={deletingId === flow.id}
-                      className="p-1.5 rounded hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-colors disabled:opacity-50"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="mb-14">
-          <h1 className="font-sans text-[28px] md:text-[34px] font-semibold text-white/90 mb-3 tracking-tight">
-            Create Flow
-          </h1>
-          <p className="font-sans text-[15px] text-white/50 max-w-xl leading-relaxed">
-            Start from a blank canvas to design custom automated response flows tailored to your business needs.
-          </p>
-        </div>
-
-        <div className="max-w-xl pb-20">
-          {blankCard && (
-            <div
-              onClick={() => handleSelect(blankCard.id)}
-              className="relative flex flex-col bg-[#111111] border border-white/[0.05] rounded-2xl p-8 h-[240px] cursor-pointer group transition-all duration-300 ease-out hover:bg-[#151515] hover:border-white/[0.09] hover:shadow-[0_8px_32px_-8px_rgba(0,0,0,0.5)] hover:-translate-y-1 overflow-hidden outline-none focus-visible:border-[#06B6D4]/50 focus-visible:ring-1 focus-visible:ring-[#06B6D4]/20"
-              role="button"
-              aria-label="Start from blank canvas"
-              tabIndex={0}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSelect(blankCard.id); }}
-            >
-              {/* Subtle top illumination on hover */}
-              <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[#06B6D4]/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-
-              {loadingType === blankCard.id ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0A]/80 backdrop-blur-sm z-10 rounded-2xl">
-                  <Loader2 className="w-6 h-6 animate-spin text-[#06B6D4]" />
-                </div>
-              ) : null}
-
-              <div className="flex justify-between items-start mb-6">
-                <div className="w-12 h-12 rounded-xl bg-white/[0.03] flex items-center justify-center border border-white/[0.05] group-hover:bg-[#06B6D4]/10 group-hover:border-[#06B6D4]/20 transition-all duration-300">
-                  <LayoutTemplate className="w-6 h-6 text-white/50 group-hover:text-[#06B6D4] transition-colors duration-300" />
-                </div>
-                <span className="font-sans text-[11px] font-medium tracking-wide opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-1 group-hover:translate-x-0 text-white/40 group-hover:text-white/60 uppercase">
-                  Select
-                </span>
-              </div>
-
-              <h3 className="font-sans text-[18px] font-semibold text-white/90 tracking-tight">
-                {blankCard.name}
-              </h3>
-              
-              <p className="font-sans text-[13.5px] text-white/45 leading-relaxed mt-2">
-                {blankCard.description}
-              </p>
-
-              <div className="mt-auto flex items-center gap-6 text-[12px] text-white/40">
-                <span className="flex items-center gap-1.5"><Zap className="w-3.5 h-3.5 text-[#06B6D4]" /> Full 150+ node toolkit</span>
-                <span className="flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> 100% customizable</span>
+                ))}
               </div>
             </div>
           )}
+
+          <div className="mb-14">
+            <h1 className="font-sans text-[28px] md:text-[34px] font-semibold text-white/90 mb-3 tracking-tight">
+              Create Flow
+            </h1>
+            <p className="font-sans text-[15px] text-white/50 max-w-xl leading-relaxed">
+              Start from a blank canvas to design custom automated response flows tailored to your business needs.
+            </p>
+          </div>
+
+          <div className="max-w-xl pb-20">
+            {blankCard && (
+              <div
+                onClick={() => handleSelect(blankCard.id)}
+                className="relative flex flex-col bg-[#111111] border border-white/[0.05] rounded-2xl p-8 h-[240px] cursor-pointer group transition-all duration-300 ease-out hover:bg-[#151515] hover:border-white/[0.09] hover:shadow-[0_8px_32px_-8px_rgba(0,0,0,0.5)] hover:-translate-y-1 overflow-hidden outline-none focus-visible:border-[#06B6D4]/50 focus-visible:ring-1 focus-visible:ring-[#06B6D4]/20"
+                role="button"
+                aria-label="Start from blank canvas"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSelect(blankCard.id); }}
+              >
+                {/* Subtle top illumination on hover */}
+                <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[#06B6D4]/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+                {loadingType === blankCard.id ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0A]/80 backdrop-blur-sm z-10 rounded-2xl">
+                    <Loader2 className="w-6 h-6 animate-spin text-[#06B6D4]" />
+                  </div>
+                ) : null}
+
+                <div className="flex justify-between items-start mb-6">
+                  <div className="w-12 h-12 rounded-xl bg-white/[0.03] flex items-center justify-center border border-white/[0.05] group-hover:bg-[#06B6D4]/10 group-hover:border-[#06B6D4]/20 transition-all duration-300">
+                    <LayoutTemplate className="w-6 h-6 text-white/50 group-hover:text-[#06B6D4] transition-colors duration-300" />
+                  </div>
+                  <span className="font-sans text-[11px] font-medium tracking-wide opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-1 group-hover:translate-x-0 text-white/40 group-hover:text-white/60 uppercase">
+                    Select
+                  </span>
+                </div>
+
+                <h3 className="font-sans text-[18px] font-semibold text-white/90 tracking-tight">
+                  {blankCard.name}
+                </h3>
+                
+                <p className="font-sans text-[13.5px] text-white/45 leading-relaxed mt-2">
+                  {blankCard.description}
+                </p>
+
+                <div className="mt-auto flex items-center gap-6 text-[12px] text-white/40">
+                  <span className="flex items-center gap-1.5"><Zap className="w-3.5 h-3.5 text-[#06B6D4]" /> Full 150+ node toolkit</span>
+                  <span className="flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> 100% customizable</span>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </FeaturePageGate>
   );
 }
+

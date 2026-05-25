@@ -124,12 +124,15 @@ function OnboardContent() {
   const [businessDescription, setBusinessDescription] = useState("");
   const [businessPhone, setBusinessPhone] = useState("");
 
-  // Step 2
+  // Step 2: Choose Free Trial
+  const [selectedPlan, setSelectedPlan] = useState<"starter" | "growth" | "pro">("starter");
+
+  // Step 3
   const [botName, setBotName] = useState("");
   const [personality, setPersonality] = useState(PERSONALITIES[1].value);
   const [welcomeMsg, setWelcomeMsg] = useState("");
 
-  // Step 3 (WhatsApp number — white-labeled)
+  // Step 4 (WhatsApp number — white-labeled)
   const [waPhone, setWaPhone] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
@@ -155,7 +158,7 @@ function OnboardContent() {
   async function handleStep2() {
     if (!botName.trim()) { setError("Please give your AI assistant a name."); return; }
     setError("");
-    setStep(2);
+    setStep(3);
   }
 
   async function handleFinish() {
@@ -174,6 +177,7 @@ function OnboardContent() {
           welcome_message: welcomeMsg.trim() || null,
           whatsapp_number_requested: waPhone.trim() || null,
           business_description: businessDescription.trim() || null,
+          plan: selectedPlan,
         }),
       });
       const data = await res.json();
@@ -218,13 +222,14 @@ function OnboardContent() {
               Let's set up your<br /><span style={{ color: G }}>AI Command Centre</span>
             </h1>
             <p style={styles.heroSub}>
-              Three quick steps and your personalised WhatsApp AI is ready to handle customer conversations 24/7.
+              Select your free trial and configure your personalised WhatsApp AI to automate conversations 24/7.
             </p>
 
             {/* Step previews */}
             <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
               {[
                 { icon: "🏢", title: "Business Profile", text: "Your name, industry & contact" },
+                { icon: "🎁", title: "Free Trial Plan", text: "Select your trial tier & limits" },
                 { icon: "🤖", title: "AI Personality", text: "Name, tone & welcome message" },
                 { icon: "📱", title: "WhatsApp Activation", text: "We'll handle the rest for you" },
               ].map((item, i) => (
@@ -266,7 +271,7 @@ function OnboardContent() {
       {/* Right pane */}
       <main style={styles.right}>
         <div style={styles.formCard}>
-          <StepIndicator current={step} total={3} />
+          <StepIndicator current={step} total={4} />
 
           {/* ── STEP 1: Business Profile ── */}
           {step === 0 && (
@@ -303,7 +308,7 @@ function OnboardContent() {
                 </Field>
 
                 {businessType === "Other" && (
-                  <Field label="What is your business about?">
+                   <Field label="What is your business about?">
                     <textarea
                       style={{ ...styles.input, minHeight: 80, resize: "vertical", lineHeight: 1.55 }}
                       value={businessDescription}
@@ -341,10 +346,118 @@ function OnboardContent() {
             </>
           )}
 
-          {/* ── STEP 2: AI Personality ── */}
+          {/* ── STEP 2: Free Trial Selection ── */}
           {step === 1 && (
             <>
-              <p style={styles.eyebrow}>Step 2: AI Assistant</p>
+              <p style={styles.eyebrow}>Step 2: Trial Tier</p>
+              <h2 style={styles.formTitle}>Choose Your Free Trial</h2>
+              <p style={{ fontSize: 13, color: "#64748b", marginTop: -20, marginBottom: 24, lineHeight: 1.5 }}>
+                Select the free trial tier that matches your business needs. You can change this anytime from your billing settings.
+              </p>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                {[
+                  {
+                    id: "starter",
+                    name: "Starter Trial",
+                    price: "Free 14-Day Trial",
+                    renewal: "$19/mo after trial",
+                    features: ["1,000 monthly messages", "100 AI conversations", "Basic Live Chat & Contacts", "1 Active AI Agent"],
+                    badge: "Best for Solopreneurs",
+                  },
+                  {
+                    id: "growth",
+                    name: "Growth Trial",
+                    price: "Free 14-Day Trial",
+                    renewal: "$39/mo after trial",
+                    features: ["5,000 monthly messages", "500 AI conversations", "Up to 3 AI Agents & Smart Rules", "Broadcasting campaigns"],
+                    badge: "Most Popular",
+                  },
+                  {
+                    id: "pro",
+                    name: "Pro Trial",
+                    price: "Free 14-Day Trial",
+                    renewal: "$79/mo after trial",
+                    features: ["10,000 monthly messages", "1,000 AI conversations", "Unlimited AI Agents & AI Flows", "Custom Integrations & CRM sync", "Advanced analytics dashboards"],
+                    badge: "For Growing Teams",
+                  },
+                ].map((tier) => {
+                  const isSelected = selectedPlan === tier.id;
+                  return (
+                    <button
+                      key={tier.id}
+                      type="button"
+                      onClick={() => setSelectedPlan(tier.id as any)}
+                      style={{
+                        width: "100%",
+                        padding: "16px",
+                        border: `2px solid ${isSelected ? G : "#e5e7eb"}`,
+                        borderRadius: 14,
+                        background: isSelected ? "rgba(37,211,102,0.06)" : "#fafbfc",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                        transition: "all 0.18s ease",
+                        fontFamily: "inherit",
+                        position: "relative",
+                      }}
+                    >
+                      <div style={{ display: "flex", width: "100%", alignItems: "center" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{
+                            width: 18, height: 18, borderRadius: "50%",
+                            border: `2px solid ${isSelected ? G : "#d1d5db"}`,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            flexShrink: 0,
+                          }}>
+                            {isSelected && <div style={{ width: 8, height: 8, borderRadius: "50%", background: G }} />}
+                          </div>
+                          <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>{tier.name}</span>
+                        </div>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: GD, marginLeft: "auto" }}>{tier.price}</span>
+                      </div>
+                      
+                      <div style={{ fontSize: 11, color: "#64748b", display: "flex", gap: 6, flexWrap: "wrap", margin: "4px 0" }}>
+                        {tier.features.slice(0, 3).map((f, idx) => (
+                          <span key={idx} style={{ background: "rgba(0,0,0,0.04)", padding: "2px 8px", borderRadius: 99 }}>
+                            {f}
+                          </span>
+                        ))}
+                      </div>
+
+                      <div style={{ display: "flex", justifyContent: "space-between", width: "100%", marginTop: 2, fontSize: 11, color: "#94a3b8" }}>
+                        <span>{tier.renewal}</span>
+                        {tier.badge && (
+                          <span style={{ marginLeft: "auto", fontSize: 10, background: isSelected ? "rgba(37,211,102,0.15)" : "rgba(0,0,0,0.05)", color: isSelected ? GD : "#64748b", fontWeight: 700, padding: "2px 6px", borderRadius: 4 }}>
+                            {tier.badge}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+
+                <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
+                  <button onClick={() => setStep(0)} style={styles.backBtn}>← Back</button>
+                  <button
+                    onClick={() => setStep(2)}
+                    style={{ ...styles.submitBtn, flex: 1 }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = "translateY(-1px)"; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = "none"; }}
+                  >
+                    Continue →
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ── STEP 3: AI Personality ── */}
+          {step === 2 && (
+            <>
+              <p style={styles.eyebrow}>Step 3: AI Assistant</p>
               <h2 style={styles.formTitle}>Personalise your AI</h2>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -388,7 +501,7 @@ function OnboardContent() {
                 {error && <ErrorBox msg={error} />}
 
                 <div style={{ display: "flex", gap: 12 }}>
-                  <button onClick={() => { setError(""); setStep(0); }} style={styles.backBtn}>← Back</button>
+                  <button onClick={() => { setError(""); setStep(1); }} style={styles.backBtn}>← Back</button>
                   <button
                     onClick={handleStep2}
                     style={{ ...styles.submitBtn, flex: 1 }}
@@ -402,10 +515,10 @@ function OnboardContent() {
             </>
           )}
 
-          {/* ── STEP 3: WhatsApp Activation ── */}
-          {step === 2 && (
+          {/* ── STEP 4: WhatsApp Activation ── */}
+          {step === 3 && (
             <>
-              <p style={styles.eyebrow}>Step 3: WhatsApp Activation</p>
+              <p style={styles.eyebrow}>Step 4: WhatsApp Activation</p>
               <h2 style={styles.formTitle}>Connect your WhatsApp</h2>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -460,7 +573,7 @@ function OnboardContent() {
                 {error && <ErrorBox msg={error} />}
 
                 <div style={{ display: "flex", gap: 12 }}>
-                  <button onClick={() => { setError(""); setStep(1); }} style={styles.backBtn}>← Back</button>
+                  <button onClick={() => { setError(""); setStep(2); }} style={styles.backBtn}>← Back</button>
                   <button
                     onClick={handleFinish}
                     disabled={loading}
@@ -479,6 +592,7 @@ function OnboardContent() {
             </>
           )}
         </div>
+
 
         <p style={{ position: "absolute", bottom: 24, fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
           By continuing you agree to our{" "}

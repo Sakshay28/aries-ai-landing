@@ -1,5 +1,6 @@
 import { Metadata } from 'next';
 import { AnalyticsClient } from './_components/AnalyticsClient';
+import { FeaturePageGate } from '../_layout/FeaturePageGate';
 
 export const metadata: Metadata = {
   title: 'Analytics | Aries AI',
@@ -8,8 +9,10 @@ export const metadata: Metadata = {
 
 export default function AnalyticsPage() {
   return (
-    <div className="h-[calc(100vh-3.5rem)]">
-      <AnalyticsClient />
-    </div>
+    <FeaturePageGate feature="Analytics" allowedPlans={['growth', 'pro', 'enterprise']}>
+      <div className="h-[calc(100vh-3.5rem)]">
+        <AnalyticsClient />
+      </div>
+    </FeaturePageGate>
   );
 }

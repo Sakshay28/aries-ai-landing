@@ -4,6 +4,7 @@ import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSidebar } from "./SidebarContext";
 import Image from "next/image";
+import Link from "next/link";
 
 export default function AppHeader() {
   const { toggleMobile } = useSidebar();
@@ -19,12 +20,12 @@ export default function AppHeader() {
       >
         <Menu className="h-5 w-5" />
       </Button>
-      <div className="flex items-center gap-2">
+      <Link href="/" className="flex items-center gap-2 hover:opacity-90 transition-opacity">
         <div className="flex h-7 w-7 items-center justify-center rounded bg-white overflow-hidden shadow-sm">
           <Image src="/logo.png" alt="Aries AI Logo" width={28} height={28} className="object-cover" />
         </div>
         <span className="text-sm font-bold tracking-tight text-foreground">Aries AI</span>
-      </div>
+      </Link>
     </header>
   );
 }

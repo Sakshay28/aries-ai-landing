@@ -1,5 +1,6 @@
 import { Metadata } from 'next';
 import { BroadcastClient } from './_components/BroadcastClient';
+import { FeaturePageGate } from '../_layout/FeaturePageGate';
 
 export const metadata: Metadata = {
   title: 'Broadcasts | Aries AI',
@@ -8,8 +9,10 @@ export const metadata: Metadata = {
 
 export default function BroadcastPage() {
   return (
-    <div className="h-[calc(100vh-3.5rem)]">
-      <BroadcastClient />
-    </div>
+    <FeaturePageGate feature="Broadcasts" allowedPlans={['growth', 'pro', 'enterprise']}>
+      <div className="h-[calc(100vh-3.5rem)]">
+        <BroadcastClient />
+      </div>
+    </FeaturePageGate>
   );
 }

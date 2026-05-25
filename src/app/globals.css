@@ -370,18 +370,199 @@
   background: var(--primary-dark);
 }
 
-/* ── Elegant Node Reveal Animation ── */
+/* ── React Flow: Handle + Edge + Node Overrides ───────────────────────────── */
+
+/*
+ * BASE HANDLE RESET
+ * Only override pointer-events (default is none!) and cursor.
+ * NO transform override here — React Flow uses transform:translate() for
+ * handle positioning and we must not clobber it.
+ * Color/size/border controlled entirely by .flow-handle classes below.
+ */
+.react-flow__handle {
+  pointer-events: all !important;
+  cursor: crosshair !important;
+  z-index: 100 !important;
+}
+
+/* Node overflow — handles live outside card bounds */
+.react-flow__node {
+  overflow: visible !important;
+}
+
+/* GPU compositing for the viewport transform (only 1 element) */
+.react-flow__viewport {
+  will-change: transform;
+}
+
+/* Promote dragging node to its own GPU layer during drag only.
+ * Applying will-change to ALL nodes would create 150+ compositing layers
+ * and exhaust GPU memory. Only the .dragging node gets it. */
+.react-flow__node.dragging {
+  will-change: transform;
+  z-index: 1000 !important;
+}
+
+/* Edge SVG layer — paint isolation without full compositing */
+.react-flow__edges {
+  contain: layout;
+}
+
+/* ── PREMIUM HANDLE SYSTEM (.flow-handle) ────────────────────────────────────
+ * Handles use CSS `scale` (Individual Transform property, CSS Level 5) for
+ * hover animation. `scale` composites ON TOP of the existing `transform`
+ * property — it does NOT replace it. This means React Flow's positioning
+ * transform: translate(-50%, -50%) etc. is preserved on hover.
+ * Supported: Chrome 104+, Firefox 110+, Safari 14.1+
+ * ─────────────────────────────────────────────────────────────────────────── */
+.flow-handle {
+  width: 14px !important;
+  height: 14px !important;
+  border-radius: 50% !important;
+  border: 2.5px solid rgba(255, 255, 255, 0.92) !important;
+  cursor: crosshair !important;
+  pointer-events: all !important;
+  z-index: 100 !important;
+  transition: scale 0.14s cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 0.14s ease !important;
+}
+
+.flow-handle--blue {
+  background: #3b82f6 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28) !important;
+}
+.flow-handle--green {
+  background: #10b981 !important;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.28) !important;
+}
+.flow-handle--red {
+  background: #ef4444 !important;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.28) !important;
+}
+.flow-handle--gray {
+  background: #94a3b8 !important;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.22) !important;
+}
+
+/* Hover: spring-pop using `scale` (Individual Transform — preserves translate) */
+.flow-handle:hover {
+  scale: 1.5 !important;
+}
+
+/* Valid connection target while dragging */
+.flow-handle.valid {
+  box-shadow: 0 0 0 7px rgba(16, 185, 129, 0.48) !important;
+  scale: 1.4 !important;
+}
+
+/* Source handle being dragged */
+.flow-handle.connectingfrom {
+  box-shadow: 0 0 0 6px rgba(99, 102, 241, 0.55) !important;
+}
+
+/* ── EDGES ───────────────────────────────────────────────────────────────── */
+
+.react-flow__edge-path {
+  stroke-width: 2px;
+  stroke: rgba(16, 185, 129, 0.6);
+  /* No transition on base — avoids per-frame style recalc during drag */
+}
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: rgba(16, 185, 129, 0.95);
+  stroke-width: 2.5px;
+  transition: stroke 0.12s ease, stroke-width 0.12s ease;
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #22c55e;
+  stroke-width: 3px;
+  filter: drop-shadow(0 0 5px rgba(34, 197, 94, 0.45));
+  transition: stroke 0.12s ease, stroke-width 0.12s ease;
+}
+
+/* Live connection line (while dragging from handle) */
+.react-flow__connection-path {
+  stroke: rgba(99, 102, 241, 0.9) !important;
+  stroke-width: 2px !important;
+  stroke-dasharray: 6 3 !important;
+}
+
+/* Edge label */
+.react-flow__edge-label {
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+}
+
+/* Selection rectangle */
+.react-flow__selection {
+  background: rgba(34, 197, 94, 0.04) !important;
+  border: 1px solid rgba(34, 197, 94, 0.22) !important;
+  border-radius: 4px !important;
+}
+
+/* Controls panel — dark glass */
+.react-flow__controls {
+  background: rgba(10, 12, 18, 0.92) !important;
+  border: 1px solid rgba(255, 255, 255, 0.07) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+  overflow: hidden;
+}
+.react-flow__controls-button {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+  fill: rgba(255, 255, 255, 0.5) !important;
+  width: 28px !important;
+  height: 28px !important;
+}
+.react-flow__controls-button:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+  fill: rgba(255, 255, 255, 0.85) !important;
+}
+.react-flow__controls-button:last-child {
+  border-bottom: none !important;
+}
+.react-flow__controls-button svg {
+  fill: inherit !important;
+}
+
+/* Minimap rounded corners clip */
+.react-flow__minimap {
+  border-radius: 16px !important;
+  overflow: hidden !important;
+}
+.react-flow__minimap-mask {
+  fill: rgba(6, 7, 10, 0.55) !important;
+}
+
+/* Attribution — hidden via proOptions but belt-and-suspenders */
+.react-flow__attribution {
+  display: none !important;
+}
+
+/* ── Node Reveal Animation ── */
 .react-flow__node > div {
-  animation: revealNode 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: revealNode 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes revealNode {
   0% {
     opacity: 0;
-    transform: scale(0.96) translateY(6px);
+    transform: scale(0.94) translateY(8px);
   }
   100% {
     opacity: 1;
     transform: scale(1) translateY(0);
   }
+}
+
+/* ── Panning cursor ── */
+.react-flow__pane {
+  cursor: default;
+}
+.react-flow__pane.dragging {
+  cursor: grabbing !important;
 }

@@ -6,6 +6,7 @@ import {
   Node,
   NodeChange,
   addEdge,
+  MarkerType,
   OnNodesChange,
   OnEdgesChange,
   OnConnect,
@@ -105,10 +106,19 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   },
 
   onNodesChange: (changes: NodeChange<AppNode>[]) => {
-    set({ isSaving: true });
-    set({ nodes: applyNodeChanges(changes, get().nodes) });
-    const selectedNode = get().nodes.find((n) => n.selected);
-    set({ selectedNodeId: selectedNode ? selectedNode.id : null });
+    // Single set() call — avoids two React renders per drag tick
+    set(state => {
+      const nodes = applyNodeChanges(changes, state.nodes);
+      // Only scan for selection changes when a select/remove event exists.
+      // Position changes fire 60x/sec during drag — skip the O(n) scan on those.
+      const hasSelectionEvent = changes.some(
+        c => c.type === 'select' || c.type === 'remove'
+      );
+      const selectedNodeId = hasSelectionEvent
+        ? (nodes.find(n => n.selected)?.id ?? null)
+        : state.selectedNodeId;
+      return { nodes, selectedNodeId, isSaving: true };
+    });
     // Debounced auto-save — only if we have a flowId already
     if (_saveTimer) clearTimeout(_saveTimer);
     _saveTimer = setTimeout(() => {
@@ -129,29 +139,51 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   
   onConnect: (connection: Connection) => {
     get().saveHistory();
-    let color = "rgba(16,185,129,0.5)"; // Green (success default)
-    if (connection.sourceHandle === 'error' || connection.sourceHandle === 'missing' || connection.sourceHandle === 'fallback') {
-      color = "rgba(239,68,68,0.5)"; // Red
-    } else if (connection.sourceHandle === 'true' || connection.sourceHandle === 'false') {
-      color = "rgba(245,158,11,0.5)"; // Yellow
-    }
-    
-    // Check if source node is Memory or Knowledge (purple data flow)
-    const sourceNode = get().nodes.find(n => n.id === connection.source);
-    if (sourceNode?.type === 'memory' || sourceNode?.type === 'knowledge') {
-      color = "rgba(168,85,247,0.5)"; // Purple
+
+    // Color-code by semantic handle
+    let color = "rgba(16,185,129,0.75)"; // green — success / next
+    const h = connection.sourceHandle;
+    if (h === 'error' || h === 'failed' || h === 'missing' || h === 'fallback' || h === 'false' || h === 'timeout') {
+      color = "rgba(239,68,68,0.75)"; // red — failure / false
+    } else if (h === 'true') {
+      color = "rgba(16,185,129,0.75)"; // green — true
     }
 
-    const edge = { 
-      ...connection, 
-      type: 'smoothstep', 
-      animated: true, 
-      style: { stroke: color, strokeWidth: 2 },
-      label: connection.sourceHandle ? connection.sourceHandle.toUpperCase() : undefined,
-      labelBgStyle: { fill: '#111', color: '#fff', fillOpacity: 0.8 },
-      labelStyle: { fill: '#fff', fontWeight: 600, fontSize: 10, letterSpacing: 1 },
+    // Purple for data-flow nodes
+    const sourceNode = get().nodes.find(n => n.id === connection.source);
+    if (sourceNode?.type === 'memory' || sourceNode?.type === 'knowledge') {
+      color = "rgba(168,85,247,0.75)";
+    }
+
+    // Label for multi-output handles (keep it short)
+    const labelMap: Record<string, string> = {
+      success: 'yes', error: 'no', fallback: 'fallback',
+      true: 'true', false: 'false', missing: 'missing',
+      timeout: 'timeout', found: 'found', assigned: 'assigned',
     };
-    
+    const label = h && labelMap[h] ? labelMap[h] : undefined;
+
+    const edge: Edge = {
+      ...connection,
+      id: `e-${connection.source}-${connection.target}-${h ?? 'default'}-${Date.now()}`,
+      type: 'smoothstep',
+      animated: false,
+      style: { stroke: color, strokeWidth: 2 },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 14,
+        height: 14,
+        color,
+      },
+      ...(label ? {
+        label,
+        labelBgStyle: { fill: 'rgba(10,12,18,0.9)', fillOpacity: 1 },
+        labelStyle: { fill: color, fontWeight: 700, fontSize: 9, letterSpacing: '0.07em', textTransform: 'uppercase' },
+        labelBgPadding: [5, 3] as [number, number],
+        labelBgBorderRadius: 4,
+      } : {}),
+    };
+
     set({ edges: addEdge(edge, get().edges) });
   },
   
@@ -163,15 +195,20 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   },
 
   updateNodeData: (id: string, data: any) => {
-    get().saveHistory();
-    set({
-      nodes: get().nodes.map((node) => {
-        if (node.id === id) {
-          return { ...node, data: { ...node.data, ...data } };
-        }
-        return node;
-      }),
-    });
+    // No saveHistory() here — calling it on every keystroke clones ALL node/edge
+    // arrays and triggers a full Zustand rerender storm. Structural history
+    // (add/connect/delete) is saved at those action sites instead.
+    set(state => ({
+      nodes: state.nodes.map(n =>
+        n.id === id ? { ...n, data: { ...n.data, ...data } } : n
+      ),
+    }));
+    // Debounced autosave
+    if (_saveTimer) clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(() => {
+      const { flowId, saveFlow } = get();
+      if (flowId) saveFlow().catch(console.error);
+    }, 2000);
   },
 
   setSelectedNodeId: (id: string | null) => {

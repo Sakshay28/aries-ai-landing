@@ -1,464 +1,490 @@
 "use client";
 
-import { useState } from "react";
-import { Sparkles, MessageSquare, CornerDownRight, Zap, SplitSquareVertical, Webhook, Trash2, Copy, Plus, Clock, UserIcon, BookOpen, CircleStop, Database, PlayCircle, Braces, Paintbrush, Hourglass, FileText, Pen, HelpCircle, ListChecks } from "lucide-react";
+import React from "react";
+import { Handle, Position } from "@xyflow/react";
+import {
+  Sparkles, MessageSquare, SplitSquareVertical, Webhook,
+  Clock, UserCheck, BookOpen, XCircle, Database,
+  PlayCircle, Code2, Paintbrush, Hourglass, FileText,
+  ListChecks, Zap, MoreVertical,
+} from "lucide-react";
 import { useFlowStore } from "../store";
 
-export enum Position {
-  Left = 'left',
-  Top = 'top',
-  Right = 'right',
-  Bottom = 'bottom',
-}
+export { Position };
 
-export function Handle({ type, id, style, className }: { 
-  type: 'source' | 'target', 
-  position?: Position, 
-  id?: string, 
-  style?: React.CSSProperties, 
-  className?: string 
-}) {
-  const isTarget = type === 'target';
+// ─── NODE CATEGORY (used by FlowCanvas minimap) ───────────────────────────────
+export const NODE_CATEGORY: Record<string, { color: string; label: string }> = {
+  trigger:       { color: '#3B82F6', label: 'TRIGGER' },
+  standard:      { color: '#10B981', label: 'MESSAGE' },
+  condition:     { color: '#F59E0B', label: 'CONDITION' },
+  interruption:  { color: '#8B5CF6', label: 'AI REPLY' },
+  delay:         { color: '#6366F1', label: 'DELAY' },
+  handoff:       { color: '#EC4899', label: 'HANDOFF' },
+  webhook:       { color: '#06B6D4', label: 'WEBHOOK' },
+  knowledge:     { color: '#A855F7', label: 'KNOWLEDGE' },
+  end:           { color: '#EF4444', label: 'END' },
+  extract:       { color: '#14B8A6', label: 'EXTRACT' },
+  format:        { color: '#0EA5E9', label: 'FORMAT' },
+  memory:        { color: '#8B5CF6', label: 'MEMORY' },
+  wait:          { color: '#64748B', label: 'WAIT' },
+  resume:        { color: '#22C55E', label: 'RESUME' },
+  resume_parser: { color: '#10B981', label: 'PARSER' },
+  collect_data:  { color: '#F59E0B', label: 'COLLECT' },
+};
+
+// ─── DELETE BUTTON ────────────────────────────────────────────────────────────
+function DeleteBtn({ id }: { id: string }) {
   return (
-    <div 
-      className={`node-handle absolute w-3 h-3 bg-[#111] border-2 border-white/20 hover:border-[#06B6D4] hover:bg-[#06B6D4]/20 hover:scale-125 transition-all duration-300 rounded-full z-50 shadow-sm cursor-crosshair ${className || ''}`}
-      style={{
-        top: isTarget ? '-6px' : 'auto',
-        bottom: !isTarget ? '-6px' : 'auto',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        ...style
+    <button
+      className="nodrag nopan"
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        const { nodes, edges, saveHistory } = useFlowStore.getState();
+        saveHistory();
+        useFlowStore.setState({
+          nodes: nodes.filter((n) => n.id !== id),
+          edges: edges.filter((ed) => ed.source !== id && ed.target !== id),
+          selectedNodeId: null,
+        });
       }}
-      data-handle-type={type}
-      data-handle-id={id || null}
-    />
+      title="Delete"
+      style={{
+        background: "rgba(255,255,255,0.18)",
+        border: "none",
+        borderRadius: 6,
+        width: 26,
+        height: 26,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        color: "white",
+        flexShrink: 0,
+        outline: "none",
+      }}
+    >
+      <MoreVertical size={12} />
+    </button>
   );
 }
 
-const targetHandleStyle = "";
-const sourceHandleStyle = "";
+// ─── CARD (visual shell only — no handles inside) ────────────────────────────
+// Handles are placed OUTSIDE this component, as siblings at the node root level.
+interface CardProps {
+  id: string;
+  selected?: boolean;
+  color: string;
+  Icon: React.ElementType;
+  title: string;
+  children?: React.ReactNode;
+  footer?: React.ReactNode;
+}
 
-function NodeActions({ id }: { id: string }) {
-  const onDelete = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const { nodes, edges, saveHistory } = useFlowStore.getState();
-    saveHistory();
-    useFlowStore.setState({
-      nodes: nodes.filter((n) => n.id !== id),
-      edges: edges.filter((e) => e.source !== id && e.target !== id),
-      selectedNodeId: null
-    });
-  };
-
-  const onEdit = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    useFlowStore.getState().setSelectedNodeId(id);
-  };
-
-  const onDuplicate = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const { nodes, saveHistory } = useFlowStore.getState();
-    const nodeToDuplicate = nodes.find(n => n.id === id);
-    if (nodeToDuplicate) {
-      saveHistory();
-      const newId = `node_${Math.random().toString(36).substr(2, 9)}`;
-      const nodeX = nodeToDuplicate.x ?? nodeToDuplicate.position?.x ?? 0;
-      const nodeY = nodeToDuplicate.y ?? nodeToDuplicate.position?.y ?? 0;
-      const newNode = {
-        ...nodeToDuplicate,
-        id: newId,
-        x: nodeX + 40,
-        y: nodeY + 40,
-        position: { x: nodeX + 40, y: nodeY + 40 },
-        selected: false
-      };
-      useFlowStore.setState({
-        nodes: [...nodes, newNode],
-        selectedNodeId: newId
-      });
-    }
-  };
-
+function Card({ id, selected, color, Icon, title, children, footer }: CardProps) {
+  const hasBody = Boolean(children);
+  const hasFooter = Boolean(footer);
   return (
-    <div className="absolute -top-10 left-0 right-0 flex justify-center z-50 pointer-events-auto">
-      <div className="flex items-center gap-1 bg-[#1A1A1A] border border-white/10 p-1 rounded-md shadow-xl opacity-0 group-hover:opacity-100 transition-opacity">
-        <button onClick={onEdit} className="p-1.5 hover:bg-white/10 rounded text-white/50 hover:text-white transition-colors" title="Edit">
-          <Pen className="w-3 h-3" />
-        </button>
-        <button onClick={onDuplicate} className="p-1.5 hover:bg-white/10 rounded text-white/50 hover:text-white transition-colors" title="Duplicate">
-          <Copy className="w-3 h-3" />
-        </button>
-        <button onClick={onDelete} className="p-1.5 hover:bg-red-500/20 rounded text-white/50 hover:text-red-400 transition-colors" title="Delete">
-          <Trash2 className="w-3 h-3" />
-        </button>
+    <div
+      style={{
+        borderRadius: 14,
+        border: selected ? `2px solid ${color}` : "1.5px solid #e2e8f0",
+        boxShadow: selected
+          ? `0 0 0 4px ${color}18, 0 8px 28px rgba(0,0,0,0.2)`
+          : "0 2px 10px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.04)",
+        overflow: "hidden",
+        fontFamily: "system-ui, -apple-system, sans-serif",
+        transition: "box-shadow 0.15s ease, border-color 0.15s ease",
+        background: "#fff",
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          background: color,
+          height: 44,
+          display: "flex",
+          alignItems: "center",
+          gap: 9,
+          padding: "0 10px 0 12px",
+        }}
+      >
+        <div
+          style={{
+            width: 27,
+            height: 27,
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.22)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          <Icon size={14} color="white" />
+        </div>
+        <span
+          style={{
+            color: "white",
+            fontWeight: 600,
+            fontSize: 13,
+            flex: 1,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {title}
+        </span>
+        <DeleteBtn id={id} />
       </div>
+
+      {/* Body */}
+      {hasBody && (
+        <div
+          style={{
+            padding: "10px 14px",
+            background: "#fff",
+            borderBottom: hasFooter ? "1px solid #f1f5f9" : undefined,
+          }}
+        >
+          {children}
+        </div>
+      )}
+
+      {/* Footer (output labels) */}
+      {hasFooter && (
+        <div style={{ background: "#fafafa", padding: "6px 14px 8px" }}>
+          {footer}
+        </div>
+      )}
     </div>
   );
 }
 
-export function StandardNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
-  const isValid = !!data.content;
-  const borderClass = isValid 
-    ? (selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02] shadow-xl' : 'border border-white/5')
-    : 'border border-red-500/40 shadow-[0_0_15px_rgba(239,68,68,0.1)]';
+// ─── BODY HELPERS ─────────────────────────────────────────────────────────────
 
+function Preview({ text }: { text: string }) {
   return (
-    <div className={`w-[280px] rounded-[16px] bg-[#0A0A0A] shadow-2xl overflow-visible relative group transition-all duration-300 ${borderClass}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={targetHandleStyle} />
-      
-      {/* Documentation Tooltip & Status Badge */}
-      <div className="absolute -top-3 right-3 flex items-center gap-1.5">
-        {!isValid && (
-          <div className="bg-red-500/20 text-red-400 border border-red-500/30 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-widest backdrop-blur-md">
-            Error
+    <p
+      style={{
+        margin: 0,
+        fontSize: 12.5,
+        color: "#475569",
+        lineHeight: 1.5,
+        overflow: "hidden",
+        display: "-webkit-box",
+        WebkitLineClamp: 2,
+        WebkitBoxOrient: "vertical",
+      }}
+    >
+      {text}
+    </p>
+  );
+}
+
+function Badge({ label, color }: { label: string; color: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "3px 9px",
+        borderRadius: 7,
+        background: `${color}12`,
+        border: `1px solid ${color}30`,
+        fontSize: 11,
+        fontWeight: 600,
+        color,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function KV({ k, v }: { k: string; v: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <span style={{ fontSize: 11, color: "#94a3b8" }}>{k}</span>
+      <span style={{ fontSize: 11.5, fontWeight: 500, color: "#334155" }}>{v}</span>
+    </div>
+  );
+}
+
+function OutLabels({ items }: { items: Array<{ label: string; color: string; dir: string }> }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 4 }}>
+      {items.map((it, i) => (
+        <span key={i} style={{ fontSize: 10, fontWeight: 700, color: it.color, letterSpacing: "0.04em" }}>
+          {it.label} {it.dir}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ─── NODE ROOT WRAPPER ────────────────────────────────────────────────────────
+// ARCHITECTURE: All Handle components are direct children of this wrapper.
+// This is critical so React Flow's getHandleBounds() can find them at the
+// correct DOM level. No Handle is ever nested inside a position:relative child.
+function Root({ width, children }: { width: number; children: React.ReactNode }) {
+  return (
+    <div style={{ position: "relative", width }}>
+      {children}
+    </div>
+  );
+}
+
+// ─── NODE COMPONENTS ──────────────────────────────────────────────────────────
+// Handle className pattern: "flow-handle flow-handle--{color}"
+// No inline style on Handle — React Flow's own CSS handles positioning.
+// isConnectable is explicitly true on every Handle.
+
+export const TriggerNode = React.memo(function TriggerNode({ id, data, selected }: any) {
+  return (
+    <Root width={248}>
+      {/* Trigger: no input. Single output at bottom. */}
+      <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
+      <Card id={id} selected={selected} color="#3B82F6" Icon={PlayCircle} title={data.label || "Message Trigger"}>
+        <Badge label={data.triggerType || "Any Message"} color="#3B82F6" />
+        {data.keywords && (
+          <div style={{ marginTop: 7, display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {String(data.keywords).split(",").filter(Boolean).slice(0, 4).map((k: string, i: number) => (
+              <span key={i} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 99, background: "rgba(59,130,246,0.08)", color: "#3b82f6", border: "1px solid rgba(59,130,246,0.18)" }}>
+                {k.trim()}
+              </span>
+            ))}
           </div>
         )}
-        <div className="bg-[#111] border border-white/10 text-white/50 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-widest">
-          Active
-        </div>
-        <div className="group/tooltip relative">
-          <HelpCircle className="w-3 h-3 text-white/20 hover:text-white/60 cursor-help transition-colors" />
-          <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 p-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-[11px] text-white/70 opacity-0 group-hover/tooltip:opacity-100 transition-opacity pointer-events-none z-50">
-            Sends a static text message to the user.
-          </div>
-        </div>
-      </div>
-
-      <div className="px-4 py-4">
-        <div className="flex items-center gap-2 mb-2">
-          <MessageSquare className="w-3.5 h-3.5 text-white/40" />
-          <div className="font-semibold text-[11px] uppercase tracking-widest text-white/50">{data.label}</div>
-        </div>
-        <div className="text-[13px] text-white/90 leading-relaxed font-medium tracking-tight">
-          {data.content || <span className="text-red-400/50 italic">Missing content</span>}
-        </div>
-      </div>
-
-      <Handle type="source" position={Position.Bottom} className={sourceHandleStyle} />
-      
-      {/* First-time helper text */}
-      <div className="absolute -bottom-7 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-700 delay-500 text-[9px] uppercase tracking-widest font-bold text-white/30 pointer-events-none whitespace-nowrap">
-        Drag to connect
-      </div>
-    </div>
+      </Card>
+    </Root>
   );
-}
+});
 
-export function AIInterruptionNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+export const StandardNode = React.memo(function StandardNode({ id, data, selected }: any) {
   return (
-    <div className={`w-[340px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
-      
-      <div className="px-5 py-4 relative z-10">
-        <div className="flex items-center gap-2 mb-4">
-          <Sparkles className="w-4 h-4 text-white/50" />
-          <div className="flex-1">
-            <div className="font-semibold text-[13px] text-white/90 tracking-tight">{data.label}</div>
-            <div className="flex justify-between items-center mt-0.5">
-              <span className="text-[9px] font-medium text-white/40 uppercase tracking-widest">Handled by AI</span>
-              <span className="text-[9px] font-bold text-red-400/80 uppercase tracking-widest">Fallback &lt; {data.threshold || "70"}%</span>
-            </div>
-          </div>
-        </div>
-        
-        <div className="space-y-4">
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-white/30 mb-1.5 font-semibold">User Query</div>
-            <div className="bg-[#030303] rounded-lg p-2.5 border border-white/5 text-[12px] text-white/50 italic relative">
-              "{data.userQuery}"
-            </div>
-          </div>
-          
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-white/30 mb-1.5 font-semibold flex items-center gap-1.5">
-              <CornerDownRight className="w-3 h-3" /> Auto-Response
-            </div>
-            <div className="bg-white/5 rounded-lg p-2.5 border border-white/10 text-[12px] text-white/70 leading-relaxed relative overflow-hidden">
-              {data.aiResponse}
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      <Handle type="source" position={Position.Bottom} id="success" className={`${sourceHandleStyle} !bg-[#0A0A0A]`} style={{ left: '25%' }} />
-      <Handle type="source" position={Position.Bottom} id="fallback" className={`${sourceHandleStyle} !border-red-500/40 !bg-[#0A0A0A]`} style={{ left: '75%' }} />
-    </div>
+    <Root width={256}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
+      <Card id={id} selected={selected} color="#10B981" Icon={MessageSquare} title={data.label || "Send Message"}>
+        {data.content && <Preview text={String(data.content).slice(0, 100)} />}
+      </Card>
+    </Root>
   );
-}
+});
 
-export function ResumeNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+export const AIInterruptionNode = React.memo(function AIInterruptionNode({ id, data, selected }: any) {
   return (
-    <div className={`w-[240px] flex items-center gap-3 p-3 transition-all duration-300 relative group ${selected ? 'opacity-100 scale-[1.02]' : 'opacity-60'}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
-      
-      <div className="w-6 h-6 rounded-full bg-white/5 flex items-center justify-center flex-shrink-0 border border-white/10">
-        <Zap className="w-3 h-3 text-white/40" />
-      </div>
-      <div>
-        <div className="text-[12px] font-medium text-white/80">{data.label || "Return to Flow"}</div>
-        <div className="text-[10px] text-white/40">Resumes main path</div>
-      </div>
-
-      <Handle type="source" position={Position.Bottom} className={`${sourceHandleStyle}`} />
-
-    </div>
+    <Root width={264}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="source" position={Position.Right} id="success" isConnectable className="flow-handle flow-handle--green" />
+      <Handle type="source" position={Position.Bottom} id="fallback" isConnectable className="flow-handle flow-handle--red" />
+      <Card id={id} selected={selected} color="#8B5CF6" Icon={Sparkles} title={data.label || "AI Reply"}
+        footer={<OutLabels items={[{ label: "ANSWERED", color: "#10b981", dir: "→" }, { label: "FALLBACK", color: "#ef4444", dir: "↓" }]} />}
+      >
+        {data.userQuery && <Preview text={`"${data.userQuery}"`} />}
+      </Card>
+    </Root>
   );
-}
+});
 
-export function LogicNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+export const ResumeNode = React.memo(function ResumeNode({ id, data, selected }: any) {
   return (
-    <div className={`w-[260px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
-      
-      <div className="px-4 py-4">
-        <div className="flex items-center gap-2 mb-2">
-          <SplitSquareVertical className="w-3.5 h-3.5 text-white/50" />
-          <div className="font-semibold text-[11px] uppercase tracking-widest text-white/80">Logic Branch</div>
-        </div>
-        <div className="p-2 rounded bg-white/5 border border-white/10 flex flex-col gap-1">
-          <div className="text-[9px] text-white/40 uppercase tracking-widest font-bold">Condition</div>
-          <div className="text-[12px] text-white/90 font-medium tracking-tight font-mono">
-            {data.field || "intent"} <span className="text-white/60">{data.operator || "=="}</span> "{data.value || "buy_plan"}"
+    <Root width={220}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
+      <Card id={id} selected={selected} color="#22C55E" Icon={Zap} title={data.label || "Resume Flow"} />
+    </Root>
+  );
+});
+
+export const LogicNode = React.memo(function LogicNode({ id, data, selected }: any) {
+  return (
+    <Root width={256}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="source" position={Position.Right} id="true" isConnectable className="flow-handle flow-handle--green" />
+      <Handle type="source" position={Position.Bottom} id="false" isConnectable className="flow-handle flow-handle--red" />
+      <Card id={id} selected={selected} color="#F59E0B" Icon={SplitSquareVertical} title={data.label || "Condition"}
+        footer={<OutLabels items={[{ label: "TRUE", color: "#10b981", dir: "→" }, { label: "FALSE", color: "#ef4444", dir: "↓" }]} />}
+      >
+        {(data.field || data.value) && (
+          <div style={{ fontFamily: "monospace", fontSize: 12, color: "#334155", background: "#f8fafc", borderRadius: 8, padding: "6px 10px", border: "1px solid #e2e8f0" }}>
+            <span style={{ color: "#d97706" }}>{data.field || "intent"}</span>
+            <span style={{ color: "#94a3b8", margin: "0 6px" }}>{data.operator || "=="}</span>
+            <span style={{ color: "#059669" }}>"{data.value || "value"}"</span>
           </div>
-        </div>
-      </div>
-
-      <Handle type="source" position={Position.Bottom} id="true" className={`${sourceHandleStyle} !bg-[#0A0A0A]`} style={{ left: '25%' }} />
-      <Handle type="source" position={Position.Bottom} id="false" className={`${sourceHandleStyle} !border-red-500/40 !bg-[#0A0A0A]`} style={{ left: '75%' }} />
-    </div>
+        )}
+      </Card>
+    </Root>
   );
-}
+});
 
-export function WebhookNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+export const WebhookNode = React.memo(function WebhookNode({ id, data, selected }: any) {
   return (
-    <div className={`w-[260px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
-      
-      <div className="px-4 py-4">
-        <div className="flex items-center gap-2 mb-2">
-          <Webhook className="w-3.5 h-3.5 text-white/50" />
-          <div className="font-semibold text-[11px] uppercase tracking-widest text-white/80">API Request</div>
-        </div>
-        <div className="flex items-center gap-2 mt-2">
-          <span className="px-1.5 py-0.5 rounded bg-white/5 text-white/60 text-[10px] font-bold tracking-widest uppercase border border-white/10">
-            {data.method || "POST"}
+    <Root width={264}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="source" position={Position.Right} id="success" isConnectable className="flow-handle flow-handle--green" />
+      <Handle type="source" position={Position.Bottom} id="error" isConnectable className="flow-handle flow-handle--red" />
+      <Card id={id} selected={selected} color="#06B6D4" Icon={Webhook} title={data.label || "API Request"}
+        footer={<OutLabels items={[{ label: "200 OK", color: "#10b981", dir: "→" }, { label: "ERROR", color: "#ef4444", dir: "↓" }]} />}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <Badge label={data.method || "POST"} color="#06b6d4" />
+          <span style={{ fontSize: 11, color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+            {data.url || "https://api.example.com"}
           </span>
-          <span className="text-[12px] text-white/60 truncate">{data.url || "https://api.example.com"}</span>
         </div>
-      </div>
-
-      <Handle type="source" position={Position.Bottom} id="success" className={`${sourceHandleStyle} !bg-[#0A0A0A]`} style={{ left: '30%' }} />
-      <Handle type="source" position={Position.Bottom} id="error" className={`${sourceHandleStyle} !border-red-500/40 !bg-[#0A0A0A]`} style={{ left: '70%' }} />
-
-    </div>
+      </Card>
+    </Root>
   );
-}
+});
 
-// --- NEW NODES ---
-
-export function DelayNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+export const DelayNode = React.memo(function DelayNode({ id, data, selected }: any) {
   return (
-    <div className={`w-[200px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
-      <div className="px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Clock className="w-3.5 h-3.5 text-white/50" />
-          <div className="font-semibold text-[11px] uppercase tracking-widest text-white/80">Delay</div>
-        </div>
-        <div className="text-[12px] text-white/90 font-medium">{data.duration || "2"}s</div>
-      </div>
-      <Handle type="source" position={Position.Bottom} className={`${sourceHandleStyle}`} />
-
-    </div>
+    <Root width={220}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
+      <Card id={id} selected={selected} color="#6366F1" Icon={Clock} title="Time Delay">
+        <Badge label={`Wait ${data.duration || "2"}s`} color="#6366F1" />
+      </Card>
+    </Root>
   );
-}
+});
 
-export function HandoffNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+export const HandoffNode = React.memo(function HandoffNode({ id, data, selected }: any) {
   return (
-    <div className={`w-[240px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
-      <div className="px-4 py-4">
-        <div className="flex items-center gap-2 mb-1">
-          <UserIcon className="w-3.5 h-3.5 text-white/50" />
-          <div className="font-semibold text-[11px] uppercase tracking-widest text-white/80">Human Handoff</div>
-        </div>
-        <div className="text-[12px] text-white/50">{data.team || "Support Team"}</div>
-      </div>
-      {/* No source handle, this is an end point usually, or maybe it just pauses */}
-      <Handle type="source" position={Position.Bottom} className={`${sourceHandleStyle}`} />
-    </div>
+    <Root width={240}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
+      <Card id={id} selected={selected} color="#EC4899" Icon={UserCheck} title={data.label || "Human Handoff"}>
+        <KV k="Assign to" v={data.team || "Support Team"} />
+      </Card>
+    </Root>
   );
-}
+});
 
-export function KnowledgeNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+export const KnowledgeNode = React.memo(function KnowledgeNode({ id, data, selected }: any) {
   return (
-    <div className={`w-[260px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
-      <div className="px-4 py-4">
-        <div className="flex items-center gap-2 mb-2">
-          <BookOpen className="w-3.5 h-3.5 text-white/50" />
-          <div className="font-semibold text-[11px] uppercase tracking-widest text-white/80">AI Knowledge</div>
-        </div>
-        <div className="p-2 rounded bg-white/5 border border-white/10 text-[12px] text-white/80">
-          Source: <span className="font-semibold text-white/90">{data.source || "Help Center"}</span>
-        </div>
-      </div>
-      <Handle type="source" position={Position.Bottom} className={`${sourceHandleStyle}`} />
-
-    </div>
+    <Root width={256}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="source" position={Position.Right} id="success" isConnectable className="flow-handle flow-handle--green" />
+      <Handle type="source" position={Position.Bottom} id="missing" isConnectable className="flow-handle flow-handle--gray" />
+      <Card id={id} selected={selected} color="#A855F7" Icon={BookOpen} title={data.label || "Knowledge Base"}
+        footer={<OutLabels items={[{ label: "FOUND", color: "#10b981", dir: "→" }, { label: "NOT FOUND", color: "#94a3b8", dir: "↓" }]} />}
+      >
+        <KV k="Source" v={data.source || "Help Center"} />
+      </Card>
+    </Root>
   );
-}
+});
 
-export function EndNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+export const EndNode = React.memo(function EndNode({ id, data, selected }: any) {
   return (
-    <div className={`w-[200px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
-      <div className="px-4 py-3 flex items-center justify-center gap-2">
-        <CircleStop className="w-3.5 h-3.5 text-white/40" />
-        <div className="font-semibold text-[11px] uppercase tracking-widest text-white/60">End Flow</div>
-      </div>
-    </div>
+    <Root width={200}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      {/* No source handle — flow ends here */}
+      <Card id={id} selected={selected} color="#EF4444" Icon={XCircle} title={data.label || "End Flow"} />
+    </Root>
   );
-}
+});
 
-export function TriggerNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+export const ExtractNode = React.memo(function ExtractNode({ id, data, selected }: any) {
+  const entities: string[] = data.entities || ["name", "email"];
   return (
-    <div className={`w-[220px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
-      <NodeActions id={id} />
-      <div className="px-4 py-4">
-        <div className="flex items-center gap-2 mb-2">
-          <PlayCircle className="w-4 h-4 text-[#06B6D4]" />
-          <div className="font-semibold text-[11px] uppercase tracking-widest text-white/80">Message Trigger</div>
-        </div>
-        <div className="text-[12px] text-white/60">Starts when: <span className="text-white/90 font-medium">{data.triggerType || "Webhook"}</span></div>
-      </div>
-      <Handle type="source" position={Position.Bottom} className={`${sourceHandleStyle}`} />
-    </div>
-  );
-}
-
-export function ExtractNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
-  return (
-    <div className={`w-[220px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
-      <div className="px-4 py-4">
-        <div className="flex items-center gap-2 mb-2">
-          <Braces className="w-3.5 h-3.5 text-white/50" />
-          <div className="font-semibold text-[11px] uppercase tracking-widest text-white/80">Extract Entities</div>
-        </div>
-        <div className="flex gap-1 flex-wrap">
-          {(data.entities || ["name", "email"]).map((e: string) => (
-            <span key={e} className="px-1.5 py-0.5 rounded bg-white/5 text-white/60 text-[10px] uppercase tracking-wider">{e}</span>
+    <Root width={256}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="source" position={Position.Right} id="success" isConnectable className="flow-handle flow-handle--green" />
+      <Handle type="source" position={Position.Bottom} id="missing" isConnectable className="flow-handle flow-handle--gray" />
+      <Card id={id} selected={selected} color="#14B8A6" Icon={Code2} title={data.label || "Extract Entities"}
+        footer={<OutLabels items={[{ label: "EXTRACTED", color: "#10b981", dir: "→" }, { label: "MISSING", color: "#94a3b8", dir: "↓" }]} />}
+      >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {entities.slice(0, 5).map((e: string) => (
+            <span key={e} style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 99, background: "rgba(20,184,166,0.1)", color: "#0d9488", border: "1px solid rgba(20,184,166,0.22)" }}>
+              {e}
+            </span>
           ))}
+          {entities.length > 5 && <span style={{ fontSize: 10, color: "#94a3b8" }}>+{entities.length - 5}</span>}
         </div>
-      </div>
-      <Handle type="source" position={Position.Bottom} id="success" className={`${sourceHandleStyle} !bg-[#0A0A0A]`} style={{ left: '30%' }} />
-      <Handle type="source" position={Position.Bottom} id="missing" className={`${sourceHandleStyle} !border-red-500/40 !bg-[#0A0A0A]`} style={{ left: '70%' }} />
-    </div>
+      </Card>
+    </Root>
   );
-}
+});
 
-export function FormatNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+export const FormatNode = React.memo(function FormatNode({ id, data, selected }: any) {
   return (
-    <div className={`w-[220px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
-      <div className="px-4 py-4">
-        <div className="flex items-center gap-2 mb-1">
-          <Paintbrush className="w-3.5 h-3.5 text-white/50" />
-          <div className="font-semibold text-[11px] uppercase tracking-widest text-white/80">Format Response</div>
-        </div>
-        <div className="text-[12px] text-white/50">{data.formatType || "Clean & Add Buttons"}</div>
-      </div>
-      <Handle type="source" position={Position.Bottom} className={`${sourceHandleStyle}`} />
-    </div>
+    <Root width={240}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
+      <Card id={id} selected={selected} color="#0EA5E9" Icon={Paintbrush} title={data.label || "Format Response"}>
+        <Badge label={data.formatType || "Quick Replies"} color="#0ea5e9" />
+      </Card>
+    </Root>
   );
-}
+});
 
-export function MemoryNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+export const MemoryNode = React.memo(function MemoryNode({ id, data, selected }: any) {
   return (
-    <div className={`w-[220px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
-      <div className="px-4 py-4">
-        <div className="flex items-center gap-2 mb-1">
-          <Database className="w-3.5 h-3.5 text-white/50" />
-          <div className="font-semibold text-[11px] uppercase tracking-widest text-white/80">Context Memory</div>
-        </div>
-        <div className="text-[12px] text-white/50">Save to: <span className="text-white/80">{data.scope || "Session"}</span></div>
-      </div>
-      <Handle type="source" position={Position.Bottom} className={`${sourceHandleStyle}`} />
-    </div>
+    <Root width={240}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
+      <Card id={id} selected={selected} color="#8B5CF6" Icon={Database} title={data.label || "Context Memory"}>
+        <KV k="Scope" v={data.scope || "User Session"} />
+      </Card>
+    </Root>
   );
-}
+});
 
-export function WaitNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+export const WaitNode = React.memo(function WaitNode({ id, data, selected }: any) {
   return (
-    <div className={`w-[220px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
-      <div className="px-4 py-4">
-        <div className="flex items-center gap-2 mb-1">
-          <Hourglass className="w-3.5 h-3.5 text-white/50" />
-          <div className="font-semibold text-[11px] uppercase tracking-widest text-white/80">Wait for Event</div>
-        </div>
-        <div className="text-[12px] text-white/50">Halts execution until: <br/><span className="text-white/80 font-medium mt-1 inline-block">{data.event || "User Reply"}</span></div>
-      </div>
-      <Handle type="source" position={Position.Bottom} className={`${sourceHandleStyle}`} />
-    </div>
+    <Root width={240}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="source" position={Position.Right} id="next" isConnectable className="flow-handle flow-handle--green" />
+      <Handle type="source" position={Position.Bottom} id="timeout" isConnectable className="flow-handle flow-handle--gray" />
+      <Card id={id} selected={selected} color="#64748B" Icon={Hourglass} title={data.label || "Wait for Reply"}
+        footer={<OutLabels items={[{ label: "RECEIVED", color: "#10b981", dir: "→" }, { label: "TIMEOUT", color: "#94a3b8", dir: "↓" }]} />}
+      >
+        <KV k="Waiting for" v={data.event || "User Reply"} />
+      </Card>
+    </Root>
   );
-}
+});
 
-export function ResumeParserNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+export const ResumeParserNode = React.memo(function ResumeParserNode({ id, data, selected }: any) {
   return (
-    <div className={`w-[220px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
-      <div className="px-4 py-4">
-        <div className="flex items-center gap-2 mb-1">
-          <FileText className="w-3.5 h-3.5 text-white/50" />
-          <div className="font-semibold text-[11px] uppercase tracking-widest text-white/80">Parse Resume PDF</div>
-        </div>
-        <div className="text-[12px] text-white/50">Extracts: <span className="text-white/80">{data.extracts || "Skills, Experience"}</span></div>
-      </div>
-      
-      <Handle type="source" position={Position.Bottom} id="success" className={`${sourceHandleStyle} !bg-[#0A0A0A]`} style={{ left: '30%' }} />
-      <Handle type="source" position={Position.Bottom} id="error" className={`${sourceHandleStyle} !border-red-500/40 !bg-[#0A0A0A]`} style={{ left: '70%' }} />
-    </div>
+    <Root width={248}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="source" position={Position.Right} id="success" isConnectable className="flow-handle flow-handle--green" />
+      <Handle type="source" position={Position.Bottom} id="error" isConnectable className="flow-handle flow-handle--red" />
+      <Card id={id} selected={selected} color="#10B981" Icon={FileText} title={data.label || "Resume Parser"}
+        footer={<OutLabels items={[{ label: "PARSED", color: "#10b981", dir: "→" }, { label: "FAILED", color: "#ef4444", dir: "↓" }]} />}
+      >
+        <KV k="Extracts" v={data.extracts || "Skills, Experience"} />
+      </Card>
+    </Root>
   );
-}
+});
 
-export function CollectDataNode({ id, data, selected }: { id: string, data: any, selected?: boolean }) {
+export const CollectDataNode = React.memo(function CollectDataNode({ id, data, selected }: any) {
+  const fields: string[] = data.fields || ["Name", "Email", "Phone"];
   return (
-    <div className={`w-[260px] rounded-[16px] bg-[#0A0A0A] shadow-xl overflow-visible relative group transition-all duration-300 ${selected ? 'border border-[#06B6D4] ring-1 ring-[#06B6D4]/20 scale-[1.02]' : 'border border-white/10'}`}>
-      <NodeActions id={id} />
-      <Handle type="target" position={Position.Top} className={`${targetHandleStyle}`} />
-      <div className="px-4 py-4">
-        <div className="flex items-center gap-2 mb-2">
-          <ListChecks className="w-4 h-4 text-emerald-500" />
-          <div className="font-semibold text-[11px] uppercase tracking-widest text-white/80">Collect Data Form</div>
-        </div>
-        <p className="text-[10px] text-white/40 mb-3">AI naturally asks these questions in chat</p>
-        <div className="space-y-1">
-          {(data.fields || ["Name", "Email", "Phone"]).map((field: string, idx: number) => (
-            <div key={idx} className="flex items-center gap-2 px-2 py-1.5 rounded bg-white/5 border border-white/5 text-[11px] text-white/70">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/50" />
-              {field}
+    <Root width={256}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="source" position={Position.Right} id="success" isConnectable className="flow-handle flow-handle--green" />
+      <Handle type="source" position={Position.Bottom} id="timeout" isConnectable className="flow-handle flow-handle--gray" />
+      <Card id={id} selected={selected} color="#F59E0B" Icon={ListChecks} title={data.label || "Collect Data"}
+        footer={<OutLabels items={[{ label: "COMPLETE", color: "#10b981", dir: "→" }, { label: "TIMEOUT", color: "#94a3b8", dir: "↓" }]} />}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {fields.slice(0, 3).map((f: string, i: number) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11.5, color: "#475569" }}>
+              <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />
+              {f}
             </div>
           ))}
+          {fields.length > 3 && <span style={{ fontSize: 10.5, color: "#94a3b8" }}>+{fields.length - 3} more</span>}
         </div>
-      </div>
-      <Handle type="source" position={Position.Bottom} className={`${sourceHandleStyle}`} />
-    </div>
+      </Card>
+    </Root>
   );
-}
+});

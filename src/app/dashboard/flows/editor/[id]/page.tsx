@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, X, ArrowLeft, Check, Loader2 } from "lucide-react";
+import { Play, X, ArrowLeft, Check, Loader2, Undo2, Redo2 } from "lucide-react";
 import FlowSidebar from "../../_components/FlowSidebar";
 import FlowCanvas from "../../_components/FlowCanvas";
 import FlowInspector from "../../_components/FlowInspector";
@@ -14,7 +14,7 @@ import { BUSINESS_TYPE_CONFIG } from "../../config";
 import { getPrebuiltFlow } from "../../prebuiltFlows";
 
 export default function FlowEditorPage() {
-  const { selectedNodeId, isSimulating, setIsSimulating, isPublishing, isSaving, publishFlow, loadTemplate, loadFlow, saveFlow, flowId: storeFlowId } = useFlowStore();
+  const { selectedNodeId, isSimulating, setIsSimulating, isPublishing, isSaving, publishFlow, loadTemplate, loadFlow, saveFlow, undo, redo, history } = useFlowStore();
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -22,7 +22,7 @@ export default function FlowEditorPage() {
   const businessType = searchParams?.get('type') || 'blank';
   const templateId = searchParams?.get('template') || null;
   const [flowName, setFlowName] = useState('Untitled Flow');
-  
+
   const config = BUSINESS_TYPE_CONFIG[businessType] || BUSINESS_TYPE_CONFIG['blank'];
 
   const handlePublish = async () => {
@@ -50,10 +50,8 @@ export default function FlowEditorPage() {
 
   useEffect(() => {
     if (routeId !== 'new') {
-      // Load existing flow from DB
       loadFlow(routeId);
     } else {
-      // Fresh editor — load prebuilt template if applicable
       const isBlank = businessType === 'blank' && !templateId;
       if (!isBlank) {
         const { nodes, edges } = getPrebuiltFlow(templateId || businessType, businessType);
@@ -64,48 +62,91 @@ export default function FlowEditorPage() {
     }
   }, [routeId, businessType, templateId, loadTemplate, loadFlow]);
 
+  const canUndo = history.past.length > 0;
+  const canRedo = history.future.length > 0;
+
   return (
     <>
       <Toaster theme="dark" position="bottom-center" />
-      <div className="-m-4 md:-m-6 lg:-m-8 h-[calc(100vh-64px)] lg:h-screen flex flex-col overflow-hidden bg-[#030303] text-white selection:bg-emerald-500/30 animate-in fade-in duration-300">
-        
-        {/* Top Bar */}
-        <header className="h-[52px] flex-shrink-0 border-b border-[rgba(255,255,255,0.08)] bg-[#0A0A0A] flex items-center justify-between px-4 z-20">
-          <div className="flex items-center gap-2 text-[13px]">
-            <Link 
+      <div className="-m-4 md:-m-6 lg:-m-8 h-[calc(100vh-64px)] lg:h-screen flex flex-col overflow-hidden text-white" style={{ background: '#06070a' }}>
+
+        {/* Header — 56px */}
+        <header
+          className="h-14 flex-shrink-0 flex items-center justify-between px-5 z-20"
+          style={{
+            background: 'rgba(13,17,23,0.92)',
+            backdropFilter: 'blur(20px)',
+            borderBottom: '1px solid rgba(255,255,255,0.05)',
+          }}
+        >
+          {/* Left: Breadcrumb + Flow name */}
+          <div className="flex items-center gap-2.5 text-[13px]">
+            <Link
               href={businessType !== 'blank' ? `/dashboard/flows/templates/${businessType}` : `/dashboard/flows`}
-              className="p-1.5 -ml-1.5 rounded-md hover:bg-white/5 text-gray-400 hover:text-white transition-colors mr-1"
+              className="p-1.5 -ml-1.5 rounded-lg hover:bg-white/[0.06] transition-colors mr-1"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-4 h-4" style={{ color: 'rgba(255,255,255,0.35)' }} />
             </Link>
-            
-            <Link href="/dashboard/flows" className="text-gray-400 hover:text-white transition-colors">
+
+            <Link href="/dashboard/flows" className="text-[12px] transition-colors hover:text-white/60" style={{ color: 'rgba(255,255,255,0.3)' }}>
               Flows
             </Link>
-            <span className="text-gray-500">/</span>
-            <Link href={businessType !== 'blank' ? `/dashboard/flows/templates/${businessType}` : `/dashboard/flows`} className="text-gray-400 hover:text-white transition-colors">
+            <span className="text-[12px]" style={{ color: 'rgba(255,255,255,0.12)' }}>/</span>
+            <Link href={businessType !== 'blank' ? `/dashboard/flows/templates/${businessType}` : `/dashboard/flows`} className="text-[12px] transition-colors hover:text-white/60" style={{ color: 'rgba(255,255,255,0.3)' }}>
               {config.name}
             </Link>
-            <span className="text-gray-500">/</span>
+            <span className="text-[12px]" style={{ color: 'rgba(255,255,255,0.12)' }}>/</span>
             <input
               value={flowName}
               onChange={e => setFlowName(e.target.value)}
-              className="bg-transparent text-white font-medium text-[13px] focus:outline-none border-b border-transparent focus:border-white/20 transition-colors px-1"
+              className="bg-transparent font-semibold text-[13.5px] focus:outline-none transition-colors px-0.5 min-w-[110px]"
+              style={{ color: 'rgba(255,255,255,0.88)', borderBottom: '1px solid transparent' }}
+              onFocus={e => { (e.target as HTMLInputElement).style.borderBottomColor = 'rgba(255,255,255,0.18)'; }}
+              onBlur={e => { (e.target as HTMLInputElement).style.borderBottomColor = 'transparent'; }}
               placeholder="Untitled Flow"
             />
           </div>
 
-          <div className="flex items-center gap-4">
-            {!isSaving && (
-              <span className="text-green-400 text-sm flex items-center gap-1.5">
-                Saved <Check className="w-3.5 h-3.5" />
-              </span>
-            )}
-            {isSaving && (
-              <span className="text-gray-400 text-sm">Saving...</span>
-            )}
+          {/* Right: Actions */}
+          <div className="flex items-center gap-2">
+            {/* Undo / Redo */}
+            <div className="flex items-center rounded-lg overflow-hidden mr-2" style={{ border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)' }}>
+              <button
+                onClick={undo}
+                disabled={!canUndo}
+                title="Undo (⌘Z)"
+                className="px-2.5 py-1.5 transition-all disabled:opacity-20 hover:bg-white/[0.06]"
+                style={{ color: 'rgba(255,255,255,0.45)' }}
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+              </button>
+              <div className="w-px h-4" style={{ background: 'rgba(255,255,255,0.07)' }} />
+              <button
+                onClick={redo}
+                disabled={!canRedo}
+                title="Redo (⌘⇧Z)"
+                className="px-2.5 py-1.5 transition-all disabled:opacity-20 hover:bg-white/[0.06]"
+                style={{ color: 'rgba(255,255,255,0.45)' }}
+              >
+                <Redo2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
 
-            <button 
+            {/* Save status */}
+            <div className="mr-2">
+              {isSaving ? (
+                <span className="text-[12px] flex items-center gap-1.5" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                  <Loader2 className="w-3 h-3 animate-spin" /> Saving
+                </span>
+              ) : (
+                <span className="text-[12px] flex items-center gap-1.5 text-emerald-400/80">
+                  <Check className="w-3 h-3" /> Saved
+                </span>
+              )}
+            </div>
+
+            {/* Simulate */}
+            <button
               onClick={() => {
                 if (isSimulating) {
                   setIsSimulating(false);
@@ -114,36 +155,62 @@ export default function FlowEditorPage() {
                   setIsSimulating(true);
                 }
               }}
-              className="h-8 px-3 rounded-md hover:bg-[rgba(255,255,255,0.05)] text-[13px] font-medium text-white transition-colors flex items-center gap-2"
+              className="h-8 px-3.5 rounded-lg text-[12px] font-medium flex items-center gap-1.5 transition-all"
+              style={{
+                background: isSimulating ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.05)',
+                color: isSimulating ? '#f87171' : 'rgba(255,255,255,0.6)',
+                border: `1px solid ${isSimulating ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.07)'}`,
+              }}
             >
-              {isSimulating ? <><X className="w-4 h-4" /> Exit Simulation</> : <><Play className="w-4 h-4" /> Simulate</>}
+              {isSimulating ? <><X className="w-3.5 h-3.5" /> Exit</> : <><Play className="w-3.5 h-3.5" /> Simulate</>}
             </button>
 
+            {/* Save */}
             <button
               onClick={handleSave}
               disabled={isSaving}
-              className="h-8 px-3 rounded-md border border-white/10 hover:bg-white/5 text-[13px] font-medium text-white/80 transition-colors disabled:opacity-50"
+              className="h-8 px-3.5 rounded-lg text-[12px] font-medium transition-all disabled:opacity-40"
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                color: 'rgba(255,255,255,0.65)',
+              }}
             >
-              {isSaving ? 'Saving...' : 'Save'}
+              Save
             </button>
-            <button 
+
+            {/* Publish */}
+            <button
               onClick={handlePublish}
               disabled={isPublishing}
-              className="h-8 px-4 rounded-md bg-[#12B76A] text-white hover:bg-[#0E9055] text-[13px] font-medium transition-colors disabled:opacity-70 flex items-center gap-1.5"
+              className="h-8 px-4 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 transition-all disabled:opacity-50"
+              style={{
+                background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
+                color: '#fff',
+                boxShadow: '0 1px 12px rgba(34,197,94,0.25)',
+              }}
             >
-              {isPublishing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {isPublishing && <Loader2 className="w-3 h-3 animate-spin" />}
               {isPublishing ? 'Publishing...' : 'Publish'}
             </button>
           </div>
         </header>
 
-        {/* Main Content */}
+        {/* Main */}
         <div className="flex-1 flex overflow-hidden relative">
           {!isSimulating && <FlowSidebar businessType={businessType} />}
           {isSimulating && <FlowSimulator />}
           <FlowCanvas />
           {!isSimulating && selectedNodeId && (
-            <div className="w-[300px] flex-shrink-0 bg-[#0A0A0A] border-l border-[rgba(255,255,255,0.08)] z-10 shadow-[-4px_0_24px_rgba(0,0,0,0.5)] overflow-hidden">
+            <div
+              className="w-[360px] flex-shrink-0 z-10 overflow-hidden"
+              style={{
+                background: 'rgba(13,17,23,0.9)',
+                backdropFilter: 'blur(20px)',
+                borderLeft: '1px solid rgba(255,255,255,0.05)',
+                boxShadow: '-8px 0 32px rgba(0,0,0,0.5)',
+              }}
+            >
               <FlowInspector />
             </div>
           )}
