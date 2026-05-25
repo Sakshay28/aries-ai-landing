@@ -655,7 +655,7 @@ export default function SettingsPage() {
               />
             </Field>
             <p className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
-              Every inbound WhatsApp message will be POSTed to this URL as JSON —
+              Every inbound WhatsApp message will be POSTed to this URL as JSON,
               including phone, message text, conversation ID, and timestamp.
               Compatible with Zapier, Make, n8n, or any custom HTTP endpoint.
             </p>

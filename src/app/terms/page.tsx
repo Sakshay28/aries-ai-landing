@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Terms of Service — Aries AI',
+  title: 'Terms of Service | Aries AI',
   description: 'Terms and conditions for using the Aries AI WhatsApp automation platform.',
   robots: { index: true, follow: true },
 };
@@ -46,7 +46,7 @@ export default function TermsPage() {
           By using our Service, you agree to comply with:
           <ul style={{ paddingLeft: 20, lineHeight: 2, marginTop: 12 }}>
             <li>Meta&apos;s WhatsApp Business Policy and Commerce Policy.</li>
-            <li>WhatsApp&apos;s acceptable use guidelines — no spam, no unsolicited marketing without opt-in.</li>
+            <li>WhatsApp&apos;s acceptable use guidelines: no spam, and no unsolicited marketing without opt-in.</li>
             <li>All applicable laws regarding electronic communications in your jurisdiction.</li>
           </ul>
           We reserve the right to suspend accounts that violate WhatsApp&apos;s policies or send spam.

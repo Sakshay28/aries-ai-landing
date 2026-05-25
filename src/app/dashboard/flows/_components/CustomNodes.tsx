@@ -1,37 +1,98 @@
 "use client";
 
 import { useState } from "react";
-import { Handle, Position, NodeToolbar, useReactFlow } from "@xyflow/react";
 import { Sparkles, MessageSquare, CornerDownRight, Zap, SplitSquareVertical, Webhook, Trash2, Copy, Plus, Clock, UserIcon, BookOpen, CircleStop, Database, PlayCircle, Braces, Paintbrush, Hourglass, FileText, Pen, HelpCircle, ListChecks } from "lucide-react";
-
 import { useFlowStore } from "../store";
-const targetHandleStyle = "!w-3 !h-3 !bg-[#111] !border-2 !border-white/20 hover:!border-[#06B6D4] hover:!bg-[#06B6D4]/20 hover:!scale-125 transition-all duration-300 !opacity-100 !rounded-full !z-50 shadow-sm";
-const sourceHandleStyle = "!w-3 !h-3 !bg-[#111] !border-2 !border-white/20 hover:!border-[#06B6D4] hover:!bg-[#06B6D4]/20 hover:!scale-125 transition-all duration-300 !opacity-100 !rounded-full !z-50 shadow-sm !cursor-crosshair";
+
+export enum Position {
+  Left = 'left',
+  Top = 'top',
+  Right = 'right',
+  Bottom = 'bottom',
+}
+
+export function Handle({ type, id, style, className }: { 
+  type: 'source' | 'target', 
+  position?: Position, 
+  id?: string, 
+  style?: React.CSSProperties, 
+  className?: string 
+}) {
+  const isTarget = type === 'target';
+  return (
+    <div 
+      className={`node-handle absolute w-3 h-3 bg-[#111] border-2 border-white/20 hover:border-[#06B6D4] hover:bg-[#06B6D4]/20 hover:scale-125 transition-all duration-300 rounded-full z-50 shadow-sm cursor-crosshair ${className || ''}`}
+      style={{
+        top: isTarget ? '-6px' : 'auto',
+        bottom: !isTarget ? '-6px' : 'auto',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        ...style
+      }}
+      data-handle-type={type}
+      data-handle-id={id || null}
+    />
+  );
+}
+
+const targetHandleStyle = "";
+const sourceHandleStyle = "";
 
 function NodeActions({ id }: { id: string }) {
-  const { setNodes, setEdges } = useReactFlow();
-  
-  const onDelete = () => {
-    setNodes((nodes) => nodes.filter((n) => n.id !== id));
-    setEdges((edges) => edges.filter((e) => e.source !== id && e.target !== id));
+  const onDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const { nodes, edges, saveHistory } = useFlowStore.getState();
+    saveHistory();
+    useFlowStore.setState({
+      nodes: nodes.filter((n) => n.id !== id),
+      edges: edges.filter((e) => e.source !== id && e.target !== id),
+      selectedNodeId: null
+    });
   };
 
-  const onEdit = () => {
+  const onEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
     useFlowStore.getState().setSelectedNodeId(id);
   };
 
+  const onDuplicate = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const { nodes, saveHistory } = useFlowStore.getState();
+    const nodeToDuplicate = nodes.find(n => n.id === id);
+    if (nodeToDuplicate) {
+      saveHistory();
+      const newId = `node_${Math.random().toString(36).substr(2, 9)}`;
+      const nodeX = nodeToDuplicate.x ?? nodeToDuplicate.position?.x ?? 0;
+      const nodeY = nodeToDuplicate.y ?? nodeToDuplicate.position?.y ?? 0;
+      const newNode = {
+        ...nodeToDuplicate,
+        id: newId,
+        x: nodeX + 40,
+        y: nodeY + 40,
+        position: { x: nodeX + 40, y: nodeY + 40 },
+        selected: false
+      };
+      useFlowStore.setState({
+        nodes: [...nodes, newNode],
+        selectedNodeId: newId
+      });
+    }
+  };
+
   return (
-    <NodeToolbar isVisible position={Position.Top} className="flex items-center gap-1 bg-[#1A1A1A] border border-white/10 p-1 rounded-md shadow-xl opacity-0 group-hover:opacity-100 transition-opacity">
-      <button onClick={onEdit} className="p-1.5 hover:bg-white/10 rounded text-white/50 hover:text-white transition-colors" title="Edit">
-        <Pen className="w-3 h-3" />
-      </button>
-      <button className="p-1.5 hover:bg-white/10 rounded text-white/50 hover:text-white transition-colors" title="Duplicate">
-        <Copy className="w-3 h-3" />
-      </button>
-      <button onClick={onDelete} className="p-1.5 hover:bg-red-500/20 rounded text-white/50 hover:text-red-400 transition-colors" title="Delete">
-        <Trash2 className="w-3 h-3" />
-      </button>
-    </NodeToolbar>
+    <div className="absolute -top-10 left-0 right-0 flex justify-center z-50 pointer-events-auto">
+      <div className="flex items-center gap-1 bg-[#1A1A1A] border border-white/10 p-1 rounded-md shadow-xl opacity-0 group-hover:opacity-100 transition-opacity">
+        <button onClick={onEdit} className="p-1.5 hover:bg-white/10 rounded text-white/50 hover:text-white transition-colors" title="Edit">
+          <Pen className="w-3 h-3" />
+        </button>
+        <button onClick={onDuplicate} className="p-1.5 hover:bg-white/10 rounded text-white/50 hover:text-white transition-colors" title="Duplicate">
+          <Copy className="w-3 h-3" />
+        </button>
+        <button onClick={onDelete} className="p-1.5 hover:bg-red-500/20 rounded text-white/50 hover:text-red-400 transition-colors" title="Delete">
+          <Trash2 className="w-3 h-3" />
+        </button>
+      </div>
+    </div>
   );
 }
 

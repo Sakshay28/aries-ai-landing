@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Customer Support — Aries AI',
+  title: 'Customer Support | Aries AI',
   description: 'Get help with your Aries AI WhatsApp CRM and automation platform.',
   robots: { index: true, follow: true },
 };

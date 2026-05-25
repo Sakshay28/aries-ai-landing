@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy — Aries AI',
+  title: 'Privacy Policy | Aries AI',
   description: 'How Aries AI collects, uses, and protects your personal data.',
   robots: { index: true, follow: true },
 };

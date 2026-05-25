@@ -258,7 +258,7 @@ export default function BusinessProfilePage() {
           <div className="space-y-1.5">
             <h1 className="text-2xl font-semibold tracking-tight">Business Profile</h1>
             <p className="text-sm text-muted-foreground max-w-lg leading-relaxed">
-              This information is used to personalise your AI agent's responses, tone, and vocabulary — no technical prompting required.
+              This information is used to personalise your AI agent's responses, tone, and vocabulary, with no technical prompting required.
             </p>
           </div>
 
@@ -315,7 +315,7 @@ export default function BusinessProfilePage() {
                 />
               </Field>
 
-              <Field label="Website URL" icon={<Globe className="w-4 h-4" />} hint="Optional — used in AI responses">
+              <Field label="Website URL" icon={<Globe className="w-4 h-4" />} hint="Optional: used in AI responses">
                 <input
                   id="website-url"
                   type="url"
@@ -404,7 +404,7 @@ export default function BusinessProfilePage() {
             <span className="text-sm font-bold tracking-wide text-emerald-600 dark:text-emerald-400">AI Persona Preview</span>
           </div>
           <div className="bg-background/80 rounded-xl p-4 border border-border/60 text-sm text-foreground leading-relaxed font-mono">
-            {profile.company_name || 'Your Business'} assistant here —{' '}
+            {profile.company_name || 'Your Business'} assistant here:{' '}
             {profile.tone === 'friendly' && '😊 How can I help you today?'}
             {profile.tone === 'professional' && 'How may I assist you?'}
             {profile.tone === 'casual' && 'Hey! What can I do for you?'}

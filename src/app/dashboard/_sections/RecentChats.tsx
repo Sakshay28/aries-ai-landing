@@ -92,7 +92,7 @@ export function RecentChats() {
     return (
       <div className="py-8 text-center">
         <p className="text-sm text-muted-foreground">
-          No conversations yet — waiting for your first WhatsApp message.
+          No conversations yet, waiting for your first WhatsApp message.
         </p>
       </div>
     );

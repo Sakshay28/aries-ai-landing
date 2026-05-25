@@ -492,7 +492,7 @@ export function ContactsClient() {
                   </span>
                   <span className="text-[12px] text-muted-foreground mt-1">
                     {csvFile
-                      ? `${(csvFile.size / 1024).toFixed(1)} KB — click to change`
+                      ? `${(csvFile.size / 1024).toFixed(1)} KB, click to change`
                       : 'or drag & drop'}
                   </span>
                   <input
@@ -1080,7 +1080,7 @@ export function ContactsClient() {
                 }`}
               >
                 <AlertCircle className="w-3.5 h-3.5" />
-                {escalated ? 'Escalated — AI paused' : escalating ? 'Escalating...' : 'Escalate to Human'}
+                {escalated ? 'Escalated: AI paused' : escalating ? 'Escalating...' : 'Escalate to Human'}
               </button>
             </div>
           </div>

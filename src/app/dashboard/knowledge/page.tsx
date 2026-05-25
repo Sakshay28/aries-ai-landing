@@ -237,7 +237,7 @@ export default function KnowledgeBasePage() {
                 {uploading ? 'Uploading & processing…' : 'Drop a file here, or click to browse'}
               </h3>
               <p className="text-sm text-muted-foreground">
-                Accepted: .txt, .md, .csv, .json, .pdf — Max 10 MB
+                Accepted: .txt, .md, .csv, .json, .pdf (Max 10 MB)
               </p>
 
               {/* Progress bar */}

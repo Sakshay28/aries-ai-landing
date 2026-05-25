@@ -4,7 +4,7 @@ import LandingPageClient from "./_components/LandingPageClient";
 export const metadata: Metadata = {
   title: "Aries AI - AI-Powered WhatsApp Automation for Indian Businesses",
   description:
-    "Automate customer conversations, capture leads, and grow revenue with AI-powered WhatsApp & Instagram bots. Built for Indian businesses. Setup in 5 minutes.",
+    "Automate customer conversations, capture leads, and grow revenue with AI-powered WhatsApp & Instagram bots. Built for Indian businesses. Setup in 10 minutes.",
   alternates: {
     canonical: "https://ariesai.in",
   },

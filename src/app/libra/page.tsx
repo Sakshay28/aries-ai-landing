@@ -184,7 +184,7 @@ export default function LibraLanding() {
       <section id="how-it-works" style={{ padding: "100px 40px", background: "#fafafa" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
           <div style={{ textAlign: "center", marginBottom: 60 }}>
-            <h2 style={{ fontSize: 40, fontWeight: 800, marginBottom: 12, letterSpacing: "-0.02em" }}>Live in 5 minutes</h2>
+            <h2 style={{ fontSize: 40, fontWeight: 800, marginBottom: 12, letterSpacing: "-0.02em" }}>Live in 10 minutes</h2>
             <p style={{ color: "#666", fontSize: 17 }}>No code. No engineer. No Meta paperwork on your end.</p>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 32 }}>

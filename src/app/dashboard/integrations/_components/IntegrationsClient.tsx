@@ -43,7 +43,7 @@ const INTEGRATIONS: IntegrationDef[] = [
   {
     id: 'google_sheets',
     name: 'Google Sheets',
-    description: 'Leads auto-sync to your Google Sheet in real-time via OAuth — no Zapier needed.',
+    description: 'Leads auto-sync to your Google Sheet in real-time via OAuth, no Zapier needed.',
     icon: FileSpreadsheet,
     color: 'text-[#0F9D58]',
     bgColor: 'bg-[#0F9D58]/10',
@@ -75,7 +75,7 @@ const INTEGRATIONS: IntegrationDef[] = [
   {
     id: 'pabbly',
     name: 'Pabbly Connect',
-    description: 'Send lead and event data to any Pabbly workflow via webhook — connect 1000+ apps instantly.',
+    description: 'Send lead and event data to any Pabbly workflow via webhook, connecting 1000+ apps instantly.',
     icon: Zap,
     color: 'text-[#FF6B35]',
     bgColor: 'bg-[#FF6B35]/10',
@@ -113,7 +113,7 @@ const INTEGRATIONS: IntegrationDef[] = [
     eventBadges: ['Payment requests'],
     fields: [
       { key: 'key_id', label: 'Key ID', type: 'text', placeholder: 'rzp_live_...', required: true, hint: 'Dashboard → Settings → API Keys' },
-      { key: 'key_secret', label: 'Key Secret', type: 'password', placeholder: '••••••••••••••••', required: true, hint: 'Copy immediately — shown only once' },
+      { key: 'key_secret', label: 'Key Secret', type: 'password', placeholder: '••••••••••••••••', required: true, hint: 'Copy immediately: shown only once' },
     ],
   },
   {

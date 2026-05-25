@@ -5,7 +5,6 @@ import FlowSidebar from "../../_components/FlowSidebar";
 import FlowCanvas from "../../_components/FlowCanvas";
 import FlowInspector from "../../_components/FlowInspector";
 import FlowSimulator from "../../_components/FlowSimulator";
-import { ReactFlowProvider } from "@xyflow/react";
 import { useFlowStore } from "../../store";
 import { Toaster, toast } from "sonner";
 import { useEffect, useState } from "react";
@@ -33,7 +32,7 @@ export default function FlowEditorPage() {
       if (id && routeId === 'new') {
         router.replace(`/dashboard/flows/editor/${id}?type=${businessType}`);
       }
-      toast.success('Flow published — now live', {
+      toast.success('Flow published: now live', {
         description: 'Incoming WhatsApp messages will trigger this flow.',
       });
     } catch {
@@ -66,7 +65,7 @@ export default function FlowEditorPage() {
   }, [routeId, businessType, templateId, loadTemplate, loadFlow]);
 
   return (
-    <ReactFlowProvider>
+    <>
       <Toaster theme="dark" position="bottom-center" />
       <div className="-m-4 md:-m-6 lg:-m-8 h-[calc(100vh-64px)] lg:h-screen flex flex-col overflow-hidden bg-[#030303] text-white selection:bg-emerald-500/30 animate-in fade-in duration-300">
         
@@ -150,6 +149,6 @@ export default function FlowEditorPage() {
           )}
         </div>
       </div>
-    </ReactFlowProvider>
+    </>
   );
 }

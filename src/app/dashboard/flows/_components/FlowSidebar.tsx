@@ -3,7 +3,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { MessageSquare, SplitSquareVertical, Webhook, HandMetal, Sparkles, Clock, UserIcon, BookOpen, CircleStop, PlayCircle, Braces, Paintbrush, Database, Hourglass, FileText, Search, ChevronRight, ShoppingCart, Box, RefreshCw, ShoppingBag, ImageIcon, Mic, MapPin, List, LayoutGrid, FileQuestion, Send, UserPlus, FileSignature, AlertCircle, RefreshCcw, Tag, GitBranch, Repeat, Globe, Phone, Mail, FileCheck, Star, ThumbsUp, CreditCard, ShieldCheck, Calendar, Building, Users, PiggyBank, Link2, Code, Terminal, Edit3, X, CornerDownRight, HelpCircle, ListChecks } from "lucide-react";
 import { useFlowStore } from "../store";
-import { useReactFlow } from "@xyflow/react";
 import { BUSINESS_TYPE_CONFIG } from "../config";
 
 export const nodeCategories = [
@@ -277,7 +276,6 @@ export const getDefaultNodeData = (id: string) => {
 
 export default function FlowSidebar({ businessType = 'blank' }: { businessType?: string }) {
   const { addNode, setSelectedNodeId } = useFlowStore();
-  const { screenToFlowPosition } = useReactFlow();
   const [searchQuery, setSearchQuery] = useState("");
   
   const config = BUSINESS_TYPE_CONFIG[businessType] || BUSINESS_TYPE_CONFIG['blank'];
@@ -313,16 +311,15 @@ export default function FlowSidebar({ businessType = 'blank' }: { businessType?:
   };
 
   const onAddClick = (node: any) => {
-    const position = screenToFlowPosition({
-      x: window.innerWidth / 2 - 100,
-      y: window.innerHeight / 2 - 100,
-    });
-
     const nodeId = `node_${Math.random().toString(36).substr(2, 9)}`;
+    const x = 300;
+    const y = 200;
     addNode({
       id: nodeId,
       type: node.type,
-      position,
+      x,
+      y,
+      position: { x, y },
       data: getDefaultNodeData(node.id),
     });
     setTimeout(() => setSelectedNodeId(nodeId), 50);

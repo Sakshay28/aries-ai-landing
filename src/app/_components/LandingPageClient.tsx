@@ -50,7 +50,7 @@ function Reveal({
    GLOBAL CSS  (injected once — keeps the file self-contained)              
    No "transition: all", no border-left stripes, no glassmorphism           
 ───────────────────────────────────────────────────────────────────────── */
-const CSS = `
+export const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap');
 
   *, *::before, *::after { box-sizing: border-box; }
@@ -338,6 +338,54 @@ const CSS = `
       transition-duration: 0.01ms !important;
     }
   }
+
+  /* ─ Quickstart card ─────────────────────────────────────────── */
+  .quickstart-card {
+    background: #ffffff;
+    border-radius: 32px;
+    box-shadow: 0 20px 45px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.01);
+    border: 1px solid rgba(0,0,0,0.06);
+    padding: 48px 48px 48px 56px;
+    display: grid;
+    grid-template-columns: 1.15fr 1fr;
+    gap: 48px;
+    align-items: center;
+    overflow: hidden;
+  }
+  .quickstart-mockup {
+    background: #ecfef3;
+    border-radius: 24px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 420px;
+    border: 1px solid rgba(37,211,102,0.15);
+  }
+
+  @media (max-width: 1024px) {
+    .quickstart-card {
+      grid-template-columns: 1fr;
+      padding: 40px;
+      gap: 36px;
+    }
+    .quickstart-mockup {
+      min-height: 360px;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .quickstart-card {
+      padding: 32px 24px;
+      gap: 28px;
+      border-radius: 24px;
+    }
+    .quickstart-mockup {
+      min-height: 280px;
+      border-radius: 16px;
+    }
+  }
 `;
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -392,7 +440,7 @@ function IconPhone() {
 /* ─────────────────────────────────────────────────────────────────────────
    NAVBAR                                                                    
 ───────────────────────────────────────────────────────────────────────── */
-function Navbar() {
+export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -493,7 +541,7 @@ const heroTextVariants = {
   }),
 };
 
-function Hero() {
+export function Hero() {
   return (
     <section style={{ minHeight: "100dvh", display: "flex", alignItems: "center", background: "linear-gradient(135deg, #f0fdf4 0%, #fff 50%, #f0fdf4 100%)", paddingTop: 80, overflow: "hidden" }}>
       <div className="hero-grid">
@@ -516,7 +564,7 @@ function Hero() {
             variants={heroTextVariants}
             style={{ fontSize: 18, color: "#555", lineHeight: 1.7, marginBottom: 36, maxWidth: 480 }}
           >
-            Your AI assistant replies to customer enquiries, takes bookings, captures leads, and follows up — 24/7. While you sleep.
+            Your AI assistant replies to customer enquiries, takes bookings, captures leads, and follows up 24/7. While you sleep.
           </motion.p>
           <div className="hero-cta" style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 40 }}>
             <motion.div
@@ -585,7 +633,7 @@ function Hero() {
 /* ─────────────────────────────────────────────────────────────────────────
    TRUST BAR — dark strip with grid layout                                   
 ───────────────────────────────────────────────────────────────────────── */
-function TrustBar() {
+export function TrustBar() {
   const items = [
     {
       icon: (
@@ -715,7 +763,7 @@ function TrustBar() {
 /* ─────────────────────────────────────────────────────────────────────────
    STATS — numbers with borders instead of cards (Impeccable flat rule)     
 ───────────────────────────────────────────────────────────────────────── */
-function Stats() {
+export function Stats() {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: "-100px" });
 
@@ -749,7 +797,7 @@ function Stats() {
               <span style={{ color: "#a1a1aa", fontWeight: 700 }}>better than your staff.</span>
             </h2>
             <p style={{ fontSize: 19, color: "#9ca3af", maxWidth: 680, margin: "0 auto", lineHeight: 1.7 }}>
-              Every business is unique. Aries AI learns your menu, prices, FAQs, and tone — then answers like a trained team member.
+              Every business is unique. Aries AI learns your menu, prices, FAQs, and tone, then answers like a trained team member.
             </p>
           </div>
         </Reveal>
@@ -852,9 +900,9 @@ function LeadPipelineVisual({ isHovered }: { isHovered?: boolean }) {
   return (
     <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 5 }}>
       {[
-        { label: "Rahul — Table booking", score: "HOT", color: "#ef4444", delay: 0 },
-        { label: "Priya — Menu inquiry", score: "WARM", color: "#f59e0b", delay: 0.15 },
-        { label: "Ankit — Just browsing", score: "COLD", color: "#6b7280", delay: 0.3 },
+        { label: "Rahul: Table booking", score: "HOT", color: "#ef4444", delay: 0 },
+        { label: "Priya: Menu inquiry", score: "WARM", color: "#f59e0b", delay: 0.15 },
+        { label: "Ankit: Just browsing", score: "COLD", color: "#6b7280", delay: 0.3 },
       ].map((item, idx) => (
         <motion.div 
           key={idx}
@@ -1143,7 +1191,7 @@ function ChatWindow({
   );
 }
 
-function Features() {
+export function Features() {
   const [activeMsg, setActiveMsg] = useState(0);
   const [hoveredBentoIndex, setHoveredBentoIndex] = useState<number | null>(null);
 
@@ -1176,7 +1224,7 @@ function Features() {
     {
       icon: <IconTrendUp />, color: "#F59E0B",
       title: "Smart Lead Pipeline",
-      desc: "Every chat automatically scored — hot, warm, cold.",
+      desc: "Every chat automatically scored: hot, warm, cold.",
       VisualComponent: LeadPipelineVisual,
     },
     {
@@ -1280,7 +1328,7 @@ function Features() {
                   AI That Truly Understands
                 </h3>
                 <p style={{ fontSize: 14, color: "#777", lineHeight: 1.7, marginBottom: 20 }}>
-                  Not a rigid chatbot. Real language understanding that gets &apos;bhai kal 4 baje table milega?&apos; in Hindi, English, or Hinglish. Trains on your business once — handles everything 24/7.
+                  Not a rigid chatbot. Real language understanding that gets &apos;bhai kal 4 baje table milega?&apos; in Hindi, English, or Hinglish. Trains on your business once and handles everything 24/7.
                 </p>
 
                 {/* Dual live animated chats */}
@@ -1681,7 +1729,7 @@ function AnimatedCounter({
   return <span>{displayVal}</span>;
 }
 
-function UseCases() {
+export function UseCases() {
   const [hoveredIndustryIndex, setHoveredIndustryIndex] = useState<number | null>(null);
   const industries = [
     {
@@ -1820,7 +1868,7 @@ function UseCases() {
   );
 }
 
-function Integrations() {
+export function Integrations() {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true });
   const [hoveredIntegration, setHoveredIntegration] = useState<string | null>(null);
@@ -1903,7 +1951,7 @@ function Integrations() {
               <span style={{ color: G }}> existing stack</span>
             </h2>
             <p style={{ fontSize: 19, color: "#9ca3af", maxWidth: 640, margin: "0 auto", lineHeight: 1.7 }}>
-              Plug into the tools your team already uses — CRM, payments, sheets, automation and more.
+              Plug into the tools your team already uses: CRM, payments, sheets, automation and more.
             </p>
           </div>
         </Reveal>
@@ -1962,6 +2010,8 @@ function Integrations() {
                   <motion.path
                     d={d}
                     fill="none"
+                    strokeWidth={1.5}
+                    opacity={0.7}
                     animate={{
                       stroke: isHovered ? item.color : isOtherHovered ? "rgba(37,211,102,0.06)" : pathColors[i],
                       strokeWidth: isHovered ? 2.5 : isOtherHovered ? 1.0 : 1.5,
@@ -2033,6 +2083,7 @@ function Integrations() {
                       x={x - 140} y={y - 34}
                       width={280} height={68}
                       rx={18}
+                      strokeWidth={1.2}
                       animate={{
                         fill: isHovered ? `${item.color}1c` : isOtherHovered ? "rgba(37,211,102,0.02)" : "rgba(37,211,102,0.06)",
                         stroke: isHovered ? item.color : isOtherHovered ? "rgba(37,211,102,0.08)" : "rgba(37,211,102,0.25)",
@@ -2093,6 +2144,8 @@ function Integrations() {
                   <motion.path
                     d={d}
                     fill="none"
+                    strokeWidth={1.5}
+                    opacity={0.7}
                     animate={{
                       stroke: isHovered ? item.color : isOtherHovered ? "rgba(37,211,102,0.06)" : pathColors[i],
                       strokeWidth: isHovered ? 2.5 : isOtherHovered ? 1.0 : 1.5,
@@ -2166,6 +2219,7 @@ function Integrations() {
                       x={x - 140} y={y - 34}
                       width={280} height={68}
                       rx={18}
+                      strokeWidth={1.2}
                       animate={{
                         fill: isHovered ? `${item.color}1c` : isOtherHovered ? "rgba(37,211,102,0.02)" : "rgba(37,211,102,0.06)",
                         stroke: isHovered ? item.color : isOtherHovered ? "rgba(37,211,102,0.08)" : "rgba(37,211,102,0.25)",
@@ -2270,7 +2324,7 @@ function Integrations() {
 /* ─────────────────────────────────────────────────────────────────────────
    HOW IT WORKS — 3 steps (acceptable because steps aren't cards)           
 ───────────────────────────────────────────────────────────────────────── */
-function HowItWorks() {
+export function HowItWorks() {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: "-100px" });
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
@@ -2280,7 +2334,7 @@ function HowItWorks() {
       n: "01",
       Icon: <IconPhone />,
       title: "Connect WhatsApp",
-      desc: "Link your WhatsApp Business number. Step-by-step guidance gets you live in 5 minutes.",
+      desc: "Link your WhatsApp Business number. Step-by-step guidance gets you live in 10 minutes.",
       detail: "No tech skills needed",
     },
     {
@@ -2310,7 +2364,7 @@ function HowItWorks() {
               marginBottom: 16,
               lineHeight: 1.1,
             }}>
-              Live in <span style={{ color: G }}>under 5 minutes</span>
+              Live in <span style={{ color: G }}>under 10 minutes</span>
             </h2>
             <p style={{ fontSize: 19, color: "#4b5563", maxWidth: 500, margin: "0 auto", fontWeight: 500 }}>
               Three simple steps. No developer. No waiting.
@@ -2639,7 +2693,7 @@ function HowItWorks() {
 /* ─────────────────────────────────────────────────────────────────────────
    PRICING                                                                   
 ───────────────────────────────────────────────────────────────────────── */
-function Pricing() {
+export function Pricing() {
   const [billing, setBilling] = useState<"monthly" | "annual">("monthly");
 
   const plans = [
@@ -2748,7 +2802,7 @@ function Pricing() {
         <Reveal>
           <div style={{ textAlign: "center", marginBottom: 40 }}>
             <h2 style={{ fontSize: "clamp(34px,4vw,56px)", fontWeight: 900, letterSpacing: "-2.5px", marginTop: 0, lineHeight: 1.1 }}>
-              Simple, <span style={{ color: G }}>transparent</span> pricing
+              Choose Your <span style={{ color: G }}>Growth</span> Plan
             </h2>
             <p style={{ color: "#374151", fontSize: 19, marginTop: 16, fontWeight: 500 }}>
               No hidden charges. All plans include WhatsApp Business API.
@@ -2779,13 +2833,16 @@ function Pricing() {
                 {plan.popular && (
                   <div className="pop-badge" style={{
                     position: "absolute", top: -13, left: "50%", transform: "translateX(-50%)",
-                    background: G, color: "#fff", padding: "4px 18px", borderRadius: 100,
+                    background: G, color: "#fff", padding: "5px 16px", borderRadius: 100,
                     fontSize: 10, fontWeight: 700, whiteSpace: "nowrap", letterSpacing: "0.06em",
                     textTransform: "uppercase",
-                  }}><svg viewBox="0 0 24 24" width="10" height="10" style={{ fill: "#fff", stroke: "none" }}>
+                    display: "flex", alignItems: "center", gap: 6, justifyContent: "center"
+                  }}>
+                    <svg viewBox="0 0 24 24" width="12" height="12" style={{ fill: "#fff", stroke: "none" }}>
                       <path d="M12 2c0 0 6 5.5 6 10a6 6 0 0 1-12 0c0-4.5 6-10 6-10z" />
                     </svg>
-                    Most Popular</div>
+                    <span>Most Popular</span>
+                  </div>
                 )}
                 <h3 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>{plan.name}</h3>
                 <p className="pd" style={{ fontSize: 13, marginBottom: 20, lineHeight: 1.5 }}>{plan.desc}</p>
@@ -2979,7 +3036,7 @@ function FAQItem({ question, answer }: { question: string; answer: React.ReactNo
   );
 }
 
-function FAQ() {
+export function FAQ() {
   const faqs = [
     {
       q: "How does the AI work? Does it need pre-configured templates?",
@@ -3043,7 +3100,7 @@ function FAQ() {
 /* ─────────────────────────────────────────────────────────────────────────
    CTA — original live website full-bleed solid green layout
 ───────────────────────────────────────────────────────────────────────── */
-function CTA() {
+export function CTA() {
   return (
     <section style={{ padding: "80px 24px 90px", background: G, position: "relative", zIndex: 1 }} id="contact-us">
       <div style={{ maxWidth: 720, margin: "0 auto", textAlign: "center" }}>
@@ -3052,7 +3109,7 @@ function CTA() {
             Ready to Automate Your Business?
           </h2>
           <p style={{ color: "rgba(255,255,255,0.95)", fontSize: 17, marginBottom: 36, marginTop: 0, maxWidth: 580, margin: "0 auto 36px", lineHeight: 1.6 }}>
-            Be one of the first to turn WhatsApp into your smartest revenue channel — fully automated, 24/7.
+            Be one of the first to turn WhatsApp into your smartest revenue channel, fully automated, 24/7.
           </p>
           <div className="cta-buttons" style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
             <motion.div whileTap={{ scale: 0.96 }}>
@@ -3078,7 +3135,7 @@ function CTA() {
 /* ─────────────────────────────────────────────────────────────────────────
    FOOTER — original live website flat black container
 ───────────────────────────────────────────────────────────────────────── */
-function Footer() {
+export function Footer() {
   return (
     <footer style={{
       background: "#0c0e14",
@@ -3134,7 +3191,7 @@ function ShowcaseSection() {
         </Reveal>
         <Reveal delay={0.2}>
           <p style={{ fontSize: 17, color: "#666", maxWidth: 520, margin: "0 auto 40px", lineHeight: 1.7 }}>
-            From product enquiries to checkout — your AI handles the entire customer journey on WhatsApp, automatically.
+            From product enquiries to checkout, your AI handles the entire customer journey on WhatsApp, automatically.
           </p>
         </Reveal>
         <Reveal delay={0.3} y={24}>
@@ -3142,6 +3199,129 @@ function ShowcaseSection() {
             <img src="/hero.png" alt="WhatsApp Business Automation in action"
               style={{ width: "100%", maxWidth: 1100, height: "auto", WebkitMaskImage: "linear-gradient(to bottom, black 70%, transparent 100%)", maskImage: "linear-gradient(to bottom, black 70%, transparent 100%)" }}
             />
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   QUICK START — last.jpeg setup overview                                    
+   ───────────────────────────────────────────────────────────────────────── */
+export function QuickStartSection() {
+  return (
+    <section style={{ background: "#f7f8fa", padding: "80px 24px 100px", overflow: "hidden" }}>
+      <div style={{ maxWidth: 1280, margin: "0 auto" }}>
+        <Reveal delay={0.1} y={24}>
+          <div className="quickstart-card">
+            
+            {/* Left Column: Crisp HTML Text & List */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 28, textAlign: "left" }}>
+              <div>
+                <h2 style={{
+                  fontSize: "clamp(26px, 3.2vw, 38px)",
+                  fontWeight: 900,
+                  color: "#0c0e14",
+                  letterSpacing: "-1.5px",
+                  lineHeight: 1.15,
+                  margin: "0 0 16px 0"
+                }}>
+                  Get WhatsApp AI Running<br />in Under 10 Minutes
+                </h2>
+                <p style={{
+                  fontSize: 16.5,
+                  color: "#4b5563",
+                  lineHeight: 1.6,
+                  fontWeight: 500,
+                  margin: 0,
+                  maxWidth: 520
+                }}>
+                  Aries AI connects directly to WhatsApp Business API with no coding, no third-party tools, and no waiting weeks.
+                </p>
+              </div>
+
+              {/* Bullet checklist with exact site green */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                {[
+                  {
+                    title: "Direct Meta API Connection",
+                    desc: "Your number, your data. No middlemen. Fully compliant with Meta's WhatsApp policies."
+                  },
+                  {
+                    title: "AI Trained on Your Business",
+                    desc: "Tell us your services once. AI handles every customer query 24/7 in Hindi, English, or Hinglish."
+                  },
+                  {
+                    title: "Zero Tech Skills Needed",
+                    desc: "If you can use WhatsApp, you can set up Aries AI. Step-by-step onboarding included."
+                  }
+                ].map((item, idx) => (
+                  <div key={idx} style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 22,
+                      height: 22,
+                      borderRadius: "50%",
+                      background: G,
+                      color: "#fff",
+                      flexShrink: 0,
+                      marginTop: 2,
+                      boxShadow: `0 0 10px ${G}33`
+                    }}>
+                      <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </div>
+                    <p style={{ fontSize: 14.8, color: "#1f2937", lineHeight: 1.5, margin: 0 }}>
+                      <strong style={{ fontWeight: 700 }}>{item.title}</strong>: {item.desc}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {/* CTA Button with exact site green */}
+              <div>
+                <motion.div whileTap={{ scale: 0.97 }} style={{ display: "inline-block" }}>
+                  <Link 
+                    href="/signup" 
+                    className="btn-anim"
+                    style={{ 
+                      display: "inline-flex", 
+                      alignItems: "center",
+                      gap: 8,
+                      background: G, 
+                      color: "#fff", 
+                      padding: "14px 28px", 
+                      borderRadius: 10, 
+                      fontSize: 15, 
+                      fontWeight: 800, 
+                      textDecoration: "none", 
+                      boxShadow: `0 8px 24px ${G}25`
+                    }}
+                  >
+                    Start Free for 14 Days →
+                  </Link>
+                </motion.div>
+              </div>
+            </div>
+
+            {/* Right Column: Hand-cropped illustration with exact light green container */}
+            <div className="quickstart-mockup">
+              <img 
+                src="/last_mockup.png" 
+                alt="Aries AI Mockup"
+                style={{ 
+                  width: "100%", 
+                  height: "100%", 
+                  display: "block",
+                  objectFit: "contain"
+                }} 
+              />
+            </div>
+
           </div>
         </Reveal>
       </div>
@@ -3166,6 +3346,7 @@ export default function LandingPageClient() {
       <Integrations />
       <UseCases />
       <Pricing />
+      <QuickStartSection />
       <FAQ />
       <CTA />
       <Footer />

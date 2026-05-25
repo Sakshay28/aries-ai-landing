@@ -271,7 +271,7 @@ function OnboardContent() {
           {/* ── STEP 1: Business Profile ── */}
           {step === 0 && (
             <>
-              <p style={styles.eyebrow}>Step 1 — Business Profile</p>
+              <p style={styles.eyebrow}>Step 1: Business Profile</p>
               <h2 style={styles.formTitle}>Tell us about your business</h2>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
@@ -344,7 +344,7 @@ function OnboardContent() {
           {/* ── STEP 2: AI Personality ── */}
           {step === 1 && (
             <>
-              <p style={styles.eyebrow}>Step 2 — AI Assistant</p>
+              <p style={styles.eyebrow}>Step 2: AI Assistant</p>
               <h2 style={styles.formTitle}>Personalise your AI</h2>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -405,7 +405,7 @@ function OnboardContent() {
           {/* ── STEP 3: WhatsApp Activation ── */}
           {step === 2 && (
             <>
-              <p style={styles.eyebrow}>Step 3 — WhatsApp Activation</p>
+              <p style={styles.eyebrow}>Step 3: WhatsApp Activation</p>
               <h2 style={styles.formTitle}>Connect your WhatsApp</h2>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -473,7 +473,7 @@ function OnboardContent() {
                 </div>
 
                 <button onClick={handleFinish} disabled={loading} style={{ background: "none", border: "none", color: "#94a3b8", fontSize: 12, cursor: "pointer", textAlign: "center", fontFamily: "inherit" }}>
-                  Skip for now — I'll add my number later
+                  Skip for now, I'll add my number later
                 </button>
               </div>
             </>

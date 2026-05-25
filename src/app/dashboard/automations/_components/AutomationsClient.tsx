@@ -22,7 +22,7 @@ interface Rule {
 const SUGGESTIONS = [
   {
     title: 'Turn on "Smart Review Collection"',
-    description: 'Ask for a Google review 2 days after a chat — only when the AI detects the customer was happy.',
+    description: 'Ask for a Google review 2 days after a chat, only when the AI detects the customer was happy.',
     template: { name: 'Smart Review Collection', trigger_source: 'When customer sentiment is deeply positive after a resolved chat', ai_summary: 'Wait 48 hours, then send a polite request with a link to the Google My Business page.' },
   },
   {
@@ -197,7 +197,7 @@ export function AutomationsClient() {
           <div>
             <h2 className="text-2xl font-semibold tracking-tight mb-2">Let AI do the follow-ups.</h2>
             <p className="text-[15px] text-muted-foreground leading-relaxed">
-              Your AI reads every conversation and follows these rules automatically — no code, no triggers to configure.
+              Your AI reads every conversation and follows these rules automatically: no code, no triggers to configure.
             </p>
           </div>
 
