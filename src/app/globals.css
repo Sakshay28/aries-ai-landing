@@ -440,7 +440,7 @@
 
 /* Grow larger when the handle itself is hovered — magnetic feel */
 .react-flow__node:hover .flow-handle:hover {
-  scale: 1.65 !important;
+  scale: 2.0 !important;
 }
 
 /* Always visible and prominent during an active connection drag */
@@ -466,10 +466,11 @@
   pointer-events: none;
 }
 
-.flow-handle--blue {
-  background: #3b82f6 !important;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3), 0 2px 8px rgba(59, 130, 246, 0.2) !important;
-  color: rgba(59, 130, 246, 0.15);
+.flow-handle--white {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(255, 255, 255, 0.6) !important;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18), 0 2px 8px rgba(0, 0, 0, 0.18) !important;
+  color: rgba(255, 255, 255, 0.12);
 }
 .flow-handle--green {
   background: #10b981 !important;
@@ -489,10 +490,10 @@
 
 /* Hover: spring-pop scale + expanded glow + show magnetic aura */
 .flow-handle:hover {
-  scale: 1.6 !important;
+  scale: 1.8 !important;
 }
-.flow-handle--blue:hover {
-  box-shadow: 0 0 0 5px rgba(59, 130, 246, 0.35), 0 0 16px rgba(59, 130, 246, 0.45) !important;
+.flow-handle--white:hover {
+  box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.3), 0 0 16px rgba(255, 255, 255, 0.22) !important;
 }
 .flow-handle--green:hover {
   box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.35), 0 0 16px rgba(16, 185, 129, 0.45) !important;

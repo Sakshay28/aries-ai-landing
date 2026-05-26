@@ -264,7 +264,7 @@ export const TriggerNode = React.memo(function TriggerNode({ id, data, selected 
 export const StandardNode = React.memo(function StandardNode({ id, data, selected }: any) {
   return (
     <Root width={256}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
       <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
       <Card id={id} selected={selected} color="#10B981" Icon={MessageSquare} title={data.label || "Send Message"}>
         {data.content && <Preview text={String(data.content).slice(0, 100)} />}
@@ -276,11 +276,11 @@ export const StandardNode = React.memo(function StandardNode({ id, data, selecte
 export const AIInterruptionNode = React.memo(function AIInterruptionNode({ id, data, selected }: any) {
   return (
     <Root width={264}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
-      <Handle type="source" position={Position.Right} id="success" isConnectable className="flow-handle flow-handle--green" />
-      <Handle type="source" position={Position.Bottom} id="fallback" isConnectable className="flow-handle flow-handle--red" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="success" isConnectable className="flow-handle flow-handle--green" style={{ left: '28%', transform: 'translateX(-50%)' }} />
+      <Handle type="source" position={Position.Bottom} id="fallback" isConnectable className="flow-handle flow-handle--red" style={{ left: '72%', transform: 'translateX(-50%)' }} />
       <Card id={id} selected={selected} color="#8B5CF6" Icon={Sparkles} title={data.label || "AI Reply"}
-        footer={<OutLabels items={[{ label: "ANSWERED", color: "#10b981", dir: "→" }, { label: "FALLBACK", color: "#ef4444", dir: "↓" }]} />}
+        footer={<OutLabels items={[{ label: "ANSWERED", color: "#10b981", dir: "↙" }, { label: "FALLBACK", color: "#ef4444", dir: "↘" }]} />}
       >
         {data.userQuery && <Preview text={`"${data.userQuery}"`} />}
       </Card>
@@ -291,7 +291,7 @@ export const AIInterruptionNode = React.memo(function AIInterruptionNode({ id, d
 export const ResumeNode = React.memo(function ResumeNode({ id, data, selected }: any) {
   return (
     <Root width={220}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
       <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
       <Card id={id} selected={selected} color="#22C55E" Icon={Zap} title={data.label || "Resume Flow"} />
     </Root>
@@ -301,11 +301,11 @@ export const ResumeNode = React.memo(function ResumeNode({ id, data, selected }:
 export const LogicNode = React.memo(function LogicNode({ id, data, selected }: any) {
   return (
     <Root width={256}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
-      <Handle type="source" position={Position.Right} id="true" isConnectable className="flow-handle flow-handle--green" />
-      <Handle type="source" position={Position.Bottom} id="false" isConnectable className="flow-handle flow-handle--red" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="true" isConnectable className="flow-handle flow-handle--green" style={{ left: '28%', transform: 'translateX(-50%)' }} />
+      <Handle type="source" position={Position.Bottom} id="false" isConnectable className="flow-handle flow-handle--red" style={{ left: '72%', transform: 'translateX(-50%)' }} />
       <Card id={id} selected={selected} color="#F59E0B" Icon={SplitSquareVertical} title={data.label || "Condition"}
-        footer={<OutLabels items={[{ label: "TRUE", color: "#10b981", dir: "→" }, { label: "FALSE", color: "#ef4444", dir: "↓" }]} />}
+        footer={<OutLabels items={[{ label: "TRUE", color: "#10b981", dir: "↙" }, { label: "FALSE", color: "#ef4444", dir: "↘" }]} />}
       >
         {(data.field || data.value) && (
           <div style={{ fontFamily: "monospace", fontSize: 12, color: "#334155", background: "#f8fafc", borderRadius: 8, padding: "6px 10px", border: "1px solid #e2e8f0" }}>
@@ -322,11 +322,11 @@ export const LogicNode = React.memo(function LogicNode({ id, data, selected }: a
 export const WebhookNode = React.memo(function WebhookNode({ id, data, selected }: any) {
   return (
     <Root width={264}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
-      <Handle type="source" position={Position.Right} id="success" isConnectable className="flow-handle flow-handle--green" />
-      <Handle type="source" position={Position.Bottom} id="error" isConnectable className="flow-handle flow-handle--red" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="success" isConnectable className="flow-handle flow-handle--green" style={{ left: '28%', transform: 'translateX(-50%)' }} />
+      <Handle type="source" position={Position.Bottom} id="error" isConnectable className="flow-handle flow-handle--red" style={{ left: '72%', transform: 'translateX(-50%)' }} />
       <Card id={id} selected={selected} color="#06B6D4" Icon={Webhook} title={data.label || "API Request"}
-        footer={<OutLabels items={[{ label: "200 OK", color: "#10b981", dir: "→" }, { label: "ERROR", color: "#ef4444", dir: "↓" }]} />}
+        footer={<OutLabels items={[{ label: "200 OK", color: "#10b981", dir: "↙" }, { label: "ERROR", color: "#ef4444", dir: "↘" }]} />}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <Badge label={data.method || "POST"} color="#06b6d4" />
@@ -342,7 +342,7 @@ export const WebhookNode = React.memo(function WebhookNode({ id, data, selected 
 export const DelayNode = React.memo(function DelayNode({ id, data, selected }: any) {
   return (
     <Root width={220}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
       <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
       <Card id={id} selected={selected} color="#6366F1" Icon={Clock} title="Time Delay">
         <Badge label={`Wait ${data.duration || "2"}s`} color="#6366F1" />
@@ -354,7 +354,7 @@ export const DelayNode = React.memo(function DelayNode({ id, data, selected }: a
 export const HandoffNode = React.memo(function HandoffNode({ id, data, selected }: any) {
   return (
     <Root width={240}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
       <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
       <Card id={id} selected={selected} color="#EC4899" Icon={UserCheck} title={data.label || "Human Handoff"}>
         <KV k="Assign to" v={data.team || "Support Team"} />
@@ -366,11 +366,11 @@ export const HandoffNode = React.memo(function HandoffNode({ id, data, selected 
 export const KnowledgeNode = React.memo(function KnowledgeNode({ id, data, selected }: any) {
   return (
     <Root width={256}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
-      <Handle type="source" position={Position.Right} id="success" isConnectable className="flow-handle flow-handle--green" />
-      <Handle type="source" position={Position.Bottom} id="missing" isConnectable className="flow-handle flow-handle--gray" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="success" isConnectable className="flow-handle flow-handle--green" style={{ left: '28%', transform: 'translateX(-50%)' }} />
+      <Handle type="source" position={Position.Bottom} id="missing" isConnectable className="flow-handle flow-handle--gray" style={{ left: '72%', transform: 'translateX(-50%)' }} />
       <Card id={id} selected={selected} color="#A855F7" Icon={BookOpen} title={data.label || "Knowledge Base"}
-        footer={<OutLabels items={[{ label: "FOUND", color: "#10b981", dir: "→" }, { label: "NOT FOUND", color: "#94a3b8", dir: "↓" }]} />}
+        footer={<OutLabels items={[{ label: "FOUND", color: "#10b981", dir: "↙" }, { label: "NOT FOUND", color: "#94a3b8", dir: "↘" }]} />}
       >
         <KV k="Source" v={data.source || "Help Center"} />
       </Card>
@@ -381,7 +381,7 @@ export const KnowledgeNode = React.memo(function KnowledgeNode({ id, data, selec
 export const EndNode = React.memo(function EndNode({ id, data, selected }: any) {
   return (
     <Root width={200}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
       {/* No source handle — flow ends here */}
       <Card id={id} selected={selected} color="#EF4444" Icon={XCircle} title={data.label || "End Flow"} />
     </Root>
@@ -392,11 +392,11 @@ export const ExtractNode = React.memo(function ExtractNode({ id, data, selected 
   const entities: string[] = data.entities || ["name", "email"];
   return (
     <Root width={256}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
-      <Handle type="source" position={Position.Right} id="success" isConnectable className="flow-handle flow-handle--green" />
-      <Handle type="source" position={Position.Bottom} id="missing" isConnectable className="flow-handle flow-handle--gray" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="success" isConnectable className="flow-handle flow-handle--green" style={{ left: '28%', transform: 'translateX(-50%)' }} />
+      <Handle type="source" position={Position.Bottom} id="missing" isConnectable className="flow-handle flow-handle--gray" style={{ left: '72%', transform: 'translateX(-50%)' }} />
       <Card id={id} selected={selected} color="#14B8A6" Icon={Code2} title={data.label || "Extract Entities"}
-        footer={<OutLabels items={[{ label: "EXTRACTED", color: "#10b981", dir: "→" }, { label: "MISSING", color: "#94a3b8", dir: "↓" }]} />}
+        footer={<OutLabels items={[{ label: "EXTRACTED", color: "#10b981", dir: "↙" }, { label: "MISSING", color: "#94a3b8", dir: "↘" }]} />}
       >
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
           {entities.slice(0, 5).map((e: string) => (
@@ -414,7 +414,7 @@ export const ExtractNode = React.memo(function ExtractNode({ id, data, selected 
 export const FormatNode = React.memo(function FormatNode({ id, data, selected }: any) {
   return (
     <Root width={240}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
       <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
       <Card id={id} selected={selected} color="#0EA5E9" Icon={Paintbrush} title={data.label || "Format Response"}>
         <Badge label={data.formatType || "Quick Replies"} color="#0ea5e9" />
@@ -426,7 +426,7 @@ export const FormatNode = React.memo(function FormatNode({ id, data, selected }:
 export const MemoryNode = React.memo(function MemoryNode({ id, data, selected }: any) {
   return (
     <Root width={240}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
       <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
       <Card id={id} selected={selected} color="#8B5CF6" Icon={Database} title={data.label || "Context Memory"}>
         <KV k="Scope" v={data.scope || "User Session"} />
@@ -438,11 +438,11 @@ export const MemoryNode = React.memo(function MemoryNode({ id, data, selected }:
 export const WaitNode = React.memo(function WaitNode({ id, data, selected }: any) {
   return (
     <Root width={240}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
-      <Handle type="source" position={Position.Right} id="next" isConnectable className="flow-handle flow-handle--green" />
-      <Handle type="source" position={Position.Bottom} id="timeout" isConnectable className="flow-handle flow-handle--gray" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="next" isConnectable className="flow-handle flow-handle--green" style={{ left: '28%', transform: 'translateX(-50%)' }} />
+      <Handle type="source" position={Position.Bottom} id="timeout" isConnectable className="flow-handle flow-handle--gray" style={{ left: '72%', transform: 'translateX(-50%)' }} />
       <Card id={id} selected={selected} color="#64748B" Icon={Hourglass} title={data.label || "Wait for Reply"}
-        footer={<OutLabels items={[{ label: "RECEIVED", color: "#10b981", dir: "→" }, { label: "TIMEOUT", color: "#94a3b8", dir: "↓" }]} />}
+        footer={<OutLabels items={[{ label: "RECEIVED", color: "#10b981", dir: "↙" }, { label: "TIMEOUT", color: "#94a3b8", dir: "↘" }]} />}
       >
         <KV k="Waiting for" v={data.event || "User Reply"} />
       </Card>
@@ -453,11 +453,11 @@ export const WaitNode = React.memo(function WaitNode({ id, data, selected }: any
 export const ResumeParserNode = React.memo(function ResumeParserNode({ id, data, selected }: any) {
   return (
     <Root width={248}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
-      <Handle type="source" position={Position.Right} id="success" isConnectable className="flow-handle flow-handle--green" />
-      <Handle type="source" position={Position.Bottom} id="error" isConnectable className="flow-handle flow-handle--red" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="success" isConnectable className="flow-handle flow-handle--green" style={{ left: '28%', transform: 'translateX(-50%)' }} />
+      <Handle type="source" position={Position.Bottom} id="error" isConnectable className="flow-handle flow-handle--red" style={{ left: '72%', transform: 'translateX(-50%)' }} />
       <Card id={id} selected={selected} color="#10B981" Icon={FileText} title={data.label || "Resume Parser"}
-        footer={<OutLabels items={[{ label: "PARSED", color: "#10b981", dir: "→" }, { label: "FAILED", color: "#ef4444", dir: "↓" }]} />}
+        footer={<OutLabels items={[{ label: "PARSED", color: "#10b981", dir: "↙" }, { label: "FAILED", color: "#ef4444", dir: "↘" }]} />}
       >
         <KV k="Extracts" v={data.extracts || "Skills, Experience"} />
       </Card>
@@ -469,11 +469,11 @@ export const CollectDataNode = React.memo(function CollectDataNode({ id, data, s
   const fields: string[] = data.fields || ["Name", "Email", "Phone"];
   return (
     <Root width={256}>
-      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--blue" />
-      <Handle type="source" position={Position.Right} id="success" isConnectable className="flow-handle flow-handle--green" />
-      <Handle type="source" position={Position.Bottom} id="timeout" isConnectable className="flow-handle flow-handle--gray" />
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="success" isConnectable className="flow-handle flow-handle--green" style={{ left: '28%', transform: 'translateX(-50%)' }} />
+      <Handle type="source" position={Position.Bottom} id="timeout" isConnectable className="flow-handle flow-handle--gray" style={{ left: '72%', transform: 'translateX(-50%)' }} />
       <Card id={id} selected={selected} color="#F59E0B" Icon={ListChecks} title={data.label || "Collect Data"}
-        footer={<OutLabels items={[{ label: "COMPLETE", color: "#10b981", dir: "→" }, { label: "TIMEOUT", color: "#94a3b8", dir: "↓" }]} />}
+        footer={<OutLabels items={[{ label: "COMPLETE", color: "#10b981", dir: "↙" }, { label: "TIMEOUT", color: "#94a3b8", dir: "↘" }]} />}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {fields.slice(0, 3).map((f: string, i: number) => (
