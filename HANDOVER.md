@@ -251,9 +251,12 @@ These have all been root-caused and cost real time. Treat them as immutable.
 
 ---
 
-## 6. Flow Engine — every node type
+## 6. Flow Engine — every node
 
-Located in `src/lib/flows/engine.ts`. Sidebar definitions in `src/app/dashboard/flows/_components/FlowSidebar.tsx`.
+**51 distinct sidebar nodes across 8 categories, mapping to ~14 engine handlers.**
+
+Sidebar definitions: `src/app/dashboard/flows/_components/FlowSidebar.tsx`
+Engine handlers: `src/lib/flows/engine.ts`
 
 ### Execution context
 ```ts
@@ -272,44 +275,121 @@ interface ExecContext {
 }
 ```
 
-### Trigger nodes (entry points)
-| ID | Engine type | Purpose |
+### 6.1 Full sidebar inventory (all 51)
+
+#### Triggers — 8 nodes (`#3B82F6` blue)
+| Sidebar ID | Label | Engine type |
 |---|---|---|
-| `trigger` | `trigger` | Any-message trigger |
-| `keyword_trigger` | `trigger` | Match specific keywords |
-| `button_trigger` | `trigger` | Reply to interactive button |
-| `webhook_trigger` | `trigger` | External webhook fires flow |
-| `schedule_trigger` | `trigger` | Cron-style scheduled fire |
-| `inactivity_trigger` | `trigger` | After N hours of silence |
-| `wait` | `wait` | Wait for an event (treated as time delay in current engine — known mismatch, see §10) |
-| `resume` | `resume` | Returns flow to listening mode (stops cleanly) |
+| `trigger` | Message Trigger | `trigger` |
+| `keyword_trigger` | Keyword Trigger | `trigger` |
+| `button_trigger` | Button Click | `trigger` |
+| `webhook_trigger` | Webhook Trigger | `trigger` |
+| `schedule_trigger` | Scheduled Time | `trigger` |
+| `inactivity_trigger` | Inactivity Trigger | `trigger` |
+| `wait` | Wait for Event | `wait` |
+| `resume` | Return to Listen | `resume` |
 
-### Send nodes
-| ID | Engine handler |
-|---|---|
-| `standard` | Sends `node.data.content` as text via `sendTextMessage` |
-| `send_media` | Image / video / audio / file via `sendMediaMessage` (`MetaMediaType`) |
-| `send_audio` | Audio (sub-type of media) |
-| `interactive_buttons` | Quick-reply buttons |
-| `list_message` | List picker |
+#### Messaging — 8 nodes (`#10B981` green)
+| Sidebar ID | Label | Engine type |
+|---|---|---|
+| `standard` | Send Message | `standard` |
+| `send_media` | Send Media | `standard` ⚠ |
+| `send_audio` | Send Audio | `standard` ⚠ |
+| `send_buttons` | Interactive Buttons | `standard` |
+| `send_list` | List Menu | `standard` |
+| `format` | Format Response | `format` |
+| `handoff` | Human Handoff | `handoff` |
+| `assign_agent` | Assign to Agent | `standard` |
 
-### Logic nodes
+#### AI & Logic — 8 nodes (`#8B5CF6` purple)
+| Sidebar ID | Label | Engine type |
+|---|---|---|
+| `condition` | Logic Branch | `condition` |
+| `interruption` | AI Intent Handling | `interruption` |
+| `extract` | Extract Entities | `extract` |
+| `memory` | Context Memory | `memory` |
+| `knowledge` | AI Knowledge Base | `knowledge` |
+| `sentiment` | Sentiment Analysis | `standard` |
+| `intent_routing` | Intent Routing | `standard` |
+| `end` | End Flow | `end` |
+
+#### E-Commerce — 6 nodes (`#06B6D4` cyan)
+| Sidebar ID | Label | Engine type |
+|---|---|---|
+| `show_products` | Show Products | `standard` |
+| `add_cart` | Add to Cart | `standard` |
+| `checkout_link` | Checkout Link | `standard` |
+| `payment_link` | Payment Link | `standard` |
+| `order_tracking` | Order Tracking | `standard` |
+| `returns_handler` | Returns Handler | `standard` |
+
+#### Appointments — 5 nodes (`#F79009` orange)
+| Sidebar ID | Label | Engine type |
+|---|---|---|
+| `show_slots` | Show Slots | `standard` |
+| `book_appt` | Book Appointment | `standard` |
+| `reschedule` | Reschedule | `standard` |
+| `intake_form` | Intake Form | `standard` |
+| `appt_reminder` | Reminder | `standard` |
+
+#### Lead Gen & CRM — 5 nodes (`#F04438` red)
+| Sidebar ID | Label | Engine type |
+|---|---|---|
+| `capture_lead` | Capture Lead | `standard` |
+| `collect_data` | Collect Data Form | `collect_data` |
+| `lead_quiz` | Lead Quiz | `standard` |
+| `push_crm` | Push to CRM | `webhook` |
+| `schedule_demo` | Schedule Demo | `standard` |
+
+#### Integrations — 7 nodes (`#6366F1` indigo)
+| Sidebar ID | Label | Engine type |
+|---|---|---|
+| `webhook` | API Call | `webhook` |
+| `gsheets` | Google Sheets | `webhook` |
+| `gcal` | Google Calendar | `webhook` |
+| `send_email` | Send Email | `standard` |
+| `delay` | Time Delay | `delay` |
+| `set_var` | Set Variable | `standard` |
+| `update_tag` | Update Tag | `standard` ⚠ |
+
+#### Custom — 4 nodes (`#64748B` slate)
+| Sidebar ID | Label | Engine type |
+|---|---|---|
+| `custom_code` | Custom Code | `standard` |
+| `custom_webhook` | Custom Webhook | `webhook` |
+| `custom_prompt` | Custom AI Prompt | `interruption` |
+| `custom_cond` | Custom Condition | `condition` |
+
+⚠ = sidebar-engine type mismatch, see §10.
+
+### 6.2 Engine handler semantics (the ~14 unique handlers)
+
+#### Trigger handlers
+- `trigger` — any-message / keyword / button / webhook / schedule / inactivity entry. Returns `nextId` to first downstream node.
+- `wait` — pause until external event. Currently treated as time delay (known mismatch).
+- `resume` — terminal-style; flow returns to listening mode, stops cleanly.
+
+#### Send handlers
+- `standard` — sends `node.data.content` as text via `sendTextMessage`. **Most messaging-category nodes route here**, including the broken `send_media`/`send_audio`/`send_buttons`/`send_list` that should ideally have their own handlers.
+- `send_media` — image / video / audio / file via `sendMediaMessage` with `MetaMediaType`. **Currently dead code** — sidebar emits `type: "standard"` for these.
+
+#### Logic handlers
 - `condition` — field/operator/value matcher OR fallback keyword match. Branches `true` / `false`. Operators: `=`, `!=`, `>`, `<`, `contains`.
-- `extract` — regex extraction of `email`, `phone`, `name` from message into `ctx.variables`.
-- `format` — stringifies `knowledge_result` / `webhook_response` into `formatted_message` (used by next send node).
+- `extract` — regex extraction of `email`, `phone`, `name` from inbound message into `ctx.variables`.
+- `format` — stringifies `knowledge_result` / `webhook_response` into `formatted_message` (consumed by next send node).
 - `memory` — persists `name` / `email` to `leads` table; full vars to `conversations.context` JSON.
 - `knowledge` — keyword search across tenant's `knowledge_docs`; RAG pgvector in production.
 - `interruption` — Gemini intent classifier; branches `success` / `fallback`.
 
-### Action nodes
+#### Action handlers
 - `webhook` — real HTTP POST/GET, stores JSON response in `ctx.variables[node.id]`. Branches `success` / `error`.
-- `tag` — adds tag to lead via `leads.tags` array.
+- `tag` — adds tag to lead via `leads.tags` array. Currently triggered accidentally via `node.id?.startsWith('tag')` rather than type match.
 - `handoff` — sets `bot_paused=true` on conversation, fires `sendStaffAlert`.
-- `delay` / `wait` — `setTimeout` (max 5s in dryRun). Reads `node.data.seconds` OR `delay` OR `duration`.
+- `delay` — `setTimeout` (max 5s in dryRun). Reads `node.data.seconds` OR `delay` OR `duration`.
 - `book_appointment` — Google Calendar event via OAuth. Branches `success` / `error`.
 - `ai_reply` — Gemini context-aware reply, sent via `sendTextMessage`.
 - `wait_for_reply` — saves `pending_flow_node` on conversation, returns `stop:true`. Inbound webhook resumes from saved node.
-- `collect_data` / `resume_parser` — multi-field capture (production-side wiring is partial — see §10).
+- `collect_data` / `resume_parser` — multi-field capture (live execution stub — dryRun trace works).
 - `end` — terminal, stops execution.
 
 ### Dry-run vs live execution
