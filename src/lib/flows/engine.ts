@@ -281,6 +281,9 @@ async function executeNode(
 
   // ── Trigger — just pass through ──────────────────────────
   if (type === 'trigger' || type === 'keyword_trigger') {
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'trigger_matched', payload: String(node.data?.label || 'Flow started'), nextId: getNextNode(node.id, null, edges) });
+    }
     return { nextId: getNextNode(node.id, null, edges) };
   }
 
@@ -398,6 +401,10 @@ async function executeNode(
       const keyword = ((node.data?.condition as string) || targetVal || '').toLowerCase().trim();
       matched = keyword ? keywordMatches(ctx.messageText.toLowerCase(), keyword) : false;
     }
+    if (ctx.dryRun) {
+      const desc = field ? `${field} ${operator} "${targetVal}" → ${matched ? 'TRUE ✓' : 'FALSE ✗'}` : `keyword match: ${matched}`;
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: matched ? 'condition_true' : 'condition_false', payload: desc, variables: { ...ctx.variables }, nextId: getNextNode(node.id, matched ? 'true' : 'false', edges) });
+    }
     return { nextId: getNextNode(node.id, matched ? 'true' : 'false', edges) };
   }
 
@@ -440,7 +447,7 @@ async function executeNode(
 
   // ── Delay / Wait ─────────────────────────────────────────
   if (type === 'delay' || type === 'wait') {
-    const seconds = Math.min(Number(node.data?.seconds ?? node.data?.delay ?? 1), 5);
+    const seconds = Math.min(Number(node.data?.seconds ?? node.data?.delay ?? node.data?.duration ?? 1), 5);
     if (ctx.dryRun) {
       ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'delay', payload: `${seconds}s`, nextId: getNextNode(node.id, null, edges) });
       return { nextId: getNextNode(node.id, null, edges) };
@@ -502,6 +509,10 @@ async function executeNode(
 
   // ── Interruption — AI intent extraction into variables ───
   if (type === 'interruption') {
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'ai_intent', payload: `Analyzing: "${ctx.messageText.slice(0, 60)}"`, variables: { ...ctx.variables }, nextId: getNextNode(node.id, 'success', edges) });
+      return { nextId: getNextNode(node.id, 'success', edges) };
+    }
     try {
       const { data: tenantRow } = await supabaseAdmin
         .from('tenants').select('*').eq('id', ctx.tenantId).single();
@@ -533,6 +544,10 @@ async function executeNode(
 
   // ── Knowledge — search tenant's knowledge docs ──────────
   if (type === 'knowledge') {
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'knowledge_search', payload: `Searching docs: "${ctx.messageText.slice(0, 40)}"`, nextId: getNextNode(node.id, null, edges) });
+      return { nextId: getNextNode(node.id, null, edges) };
+    }
     try {
       const { data: docs } = await supabaseAdmin
         .from('knowledge_docs')
@@ -568,6 +583,11 @@ async function executeNode(
 
   // ── Memory — persist variables to lead + conversation ───
   if (type === 'memory') {
+    if (ctx.dryRun) {
+      const keys = Object.keys(ctx.variables).filter(Boolean).join(', ');
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'memory_saved', payload: keys || 'no variables yet', variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
+      return { nextId: getNextNode(node.id, null, edges) };
+    }
     if (ctx.leadId) {
       const updates: Record<string, unknown> = {};
       if (ctx.variables.name)  updates.name  = ctx.variables.name;
@@ -607,6 +627,9 @@ async function executeNode(
         ctx.variables.formatted_message = String(data);
       }
     }
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'format_message', payload: String(ctx.variables.formatted_message || '(no input to format)'), variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
+    }
     return { nextId: getNextNode(node.id, null, edges) };
   }
 
@@ -618,11 +641,20 @@ async function executeNode(
     if (emailMatch) ctx.variables.email          = emailMatch[0];
     if (phoneMatch) ctx.variables.extracted_phone = phoneMatch[0];
     if (nameMatch)  ctx.variables.name            = nameMatch[1].trim();
+    if (ctx.dryRun) {
+      const found = [emailMatch && `email: ${emailMatch[0]}`, phoneMatch && `phone: ${phoneMatch[0]}`, nameMatch && `name: ${nameMatch[1].trim()}`].filter(Boolean).join(', ');
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'extract_entities', payload: found || 'no entities found in message', variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
+    }
     return { nextId: getNextNode(node.id, null, edges) };
   }
 
   // ── Book Appointment — creates Google Calendar event ─────
   if (type === 'book_appointment') {
+    if (ctx.dryRun) {
+      const title = interpolate((node.data?.title as string) || 'Appointment', ctx);
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'book_appointment', payload: `Would book: "${title}"`, variables: { ...ctx.variables }, nextId: getNextNode(node.id, 'success', edges) });
+      return { nextId: getNextNode(node.id, 'success', edges) };
+    }
     try {
       const title = interpolate((node.data?.title as string) || 'Appointment', ctx);
       const start = interpolate((node.data?.start as string) || (ctx.variables.slot_start as string) || '', ctx);
@@ -652,6 +684,10 @@ async function executeNode(
 
   // ── AI Reply — call Gemini, send its response ───────────
   if (type === 'ai_reply') {
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_message', payload: '[AI would generate a response based on conversation context]', nextId: getNextNode(node.id, null, edges) });
+      return { nextId: getNextNode(node.id, null, edges), sent: true };
+    }
     try {
       const { data: tenantRow } = await supabaseAdmin
         .from('tenants')
@@ -709,10 +745,36 @@ async function executeNode(
 
   // ── End ──────────────────────────────────────────────────
   if (type === 'end' || node.id === 'end') {
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'end_flow', payload: 'Flow completed', nextId: null });
+    }
     return { stop: true };
   }
 
+  // ── Resume (return to listening mode) ────────────────────
+  if (type === 'resume') {
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'resume_flow', payload: 'Returned to listening mode', nextId: null });
+    }
+    return { stop: true };
+  }
+
+  // ── Collect Data / Resume Parser — multi-field capture ───
+  if (type === 'collect_data' || type === 'resume_parser') {
+    const fields = Array.isArray(node.data?.fields)
+      ? (node.data.fields as string[]).slice(0, 4).join(', ')
+      : String(node.data?.extracts || '');
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'collect_data', payload: fields || 'collecting user input', nextId: getNextNode(node.id, 'success', edges) });
+      return { nextId: getNextNode(node.id, 'success', edges) };
+    }
+    return { nextId: getNextNode(node.id, null, edges) };
+  }
+
   // ── Unknown node type — just traverse ───────────────────
+  if (ctx.dryRun) {
+    ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'node_executed', payload: String(node.data?.label || type), nextId: getNextNode(node.id, null, edges) });
+  }
   return { nextId: getNextNode(node.id, null, edges) };
 }
 
