@@ -12,6 +12,7 @@ import {
   useUpdateNodeInternals,
   PanOnScrollMode,
   ConnectionLineType,
+  ConnectionMode,
   MarkerType,
   type NodeTypes,
   type Node,
@@ -269,6 +270,7 @@ function FlowCanvasInner() {
         elementsSelectable={true}
         connectOnClick={false}
         deleteKeyCode={null}
+        connectionMode={ConnectionMode.Loose}
         connectionRadius={80}
         autoPanOnConnect={true}
         /* ── CONNECTION PREVIEW LINE ── */
