@@ -201,7 +201,7 @@ export default function FlowEditorPage() {
           {!isSimulating && <FlowSidebar businessType={businessType} />}
           {isSimulating && <FlowSimulator />}
           <FlowCanvas />
-          {!isSimulating && selectedNodeId && (
+          {!isSimulating && (
             <div
               className="w-[360px] flex-shrink-0 z-10 overflow-hidden"
               style={{
@@ -209,6 +209,14 @@ export default function FlowEditorPage() {
                 backdropFilter: 'blur(20px)',
                 borderLeft: '1px solid rgba(255,255,255,0.05)',
                 boxShadow: '-8px 0 32px rgba(0,0,0,0.5)',
+                // Always mounted — CSS transition instead of React mount/unmount
+                // Avoids reconciliation cost (and perceived lag) on every node click
+                transform: selectedNodeId ? 'translateX(0)' : 'translateX(100%)',
+                transition: 'transform 0.18s cubic-bezier(0.16,1,0.3,1)',
+                position: selectedNodeId ? 'relative' : 'absolute',
+                right: 0,
+                top: 0,
+                bottom: 0,
               }}
             >
               <FlowInspector />

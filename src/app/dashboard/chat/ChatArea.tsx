@@ -358,7 +358,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
-  // Status polling: every 3s, always run — picks up delivered/read from Gupshup webhook DB updates
+  // Status polling: every 3s, always run — picks up delivered/read from Meta webhook DB updates
   useEffect(() => {
     if (!conversationId) return;
     const poll = async () => {

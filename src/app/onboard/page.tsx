@@ -9,7 +9,7 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 // 🚀 Onboarding Wizard — 3 steps, luxury concierge feel
 // Step 1: Business profile
 // Step 2: AI assistant personality
-// Step 3: WhatsApp activation (white-label, no mention of Gupshup)
+// Step 3: WhatsApp activation (Meta Cloud API direct)
 // ═══════════════════════════════════════════════════════════
 
 const G = "#25D366";

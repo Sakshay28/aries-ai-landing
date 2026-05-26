@@ -2,7 +2,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantByIgPageId, getTenantConfig, incrementMessageCount, checkUsageLimits } from '@/lib/tenant/manager';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { sendInstagramMessage, markInstagramAsRead } from '@/lib/instagram/service';
-import { sendStaffAlert } from '@/lib/gupshup/service';
+import { sendStaffAlert } from '@/lib/meta/service';
 import { scheduleConversationTimeout } from '@/lib/followup/engine';
 import { checkRedisRateLimit, getRedisClient } from '@/lib/redis/client';
 import { v4 as uuidv4 } from 'uuid';

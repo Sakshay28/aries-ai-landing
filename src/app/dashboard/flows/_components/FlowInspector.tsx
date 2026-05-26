@@ -53,11 +53,21 @@ function useFocusStyle() {
 // subscribed. This means drag position updates (60/sec) do NOT rerender
 // this component. Local React state is used for all form fields.
 export default function FlowInspector() {
-  // ── Granular selectors — only scalars, never arrays ─────────────────────────
+  // ── CRITICAL: Subscribe ONLY to selectedNodeId (a stable string scalar).
+  // nodeCount/edgeCount subscriptions were removed — they updated on every
+  // drag frame (60x/sec) and caused full inspector rerenders during panning.
+  // Canvas summary stats are now read imperatively via getState() once on mount.
   const selectedNodeId = useFlowStore(s => s.selectedNodeId);
   const setSelectedNodeId = useFlowStore(s => s.setSelectedNodeId);
-  const nodeCount = useFlowStore(s => s.nodes.length);
-  const edgeCount = useFlowStore(s => s.edges.length);
+
+  // ── Canvas summary stats — read once, not subscribed ───────────────────────
+  const [canvasStats, setCanvasStats] = useState({ nodes: 0, edges: 0 });
+  useEffect(() => {
+    if (!selectedNodeId) {
+      const s = useFlowStore.getState();
+      setCanvasStats({ nodes: s.nodes.length, edges: s.edges.length });
+    }
+  }, [selectedNodeId]);
 
   // ── Local state buffer — decoupled from Zustand node array ─────────────────
   const [activeTab, setActiveTab] = useState<TabId>("general");
@@ -86,19 +96,20 @@ export default function FlowInspector() {
     setNodeType(node.type || "standard");
     setNodeIdStr(node.id);
     setActiveTab("general");
-    // Edge counts at snapshot time
+    // Edge counts at snapshot time — imperative read, not subscription
     setInCount(s.edges.filter(e => e.target === selectedNodeId).length);
     setOutCount(s.edges.filter(e => e.source === selectedNodeId).length);
   }, [selectedNodeId]);
 
   // ── Debounced write to store — canvas does NOT rerender while typing ────────
+  // 200ms debounce: fast enough to feel instant, long enough to batch keystrokes.
   const commitField = useCallback((field: string, value: any) => {
     setLocalData(prev => ({ ...prev, [field]: value }));
     if (commitTimer.current) clearTimeout(commitTimer.current);
     commitTimer.current = setTimeout(() => {
       const id = useFlowStore.getState().selectedNodeId;
       if (id) useFlowStore.getState().updateNodeData(id, { [field]: value });
-    }, 350);
+    }, 200);
   }, []);
 
   // ── Immediate write on blur (ensures nothing is lost) ──────────────────────
@@ -108,7 +119,7 @@ export default function FlowInspector() {
     if (id) useFlowStore.getState().updateNodeData(id, { [field]: value });
   }, []);
 
-  // ── No node selected: show canvas summary ──────────────────────────────────
+  // ── No node selected: show canvas summary (stats from snapshot, not live sub) 
   if (!selectedNodeId) {
     return (
       <div className="w-full flex flex-col h-full overflow-hidden">
@@ -125,12 +136,12 @@ export default function FlowInspector() {
           >
             <div className="flex items-center justify-between">
               <span className="text-[11px]" style={{ color: "rgba(255,255,255,0.3)" }}>Total Nodes</span>
-              <span className="text-[13px] font-semibold" style={{ color: "rgba(255,255,255,0.7)" }}>{nodeCount}</span>
+              <span className="text-[13px] font-semibold" style={{ color: "rgba(255,255,255,0.7)" }}>{canvasStats.nodes}</span>
             </div>
             <div className="h-px" style={{ background: "rgba(255,255,255,0.04)" }} />
             <div className="flex items-center justify-between">
               <span className="text-[11px]" style={{ color: "rgba(255,255,255,0.3)" }}>Connections</span>
-              <span className="text-[13px] font-semibold" style={{ color: "rgba(255,255,255,0.7)" }}>{edgeCount}</span>
+              <span className="text-[13px] font-semibold" style={{ color: "rgba(255,255,255,0.7)" }}>{canvasStats.edges}</span>
             </div>
             <div className="h-px" style={{ background: "rgba(255,255,255,0.04)" }} />
             <div className="flex items-center justify-between">
@@ -166,7 +177,7 @@ export default function FlowInspector() {
   ];
 
   return (
-    <div className="w-full flex flex-col h-full overflow-hidden">
+    <div className="w-full flex flex-col h-full overflow-hidden" style={{ animation: 'inspectorIn 0.15s cubic-bezier(0.16,1,0.3,1) both' }}>
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex-shrink-0 px-5 pt-5 pb-0">
         <div className="flex items-center justify-between mb-4">
