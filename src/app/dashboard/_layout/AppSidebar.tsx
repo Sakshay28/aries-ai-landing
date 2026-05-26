@@ -22,7 +22,6 @@ import {
   UserCog,
   Library,
   Activity,
-  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -48,7 +47,6 @@ type NavItem = {
   icon: LucideIcon;
   href: string;
   badge?: React.ReactNode;
-  allowedPlans?: string[];
 };
 
 const navigationItems: NavItem[] = [
@@ -68,7 +66,6 @@ const navigationItems: NavItem[] = [
     label: "AI Agents", 
     icon: Bot, 
     href: "/dashboard/agents",
-    allowedPlans: ["growth", "pro", "enterprise"],
     badge: (
       <div className="flex items-center gap-1.5">
         <span className="text-[10px] tracking-wide text-sidebar-foreground/50">2 Active</span>
@@ -79,26 +76,24 @@ const navigationItems: NavItem[] = [
     label: "AI Flows", 
     icon: Network, 
     href: "/dashboard/flows",
-    allowedPlans: ["pro", "enterprise"],
     badge: (
       <div className="flex items-center gap-1.5">
         <span className="text-[10px] tracking-wide text-sidebar-foreground/50">Active</span>
       </div>
     ) 
   },
-  { label: "Broadcast", icon: Megaphone, href: "/dashboard/broadcast", allowedPlans: ["growth", "pro", "enterprise"] },
+  { label: "Broadcast", icon: Megaphone, href: "/dashboard/broadcast" },
   { label: "Contacts", icon: Users, href: "/dashboard/contacts" },
   { 
     label: "Smart Rules", 
     icon: Workflow, 
     href: "/dashboard/automations",
-    allowedPlans: ["growth", "pro", "enterprise"],
     badge: <SmartRulesBadge />,
   },
   { label: "Knowledge Base", icon: Library, href: "/dashboard/knowledge" },
   { label: "Templates", icon: FileText, href: "/dashboard/templates" },
   { label: "Event Logs", icon: Activity, href: "/dashboard/logs" },
-  { label: "Integrations", icon: Puzzle, href: "/dashboard/integrations", allowedPlans: ["pro", "enterprise"] },
+  { label: "Integrations", icon: Puzzle, href: "/dashboard/integrations" },
 ];
 
 const bottomItems: NavItem[] = [
@@ -230,20 +225,7 @@ function SidebarBody({
     }
   };
 
-  const [plan, setPlan] = useState<string>("starter");
-
-  useEffect(() => {
-    const fetchPlan = async () => {
-      try {
-        const supabase = createBrowserSupabaseClient();
-        const { data } = await supabase.from("tenants").select("plan").limit(1).single();
-        if (data?.plan) setPlan(data.plan);
-      } catch (err) {
-        console.error("Failed to load plan in sidebar:", err);
-      }
-    };
-    fetchPlan();
-  }, []);
+  const plan = "pro";
 
   return (
     <>
@@ -383,7 +365,7 @@ function NavButton({
   item,
   isOpen,
   isActive,
-  userPlan,
+  userPlan: _userPlan,
 }: {
   item: NavItem;
   isOpen: boolean;
@@ -391,33 +373,25 @@ function NavButton({
   userPlan: string;
 }) {
   const Icon = item.icon;
-  const isLocked = item.allowedPlans && !item.allowedPlans.includes(userPlan);
-  const targetHref = isLocked ? "/dashboard/billing" : item.href;
 
   return (
     <Link
-      href={targetHref}
+      href={item.href}
       prefetch={false}
       className={cn(
         "group relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-[13px] font-medium transition-colors",
         isActive
           ? "bg-black/5 dark:bg-white/5 text-sidebar-accent-foreground"
           : "text-sidebar-foreground/80 hover:bg-black/5 dark:hover:bg-white/5 hover:text-sidebar-accent-foreground",
-        isLocked && "opacity-50",
         !isOpen && "justify-center",
       )}
-      title={!isOpen ? (isLocked ? `${item.label} (Upgrade Required)` : item.label) : undefined}
+      title={!isOpen ? item.label : undefined}
     >
       <Icon className={cn("h-4 w-4 shrink-0 transition-colors", isActive ? "text-sidebar-accent-foreground" : "text-sidebar-foreground/60 group-hover:text-sidebar-foreground/80")} />
       {isOpen && (
         <>
           <span className="flex-1 text-left">{item.label}</span>
-          {isLocked ? (
-            <span className="text-[9px] font-bold text-amber-500 flex items-center gap-1 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
-              <Lock className="w-2.5 h-2.5" />
-              LOCK
-            </span>
-          ) : item.badge ? (
+          {item.badge ? (
             <span
               className={cn(
                 "inline-flex h-5 items-center justify-center rounded-full px-2 text-[10px] font-semibold border border-sidebar-border",
@@ -429,15 +403,9 @@ function NavButton({
           ) : null}
         </>
       )}
-      {!isOpen && (
-        isLocked ? (
-          <span className="absolute right-1 top-1 text-amber-500">
-            <Lock className="w-2 h-2" />
-          </span>
-        ) : item.badge ? (
-          <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-sidebar-primary" />
-        ) : null
-      )}
+      {!isOpen && item.badge ? (
+        <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-sidebar-primary" />
+      ) : null}
     </Link>
   );
 }
