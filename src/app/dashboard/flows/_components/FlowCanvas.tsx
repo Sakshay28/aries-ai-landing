@@ -64,14 +64,14 @@ const NODE_TYPES: NodeTypes = {
 };
 
 const DEFAULT_EDGE_OPTIONS = {
-  type: "smoothstep",
-  style: { strokeWidth: 2, stroke: "rgba(16,185,129,0.65)" },
+  type: "default", // bezier — smoother than smoothstep
+  style: { strokeWidth: 2.5, stroke: "rgba(16,185,129,0.7)" },
   animated: false,
   markerEnd: {
     type: MarkerType.ArrowClosed,
-    width: 14,
-    height: 14,
-    color: "rgba(16,185,129,0.65)",
+    width: 12,
+    height: 12,
+    color: "rgba(16,185,129,0.7)",
   },
 } as const;
 
@@ -79,10 +79,16 @@ const DEFAULT_EDGE_OPTIONS = {
 const CONNECTION_LINE_STYLE = {
   stroke: "rgba(99,102,241,0.9)",
   strokeWidth: 2,
-  strokeDasharray: "5 4",
+  filter: "drop-shadow(0 0 3px rgba(99,102,241,0.5))",
 } as const;
 
-const SNAP_GRID: [number, number] = [16, 16];
+// Per-type widths for accurate drop centering (node position = top-left in RF)
+const NODE_WIDTHS: Record<string, number> = {
+  trigger: 248, standard: 256, interruption: 264, resume: 220,
+  condition: 256, webhook: 264, delay: 220, handoff: 240,
+  knowledge: 256, end: 200, extract: 256, format: 240,
+  memory: 240, wait: 240, resume_parser: 248, collect_data: 256,
+};
 
 // ─── INNER COMPONENT ─────────────────────────────────────────────────────────
 function FlowCanvasInner() {
@@ -91,6 +97,8 @@ function FlowCanvasInner() {
   const { screenToFlowPosition, fitView } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
   const clipboardRef = useRef<Node | null>(null);
+  // Guards against the synthetic pane-click that fires right after a drag-drop
+  const justDropped = useRef(false);
 
   // ── Keyboard shortcuts ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -196,7 +204,10 @@ function FlowCanvasInner() {
         nodeId = raw;
       }
 
-      const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      // Center node at cursor: RF position is top-left, so subtract half width
+      const flowPos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const nodeWidth = NODE_WIDTHS[type] || 256;
+      const position = { x: flowPos.x - nodeWidth / 2, y: flowPos.y - 25 };
       const newNode = {
         id: `node_${Math.random().toString(36).slice(2, 11)}`,
         type,
@@ -208,9 +219,13 @@ function FlowCanvasInner() {
       store.saveHistory();
       useFlowStore.setState({
         nodes: [...store.nodes, newNode] as typeof store.nodes,
+        selectedNodeId: newNode.id,
       });
 
-      // Force React Flow to measure the new node's handles immediately
+      // Block the synthetic pane-click that fires ~100ms after a drop event
+      justDropped.current = true;
+      setTimeout(() => { justDropped.current = false; }, 300);
+
       setTimeout(() => updateNodeInternals(newNode.id), 50);
 
       const { flowId, saveFlow } = useFlowStore.getState();
@@ -225,6 +240,8 @@ function FlowCanvasInner() {
   }, []);
 
   const onPaneClick = useCallback(() => {
+    // Ignore if a node was just dropped — drop fires a synthetic click on the pane
+    if (justDropped.current) return;
     useFlowStore.getState().setSelectedNodeId(null);
   }, []);
 
@@ -252,7 +269,7 @@ function FlowCanvasInner() {
         elementsSelectable={true}
         connectOnClick={false}
         deleteKeyCode={null}
-        connectionRadius={60}
+        connectionRadius={80}
         autoPanOnConnect={true}
         /* ── CONNECTION PREVIEW LINE ── */
         connectionLineType={ConnectionLineType.Bezier}
@@ -267,9 +284,7 @@ function FlowCanvasInner() {
         zoomOnDoubleClick={false}
         selectionOnDrag={false}
         nodeDragThreshold={1}
-        /* ── SNAP ── */
-        snapToGrid={true}
-        snapGrid={SNAP_GRID}
+        /* ── SNAP disabled — nodes land exactly where dropped ── */
         /* ── PERFORMANCE ── */
         elevateEdgesOnSelect={true}
         onlyRenderVisibleElements={true}
@@ -289,7 +304,7 @@ function FlowCanvasInner() {
           }}
         />
 
-        {/* Minimap — bottom right */}
+        {/* Minimap — bottom right, calmed pan speed */}
         <MiniMap
           position="bottom-right"
           pannable
