@@ -166,9 +166,9 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     const edge: Edge = {
       ...connection,
       id: `e-${connection.source}-${connection.target}-${h ?? 'default'}-${Date.now()}`,
-      type: 'smoothstep',
+      type: 'default', // bezier — fluid organic curves vs boxy smoothstep
       animated: false,
-      style: { stroke: color, strokeWidth: 2 },
+      style: { stroke: color, strokeWidth: 2.5 },
       markerEnd: {
         type: MarkerType.ArrowClosed,
         width: 14,
@@ -227,10 +227,15 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       const res = await fetch(`/api/dashboard/flows/${id}`);
       const json = await res.json();
       if (json.success && json.data) {
+        const rawEdges: Edge[] = json.data.edges ?? [];
+        const normalizedEdges = rawEdges.map((e: Edge) => ({
+          ...e,
+          type: 'default', // upgrade any legacy smoothstep edges to bezier
+        }));
         set({
           flowId: json.data.id,
           nodes: json.data.nodes ?? [],
-          edges: json.data.edges ?? [],
+          edges: normalizedEdges,
           history: { past: [], future: [] },
         });
       }
