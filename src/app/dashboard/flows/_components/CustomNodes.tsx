@@ -1,12 +1,13 @@
 "use client";
 
 import React from "react";
+import { createPortal } from "react-dom";
 import { Handle, Position } from "@xyflow/react";
 import {
   Sparkles, MessageSquare, SplitSquareVertical, Webhook,
   Clock, UserCheck, BookOpen, XCircle, Database,
   PlayCircle, Code2, Paintbrush, Hourglass, FileText,
-  ListChecks, Zap, MoreVertical,
+  ListChecks, Zap, MoreVertical, Pencil, Copy, Trash2,
 } from "lucide-react";
 import { useFlowStore } from "../store";
 
@@ -32,40 +33,144 @@ export const NODE_CATEGORY: Record<string, { color: string; label: string }> = {
   collect_data:  { color: '#F59E0B', label: 'COLLECT' },
 };
 
-// ─── DELETE BUTTON ────────────────────────────────────────────────────────────
-function DeleteBtn({ id }: { id: string }) {
+// ─── NODE MENU (three-dot dropdown) ───────────────────────────────────────────
+function MenuItem({
+  icon, label, danger = false, onClick,
+}: { icon: React.ReactNode; label: string; danger?: boolean; onClick: () => void }) {
+  const [hover, setHover] = React.useState(false);
   return (
     <button
       className="nodrag nopan"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       onMouseDown={(e) => e.stopPropagation()}
-      onClick={(e) => {
-        e.stopPropagation();
-        const { nodes, edges, saveHistory } = useFlowStore.getState();
-        saveHistory();
-        useFlowStore.setState({
-          nodes: nodes.filter((n) => n.id !== id),
-          edges: edges.filter((ed) => ed.source !== id && ed.target !== id),
-          selectedNodeId: null,
-        });
-      }}
-      title="Delete"
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
       style={{
-        background: "rgba(255,255,255,0.18)",
-        border: "none",
-        borderRadius: 6,
-        width: 26,
-        height: 26,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
-        color: "white",
-        flexShrink: 0,
-        outline: "none",
+        display: "flex", alignItems: "center", gap: 10,
+        width: "100%", padding: "9px 16px",
+        background: hover
+          ? (danger ? "rgba(239,68,68,0.12)" : "rgba(255,255,255,0.07)")
+          : "transparent",
+        border: "none", cursor: "pointer",
+        color: danger ? "#f87171" : "#cbd5e1",
+        fontSize: 13, fontFamily: "system-ui, -apple-system, sans-serif",
+        transition: "background 0.1s ease",
+        textAlign: "left", whiteSpace: "nowrap",
       }}
     >
-      <MoreVertical size={12} />
+      {icon}{label}
     </button>
+  );
+}
+
+function NodeMenu({ id }: { id: string }) {
+  const [open, setOpen] = React.useState(false);
+  const [pos, setPos] = React.useState<{ top: number; right: number } | null>(null);
+  const btnRef = React.useRef<HTMLButtonElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  const toggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 6, right: window.innerWidth - r.right });
+    }
+    setOpen((v) => !v);
+  };
+
+  const menu =
+    open && pos
+      ? createPortal(
+          <div
+            className="nodrag nopan"
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              position: "fixed",
+              top: pos.top,
+              right: pos.right,
+              background: "#1e293b",
+              border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 10,
+              boxShadow: "0 12px 40px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.3)",
+              zIndex: 99999,
+              minWidth: 172,
+              overflow: "hidden",
+              padding: "4px 0",
+            }}
+          >
+            <MenuItem
+              icon={<Pencil size={13} />}
+              label="Edit / Configure"
+              onClick={() => {
+                useFlowStore.getState().setSelectedNodeId(id);
+                setOpen(false);
+              }}
+            />
+            <MenuItem
+              icon={<Copy size={13} />}
+              label="Duplicate"
+              onClick={() => {
+                const store = useFlowStore.getState();
+                const node = store.nodes.find((n) => n.id === id);
+                if (!node) return;
+                store.saveHistory();
+                const dup = {
+                  ...node,
+                  id: `node_${Math.random().toString(36).slice(2, 11)}`,
+                  position: { x: node.position.x + 32, y: node.position.y + 40 },
+                  selected: false,
+                };
+                useFlowStore.setState({ nodes: [...store.nodes, dup] });
+                setOpen(false);
+              }}
+            />
+            <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />
+            <MenuItem
+              icon={<Trash2 size={13} />}
+              label="Delete node"
+              danger
+              onClick={() => {
+                const { nodes, edges, saveHistory } = useFlowStore.getState();
+                saveHistory();
+                useFlowStore.setState({
+                  nodes: nodes.filter((n) => n.id !== id),
+                  edges: edges.filter((e) => e.source !== id && e.target !== id),
+                  selectedNodeId: null,
+                });
+                setOpen(false);
+              }}
+            />
+          </div>,
+          document.body
+        )
+      : null;
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        className="nodrag nopan"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={toggle}
+        style={{
+          background: open ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.18)",
+          border: "none", borderRadius: 6,
+          width: 26, height: 26,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          cursor: "pointer", color: "white", flexShrink: 0, outline: "none",
+          transition: "background 0.12s ease",
+        }}
+      >
+        <MoreVertical size={12} />
+      </button>
+      {menu}
+    </>
   );
 }
 
@@ -136,7 +241,7 @@ function Card({ id, selected, color, Icon, title, children, footer }: CardProps)
         >
           {title}
         </span>
-        <DeleteBtn id={id} />
+        <NodeMenu id={id} />
       </div>
 
       {/* Body */}

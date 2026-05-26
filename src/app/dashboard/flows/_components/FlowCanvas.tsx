@@ -220,7 +220,6 @@ function FlowCanvasInner() {
       store.saveHistory();
       useFlowStore.setState({
         nodes: [...store.nodes, newNode] as typeof store.nodes,
-        selectedNodeId: newNode.id,
       });
 
       // Block the synthetic pane-click that fires ~100ms after a drop event
