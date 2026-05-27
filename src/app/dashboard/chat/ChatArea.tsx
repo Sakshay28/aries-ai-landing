@@ -567,6 +567,49 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   );
 
   const copyMessage = (msgId: string, text: string) => {
+    // If it is an image URL, try to copy it as an actual image blob
+    if (text.startsWith('http') && (text.includes('.png') || text.includes('.jpg') || text.includes('.jpeg') || text.includes('.webp'))) {
+      const toastId = toast.loading('Copying image...');
+      fetch(text)
+        .then(res => {
+          if (!res.ok) throw new Error('Fetch failed');
+          return res.blob();
+        })
+        .then(blob => {
+          // ClipboardItem only reliably supports png/webp or standard mime types.
+          // Convert or copy the link directly as fallback
+          const mimeType = blob.type.startsWith('image/') ? blob.type : 'image/png';
+          navigator.clipboard?.write([
+            new ClipboardItem({ [mimeType]: blob })
+          ]).then(
+            () => {
+              setCopiedMessageId(msgId);
+              toast.success('Image copied directly to clipboard!', { id: toastId });
+              setTimeout(() => setCopiedMessageId(null), 2000);
+            },
+            (err) => {
+              console.error('Failed to copy image blob:', err);
+              // Fallback to copying URL
+              navigator.clipboard?.writeText(text).then(() => {
+                setCopiedMessageId(msgId);
+                toast.success('Image link copied to clipboard', { id: toastId });
+                setTimeout(() => setCopiedMessageId(null), 2000);
+              });
+            }
+          );
+        })
+        .catch(err => {
+          console.error('Failed to fetch image blob:', err);
+          // Fallback to copying URL
+          navigator.clipboard?.writeText(text).then(() => {
+            setCopiedMessageId(msgId);
+            toast.success('Image link copied to clipboard', { id: toastId });
+            setTimeout(() => setCopiedMessageId(null), 2000);
+          });
+        });
+      return;
+    }
+
     navigator.clipboard?.writeText(text).then(
       () => {
         setCopiedMessageId(msgId);
@@ -1061,7 +1104,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                         <div 
                           id={`msg-${msg.id}`}
                           className={cn(
-                            'max-w-[65%] px-2.5 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150 relative',
+                            'max-w-[65%] px-2.5 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150 relative break-words',
                             isInbound
                               ? cn(
                                   'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10',
@@ -1115,7 +1158,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                         <div 
                           id={`msg-${msg.id}`}
                           className={cn(
-                            'max-w-[65%] px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150 relative',
+                            'max-w-[65%] px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150 relative break-words',
                             isInbound
                               ? cn(
                                   'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10 text-foreground',
@@ -1134,7 +1177,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                           )}
                         >
                           {replyPreviewCard}
-                          <p className="whitespace-pre-wrap">{msg.content}</p>
+                          <p className="whitespace-pre-wrap break-words">{msg.content}</p>
 
                           {/* Timestamp + ticks — shown on every bubble */}
                           <div className={cn('flex items-center gap-1 mt-0.5', isInbound ? 'justify-start' : 'justify-end')}>

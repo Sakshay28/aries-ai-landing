@@ -6,7 +6,6 @@ import {
   Node,
   NodeChange,
   addEdge,
-  MarkerType,
   OnNodesChange,
   OnEdgesChange,
   OnConnect,
@@ -140,48 +139,22 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   onConnect: (connection: Connection) => {
     get().saveHistory();
 
-    // Color-code by semantic handle
-    let color = "rgba(16,185,129,0.75)"; // green — success / next
     const h = connection.sourceHandle;
-    if (h === 'error' || h === 'failed' || h === 'missing' || h === 'fallback' || h === 'false' || h === 'timeout') {
-      color = "rgba(239,68,68,0.75)"; // red — failure / false
-    } else if (h === 'true') {
-      color = "rgba(16,185,129,0.75)"; // green — true
-    }
 
-    // Purple for data-flow nodes
-    const sourceNode = get().nodes.find(n => n.id === connection.source);
-    if (sourceNode?.type === 'memory' || sourceNode?.type === 'knowledge') {
-      color = "rgba(168,85,247,0.75)";
-    }
-
-    // Label for multi-output handles (keep it short)
+    // Short label for multi-output handles — rendered by PremiumEdge
     const labelMap: Record<string, string> = {
-      success: 'yes', error: 'no', fallback: 'fallback',
-      true: 'true', false: 'false', missing: 'missing',
-      timeout: 'timeout', found: 'found', assigned: 'assigned',
+      success: 'YES', error: 'NO', fallback: 'FALLBACK',
+      true: 'TRUE', false: 'FALSE', missing: 'MISSING',
+      timeout: 'TIMEOUT', found: 'FOUND', assigned: 'ASSIGNED',
     };
     const label = h && labelMap[h] ? labelMap[h] : undefined;
 
     const edge: Edge = {
       ...connection,
       id: `e-${connection.source}-${connection.target}-${h ?? 'default'}-${Date.now()}`,
-      type: 'default', // bezier — fluid organic curves vs boxy smoothstep
+      type: 'premium',
       animated: false,
-      style: { stroke: color, strokeWidth: 2.5 },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        width: 14,
-        height: 14,
-        color,
-      },
-      ...(label ? {
-        label,
-        labelBgStyle: { fill: 'rgba(10,12,18,0.9)', fillOpacity: 1 },
-        labelStyle: { fill: color, fontWeight: 700, fontSize: 9, letterSpacing: '0.07em', textTransform: 'uppercase' },
-        labelBgPadding: [5, 3] as [number, number],
-        labelBgBorderRadius: 4,
-      } : {}),
+      ...(label ? { label } : {}),
     };
 
     set({ edges: addEdge(edge, get().edges) });
@@ -230,7 +203,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
         const rawEdges: Edge[] = json.data.edges ?? [];
         const normalizedEdges = rawEdges.map((e: Edge) => ({
           ...e,
-          type: 'default', // upgrade any legacy smoothstep edges to bezier
+          type: 'premium', // upgrade any legacy edges to premium renderer
         }));
         set({
           flowId: json.data.id,
