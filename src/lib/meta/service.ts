@@ -57,13 +57,14 @@ export async function sendTextMessage(
   accessToken: string,
   phoneNumberId: string,
   destination: string,
-  text: string
+  text: string,
+  contextMessageId?: string
 ): Promise<MetaSendResult> {
   if (!accessToken || !phoneNumberId || !destination || !text) {
     throw new Error('Meta sendTextMessage: missing required parameters');
   }
 
-  const payload = {
+  const payload: any = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
     to: cleanPhone(destination),
@@ -73,6 +74,12 @@ export async function sendTextMessage(
       body: text,
     },
   };
+
+  if (contextMessageId) {
+    payload.context = {
+      message_id: contextMessageId,
+    };
+  }
 
   return withMetaRetry(async () => {
     let res: Response;
@@ -182,7 +189,8 @@ export async function sendMediaMessage(
   destination: string,
   mediaType: MetaMediaType,
   url: string,
-  caption?: string
+  caption?: string,
+  contextMessageId?: string
 ): Promise<MetaSendResult> {
   if (!accessToken || !phoneNumberId || !destination || !url) {
     throw new Error('Meta sendMediaMessage: missing required parameters');
@@ -193,13 +201,19 @@ export async function sendMediaMessage(
     mediaPayload.caption = caption;
   }
 
-  const payload = {
+  const payload: any = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
     to: cleanPhone(destination),
     type: mediaType,
     [mediaType]: mediaPayload,
   };
+
+  if (contextMessageId) {
+    payload.context = {
+      message_id: contextMessageId,
+    };
+  }
 
   return withMetaRetry(async () => {
     let res: Response;

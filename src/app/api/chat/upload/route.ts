@@ -195,6 +195,20 @@ export async function POST(req: NextRequest) {
         if (!decryptedToken) {
           throw new Error('Access token decryption failed');
         }
+
+        // Retrieve the parent message's external wa_message_id if replying
+        let parentWaMessageId: string | undefined = undefined;
+        if (replyToMessageId) {
+          const { data: parentMsg } = await supabaseAdmin
+            .from('messages')
+            .select('wa_message_id')
+            .eq('id', replyToMessageId)
+            .single();
+          if (parentMsg?.wa_message_id) {
+            parentWaMessageId = parentMsg.wa_message_id;
+          }
+        }
+
         const mediaTypeArg = messageType as MetaMediaType;
         const waResult = await sendMediaMessage(
           decryptedToken,
@@ -202,7 +216,8 @@ export async function POST(req: NextRequest) {
           recipientPhone,
           mediaTypeArg,
           mediaUrl,
-          caption || undefined
+          caption || undefined,
+          parentWaMessageId
         );
         externalMessageId = waResult.messageId;
       }

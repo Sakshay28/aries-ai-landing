@@ -89,11 +89,26 @@ export async function POST(req: NextRequest) {
         if (!decryptedToken) {
           throw new Error('Access token decryption failed');
         }
+
+        // Retrieve the parent message's external wa_message_id if replying
+        let parentWaMessageId: string | undefined = undefined;
+        if (replyToMessageId) {
+          const { data: parentMsg } = await supabaseAdmin
+            .from('messages')
+            .select('wa_message_id')
+            .eq('id', replyToMessageId)
+            .single();
+          if (parentMsg?.wa_message_id) {
+            parentWaMessageId = parentMsg.wa_message_id;
+          }
+        }
+
         const waResult = await sendTextMessage(
           decryptedToken,
           tenant.wa_phone_number_id,
           recipientPhone,
-          message.trim()
+          message.trim(),
+          parentWaMessageId
         );
         externalMessageId = waResult.messageId;
       }
