@@ -278,7 +278,10 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const lastMsg = messages.at(-1);
 
   return (
-    <div className="w-[300px] flex-shrink-0 bg-card border-l border-border flex flex-col overflow-hidden">
+    <div className={cn(
+      "w-[300px] flex-shrink-0 bg-card border-l border-border flex flex-col overflow-hidden",
+      meta?.id ? "hidden xl:flex" : "hidden"
+    )}>
       {/* ── Hero ── */}
       <div className="flex items-center gap-3 px-4 pt-4 pb-3">
         <div

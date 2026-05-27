@@ -206,7 +206,10 @@ export default function ChatSidebar() {
   });
 
   return (
-    <div className="w-[300px] flex-shrink-0 bg-card border-r border-border flex flex-col relative z-20">
+    <div className={cn(
+      "w-full lg:w-[300px] flex-shrink-0 bg-card lg:border-r border-border flex flex-col relative z-20",
+      activeId ? "hidden lg:flex" : "flex"
+    )}>
       {/* Header */}
       <div className="px-4 pt-5 pb-3">
         <h2 className="text-[15px] font-semibold text-foreground tracking-tight mb-3">Inbox</h2>

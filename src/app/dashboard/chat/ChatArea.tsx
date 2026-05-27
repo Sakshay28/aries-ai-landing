@@ -3,10 +3,11 @@
 import {
   Send, Bot, User, Check, CheckCheck, Clock, AlertCircle, ArrowDown, Paperclip, Smile,
   Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal, X, Loader2, Trash2, HelpCircle,
+  ArrowLeft,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -123,6 +124,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const [replyToMsg, setReplyToMsg] = useState<Message | null>(null);
   const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const router = useRouter();
   const searchParams = useSearchParams();
   const conversationId = searchParams.get('conversationId');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -568,45 +570,76 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
   const copyMessage = (msgId: string, text: string) => {
     // If it is an image URL, try to copy it as an actual image blob
-    if (text.startsWith('http') && (text.includes('.png') || text.includes('.jpg') || text.includes('.jpeg') || text.includes('.webp'))) {
+    if (text.startsWith('http') && (text.includes('.png') || text.includes('.jpg') || text.includes('.jpeg') || text.includes('.webp') || text.includes('.svg'))) {
       const toastId = toast.loading('Copying image...');
-      fetch(text)
-        .then(res => {
-          if (!res.ok) throw new Error('Fetch failed');
-          return res.blob();
-        })
-        .then(blob => {
-          // ClipboardItem only reliably supports png/webp or standard mime types.
-          // Convert or copy the link directly as fallback
-          const mimeType = blob.type.startsWith('image/') ? blob.type : 'image/png';
-          navigator.clipboard?.write([
-            new ClipboardItem({ [mimeType]: blob })
-          ]).then(
-            () => {
-              setCopiedMessageId(msgId);
-              toast.success('Image copied directly to clipboard!', { id: toastId });
-              setTimeout(() => setCopiedMessageId(null), 2000);
-            },
-            (err) => {
-              console.error('Failed to copy image blob:', err);
-              // Fallback to copying URL
-              navigator.clipboard?.writeText(text).then(() => {
-                setCopiedMessageId(msgId);
-                toast.success('Image link copied to clipboard', { id: toastId });
-                setTimeout(() => setCopiedMessageId(null), 2000);
-              });
-            }
-          );
-        })
-        .catch(err => {
-          console.error('Failed to fetch image blob:', err);
-          // Fallback to copying URL
-          navigator.clipboard?.writeText(text).then(() => {
-            setCopiedMessageId(msgId);
-            toast.success('Image link copied to clipboard', { id: toastId });
-            setTimeout(() => setCopiedMessageId(null), 2000);
-          });
+      
+      const fallbackCopyUrlWithToast = () => {
+        navigator.clipboard?.writeText(text).then(() => {
+          setCopiedMessageId(msgId);
+          toast.success('Image link copied', { id: toastId });
+          setTimeout(() => setCopiedMessageId(null), 2000);
         });
+      };
+
+      try {
+        // Create the promise to fetch and process the image dynamically
+        const imagePromise = (async () => {
+          const proxyUrl = `/api/chat/copy-proxy?url=${encodeURIComponent(text)}`;
+          const res = await fetch(proxyUrl);
+          if (!res.ok) throw new Error('Proxy fetch failed');
+          const blob = await res.blob();
+
+          return new Promise<Blob>((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            const objectUrl = URL.createObjectURL(blob);
+            img.src = objectUrl;
+            img.onload = () => {
+              URL.revokeObjectURL(objectUrl);
+              const canvas = document.createElement('canvas');
+              canvas.width = img.naturalWidth || 200;
+              canvas.height = img.naturalHeight || 200;
+              const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                reject(new Error('Canvas context not available'));
+                return;
+              }
+              ctx.drawImage(img, 0, 0);
+              canvas.toBlob((pngBlob) => {
+                if (pngBlob) {
+                  resolve(pngBlob);
+                } else {
+                  reject(new Error('Canvas toBlob returned null'));
+                }
+              }, 'image/png');
+            };
+            img.onerror = () => {
+              URL.revokeObjectURL(objectUrl);
+              reject(new Error('Image load failed'));
+            };
+          });
+        })();
+
+        // Synchronously write the promise inside the event handler to support iOS/macOS Safari
+        const clipboardItem = new ClipboardItem({
+          'image/png': imagePromise
+        });
+
+        navigator.clipboard.write([clipboardItem]).then(
+          () => {
+            setCopiedMessageId(msgId);
+            toast.success('Image copied directly!', { id: toastId });
+            setTimeout(() => setCopiedMessageId(null), 2000);
+          },
+          (err) => {
+            console.error('Clipboard promise write failed:', err);
+            fallbackCopyUrlWithToast();
+          }
+        );
+      } catch (err) {
+        console.error('Clipboard setup failed:', err);
+        fallbackCopyUrlWithToast();
+      }
       return;
     }
 
@@ -703,7 +736,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   if (!conversationId) {
     return (
       <div
-        className="flex-1 flex flex-col items-center justify-center"
+        className="hidden lg:flex flex-1 flex-col items-center justify-center"
         style={{ background: 'var(--chat-surface, #EAEDF0)' }}
       >
         <div className="flex flex-col items-center gap-2.5 text-center px-8">
@@ -722,6 +755,13 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       {/* ── Header ── */}
       <div className="h-[60px] flex items-center justify-between px-5 bg-white dark:bg-[#1C2333] shadow-[0_1px_3px_rgba(0,0,0,0.06)] z-20 flex-shrink-0">
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => router.push('/dashboard/chat')}
+            className="lg:hidden p-1 mr-1 rounded-full text-muted-foreground/80 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-foreground transition-colors"
+            title="Back to inbox"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
           <div className="relative">
             <div
                 style={{ background: avatarGradient(avatarSeed) }}
@@ -1104,7 +1144,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                         <div 
                           id={`msg-${msg.id}`}
                           className={cn(
-                            'max-w-[65%] px-2.5 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150 relative break-words',
+                            'max-w-[65%] px-2.5 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150 relative break-all',
                             isInbound
                               ? cn(
                                   'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10',
@@ -1158,7 +1198,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                         <div 
                           id={`msg-${msg.id}`}
                           className={cn(
-                            'max-w-[65%] px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150 relative break-words',
+                            'max-w-[65%] px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150 relative break-all',
                             isInbound
                               ? cn(
                                   'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10 text-foreground',
@@ -1177,7 +1217,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                           )}
                         >
                           {replyPreviewCard}
-                          <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                          <p className="whitespace-pre-wrap break-all">{msg.content}</p>
 
                           {/* Timestamp + ticks — shown on every bubble */}
                           <div className={cn('flex items-center gap-1 mt-0.5', isInbound ? 'justify-start' : 'justify-end')}>
