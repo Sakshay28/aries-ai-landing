@@ -5,8 +5,8 @@ import {
   Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal, X, Loader2, Trash2, HelpCircle,
   ArrowLeft,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from "framer-motion";
+import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -98,6 +98,83 @@ function buildFeed(messages: Message[]): FeedItem[] {
   }
   pushGroup();
   return feed;
+}
+
+// ── SwipeToReplyRow ─────────────────────────────────────────────────
+// Production-grade WhatsApp-style swipe-to-reply gesture component.
+// Uses GPU-accelerated transforms (no layout thrash) with a spring-based
+// snap-back. The reply icon ghost fades/scales as the user drags.
+const SWIPE_THRESHOLD = 60; // px needed to trigger reply
+
+function SwipeToReplyRow({
+  isInbound,
+  onReply,
+  children,
+}: {
+  isInbound: boolean;
+  onReply: () => void;
+  children: ReactNode;
+}) {
+  const x = useMotionValue(0);
+  // Spring gives natural deceleration feel when snapping back
+  const springX = useSpring(x, { stiffness: 500, damping: 40, mass: 0.6 });
+
+  // Clamp drag: inbound bubbles drag right (+), outbound drag left (-)
+  const dragDirection = isInbound ? 1 : -1;
+
+  // Reply icon opacity/scale proportional to swipe progress
+  const iconOpacity = useTransform(x, [0, SWIPE_THRESHOLD * dragDirection], [0, 1]);
+  const iconScale = useTransform(x, [0, SWIPE_THRESHOLD * dragDirection], [0.4, 1]);
+
+  // Track whether we've already fired onReply for this drag gesture
+  const firedRef = useRef(false);
+
+  const handleDragEnd = useCallback(() => {
+    // Animate x back to 0 with spring
+    x.set(0);
+    firedRef.current = false;
+  }, [x]);
+
+  const handleDrag = useCallback(() => {
+    const current = x.get();
+    const crossed = isInbound ? current >= SWIPE_THRESHOLD : current <= -SWIPE_THRESHOLD;
+    if (crossed && !firedRef.current) {
+      firedRef.current = true;
+      onReply();
+      // Haptic feedback on supported devices
+      if (typeof window !== 'undefined' && 'vibrate' in navigator) {
+        navigator.vibrate(30);
+      }
+    }
+  }, [x, isInbound, onReply]);
+
+  return (
+    <div className="relative w-full">
+      {/* Reply icon ghost — sits behind the bubble */}
+      <motion.div
+        style={{ opacity: iconOpacity, scale: iconScale }}
+        className={`absolute top-1/2 -translate-y-1/2 ${
+          isInbound ? 'left-1' : 'right-1'
+        } w-7 h-7 rounded-full bg-indigo-500/15 flex items-center justify-center pointer-events-none z-0`}
+      >
+        <Reply className="w-3.5 h-3.5 text-indigo-500" />
+      </motion.div>
+
+      {/* The draggable bubble row */}
+      <motion.div
+        style={{ x: springX }}
+        drag="x"
+        dragConstraints={isInbound ? { left: 0, right: SWIPE_THRESHOLD + 10 } : { left: -(SWIPE_THRESHOLD + 10), right: 0 }}
+        dragElastic={0.15}
+        dragMomentum={false}
+        onDrag={handleDrag}
+        onDragEnd={handleDragEnd}
+        className="relative z-10 touch-pan-y will-change-transform"
+      >
+        {children}
+      </motion.div>
+    </div>
+  );
 }
 
 // ── props ────────────────────────────────────────────────────────────
@@ -994,78 +1071,110 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                                 }}
                               />
                               <motion.div
-                                initial={{ opacity: 0, scale: 0.92, y: 4 }}
+                                initial={{ opacity: 0, scale: 0.88, y: 6 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.92, y: 4 }}
-                                transition={{ duration: 0.1 }}
+                                exit={{ opacity: 0, scale: 0.88, y: 6 }}
+                                transition={{ type: 'spring', stiffness: 420, damping: 32, mass: 0.7 }}
+                                style={{ transformOrigin: isInbound ? 'top left' : 'top right' }}
                                 className={cn(
-                                  "absolute z-50 bg-[#1C2333]/95 backdrop-blur-md border border-border rounded-xl shadow-xl p-1 min-w-[170px] flex flex-col gap-0.5 bottom-8 cursor-default",
+                                  "absolute z-50 flex flex-col bottom-9 cursor-default select-none",
+                                  "w-[210px] rounded-[18px] overflow-hidden",
+                                  "bg-[rgba(14,18,30,0.96)] backdrop-blur-xl",
+                                  "border border-white/[0.07]",
+                                  "shadow-[0_16px_48px_rgba(0,0,0,0.55),0_2px_8px_rgba(0,0,0,0.3)]",
                                   isInbound ? "left-0" : "right-0"
                                 )}
                                 onClick={(e) => e.stopPropagation()}
                               >
-                                {/* Quick Reactions grid */}
-                                <div className="flex items-center justify-between border-b border-white/5 pb-1 px-1 mb-1 gap-1">
+                                {/* ── Reaction row ── */}
+                                <div className="flex items-center justify-between px-3 py-3">
                                   {['👍', '❤️', '😂', '😮', '😢', '🙏'].map(emoji => (
-                                    <button
+                                    <motion.button
                                       key={emoji}
+                                      whileHover={{ scale: 1.22, y: -2 }}
+                                      whileTap={{ scale: 0.92 }}
+                                      transition={{ type: 'spring', stiffness: 500, damping: 25 }}
                                       onClick={() => {
                                         handleEmojiReaction(msg.id, msg.reaction === emoji ? null : emoji);
                                         setActiveMessageMenuId(null);
                                       }}
                                       className={cn(
-                                        "hover:scale-125 transition-transform p-1 text-[15px] rounded-md hover:bg-white/5",
-                                        msg.reaction === emoji && "bg-white/10"
+                                        "w-8 h-8 rounded-xl flex items-center justify-center text-[18px]",
+                                        "transition-colors duration-150",
+                                        msg.reaction === emoji
+                                          ? "bg-white/[0.12] ring-1 ring-white/20"
+                                          : "hover:bg-white/[0.08]"
                                       )}
                                     >
                                       {emoji}
-                                    </button>
+                                    </motion.button>
                                   ))}
                                 </div>
-                                
-                                <button
-                                  onClick={() => {
-                                    setReplyToMsg(msg);
-                                    setActiveMessageMenuId(null);
-                                  }}
-                                  className="flex items-center gap-2 px-2.5 py-1.5 text-[12px] hover:bg-white/5 transition-colors rounded-lg text-left text-foreground/90 font-medium"
-                                >
-                                  <Reply className="w-3.5 h-3.5 text-muted-foreground/80" />
-                                  Reply
-                                </button>
 
-                                <button
-                                  onClick={() => {
-                                    copyMessage(msg.id, msg.media_url || msg.content || '');
-                                    setActiveMessageMenuId(null);
-                                  }}
-                                  className="flex items-center gap-2 px-2.5 py-1.5 text-[12px] hover:bg-white/5 transition-colors rounded-lg text-left text-foreground/90 font-medium"
-                                >
-                                  <Copy className="w-3.5 h-3.5 text-muted-foreground/80" />
-                                  {msg.media_url ? 'Copy link' : 'Copy text'}
-                                </button>
+                                {/* Divider */}
+                                <div className="mx-3 h-px bg-white/[0.06]" />
 
-                                <button
-                                  onClick={() => {
-                                    handleSaveToFAQ(msg);
-                                    setActiveMessageMenuId(null);
-                                  }}
-                                  className="flex items-center gap-2 px-2.5 py-1.5 text-[12px] hover:bg-white/5 transition-colors rounded-lg text-left text-foreground/90 font-medium"
-                                >
-                                  <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/80" />
-                                  Save to FAQ
-                                </button>
+                                {/* ── Menu items ── */}
+                                <div className="py-1.5 px-1.5 flex flex-col gap-0.5">
+                                  <motion.button
+                                    whileHover={{ backgroundColor: 'rgba(255,255,255,0.06)', x: 0 }}
+                                    transition={{ duration: 0.12 }}
+                                    onClick={() => {
+                                      setReplyToMsg(msg);
+                                      setActiveMessageMenuId(null);
+                                    }}
+                                    className="group flex items-center gap-3 px-3 rounded-xl text-left w-full"
+                                    style={{ minHeight: '42px' }}
+                                  >
+                                    <Reply className="w-[15px] h-[15px] flex-shrink-0" style={{ color: 'rgba(255,255,255,0.55)' }} />
+                                    <span className="text-[13.5px] font-[500]" style={{ color: 'rgba(255,255,255,0.88)' }}>Reply</span>
+                                  </motion.button>
 
-                                <button
-                                  onClick={() => {
-                                    handleDeleteMessage(msg.id);
-                                    setActiveMessageMenuId(null);
-                                  }}
-                                  className="flex items-center gap-2 px-2.5 py-1.5 text-[12px] hover:bg-red-500/10 text-red-400 hover:text-red-300 transition-colors rounded-lg text-left font-medium"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                  Delete
-                                </button>
+                                  <motion.button
+                                    whileHover={{ backgroundColor: 'rgba(255,255,255,0.06)' }}
+                                    transition={{ duration: 0.12 }}
+                                    onClick={() => {
+                                      copyMessage(msg.id, msg.media_url || msg.content || '');
+                                      setActiveMessageMenuId(null);
+                                    }}
+                                    className="group flex items-center gap-3 px-3 rounded-xl text-left w-full"
+                                    style={{ minHeight: '42px' }}
+                                  >
+                                    <Copy className="w-[15px] h-[15px] flex-shrink-0" style={{ color: 'rgba(255,255,255,0.55)' }} />
+                                    <span className="text-[13.5px] font-[500]" style={{ color: 'rgba(255,255,255,0.88)' }}>{msg.media_url ? 'Copy link' : 'Copy text'}</span>
+                                  </motion.button>
+
+                                  <motion.button
+                                    whileHover={{ backgroundColor: 'rgba(255,255,255,0.06)' }}
+                                    transition={{ duration: 0.12 }}
+                                    onClick={() => {
+                                      handleSaveToFAQ(msg);
+                                      setActiveMessageMenuId(null);
+                                    }}
+                                    className="group flex items-center gap-3 px-3 rounded-xl text-left w-full"
+                                    style={{ minHeight: '42px' }}
+                                  >
+                                    <HelpCircle className="w-[15px] h-[15px] flex-shrink-0" style={{ color: 'rgba(255,255,255,0.55)' }} />
+                                    <span className="text-[13.5px] font-[500]" style={{ color: 'rgba(255,255,255,0.88)' }}>Save to FAQ</span>
+                                  </motion.button>
+
+                                  {/* Delete divider */}
+                                  <div className="mx-1.5 my-1 h-px bg-white/[0.06]" />
+
+                                  <motion.button
+                                    whileHover={{ backgroundColor: 'rgba(255,107,107,0.10)' }}
+                                    transition={{ duration: 0.12 }}
+                                    onClick={() => {
+                                      handleDeleteMessage(msg.id);
+                                      setActiveMessageMenuId(null);
+                                    }}
+                                    className="group flex items-center gap-3 px-3 rounded-xl text-left w-full"
+                                    style={{ minHeight: '42px' }}
+                                  >
+                                    <Trash2 className="w-[15px] h-[15px] flex-shrink-0" style={{ color: '#FF6B6B' }} />
+                                    <span className="text-[13.5px] font-[500]" style={{ color: '#FF6B6B' }}>Delete</span>
+                                  </motion.button>
+                                </div>
                               </motion.div>
                             </>
                           )}
@@ -1134,8 +1243,10 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                       initial={{ opacity: 0, y: 5, scale: 0.97 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       transition={{ duration: 0.15, ease: 'easeOut' }}
-                      className={cn('group w-full flex items-end gap-1 relative', isInbound ? 'justify-start' : 'justify-end', msg.reaction && 'mb-2.5')}
+                      className={cn('group w-full relative', msg.reaction && 'mb-2.5')}
                     >
+                    <SwipeToReplyRow isInbound={isInbound} onReply={() => setReplyToMsg(msg)}>
+                      <div className={cn('w-full flex items-end gap-1', isInbound ? 'justify-start' : 'justify-end')}>
                       {/* Outbound: toolbar floats LEFT of bubble */}
                       {!isInbound && hoverToolbar}
 
@@ -1245,6 +1356,8 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
                       {/* Inbound: toolbar floats RIGHT of bubble */}
                       {isInbound && hoverToolbar}
+                      </div>
+                    </SwipeToReplyRow>
                     </motion.div>
                   );
                 })}
@@ -1291,10 +1404,11 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         <AnimatePresence>
           {replyToMsg && (
             <motion.div
-              initial={{ height: 0, opacity: 0, y: 10 }}
+              initial={{ height: 0, opacity: 0, y: 6 }}
               animate={{ height: 'auto', opacity: 1, y: 0 }}
-              exit={{ height: 0, opacity: 0, y: 10 }}
-              transition={{ duration: 0.2 }}
+              exit={{ height: 0, opacity: 0, y: 6 }}
+              transition={{ type: 'spring', stiffness: 500, damping: 38, mass: 0.5 }}
+              onAnimationComplete={() => textareaRef.current?.focus()}
               className="overflow-hidden mb-2"
             >
               <div className="flex items-center justify-between bg-white dark:bg-[#1C2333] border border-border rounded-xl p-2.5 shadow-sm ring-1 ring-black/[0.04] dark:ring-white/[0.04]">

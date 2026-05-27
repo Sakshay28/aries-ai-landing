@@ -1,24 +1,25 @@
 "use client";
 
-import { Play, X, ArrowLeft, Check, Loader2, Undo2, Redo2, AlertTriangle, CheckCircle2, XCircle, History, Smartphone, BarChart2, Download, Upload, Lightbulb, Radio } from "lucide-react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
-const FlowAnalytics      = dynamic(() => import("../../_components/FlowAnalytics"),      { ssr: false });
-const FlowFlightRecorder = dynamic(() => import("../../_components/FlowFlightRecorder"), { ssr: false });
-import FlowRecommendations from "../../_components/FlowRecommendations";
+import Link from "next/link";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
+import { Play, X, ArrowLeft, Check, Loader2, Undo2, Redo2, AlertTriangle, CheckCircle2, XCircle, History, Smartphone, BarChart2, Download, Upload, Lightbulb, Radio } from "lucide-react";
+import { Toaster, toast } from "sonner";
 import FlowSidebar from "../../_components/FlowSidebar";
 import FlowCanvas from "../../_components/FlowCanvas";
 import FlowInspector from "../../_components/FlowInspector";
 import FlowSimulator from "../../_components/FlowSimulator";
 import FlowVersionPanel from "../../_components/FlowVersionPanel";
+import FlowRecommendations from "../../_components/FlowRecommendations";
 import WhatsAppPreview from "../../_components/WhatsAppPreview";
 import { useFlowStore } from "../../store";
-import { Toaster, toast } from "sonner";
-import { useEffect, useState, useCallback, useRef } from "react";
-import Link from "next/link";
-import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { BUSINESS_TYPE_CONFIG } from "../../config";
 import { getPrebuiltFlow } from "../../prebuiltFlows";
 import { validateFlow, type FlowHealthReport } from "../../utils";
+
+const FlowAnalytics      = dynamic(() => import("../../_components/FlowAnalytics"),      { ssr: false });
+const FlowFlightRecorder = dynamic(() => import("../../_components/FlowFlightRecorder"), { ssr: false });
 
 export default function FlowEditorPage() {
   const { selectedNodeId, isSimulating, setIsSimulating, isPublishing, isSaving, publishFlow, loadTemplate, loadFlow, saveFlow, undo, redo, history, nodes } = useFlowStore();
