@@ -869,7 +869,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                       activeMessageMenuId === msg.id ? "opacity-100 z-50" : "opacity-0 group-hover:opacity-100"
                     )}>
                       <button 
-                        onClick={() => copyMessage(msg.id, msg.content || '')} 
+                        onClick={() => copyMessage(msg.id, msg.media_url || msg.content || '')} 
                         title="Copy" 
                         className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
                       >
@@ -953,13 +953,13 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
                                 <button
                                   onClick={() => {
-                                    copyMessage(msg.id, msg.content || '');
+                                    copyMessage(msg.id, msg.media_url || msg.content || '');
                                     setActiveMessageMenuId(null);
                                   }}
                                   className="flex items-center gap-2 px-2.5 py-1.5 text-[12px] hover:bg-white/5 transition-colors rounded-lg text-left text-foreground/90 font-medium"
                                 >
                                   <Copy className="w-3.5 h-3.5 text-muted-foreground/80" />
-                                  Copy text
+                                  {msg.media_url ? 'Copy link' : 'Copy text'}
                                 </button>
 
                                 <button

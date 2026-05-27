@@ -407,135 +407,121 @@
   contain: layout;
 }
 
-/* ── PREMIUM HANDLE SYSTEM (.flow-handle) ──────────────────────────────────────
- * The ::before pseudo creates a 36px invisible interaction zone (magnetic area)
- * without affecting the visual handle size at all.
- * CSS `scale` (Level 5 Individual Transform) animates the visual dot without
- * touching React Flow’s translate() positioning transform.
- * ─────────────────────────────────────────────────────────────────────────── */
-/* Nuclear: ALL handles invisible by default — top and bottom.
-   They only appear on node hover or when a live wire is being dragged. */
+/* ══════════════════════════════════════════════════════════════════════════════
+   PREMIUM HANDLE SYSTEM — pixel-perfect, zero floating-dot artifacts
+   ──────────────────────────────────────────────────────────────────────────────
+   Architecture:
+   • ALL ReactFlow handles hidden by default via nuclear .react-flow__handle rule.
+   • Source (bottom) handles — always subtly visible on THEIR OWN node via
+     .flow-handle--green/red/gray. No node-hover reveal → eliminates "floating
+     dots above adjacent nodes" caused by position overlap.
+   • Target (top) handles — always invisible (.flow-handle--white), pulse green
+     only when a live wire is dragged onto them.
+   • On direct handle:hover — scale up slightly + increase glow (smooth, subtle).
+   • On wire-drag connectionindicator/valid — full pulse animation.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Step 1: nuke ALL ReactFlow handle defaults ──────────────────────────── */
 .react-flow__handle {
-  opacity: 0 !important;
+  opacity:        0 !important;
   pointer-events: all !important;
-  transition: opacity 0.13s ease, scale 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.15s ease !important;
+  transition:     opacity 0.18s ease, scale 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease !important;
 }
 
-/* Show top handle as green pulse ONLY when a live wire is dragged onto it */
-.react-flow__handle.react-flow__handle-top.connectionindicator,
-.react-flow__handle.react-flow__handle-top.valid,
-.react-flow__handle.react-flow__handle-bottom.connectionindicator,
-.react-flow__handle.react-flow__handle-bottom.valid {
-  opacity: 1 !important;
-  scale: 1.3 !important;
-  background: #10b981 !important;
-  box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.3), 0 0 18px rgba(16, 185, 129, 0.55) !important;
-  animation: handlePulse 0.8s ease-in-out infinite !important;
-}
-
+/* ── Step 2: base class — consistent 8px dot, no border by default ───────── */
 .flow-handle {
-  width: 10px !important;
-  height: 10px !important;
-  border-radius: 50% !important;
-  border: 2px solid rgba(255, 255, 255, 0.9) !important;
-  cursor: crosshair !important;
-  pointer-events: all !important;
-  z-index: 100 !important;
-  /* Hidden by default — eliminates the “two floating dots” on connected edges */
-  opacity: 0 !important;
-  scale: 0.7 !important;
+  width:            8px !important;
+  height:           8px !important;
+  border-radius:    50% !important;
+  border:           none !important;
+  cursor:           crosshair !important;
+  pointer-events:   all !important;
+  z-index:          10 !important;
   transform-origin: center center !important;
-  transition:
-    opacity 0.13s ease,
-    scale 0.2s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.15s ease !important;
-  position: relative !important;
+  transition:       opacity 0.18s ease, scale 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease !important;
 }
 
-/* ── OUTPUT handles: reveal ONLY on direct node hover ───────────────── */
-.react-flow__node:hover .flow-handle--green,
-.react-flow__node:hover .flow-handle--red,
-.react-flow__node:hover .flow-handle--gray {
-  opacity: 1 !important;
-  scale: 1 !important;
-}
-
-/* Hover: grow via box-shadow only — immune to React Flow's transform-origin:0 0 */
-.react-flow__node:hover .flow-handle--green:hover {
-  box-shadow: 0 0 0 8px rgba(16, 185, 129, 0.22), 0 0 0 4px rgba(16, 185, 129, 0.55), 0 0 20px rgba(16, 185, 129, 0.45) !important;
-}
-.react-flow__node:hover .flow-handle--red:hover {
-  box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.22), 0 0 0 4px rgba(239, 68, 68, 0.55), 0 0 20px rgba(239, 68, 68, 0.45) !important;
-}
-.react-flow__node:hover .flow-handle--gray:hover {
-  box-shadow: 0 0 0 8px rgba(148, 163, 184, 0.18), 0 0 0 4px rgba(148, 163, 184, 0.45), 0 0 14px rgba(148, 163, 184, 0.35) !important;
-}
-
-/* Source handle while being dragged from */
-.flow-handle.connectingfrom {
-  opacity: 1 !important;
-  scale: 1 !important;
-  box-shadow: 0 0 0 8px rgba(99, 102, 241, 0.25), 0 0 0 4px rgba(99, 102, 241, 0.6), 0 0 20px rgba(99, 102, 241, 0.4) !important;
-  pointer-events: all !important;
-}
-
-/* ── INPUT handles (white) — permanently invisible silent drop targets ─────
-   NEVER shown as a dot. Becomes a green pulse only when a live wire hovers. */
-.flow-handle--white {
-  opacity: 0 !important;
+/* ── Step 3: SOURCE handles — always visible, always at their OWN node bottom ── */
+/* Green output */
+.flow-handle--green {
+  opacity:    1 !important;
+  scale:      1 !important;
   background: #10b981 !important;
-  border-color: rgba(255, 255, 255, 0.95) !important;
+  box-shadow: 0 0 0 2.5px rgba(16, 185, 129, 0.25), 0 0 6px rgba(16, 185, 129, 0.18) !important;
+}
+/* Red output */
+.flow-handle--red {
+  opacity:    1 !important;
+  scale:      1 !important;
+  background: #ef4444 !important;
+  box-shadow: 0 0 0 2.5px rgba(239, 68, 68, 0.25), 0 0 6px rgba(239, 68, 68, 0.18) !important;
+}
+/* Gray output */
+.flow-handle--gray {
+  opacity:    1 !important;
+  scale:      1 !important;
+  background: #94a3b8 !important;
+  box-shadow: 0 0 0 2.5px rgba(148, 163, 184, 0.2), 0 0 5px rgba(148, 163, 184, 0.12) !important;
+}
+
+/* ── Step 4: Direct handle hover — subtle scale + glow only ──────────────── */
+.flow-handle--green:hover {
+  scale:      1.5 !important;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.3), 0 0 14px rgba(16, 185, 129, 0.4) !important;
+}
+.flow-handle--red:hover {
+  scale:      1.5 !important;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.3), 0 0 14px rgba(239, 68, 68, 0.4) !important;
+}
+.flow-handle--gray:hover {
+  scale:      1.5 !important;
+  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.28), 0 0 12px rgba(148, 163, 184, 0.3) !important;
+}
+
+/* ── Step 5: INPUT (top) handles — permanently invisible ─────────────────── */
+.flow-handle--white {
+  opacity:    0 !important;
+  background: #10b981 !important;
+  border:     none !important;
   box-shadow: none !important;
 }
 
-/* Input handle lit as valid target when wire is dragged onto it */
+/* ── Step 6: Wire drag states — pulse green on valid drop target ─────────── */
 .flow-handle--white.connectionindicator,
-.flow-handle--white.valid {
-  opacity: 1 !important;
-  scale: 1.4 !important;
+.flow-handle--white.valid,
+.react-flow__handle.react-flow__handle-top.connectionindicator,
+.react-flow__handle.react-flow__handle-top.valid {
+  opacity:    1 !important;
+  scale:      1.4 !important;
   background: #10b981 !important;
-  box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.35), 0 0 24px rgba(16, 185, 129, 0.6) !important;
-  animation: handlePulse 0.8s ease-in-out infinite !important;
-}
-.flow-handle--green {
-  background: #10b981 !important;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3), 0 2px 8px rgba(16, 185, 129, 0.2) !important;
-  color: rgba(16, 185, 129, 0.15);
-}
-.flow-handle--red {
-  background: #ef4444 !important;
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.3), 0 2px 8px rgba(239, 68, 68, 0.2) !important;
-  color: rgba(239, 68, 68, 0.15);
-}
-.flow-handle--gray {
-  background: #94a3b8 !important;
-  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.25), 0 2px 6px rgba(148, 163, 184, 0.15) !important;
-  color: rgba(148, 163, 184, 0.12);
+  box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.32), 0 0 20px rgba(16, 185, 129, 0.55) !important;
+  animation:  handlePulse 0.9s ease-in-out infinite !important;
 }
 
-/* Hover glows for output handles */
-.flow-handle--green:hover {
-  box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.35), 0 0 16px rgba(16, 185, 129, 0.45) !important;
-}
-.flow-handle--red:hover {
-  box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.35), 0 0 16px rgba(239, 68, 68, 0.45) !important;
-}
-.flow-handle--gray:hover {
-  box-shadow: 0 0 0 5px rgba(148, 163, 184, 0.3), 0 0 12px rgba(148, 163, 184, 0.3) !important;
+/* While actively dragging FROM a source handle */
+.flow-handle.connectingfrom {
+  scale:      1.6 !important;
+  box-shadow: 0 0 0 6px rgba(99, 102, 241, 0.28), 0 0 20px rgba(99, 102, 241, 0.45) !important;
 }
 
-/* Valid target glow (for output handles being dragged onto) */
+/* Valid drop target for output handles (when wire is dragged onto them) */
 .flow-handle--green.valid,
 .flow-handle--red.valid,
 .flow-handle--gray.valid {
-  opacity: 1 !important;
-  scale: 1.5 !important;
-  animation: handlePulse 0.9s ease-in-out infinite !important;
+  scale:      1.6 !important;
+  animation:  handlePulse 0.9s ease-in-out infinite !important;
 }
 
 @keyframes handlePulse {
-  0%, 100% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0.5), 0 0 24px rgba(16, 185, 129, 0.4); }
-  50%       { box-shadow: 0 0 0 12px rgba(16, 185, 129, 0.25), 0 0 36px rgba(16, 185, 129, 0.25); }
+  0%,  100% { box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.45), 0 0 20px rgba(16, 185, 129, 0.35); }
+  50%        { box-shadow: 0 0 0 9px rgba(16, 185, 129, 0.2),  0 0 32px rgba(16, 185, 129, 0.2);  }
+}
+
+/* ── Premium wire flow animation ─────────────────────────────────────────── */
+/* stroke-dashoffset decreasing = dashes move forward (source → target) ✓   */
+@keyframes premiumFlowDash {
+  from { stroke-dashoffset: 27; }
+  to   { stroke-dashoffset: 0;  }
 }
 
 /* ── PREMIUM WIRE SYSTEM ─────────────────────────────────────────────── */
@@ -546,8 +532,8 @@
    interactWidth (16px default). Keep base clean — no transition to avoid
    per-frame style recalc during active drag. */
 .react-flow__edge-path {
-  stroke-width: 2.5px;
-  stroke: rgba(16, 185, 129, 0.65);
+  /* stroke/color owned by PremiumEdge inline styles — no override here */
+  pointer-events: none;
 }
 
 /* Directional flow animation — very subtle, premium feel.
@@ -558,40 +544,19 @@
   to   { stroke-dashoffset: 0; }
 }
 
-/* Hover state — brighten, thicken, add soft glow */
-.react-flow__edge:hover .react-flow__edge-path {
-  stroke: rgba(16, 185, 129, 1);
-  stroke-width: 3px;
-  filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.5));
-  transition: stroke 0.14s ease, stroke-width 0.14s ease, filter 0.14s ease;
-}
-
-/* Selected state — strong accent glow, clear highlight */
-.react-flow__edge.selected .react-flow__edge-path {
-  stroke: #34d399;
-  stroke-width: 3px;
-  filter: drop-shadow(0 0 8px rgba(52, 211, 153, 0.6)) drop-shadow(0 0 2px rgba(52, 211, 153, 0.8));
-  transition: stroke 0.14s ease, stroke-width 0.14s ease, filter 0.14s ease;
-}
-
-/* Animated edge (used for active/publishing state) */
-.react-flow__edge.animated .react-flow__edge-path {
-  stroke-dasharray: 8 4;
-  animation: wireFlow 0.6s linear infinite;
-}
-
-/* Live connection line (while dragging from handle) — indigo with glow */
+/* Hover/selected/animated states handled inside PremiumEdge component.
+   Live connection line (preview while dragging from a handle) */
 .react-flow__connection-path {
-  stroke: rgba(99, 102, 241, 1) !important;
-  stroke-width: 2.5px !important;
-  stroke-dasharray: 7 3 !important;
-  filter: drop-shadow(0 0 5px rgba(99, 102, 241, 0.6)) !important;
-  animation: liveWireDash 0.4s linear infinite !important;
+  stroke:           rgba(99, 102, 241, 0.9) !important;
+  stroke-width:     2px !important;
+  stroke-dasharray: 6 6 !important;
+  filter:           drop-shadow(0 0 4px rgba(99, 102, 241, 0.55)) !important;
+  animation:        liveWireDash 0.55s linear infinite !important;
 }
 
 @keyframes liveWireDash {
-  from { stroke-dashoffset: 20; }
-  to   { stroke-dashoffset: 0; }
+  from { stroke-dashoffset: 12; }
+  to   { stroke-dashoffset: 0;  }
 }
 
 /* Edge label */

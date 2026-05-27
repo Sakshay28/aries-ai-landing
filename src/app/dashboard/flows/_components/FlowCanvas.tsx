@@ -13,8 +13,8 @@ import {
   PanOnScrollMode,
   ConnectionLineType,
   ConnectionMode,
-  MarkerType,
   type NodeTypes,
+  type EdgeTypes,
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -43,6 +43,7 @@ import {
 } from "./CustomNodes";
 import { useFlowStore } from "../store";
 import { getDefaultNodeData } from "./FlowSidebar";
+import { PremiumEdge } from "./PremiumEdge";
 
 // ─── NODE TYPES (module-level — never recreated) ───────────────────────────
 const NODE_TYPES: NodeTypes = {
@@ -72,23 +73,22 @@ const NODE_TYPES: NodeTypes = {
   intake_form:     IntakeFormNode as unknown as NodeTypes[string],
 };
 
+// ─── EDGE TYPES (module-level — never recreated) ───────────────────────────
+const EDGE_TYPES: EdgeTypes = {
+  premium: PremiumEdge as unknown as EdgeTypes[string],
+};
+
 const DEFAULT_EDGE_OPTIONS = {
-  type: "default", // bezier — smoother than smoothstep
-  style: { strokeWidth: 2.5, stroke: "rgba(16,185,129,0.7)" },
+  type: "premium",
   animated: false,
-  markerEnd: {
-    type: MarkerType.ArrowClosed,
-    width: 12,
-    height: 12,
-    color: "rgba(16,185,129,0.7)",
-  },
 } as const;
 
 // Module-level constants — never recreated, no inline object allocation in render
 const CONNECTION_LINE_STYLE = {
-  stroke: "rgba(99,102,241,0.9)",
+  stroke: "rgba(99,102,241,0.85)",
   strokeWidth: 2,
-  filter: "drop-shadow(0 0 3px rgba(99,102,241,0.5))",
+  strokeDasharray: "6 6",
+  filter: "drop-shadow(0 0 4px rgba(99,102,241,0.55))",
 } as const;
 
 // Per-type widths for accurate drop centering (node position = top-left in RF)
@@ -267,6 +267,7 @@ function FlowCanvasInner() {
         onDragOver={onDragOver}
         onDrop={onDrop}
         nodeTypes={NODE_TYPES}
+        edgeTypes={EDGE_TYPES}
         defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
         /* ── TRUE INFINITE CANVAS ── */
         minZoom={0.1}
