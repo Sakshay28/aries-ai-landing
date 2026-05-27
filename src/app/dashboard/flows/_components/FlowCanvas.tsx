@@ -35,6 +35,10 @@ import {
   WaitNode,
   ResumeParserNode,
   CollectDataNode,
+  InteractiveButtonsNode,
+  ButtonTriggerNode,
+  IntentRoutingNode,
+  IntakeFormNode,
   NODE_CATEGORY,
 } from "./CustomNodes";
 import { useFlowStore } from "../store";
@@ -62,6 +66,10 @@ const NODE_TYPES: NodeTypes = {
   order_tracking: StandardNode as unknown as NodeTypes[string],
   returns_handler:StandardNode as unknown as NodeTypes[string],
   cart_abandonment:StandardNode as unknown as NodeTypes[string],
+  send_buttons:    InteractiveButtonsNode as unknown as NodeTypes[string],
+  button_trigger:  ButtonTriggerNode as unknown as NodeTypes[string],
+  intent_routing:  IntentRoutingNode as unknown as NodeTypes[string],
+  intake_form:     IntakeFormNode as unknown as NodeTypes[string],
 };
 
 const DEFAULT_EDGE_OPTIONS = {
@@ -89,6 +97,7 @@ const NODE_WIDTHS: Record<string, number> = {
   condition: 256, webhook: 264, delay: 220, handoff: 240,
   knowledge: 256, end: 200, extract: 256, format: 240,
   memory: 240, wait: 240, resume_parser: 248, collect_data: 256,
+  send_buttons: 284, button_trigger: 244, intent_routing: 284, intake_form: 264,
 };
 
 // ─── INNER COMPONENT ─────────────────────────────────────────────────────────

@@ -2,14 +2,24 @@
 
 import React from "react";
 import { createPortal } from "react-dom";
-import { Handle, Position } from "@xyflow/react";
+import { Handle, Position, useUpdateNodeInternals } from "@xyflow/react";
 import {
   Sparkles, MessageSquare, SplitSquareVertical, Webhook,
   Clock, UserCheck, BookOpen, XCircle, Database,
   PlayCircle, Code2, Paintbrush, Hourglass, FileText,
   ListChecks, Zap, MoreVertical, Pencil, Copy, Trash2,
+  LayoutGrid, GitBranch, FileSignature, MousePointerClick,
 } from "lucide-react";
 import { useFlowStore } from "../store";
+import { validateNode, type ValidationSeverity } from "../utils";
+
+function useNodeValidation(id: string): ValidationSeverity {
+  const nodes = useFlowStore(s => s.nodes);
+  const edges = useFlowStore(s => s.edges);
+  const node = nodes.find(n => n.id === id);
+  if (!node) return 'ok';
+  return validateNode(node, nodes, edges).status;
+}
 
 export { Position };
 
@@ -31,6 +41,10 @@ export const NODE_CATEGORY: Record<string, { color: string; label: string }> = {
   resume:        { color: '#22C55E', label: 'RESUME' },
   resume_parser: { color: '#10B981', label: 'PARSER' },
   collect_data:  { color: '#F59E0B', label: 'COLLECT' },
+  send_buttons:    { color: '#10B981', label: 'BUTTONS' },
+  button_trigger:  { color: '#3B82F6', label: 'BUTTON CLICK' },
+  intent_routing:  { color: '#8B5CF6', label: 'INTENT ROUTING' },
+  intake_form:     { color: '#F59E0B', label: 'INTAKE FORM' },
 };
 
 // ─── NODE MENU (three-dot dropdown) ───────────────────────────────────────────
@@ -189,6 +203,8 @@ interface CardProps {
 function Card({ id, selected, color, Icon, title, children, footer }: CardProps) {
   const hasBody = Boolean(children);
   const hasFooter = Boolean(footer);
+  const vStatus = useNodeValidation(id);
+  const badgeColor = vStatus === 'error' ? '#EF4444' : vStatus === 'warning' ? '#F59E0B' : '#22C55E';
   return (
     <div
       style={{
@@ -197,10 +213,11 @@ function Card({ id, selected, color, Icon, title, children, footer }: CardProps)
         boxShadow: selected
           ? `0 0 0 4px ${color}18, 0 8px 28px rgba(0,0,0,0.2)`
           : "0 2px 10px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.04)",
-        overflow: "hidden",
+        overflow: "visible",
         fontFamily: "system-ui, -apple-system, sans-serif",
         transition: "box-shadow 0.15s ease, border-color 0.15s ease",
         background: "#fff",
+        position: "relative",
       }}
     >
       {/* Header */}
@@ -212,6 +229,8 @@ function Card({ id, selected, color, Icon, title, children, footer }: CardProps)
           alignItems: "center",
           gap: 9,
           padding: "0 10px 0 12px",
+          borderRadius: "13px 13px 0 0",
+          overflow: "hidden",
         }}
       >
         <div
@@ -241,6 +260,18 @@ function Card({ id, selected, color, Icon, title, children, footer }: CardProps)
         >
           {title}
         </span>
+        {/* Validation badge — only show for error/warning, not for ok */}
+        {vStatus !== 'ok' && (
+          <div
+            title={vStatus === 'error' ? 'Has errors' : 'Has warnings'}
+            style={{
+              width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
+              background: badgeColor,
+              border: '2px solid rgba(255,255,255,0.7)',
+              boxShadow: `0 0 8px ${badgeColor}`,
+            }}
+          />
+        )}
         <NodeMenu id={id} />
       </div>
 
@@ -573,6 +604,162 @@ export const CollectDataNode = React.memo(function CollectDataNode({ id, data, s
             </div>
           ))}
           {fields.length > 3 && <span style={{ fontSize: 10.5, color: "#94a3b8" }}>+{fields.length - 3} more</span>}
+        </div>
+      </Card>
+    </Root>
+  );
+});
+
+// ─── INTERACTIVE BUTTONS NODE ─────────────────────────────────────────────────
+// Renders one source handle per button + a "fallback" handle.
+export const InteractiveButtonsNode = React.memo(function InteractiveButtonsNode({ id, data, selected }: any) {
+  const buttons: any[] = Array.isArray(data.buttons) && data.buttons.length
+    ? data.buttons
+    : [{ id: "btn_1", label: "Option 1", value: "opt_1" }];
+  const updateNodeInternals = useUpdateNodeInternals();
+  React.useEffect(() => { updateNodeInternals(id); }, [buttons.length, id, updateNodeInternals]);
+  const total = buttons.length + 1; // +1 for fallback
+  return (
+    <Root width={284}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      {buttons.map((b, i) => {
+        const left = ((i + 1) / (total + 1)) * 100;
+        return (
+          <Handle
+            key={b.id || `btn_${i}`}
+            type="source"
+            position={Position.Bottom}
+            id={b.id || `btn_${i}`}
+            isConnectable
+            className="flow-handle flow-handle--green"
+            style={{ left: `${left}%` }}
+          />
+        );
+      })}
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="fallback"
+        isConnectable
+        className="flow-handle flow-handle--gray"
+        style={{ left: `${(total / (total + 1)) * 100}%` }}
+      />
+      <Card id={id} selected={selected} color="#10B981" Icon={LayoutGrid} title={data.label || "Interactive Buttons"}
+        footer={<OutLabels items={[
+          ...buttons.slice(0, 3).map((b: any) => ({ label: (b.label || "OPT").toUpperCase().slice(0, 10), color: "#10b981", dir: "↓" })),
+          { label: "FALLBACK", color: "#94a3b8", dir: "↓" },
+        ]} />}
+      >
+        {data.message && <Preview text={String(data.message)} />}
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+          {buttons.slice(0, 4).map((b: any, i: number) => (
+            <div key={b.id || i} style={{ fontSize: 11.5, padding: "5px 9px", borderRadius: 7, background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.22)", color: "#0d9488", fontWeight: 500 }}>
+              {b.label || `Option ${i + 1}`}
+            </div>
+          ))}
+          {buttons.length > 4 && <span style={{ fontSize: 10.5, color: "#94a3b8" }}>+{buttons.length - 4} more</span>}
+        </div>
+      </Card>
+    </Root>
+  );
+});
+
+// ─── BUTTON CLICK / BUTTON TRIGGER NODE ───────────────────────────────────────
+export const ButtonTriggerNode = React.memo(function ButtonTriggerNode({ id, data, selected }: any) {
+  return (
+    <Root width={244}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
+      <Card id={id} selected={selected} color="#3B82F6" Icon={MousePointerClick} title={data.label || "Button Click"}>
+        <Badge label={data.mode === "specific" ? `Wait for: ${data.button || "any"}` : "Any Button"} color="#3B82F6" />
+      </Card>
+    </Root>
+  );
+});
+
+// ─── INTENT ROUTING NODE ──────────────────────────────────────────────────────
+// One source handle per intent + "fallback".
+export const IntentRoutingNode = React.memo(function IntentRoutingNode({ id, data, selected }: any) {
+  const intents: any[] = Array.isArray(data.intents) && data.intents.length
+    ? data.intents
+    : [{ id: "intent_1", name: "default", keywords: [] }];
+  const updateNodeInternals = useUpdateNodeInternals();
+  React.useEffect(() => { updateNodeInternals(id); }, [intents.length, id, updateNodeInternals]);
+  const total = intents.length + 1;
+  return (
+    <Root width={284}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      {intents.map((it: any, i: number) => {
+        const left = ((i + 1) / (total + 1)) * 100;
+        return (
+          <Handle
+            key={it.id || `intent_${i}`}
+            type="source"
+            position={Position.Bottom}
+            id={it.id || `intent_${i}`}
+            isConnectable
+            className="flow-handle flow-handle--green"
+            style={{ left: `${left}%` }}
+          />
+        );
+      })}
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="fallback"
+        isConnectable
+        className="flow-handle flow-handle--gray"
+        style={{ left: `${(total / (total + 1)) * 100}%` }}
+      />
+      <Card id={id} selected={selected} color="#8B5CF6" Icon={GitBranch} title={data.label || "Intent Routing"}
+        footer={<OutLabels items={[
+          ...intents.slice(0, 3).map((it: any) => ({ label: (it.name || "INTENT").toUpperCase().slice(0, 12), color: "#10b981", dir: "↓" })),
+          { label: "FALLBACK", color: "#94a3b8", dir: "↓" },
+        ]} />}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          {intents.slice(0, 4).map((it: any, i: number) => (
+            <div key={it.id || i} style={{ fontSize: 11.5, color: "#475569" }}>
+              <div style={{ fontWeight: 600, color: "#334155", marginBottom: 2 }}>{it.name || `Intent ${i + 1}`}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                {(it.keywords || []).slice(0, 3).map((kw: string, ki: number) => (
+                  <span key={ki} style={{ fontSize: 10, padding: "1px 6px", borderRadius: 99, background: "rgba(139,92,246,0.1)", color: "#7c3aed", border: "1px solid rgba(139,92,246,0.2)" }}>
+                    {kw}
+                  </span>
+                ))}
+                {(it.keywords || []).length > 3 && <span style={{ fontSize: 10, color: "#94a3b8" }}>+{(it.keywords || []).length - 3}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </Root>
+  );
+});
+
+// ─── INTAKE FORM NODE ─────────────────────────────────────────────────────────
+export const IntakeFormNode = React.memo(function IntakeFormNode({ id, data, selected }: any) {
+  const fields: any[] = Array.isArray(data.fields) && data.fields.length
+    ? data.fields
+    : [{ id: "f1", name: "Name", type: "text" }];
+  return (
+    <Root width={264}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="success" isConnectable className="flow-handle flow-handle--green" style={{ left: "28%" }} />
+      <Handle type="source" position={Position.Bottom} id="timeout" isConnectable className="flow-handle flow-handle--gray" style={{ left: "72%" }} />
+      <Card id={id} selected={selected} color="#F59E0B" Icon={FileSignature} title={data.label || "Intake Form"}
+        footer={<OutLabels items={[{ label: "COMPLETE", color: "#10b981", dir: "↙" }, { label: "TIMEOUT", color: "#94a3b8", dir: "↘" }]} />}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          {fields.slice(0, 4).map((f: any, i: number) => (
+            <div key={f.id || i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11.5, color: "#475569" }}>
+              <span style={{ fontWeight: 500 }}>{f.name || `Field ${i + 1}`}</span>
+              <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 99, background: "rgba(245,158,11,0.1)", color: "#b45309", border: "1px solid rgba(245,158,11,0.22)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                {f.type || "text"}
+              </span>
+            </div>
+          ))}
+          {fields.length > 4 && <span style={{ fontSize: 10.5, color: "#94a3b8" }}>+{fields.length - 4} more</span>}
         </div>
       </Card>
     </Root>

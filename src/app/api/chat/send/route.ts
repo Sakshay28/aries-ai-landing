@@ -8,7 +8,7 @@ import { decryptToken } from '@/lib/utils/crypto';
 
 export async function POST(req: NextRequest) {
   try {
-    const { conversationId, message } = await req.json();
+    const { conversationId, message, replyToMessageId } = await req.json();
 
     if (!conversationId || !message?.trim()) {
       return NextResponse.json({ success: false, error: 'Missing conversationId or message' }, { status: 400 });
@@ -66,6 +66,7 @@ export async function POST(req: NextRequest) {
         sender_id: null,
         status: 'pending',
         ai_generated: false,
+        reply_to_message_id: replyToMessageId || null,
       })
       .select()
       .single();

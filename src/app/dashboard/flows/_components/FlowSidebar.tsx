@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { MessageSquare, SplitSquareVertical, Webhook, Sparkles, Clock, UserIcon, BookOpen, CircleStop, PlayCircle, Braces, Paintbrush, Database, Hourglass, FileText, Search, ChevronDown, ShoppingCart, Box, RefreshCw, ShoppingBag, ImageIcon, Mic, MapPin, List, LayoutGrid, FileQuestion, UserPlus, FileSignature, AlertCircle, Tag, GitBranch, Repeat, Globe, Phone, Mail, FileCheck, Star, ThumbsUp, CreditCard, ShieldCheck, Calendar, Building, Users, PiggyBank, Link2, Code, Terminal, X, CornerDownRight, HelpCircle, ListChecks, RefreshCcw, Edit3, Send } from "lucide-react";
+import { MessageSquare, SplitSquareVertical, Webhook, Sparkles, Clock, UserIcon, BookOpen, CircleStop, PlayCircle, Braces, Paintbrush, Database, Hourglass, FileText, Search, ChevronDown, ShoppingCart, Box, RefreshCw, ShoppingBag, ImageIcon, Mic, MapPin, List, LayoutGrid, FileQuestion, UserPlus, FileSignature, AlertCircle, Tag, GitBranch, Repeat, Globe, Phone, Mail, FileCheck, Star, ThumbsUp, CreditCard, ShieldCheck, Calendar, Building, Users, PiggyBank, Link2, Code, Terminal, X, CornerDownRight, HelpCircle, ListChecks, RefreshCcw, Edit3, Send, Braces as BracesIcon, Layers } from "lucide-react";
 import { useFlowStore } from "../store";
 import { BUSINESS_TYPE_CONFIG } from "../config";
+import { buildVariableRegistry, type VariableDefinition } from "@/lib/flows/variables";
 
 export const nodeCategories = [
   {
@@ -11,7 +12,7 @@ export const nodeCategories = [
     nodes: [
       { id: "trigger", type: "trigger", icon: PlayCircle, label: "Message Trigger", desc: "Any incoming message" },
       { id: "keyword_trigger", type: "trigger", icon: Tag, label: "Keyword Trigger", desc: "Match specific words" },
-      { id: "button_trigger", type: "trigger", icon: LayoutGrid, label: "Button Click", desc: "Interactive button press" },
+      { id: "button_trigger", type: "button_trigger", icon: LayoutGrid, label: "Button Click", desc: "Interactive button press" },
       { id: "webhook_trigger", type: "trigger", icon: Webhook, label: "Webhook Trigger", desc: "External HTTP event" },
       { id: "schedule_trigger", type: "trigger", icon: Clock, label: "Scheduled Time", desc: "Cron / time-based" },
       { id: "wait", type: "wait", icon: Hourglass, label: "Wait for Event", desc: "Pause until triggered" },
@@ -25,7 +26,7 @@ export const nodeCategories = [
       { id: "standard", type: "standard", icon: MessageSquare, label: "Send Message", desc: "WhatsApp text" },
       { id: "send_media", type: "standard", icon: ImageIcon, label: "Send Media", desc: "Image / video / file" },
       { id: "send_audio", type: "standard", icon: Mic, label: "Send Audio", desc: "Voice message" },
-      { id: "send_buttons", type: "standard", icon: LayoutGrid, label: "Interactive Buttons", desc: "Tap to reply" },
+      { id: "send_buttons", type: "send_buttons", icon: LayoutGrid, label: "Interactive Buttons", desc: "Tap to reply" },
       { id: "send_list", type: "standard", icon: List, label: "List Menu", desc: "Scrollable options" },
       { id: "format", type: "format", icon: Paintbrush, label: "Format Response", desc: "Reshape output" },
       { id: "handoff", type: "handoff", icon: UserIcon, label: "Human Handoff", desc: "Transfer to agent" },
@@ -41,7 +42,7 @@ export const nodeCategories = [
       { id: "memory", type: "memory", icon: Database, label: "Context Memory", desc: "Store session data" },
       { id: "knowledge", type: "knowledge", icon: BookOpen, label: "AI Knowledge Base", desc: "RAG-powered" },
       { id: "sentiment", type: "standard", icon: ThumbsUp, label: "Sentiment Analysis", desc: "Positive / negative" },
-      { id: "intent_routing", type: "standard", icon: GitBranch, label: "Intent Routing", desc: "Route by intent" },
+      { id: "intent_routing", type: "intent_routing", icon: GitBranch, label: "Intent Routing", desc: "Route by intent" },
       { id: "end", type: "end", icon: CircleStop, label: "End Flow", desc: "Close conversation" },
     ]
   },
@@ -62,7 +63,7 @@ export const nodeCategories = [
       { id: "show_slots", type: "standard", icon: Calendar, label: "Show Slots", desc: "Available times" },
       { id: "book_appt", type: "standard", icon: Calendar, label: "Book Appointment", desc: "Google Calendar" },
       { id: "reschedule", type: "standard", icon: RefreshCw, label: "Reschedule", desc: "Change slot" },
-      { id: "intake_form", type: "standard", icon: FileSignature, label: "Intake Form", desc: "Patient / client" },
+      { id: "intake_form", type: "intake_form", icon: FileSignature, label: "Intake Form", desc: "Patient / client" },
       { id: "appt_reminder", type: "standard", icon: Clock, label: "Reminder", desc: "Pre-event alert" },
     ]
   },
@@ -109,7 +110,7 @@ export const getDefaultNodeData = (id: string) => {
     interruption: { label: "Intent Handling", userQuery: "Wait, what's your pricing?", aiResponse: "Our plans start at ₹2,999/mo." },
     knowledge: { label: "AI Knowledge", source: "Help Center Docs" },
     resume: { label: "Return to Listening" },
-    condition: { label: "Condition", field: "confidence", operator: ">", value: "0.7" },
+    condition: { label: "Condition", field: "confidence", operator: "==", value: "0.7" },
     webhook: { label: "API Request", method: "POST", url: "https://api.example.com" },
     delay: { label: "Delay", duration: "2" },
     wait: { label: "Wait for Event", event: "Payment Webhook" },
@@ -117,6 +118,34 @@ export const getDefaultNodeData = (id: string) => {
     resume_parser: { label: "Parse Resume PDF", extracts: "Skills, Experience" },
     handoff: { label: "Human Handoff", team: "Support Team" },
     end: { label: "End Flow" },
+    send_buttons: {
+      label: "Interactive Buttons",
+      message: "Choose an option:",
+      buttons: [
+        { id: "btn_1", label: "Option 1", value: "opt_1" },
+        { id: "btn_2", label: "Option 2", value: "opt_2" },
+      ],
+    },
+    button_trigger: {
+      label: "Button Click",
+      mode: "specific",
+      button: "opt_1",
+    },
+    intent_routing: {
+      label: "Intent Routing",
+      intents: [
+        { id: "intent_1", name: "booking", keywords: ["book", "reserve", "schedule"] },
+        { id: "intent_2", name: "support", keywords: ["help", "support", "issue"] },
+      ],
+    },
+    intake_form: {
+      label: "Intake Form",
+      fields: [
+        { id: "f1", name: "Name", type: "text" },
+        { id: "f2", name: "Email", type: "email" },
+        { id: "f3", name: "Phone", type: "phone" },
+      ],
+    },
   };
   if (map[id]) return map[id];
   for (const cat of nodeCategories) {
@@ -126,12 +155,19 @@ export const getDefaultNodeData = (id: string) => {
   return { label: "Custom Node", content: "Configure node..." };
 };
 
+const SOURCE_COLORS: Record<string, string> = { system: '#3B82F6', flow: '#22C55E', session: '#A855F7' };
+const SOURCE_LABELS: Record<string, string> = { system: 'System', flow: 'Flow', session: 'Session' };
+
 export default function FlowSidebar({ businessType = 'blank' }: { businessType?: string }) {
-  const { addNode, setSelectedNodeId } = useFlowStore();
+  const { addNode, setSelectedNodeId, nodes, updateNodeData, selectedNodeId } = useFlowStore();
+  const [activeTab, setActiveTab] = useState<'nodes' | 'variables'>('nodes');
   const [searchQuery, setSearchQuery] = useState("");
+  const [varSearch, setVarSearch] = useState("");
   const config = BUSINESS_TYPE_CONFIG[businessType] || BUSINESS_TYPE_CONFIG['blank'];
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
   const [mounted, setMounted] = useState(false);
+
+  const allVariables = useMemo(() => buildVariableRegistry(nodes), [nodes]);
 
   useEffect(() => {
     setMounted(true);
@@ -176,6 +212,22 @@ export default function FlowSidebar({ businessType = 'blank' }: { businessType?:
 
   const totalCount = filteredCategories.reduce((s, c) => s + c.nodes.length, 0);
 
+  const CONTENT_NODE_TYPES = new Set(['standard', 'send_buttons', 'interruption']);
+
+  const insertVarIntoNode = (varName: string) => {
+    if (!selectedNodeId) return;
+    const node = nodes.find(n => n.id === selectedNodeId);
+    if (!node) return;
+    const data = node.data as Record<string, unknown>;
+    const field = node.type === 'send_buttons' ? 'message' : 'content';
+    if (!CONTENT_NODE_TYPES.has(node.type ?? '')) return;
+    const current = String(data[field] ?? '');
+    updateNodeData(selectedNodeId, { [field]: current + `{{${varName}}}` });
+  };
+
+  const selectedNode = nodes.find(n => n.id === selectedNodeId);
+  const canInsert = !!selectedNodeId && CONTENT_NODE_TYPES.has(selectedNode?.type ?? '');
+
   return (
     <>
       <style dangerouslySetInnerHTML={{__html: `
@@ -185,9 +237,32 @@ export default function FlowSidebar({ businessType = 'blank' }: { businessType?:
       `}} />
       <div className="w-[280px] flex-shrink-0 flex flex-col h-full" style={{ background: 'rgba(13,17,23,0.85)', backdropFilter: 'blur(20px)', borderRight: '1px solid rgba(255,255,255,0.05)', zIndex: 10 }}>
 
-        {/* Header */}
-        <div className="px-4 pt-5 pb-4 flex-shrink-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] mb-4" style={{ color: 'rgba(255,255,255,0.18)' }}>Nodes</p>
+        {/* Tab Bar */}
+        <div className="flex items-center border-b flex-shrink-0" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+          {(['nodes', 'variables'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className="flex-1 flex items-center justify-center gap-1.5 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] transition-all"
+              style={{
+                color: activeTab === tab ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.25)',
+                borderBottom: activeTab === tab ? '2px solid #22c55e' : '2px solid transparent',
+              }}
+            >
+              {tab === 'nodes' ? <Layers className="w-3.5 h-3.5" /> : <BracesIcon className="w-3.5 h-3.5" />}
+              {tab === 'nodes' ? 'Nodes' : 'Variables'}
+              {tab === 'variables' && allVariables.length > 0 && (
+                <span className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80' }}>{allVariables.length}</span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* ── NODES TAB ────────────────────────────────── */}
+        {activeTab === 'nodes' && (
+        <div className="flex flex-col flex-1 overflow-hidden">
+        {/* Search */}
+        <div className="px-4 pt-4 pb-3 flex-shrink-0">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style={{ color: 'rgba(255,255,255,0.22)' }} />
             <input
@@ -304,6 +379,77 @@ export default function FlowSidebar({ businessType = 'blank' }: { businessType?:
             {isSearchActive ? `${totalCount} result${totalCount !== 1 ? 's' : ''} found` : 'Drag or click to place nodes'}
           </p>
         </div>
+        </div>
+        )}
+
+        {/* ── VARIABLES TAB ─────────────────────────── */}
+        {activeTab === 'variables' && (
+          <div className="flex flex-col flex-1 overflow-hidden">
+            <div className="px-4 pt-4 pb-3 flex-shrink-0">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style={{ color: 'rgba(255,255,255,0.22)' }} />
+                <input
+                  type="text" placeholder="Search variables..." value={varSearch}
+                  onChange={e => setVarSearch(e.target.value)}
+                  className="w-full h-9 pl-9 pr-3 text-[12px] focus:outline-none"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, color: 'rgba(255,255,255,0.8)' }}
+                />
+              </div>
+              {canInsert && (
+                <p className="text-[10px] mt-2 text-center" style={{ color: 'rgba(34,197,94,0.7)' }}>Click to insert into selected node</p>
+              )}
+              {selectedNodeId && !canInsert && (
+                <p className="text-[10px] mt-2 text-center" style={{ color: 'rgba(255,255,255,0.2)' }}>Select a Send Message or Buttons node to insert</p>
+              )}
+              {!selectedNodeId && (
+                <p className="text-[10px] mt-2 text-center" style={{ color: 'rgba(255,255,255,0.2)' }}>Select a message node on the canvas first</p>
+              )}
+            </div>
+            <div className="flex-1 overflow-y-auto sb-scroll px-3 pb-4 space-y-3">
+              {(['system', 'flow', 'session'] as const).map(src => {
+                const filtered = allVariables.filter(v => v.source === src && (!varSearch || v.name.includes(varSearch.toLowerCase()) || v.label.toLowerCase().includes(varSearch.toLowerCase())));
+                if (filtered.length === 0) return null;
+                return (
+                  <div key={src}>
+                    <p className="text-[9px] font-bold uppercase tracking-[0.14em] mb-1.5 px-1" style={{ color: SOURCE_COLORS[src] }}>{SOURCE_LABELS[src]}</p>
+                    <div className="space-y-0.5">
+                      {filtered.map((v: VariableDefinition) => (
+                        <button
+                          key={v.name}
+                          onClick={() => insertVarIntoNode(v.name)}
+                          className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl transition-all text-left"
+                          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.04)' }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.07)'; }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)'; }}
+                          title={v.description || `Insert {{${v.name}}}`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: `${SOURCE_COLORS[src]}15`, color: SOURCE_COLORS[src] }}>
+                              {src === 'system' ? 'SYS' : src === 'session' ? 'SES' : 'FLW'}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="font-mono text-[11px] truncate" style={{ color: 'rgba(255,255,255,0.8)' }}>{`{{${v.name}}}`}</p>
+                              {v.label !== v.name && <p className="text-[9px] truncate" style={{ color: 'rgba(255,255,255,0.3)' }}>{v.label}</p>}
+                            </div>
+                          </div>
+                          <span className="text-[9px] flex-shrink-0" style={{ color: 'rgba(255,255,255,0.2)' }}>{v.type}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              {allVariables.length === 0 && (
+                <div className="text-center py-10">
+                  <BracesIcon className="w-6 h-6 mx-auto mb-2" style={{ color: 'rgba(255,255,255,0.1)' }} />
+                  <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.25)' }}>No variables yet</p>
+                  <p className="text-[10px] mt-1" style={{ color: 'rgba(255,255,255,0.15)' }}>Add Intake Form or Extract nodes to generate variables</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
       </div>
     </>
   );

@@ -2,7 +2,7 @@
 
 import {
   Send, Bot, User, Check, CheckCheck, Clock, AlertCircle, ArrowDown, Paperclip, Smile,
-  Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal, X, Loader2,
+  Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal, X, Loader2, Trash2, HelpCircle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -120,6 +120,9 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [replyToMsg, setReplyToMsg] = useState<Message | null>(null);
+  const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const searchParams = useSearchParams();
   const conversationId = searchParams.get('conversationId');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -224,6 +227,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       file_size: file.size,
       mime_type: file.type,
       media_caption: inputMsg.trim() || null,
+      reply_to_message_id: replyToMsg?.id || null,
     };
     setMessages(prev => [...prev, optimisticMsg]);
     setTimeout(() => scrollToBottom(true), 30);
@@ -233,6 +237,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       formData.append('file', file);
       formData.append('conversationId', conversationId);
       if (inputMsg.trim()) formData.append('caption', inputMsg.trim());
+      if (replyToMsg) formData.append('replyToMessageId', replyToMsg.id);
 
       console.log('[attachment] Uploading:', file.name, file.type, file.size);
 
@@ -257,8 +262,9 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         return [...withoutOpt, realMsg];
       });
 
-      // Clear caption after successful send
+      // Clear caption and reply state after successful send
       setInputMsg('');
+      setReplyToMsg(null);
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
       console.log('[attachment] ✅ Sent successfully:', realMsg.id);
@@ -272,7 +278,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     } finally {
       setUploading(false);
     }
-  }, [pendingFile, conversationId, uploading, inputMsg, scrollToBottom]);
+  }, [pendingFile, conversationId, uploading, inputMsg, replyToMsg, scrollToBottom]);
 
   const handleScroll = useCallback(() => {
     const el = scrollAreaRef.current;
@@ -343,8 +349,14 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           setMessages(prev => {
             const exists = prev.some(m => m.id === updatedMsg.id);
             if (!exists) return prev;
-            return prev.map(m => m.id === updatedMsg.id ? { ...m, status: updatedMsg.status } : m);
+            return prev.map(m => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m);
           });
+        })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
+        (payload) => {
+          if (!payload.old || !('id' in payload.old)) return;
+          const deletedId = payload.old.id;
+          setMessages(prev => prev.filter(m => m.id !== deletedId));
         })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
@@ -464,14 +476,15 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       status: 'pending',
       created_at: new Date().toISOString(),
       ai_generated: false,
-    } as Message;
+      reply_to_message_id: replyToMsg?.id || null,
+    } as unknown as Message;
     setMessages(prev => [...prev, optimisticMsg]);
     setTimeout(() => scrollToBottom(true), 30);
 
     try {
       const res = await fetch('/api/chat/send', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId, message: text }),
+        body: JSON.stringify({ conversationId, message: text, replyToMessageId: replyToMsg?.id }),
       });
       const apiData = await res.json();
       if (!res.ok || !apiData.success) throw new Error(apiData.error || 'Failed');
@@ -489,6 +502,9 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         if (exists) return withoutOptimistic;
         return [...withoutOptimistic, realMsg];
       });
+      
+      // Clear reply state after successful send
+      setReplyToMsg(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Message failed to send.';
       toast.error(msg);
@@ -550,11 +566,86 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       : messages
   );
 
-  const copyMessage = (text: string) => {
+  const copyMessage = (msgId: string, text: string) => {
     navigator.clipboard?.writeText(text).then(
-      () => toast.success('Copied'),
+      () => {
+        setCopiedMessageId(msgId);
+        toast.success('Copied to clipboard');
+        setTimeout(() => setCopiedMessageId(null), 2000);
+      },
       () => toast.error('Copy failed'),
     );
+  };
+
+  const handleEmojiReaction = async (msgId: string, emoji: string | null) => {
+    try {
+      const supabase = supabaseRef.current;
+      const { error } = await supabase.from('messages').update({ reaction: emoji }).eq('id', msgId);
+      if (error) throw error;
+
+      // Optimistically update locally
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, reaction: emoji } : m));
+      toast.success(emoji ? 'Reaction updated' : 'Reaction removed');
+    } catch (err) {
+      console.error('Failed to react:', err);
+      toast.error('Failed to update reaction');
+    }
+  };
+
+  const handleDeleteMessage = async (msgId: string) => {
+    try {
+      const supabase = supabaseRef.current;
+      const { error } = await supabase.from('messages').delete().eq('id', msgId);
+      if (error) throw error;
+
+      // Optimistically delete locally
+      setMessages(prev => prev.filter(m => m.id !== msgId));
+      toast.success('Message deleted');
+    } catch (err) {
+      console.error('Failed to delete:', err);
+      toast.error('Failed to delete message');
+    }
+  };
+
+  const handleSaveToFAQ = async (msg: Message) => {
+    try {
+      // Find the previous inbound message as the question
+      const index = messages.findIndex(m => m.id === msg.id);
+      let question = '';
+      let answer = '';
+
+      if (msg.direction === 'inbound') {
+        question = msg.content;
+        answer = 'Placeholder Answer (Please update in settings)';
+      } else {
+        // Find the last inbound message before this one
+        const prevInbound = messages.slice(0, index).reverse().find(m => m.direction === 'inbound');
+        question = prevInbound ? prevInbound.content : 'Placeholder Question (Please update in settings)';
+        answer = msg.content;
+      }
+
+      // Fetch the settings first
+      const getRes = await fetch('/api/dashboard/settings');
+      const getData = await getRes.json();
+      if (!getRes.ok || !getData.success) throw new Error('Failed to fetch settings');
+
+      const existingFaqs = getData.data.custom_faqs || [];
+      const updatedFaqs = [...existingFaqs, { question, answer }];
+
+      // PATCH the updated custom_faqs
+      const patchRes = await fetch('/api/dashboard/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ custom_faqs: updatedFaqs }),
+      });
+      const patchData = await patchRes.json();
+      if (!patchRes.ok || !patchData.success) throw new Error(patchData.error || 'Failed to update settings');
+
+      toast.success('Saved to FAQs!', { description: 'You can customize it in the Settings tab.' });
+    } catch (err) {
+      console.error('Failed to save FAQ:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to save FAQ');
+    }
   };
 
   const chatBgStyle: React.CSSProperties = {
@@ -773,16 +864,130 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                   const isOptimistic = msg.id.startsWith('__optimistic__');
 
                   const hoverToolbar = (
-                    <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex items-center gap-0.5 bg-white dark:bg-[#1F2B3E] rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.1)] ring-1 ring-black/[0.04] dark:ring-white/[0.06] px-0.5 py-0.5 flex-shrink-0 self-center">
-                      <button onClick={() => copyMessage(msg.content)} title="Copy" className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors">
-                        <Copy className="w-3 h-3" />
+                    <div className={cn(
+                      "transition-opacity duration-150 flex items-center gap-0.5 bg-white dark:bg-[#1F2B3E] rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.1)] ring-1 ring-black/[0.04] dark:ring-white/[0.06] px-0.5 py-0.5 flex-shrink-0 self-center",
+                      activeMessageMenuId === msg.id ? "opacity-100 z-50" : "opacity-0 group-hover:opacity-100"
+                    )}>
+                      <button 
+                        onClick={() => copyMessage(msg.id, msg.content || '')} 
+                        title="Copy" 
+                        className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                      >
+                        {copiedMessageId === msg.id ? (
+                          <CheckCheck className="w-3.5 h-3.5 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
                       </button>
-                      <button onClick={() => toast('Reply', { description: 'Coming soon' })} title="Reply" className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors">
+                      <button 
+                        onClick={() => setReplyToMsg(msg)} 
+                        title="Reply" 
+                        className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                      >
                         <Reply className="w-3 h-3" />
                       </button>
-                      <button onClick={() => toast('More', { description: 'Coming soon' })} title="More" className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors">
-                        <MoreHorizontal className="w-3 h-3" />
-                      </button>
+                      
+                      <div className="relative">
+                        <button 
+                          onClick={() => setActiveMessageMenuId(activeMessageMenuId === msg.id ? null : msg.id)} 
+                          title="More options" 
+                          className={cn(
+                            "w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors",
+                            activeMessageMenuId === msg.id && "bg-black/[0.04] dark:bg-white/[0.06] text-foreground"
+                          )}
+                        >
+                          <MoreHorizontal className="w-3 h-3" />
+                        </button>
+                        
+                        <AnimatePresence>
+                          {activeMessageMenuId === msg.id && (
+                            <>
+                              {/* Backdrop */}
+                              <div 
+                                className="fixed inset-0 z-40 cursor-default" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveMessageMenuId(null);
+                                }}
+                              />
+                              <motion.div
+                                initial={{ opacity: 0, scale: 0.92, y: 4 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.92, y: 4 }}
+                                transition={{ duration: 0.1 }}
+                                className={cn(
+                                  "absolute z-50 bg-[#1C2333]/95 backdrop-blur-md border border-border rounded-xl shadow-xl p-1 min-w-[170px] flex flex-col gap-0.5 bottom-8 cursor-default",
+                                  isInbound ? "left-0" : "right-0"
+                                )}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {/* Quick Reactions grid */}
+                                <div className="flex items-center justify-between border-b border-white/5 pb-1 px-1 mb-1 gap-1">
+                                  {['👍', '❤️', '😂', '😮', '😢', '🙏'].map(emoji => (
+                                    <button
+                                      key={emoji}
+                                      onClick={() => {
+                                        handleEmojiReaction(msg.id, msg.reaction === emoji ? null : emoji);
+                                        setActiveMessageMenuId(null);
+                                      }}
+                                      className={cn(
+                                        "hover:scale-125 transition-transform p-1 text-[15px] rounded-md hover:bg-white/5",
+                                        msg.reaction === emoji && "bg-white/10"
+                                      )}
+                                    >
+                                      {emoji}
+                                    </button>
+                                  ))}
+                                </div>
+                                
+                                <button
+                                  onClick={() => {
+                                    setReplyToMsg(msg);
+                                    setActiveMessageMenuId(null);
+                                  }}
+                                  className="flex items-center gap-2 px-2.5 py-1.5 text-[12px] hover:bg-white/5 transition-colors rounded-lg text-left text-foreground/90 font-medium"
+                                >
+                                  <Reply className="w-3.5 h-3.5 text-muted-foreground/80" />
+                                  Reply
+                                </button>
+
+                                <button
+                                  onClick={() => {
+                                    copyMessage(msg.id, msg.content || '');
+                                    setActiveMessageMenuId(null);
+                                  }}
+                                  className="flex items-center gap-2 px-2.5 py-1.5 text-[12px] hover:bg-white/5 transition-colors rounded-lg text-left text-foreground/90 font-medium"
+                                >
+                                  <Copy className="w-3.5 h-3.5 text-muted-foreground/80" />
+                                  Copy text
+                                </button>
+
+                                <button
+                                  onClick={() => {
+                                    handleSaveToFAQ(msg);
+                                    setActiveMessageMenuId(null);
+                                  }}
+                                  className="flex items-center gap-2 px-2.5 py-1.5 text-[12px] hover:bg-white/5 transition-colors rounded-lg text-left text-foreground/90 font-medium"
+                                >
+                                  <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/80" />
+                                  Save to FAQ
+                                </button>
+
+                                <button
+                                  onClick={() => {
+                                    handleDeleteMessage(msg.id);
+                                    setActiveMessageMenuId(null);
+                                  }}
+                                  className="flex items-center gap-2 px-2.5 py-1.5 text-[12px] hover:bg-red-500/10 text-red-400 hover:text-red-300 transition-colors rounded-lg text-left font-medium"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  Delete
+                                </button>
+                              </motion.div>
+                            </>
+                          )}
+                        </AnimatePresence>
+                      </div>
                     </div>
                   );
 
@@ -807,37 +1012,74 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                     return <Check className="w-3.5 h-3.5 text-white/60" />;
                   })();
 
+                  const parentMsg = msg.reply_to_message_id 
+                    ? messages.find(m => m.id === msg.reply_to_message_id)
+                    : null;
+
+                  const replyPreviewCard = parentMsg && (
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const parentEl = document.getElementById(`msg-${parentMsg.id}`);
+                        if (parentEl) {
+                          parentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          parentEl.classList.add('bg-indigo-500/10', 'ring-1', 'ring-indigo-500/30');
+                          setTimeout(() => {
+                            parentEl.classList.remove('bg-indigo-500/10', 'ring-1', 'ring-indigo-500/30');
+                          }, 1500);
+                        }
+                      }}
+                      className={cn(
+                        "mb-1.5 rounded-lg border-l-4 p-2 text-[12px] bg-black/5 dark:bg-white/5 cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-all select-none text-left border-l-solid",
+                        parentMsg.direction === 'inbound' 
+                          ? "border-emerald-500 text-emerald-600 dark:text-emerald-400" 
+                          : "border-indigo-500 text-indigo-600 dark:text-indigo-400"
+                      )}
+                    >
+                      <div className="font-semibold text-[11px] mb-0.5">
+                        {parentMsg.direction === 'inbound' ? displayName : 'You'}
+                      </div>
+                      <div className="text-muted-foreground line-clamp-2">
+                        {parentMsg.content || (parentMsg.media_url ? 'Attachment' : '')}
+                      </div>
+                    </div>
+                  );
+
                   return (
                     <motion.div
                       key={msg.id}
                       initial={{ opacity: 0, y: 5, scale: 0.97 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       transition={{ duration: 0.15, ease: 'easeOut' }}
-                      className={cn('group w-full flex items-end gap-1', isInbound ? 'justify-start' : 'justify-end')}
+                      className={cn('group w-full flex items-end gap-1 relative', isInbound ? 'justify-start' : 'justify-end', msg.reaction && 'mb-2.5')}
                     >
                       {/* Outbound: toolbar floats LEFT of bubble */}
                       {!isInbound && hoverToolbar}
 
                       {msg.media_url ? (
                         /* ── Attachment bubble ── */
-                        <div className={cn(
-                          'max-w-[65%] px-2.5 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150',
-                          isInbound
-                            ? cn(
-                              'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10',
-                              isFirst ? 'rounded-2xl rounded-tl-sm' : 'rounded-2xl',
-                              isLast && !isFirst ? 'rounded-bl-sm' : ''
-                            )
-                            : cn(
-                              isOptimistic
-                                ? 'bg-gradient-to-r from-indigo-400/70 to-violet-500/70 border-indigo-400/10'
-                                : 'bg-gradient-to-r from-indigo-500/90 to-violet-600/90 border-indigo-400/20',
-                              'shadow-[0_0_12px_rgba(99,102,241,0.15)]',
-                              isFirst ? 'rounded-2xl rounded-tr-sm' : 'rounded-2xl',
-                              isLast && !isFirst ? 'rounded-br-sm' : '',
-                              msg.status === 'failed' ? 'ring-1 ring-red-300 dark:ring-red-800 opacity-80' : ''
-                            )
-                        )}>
+                        <div 
+                          id={`msg-${msg.id}`}
+                          className={cn(
+                            'max-w-[65%] px-2.5 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150 relative',
+                            isInbound
+                              ? cn(
+                                  'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10',
+                                  isFirst ? 'rounded-2xl rounded-tl-sm' : 'rounded-2xl',
+                                  isLast && !isFirst ? 'rounded-bl-sm' : ''
+                                )
+                              : cn(
+                                  isOptimistic
+                                    ? 'bg-gradient-to-r from-indigo-400/70 to-violet-500/70 border-indigo-400/10'
+                                    : 'bg-gradient-to-r from-indigo-500/90 to-violet-600/90 border-indigo-400/20',
+                                  'shadow-[0_0_12px_rgba(99,102,241,0.15)]',
+                                  isFirst ? 'rounded-2xl rounded-tr-sm' : 'rounded-2xl',
+                                  isLast && !isFirst ? 'rounded-br-sm' : '',
+                                  msg.status === 'failed' ? 'ring-1 ring-red-300 dark:ring-red-800 opacity-80' : ''
+                                )
+                          )}
+                        >
+                          {replyPreviewCard}
                           <AttachmentBubble
                             mediaUrl={msg.media_url}
                             fileName={msg.file_name || msg.content || 'file'}
@@ -857,27 +1099,41 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                             </span>
                             {!isInbound && tickIcon}
                           </div>
+
+                          {/* Reaction badge */}
+                          {msg.reaction && (
+                            <div className={cn(
+                              "absolute bottom-[-10px] bg-white dark:bg-[#1C2333] border border-border rounded-full px-1.5 py-0.5 text-[12px] shadow-sm flex items-center justify-center select-none z-10",
+                              isInbound ? "right-2" : "left-2"
+                            )}>
+                              {msg.reaction}
+                            </div>
+                          )}
                         </div>
                       ) : (
                         /* ── Text bubble ── */
-                        <div className={cn(
-                          'max-w-[65%] px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150',
-                          isInbound
-                            ? cn(
-                              'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10 text-foreground',
-                              isFirst ? 'rounded-2xl rounded-tl-sm' : 'rounded-2xl',
-                              isLast && !isFirst ? 'rounded-bl-sm' : ''
-                            )
-                            : cn(
-                              isOptimistic
-                                ? 'bg-gradient-to-r from-indigo-400/70 to-violet-500/70 border-indigo-400/10'
-                                : 'bg-gradient-to-r from-indigo-500/90 to-violet-600/90 border-indigo-400/20',
-                              'text-white shadow-[0_0_12px_rgba(99,102,241,0.15)]',
-                              isFirst ? 'rounded-2xl rounded-tr-sm' : 'rounded-2xl',
-                              isLast && !isFirst ? 'rounded-br-sm' : '',
-                              msg.status === 'failed' ? 'ring-1 ring-red-300 dark:ring-red-800 opacity-80' : ''
-                            )
-                        )}>
+                        <div 
+                          id={`msg-${msg.id}`}
+                          className={cn(
+                            'max-w-[65%] px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150 relative',
+                            isInbound
+                              ? cn(
+                                  'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10 text-foreground',
+                                  isFirst ? 'rounded-2xl rounded-tl-sm' : 'rounded-2xl',
+                                  isLast && !isFirst ? 'rounded-bl-sm' : ''
+                                )
+                              : cn(
+                                  isOptimistic
+                                    ? 'bg-gradient-to-r from-indigo-400/70 to-violet-500/70 border-indigo-400/10'
+                                    : 'bg-gradient-to-r from-indigo-500/90 to-violet-600/90 border-indigo-400/20',
+                                  'text-white shadow-[0_0_12px_rgba(99,102,241,0.15)]',
+                                  isFirst ? 'rounded-2xl rounded-tr-sm' : 'rounded-2xl',
+                                  isLast && !isFirst ? 'rounded-br-sm' : '',
+                                  msg.status === 'failed' ? 'ring-1 ring-red-300 dark:ring-red-800 opacity-80' : ''
+                                )
+                          )}
+                        >
+                          {replyPreviewCard}
                           <p className="whitespace-pre-wrap">{msg.content}</p>
 
                           {/* Timestamp + ticks — shown on every bubble */}
@@ -891,6 +1147,16 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                             {/* Only show ticks for outbound messages — no bot icon, no extras */}
                             {!isInbound && tickIcon}
                           </div>
+
+                          {/* Reaction badge */}
+                          {msg.reaction && (
+                            <div className={cn(
+                              "absolute bottom-[-10px] bg-white dark:bg-[#1C2333] border border-border rounded-full px-1.5 py-0.5 text-[12px] shadow-sm flex items-center justify-center select-none z-10",
+                              isInbound ? "right-2" : "left-2"
+                            )}>
+                              {msg.reaction}
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -937,6 +1203,38 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           className="hidden"
           onChange={handleFileAttach}
         />
+
+        {/* Reply preview strip */}
+        <AnimatePresence>
+          {replyToMsg && (
+            <motion.div
+              initial={{ height: 0, opacity: 0, y: 10 }}
+              animate={{ height: 'auto', opacity: 1, y: 0 }}
+              exit={{ height: 0, opacity: 0, y: 10 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden mb-2"
+            >
+              <div className="flex items-center justify-between bg-white dark:bg-[#1C2333] border border-border rounded-xl p-2.5 shadow-sm ring-1 ring-black/[0.04] dark:ring-white/[0.04]">
+                <div className="flex-1 flex gap-2 border-l-4 border-indigo-500 pl-2">
+                  <div className="flex flex-col text-left">
+                    <span className="text-[11px] font-semibold text-indigo-500">
+                      Replying to {replyToMsg.direction === 'inbound' ? displayName : 'You'}
+                    </span>
+                    <span className="text-[12px] text-muted-foreground line-clamp-1">
+                      {replyToMsg.content || (replyToMsg.media_url ? 'Attachment' : '')}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setReplyToMsg(null)}
+                  className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/50 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Pending attachment preview strip */}
         <AnimatePresence>

@@ -57,6 +57,19 @@ if (redis) {
   app.listen(3001, () => {
     console.log('📊 Bull Board running on port 3001. Accessible via Next.js proxy at /admin/queue');
   });
+
+  // 💓 Worker Heartbeat (set immediately, then every 30s)
+  const updateHeartbeat = async () => {
+    try {
+      await redis.set('worker:heartbeat', Date.now().toString(), 'EX', 120);
+      console.log('💓 Standalone BullMQ worker heartbeat updated');
+    } catch (err) {
+      console.error('❌ Failed to update worker heartbeat:', err);
+    }
+  };
+  void updateHeartbeat();
+  const heartbeatInterval = setInterval(updateHeartbeat, 30000);
+  heartbeatInterval.unref();
 }
 
 // Graceful shutdown

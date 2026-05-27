@@ -19,6 +19,7 @@ export interface RedisClient {
   del(...keys: string[]): Promise<number>;
   keys(pattern: string): Promise<string[]>;
   incr(key: string): Promise<number>;
+  incrby(key: string, increment: number): Promise<number>;
   expire(key: string, seconds: number): Promise<number>;
 }
 
@@ -47,6 +48,7 @@ export function getRedisClient(): RedisClient | null {
     del: (...keys) => call('DEL', keys) as Promise<number>,
     keys: (p) => call('KEYS', [p]) as Promise<string[]>,
     incr: (k) => call('INCR', [k]) as Promise<number>,
+    incrby: (k, n) => call('INCRBY', [k, String(n)]) as Promise<number>,
     expire: (k, s) => call('EXPIRE', [k, String(s)]) as Promise<number>,
   };
 
@@ -98,13 +100,66 @@ export async function cacheSet(_key: string, _value: string, _ttlSeconds: number
 }
 
 // ═══════════════════════════════════════
-// RATE LIMITING — always allow (Redis disabled)
+// RATE LIMITING — Redis sliding window (INCR + EXPIRE)
+// Falls back to allow-all when Redis unavailable (Vercel dev / cold start)
+// Key convention: tenant:{tenantId}:rl:{action}  or  rl:{action}:{identifier}
 // ═══════════════════════════════════════
 
 export async function checkRedisRateLimit(
-  _key: string,
+  key: string,
   maxRequests: number,
-  _windowSeconds: number
+  windowSeconds: number
 ): Promise<{ allowed: boolean; remaining: number }> {
-  return { allowed: true, remaining: maxRequests };
+  const redis = getRedisClient();
+  if (!redis) {
+    // Redis unavailable — fail open (do not block real traffic)
+    return { allowed: true, remaining: maxRequests };
+  }
+  try {
+    const redisKey = `rl:${key}`;
+    const count = await redis.incr(redisKey);
+    // Set TTL only on first request in the window
+    if (count === 1) {
+      await redis.expire(redisKey, windowSeconds);
+    }
+    const remaining = Math.max(0, maxRequests - count);
+    return { allowed: count <= maxRequests, remaining };
+  } catch (err) {
+    // Redis error — fail open, log for visibility
+    console.warn('⚠️ Rate limit Redis error (failing open):', (err as Error).message);
+    return { allowed: true, remaining: maxRequests };
+  }
+}
+
+// ═══════════════════════════════════════
+// TENANT-NAMESPACED CACHE HELPERS
+// All tenant data uses: tenant:{tenantId}:{type}
+// ═══════════════════════════════════════
+
+export async function tenantCacheGet(tenantId: string, type: string): Promise<string | null> {
+  const redis = getRedisClient();
+  if (!redis) return null;
+  try {
+    return await redis.get(`tenant:${tenantId}:${type}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function tenantCacheSet(tenantId: string, type: string, value: string, ttlSeconds: number): Promise<void> {
+  const redis = getRedisClient();
+  if (!redis) return;
+  try {
+    await redis.set(`tenant:${tenantId}:${type}`, value, 'EX', ttlSeconds);
+  } catch (err) {
+    console.warn('⚠️ tenantCacheSet failed:', (err as Error).message);
+  }
+}
+
+export async function tenantCacheDel(tenantId: string, type: string): Promise<void> {
+  const redis = getRedisClient();
+  if (!redis) return;
+  try {
+    await redis.del(`tenant:${tenantId}:${type}`);
+  } catch {}
 }

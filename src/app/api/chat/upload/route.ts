@@ -1,10 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
+import { decryptToken } from '@/lib/utils/crypto';
+import { sendMediaMessage, type MetaMediaType } from '@/lib/meta/service';
+import { sendInstagramMessage } from '@/lib/instagram/service';
+
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 function getMediaType(mimeType: string): string {
-  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('image/')) {
+    // WhatsApp Cloud API only supports jpeg, png, webp as images. Others (like svg, gif, bmp, tiff) must be documents.
+    const lower = mimeType.toLowerCase();
+    if (lower.includes('svg') || lower.includes('gif') || lower.includes('bmp') || lower.includes('tiff')) {
+      return 'document';
+    }
+    return 'image';
+  }
   if (mimeType.startsWith('video/')) return 'video';
   if (mimeType.startsWith('audio/')) return 'audio';
   if (
@@ -62,6 +73,7 @@ export async function POST(req: NextRequest) {
     const file = formData.get('file') as File | null;
     const conversationId = formData.get('conversationId') as string | null;
     const caption = (formData.get('caption') as string | null) || '';
+    const replyToMessageId = formData.get('replyToMessageId') as string | null;
 
     if (!file) {
       return NextResponse.json({ success: false, error: 'No file provided' }, { status: 400 });
@@ -79,16 +91,27 @@ export async function POST(req: NextRequest) {
       console.warn(`[upload] Unrecognized mime type: ${mimeType}, allowing as octet-stream`);
     }
 
-    // Verify conversation belongs to this tenant
+    // Verify conversation belongs to this tenant and get recipient details
     const { data: conv, error: convErr } = await supabaseAdmin
       .from('conversations')
-      .select('id, tenant_id, channel')
+      .select('id, sender_id, tenant_id, channel, leads(phone)')
       .eq('id', conversationId)
       .eq('tenant_id', tenantId)
       .single();
 
     if (convErr || !conv) {
       return NextResponse.json({ success: false, error: 'Conversation not found' }, { status: 404 });
+    }
+
+    // Get tenant credentials
+    const { data: tenant, error: tenantErr } = await supabaseAdmin
+      .from('tenants')
+      .select('wa_access_token, wa_phone_number_id, ig_access_token, ig_page_id')
+      .eq('id', tenantId)
+      .single();
+
+    if (tenantErr || !tenant) {
+      return NextResponse.json({ success: false, error: 'Tenant credentials not found' }, { status: 404 });
     }
 
     // Build storage path: tenantId/conversationId/timestamp_filename
@@ -118,7 +141,7 @@ export async function POST(req: NextRequest) {
     const mediaUrl = publicUrlData.publicUrl;
     const messageType = getMessageType(mimeType);
 
-    // Insert message record with media metadata
+    // Insert message record with media metadata (set status to pending initially)
     const { data: insertedMsg, error: insertErr } = await supabaseAdmin
       .from('messages')
       .insert({
@@ -129,13 +152,14 @@ export async function POST(req: NextRequest) {
         message_type: messageType,
         channel: conv.channel || 'whatsapp',
         sender_id: null,
-        status: 'sent',
+        status: 'pending',
         ai_generated: false,
         media_url: mediaUrl,
         file_name: file.name,
         file_size: file.size,
         mime_type: mimeType,
         media_caption: caption || null,
+        reply_to_message_id: replyToMessageId || null,
       })
       .select()
       .single();
@@ -147,17 +171,69 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Failed to save message' }, { status: 500 });
     }
 
+    // Determine recipient phone/ID
+    const leadsData = conv.leads as unknown as { phone: string | null } | { phone: string | null }[] | null;
+    const leadPhone = Array.isArray(leadsData) ? leadsData[0]?.phone : leadsData?.phone;
+    const recipientPhone = leadPhone || conv.sender_id;
+
+    // Send via respective channel API
+    let externalMessageId: string | null = null;
+    try {
+      if (conv.channel === 'instagram_dm') {
+        const textMessage = `${caption ? caption + '\n\n' : ''}Attachment: ${mediaUrl}`;
+        const igResult = await sendInstagramMessage(
+          tenant as unknown as Parameters<typeof sendInstagramMessage>[0],
+          recipientPhone,
+          textMessage
+        );
+        externalMessageId = "ig_" + Date.now().toString();
+      } else {
+        if (!tenant.wa_access_token || !tenant.wa_phone_number_id) {
+          throw new Error('WhatsApp is not configured for your account.');
+        }
+        const decryptedToken = decryptToken(tenant.wa_access_token);
+        if (!decryptedToken) {
+          throw new Error('Access token decryption failed');
+        }
+        const mediaTypeArg = messageType as MetaMediaType;
+        const waResult = await sendMediaMessage(
+          decryptedToken,
+          tenant.wa_phone_number_id,
+          recipientPhone,
+          mediaTypeArg,
+          mediaUrl,
+          caption || undefined
+        );
+        externalMessageId = waResult.messageId;
+      }
+    } catch (apiErr) {
+      console.error('[upload] API send failed:', apiErr);
+      await supabaseAdmin
+        .from('messages')
+        .update({ status: 'failed' })
+        .eq('id', insertedMsg.id);
+      return NextResponse.json({ success: false, error: 'Message delivery failed' }, { status: 502 });
+    }
+
+    // Update message status to sent
+    const { data: finalMsg } = await supabaseAdmin
+      .from('messages')
+      .update({ status: 'sent', wa_message_id: externalMessageId })
+      .eq('id', insertedMsg.id)
+      .select()
+      .single();
+
     // Update conversation last_message_at
     await supabaseAdmin
       .from('conversations')
       .update({ last_message_at: new Date().toISOString() })
       .eq('id', conversationId);
 
-    console.log(`[upload] ✅ Uploaded ${file.name} (${file.size} bytes) → ${mediaUrl}`);
+    console.log(`[upload] ✅ Uploaded & Sent ${file.name} (${file.size} bytes) → ${mediaUrl}`);
 
     return NextResponse.json({
       success: true,
-      message: insertedMsg,
+      message: finalMsg,
       mediaUrl,
       fileName: file.name,
       fileSize: file.size,

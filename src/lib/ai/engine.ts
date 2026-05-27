@@ -14,6 +14,7 @@ import type { ConversationContext } from '@/lib/types';
 import * as Sentry from '@/lib/sentry-stub';
 import { withTimeout } from '@/lib/utils/safety';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { guardInput, guardOutput, shouldRedirectToHuman, HALLUCINATION_REDIRECT, SYSTEM_PROMPT_SAFETY_APPENDIX } from '@/lib/ai/guardrails';
 
 let _ai: GoogleGenAI | null = null;
 function getAI(): GoogleGenAI {
@@ -142,7 +143,7 @@ You must respond with ONLY a JSON object (no markdown, no backticks) in this exa
   },
   "nextStep": "what info to collect next: greeting, ask_intent, ask_guests, ask_date, ask_occasion, ask_name, ask_phone, ask_email, confirmation, completed, escalated",
   "confidence": 0.95
-}`;
+}${SYSTEM_PROMPT_SAFETY_APPENDIX}`;
 }
 
 export interface TenantAIConfig {
@@ -176,6 +177,21 @@ export async function processMessageWithAI(
 ): Promise<AIResponse> {
   const startTime = Date.now();
 
+  // ── Guardrail: input safety check ──
+  const guard = guardInput(message, tenantConfig.businessName);
+  if (!guard.safe) {
+    return {
+      reply: guard.safeResponse,
+      extractedData: {},
+      intent: 'unknown',
+      sentiment: 'neutral',
+      shouldEscalate: false,
+      nextStep: 'ask_intent',
+      confidence: 1.0,
+    };
+  }
+  const safeMessage = guard.safeResponse; // may be truncated
+
   try {
     const systemPrompt = buildSystemPrompt(tenantConfig);
 
@@ -187,7 +203,7 @@ export async function processMessageWithAI(
       })),
       {
         role: 'user' as const,
-        parts: [{ text: message }],
+        parts: [{ text: safeMessage }],
       },
     ];
 
@@ -222,6 +238,16 @@ export async function processMessageWithAI(
 
     // Parse AI response
     const parsed = parseAIResponse(text);
+
+    // ── Guardrail: output leakage check ──
+    parsed.reply = guardOutput(parsed.reply, getFallbackResponse(safeMessage, context, tenantConfig).reply);
+
+    // ── Guardrail: hallucination redirect ──
+    const hasKB = (tenantConfig.knowledgeDocs?.length ?? 0) > 0 || (tenantConfig.customFaqs?.length ?? 0) > 0;
+    if (shouldRedirectToHuman(parsed.confidence, hasKB, parsed.intent)) {
+      parsed.reply = HALLUCINATION_REDIRECT;
+      parsed.shouldEscalate = true;
+    }
 
     // Merge extracted data into context
     if (parsed.extractedData) {

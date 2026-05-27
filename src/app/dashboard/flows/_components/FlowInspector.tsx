@@ -1,9 +1,12 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Settings2, Edit3, X, Layers, Code2 } from "lucide-react";
+import { Settings2, Edit3, X, Layers, Code2, AlertTriangle } from "lucide-react";
 import { useFlowStore } from "../store";
 import { NODE_CATEGORY } from "./CustomNodes";
+import { getUpstreamButtonsNode, getFlowVariables, validateNode, WA_LIMITS, type FlowVariable } from "../utils";
+import { buildVariableRegistry, findUnknownVariables } from "@/lib/flows/variables";
+import VariableTextarea from "./VariableTextarea";
 
 // ─── STATIC STYLE CONSTANTS (never recreated in render) ────────────────────────
 const INPUT_CLS =
@@ -18,6 +21,25 @@ const INP_FOCUS_STYLE: React.CSSProperties = {
   background: "rgba(255,255,255,0.07)",
   border: "1px solid rgba(255,255,255,0.15)",
   color: "rgba(255,255,255,0.92)",
+};
+const BTN_STYLE: React.CSSProperties = {
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  color: "rgba(255,255,255,0.75)",
+  fontSize: 12,
+  fontWeight: 500,
+  padding: "6px 10px",
+  borderRadius: 8,
+  cursor: "pointer",
+};
+const BADGE_STYLE: React.CSSProperties = {
+  display: "inline-block",
+  fontSize: 9,
+  fontWeight: 700,
+  letterSpacing: "0.05em",
+  textTransform: "uppercase" as const,
+  padding: "2px 8px",
+  borderRadius: 99,
 };
 
 type TabId = "general" | "content" | "advanced";
@@ -310,7 +332,60 @@ function GeneralTab({
           {nodeIdStr}
         </div>
       </Field>
+      <NodeValidationDisplay nodeId={nodeIdStr} />
     </>
+  );
+}
+
+// ─── VARIABLE HINT (shows available variables) ──────────────────────────────
+function VariableHint() {
+  const [expanded, setExpanded] = React.useState(false);
+  const vars = React.useMemo(() => {
+    const { nodes } = useFlowStore.getState();
+    return getFlowVariables(nodes);
+  }, []);
+  if (vars.length === 0) return null;
+  return (
+    <div className="rounded-[12px] overflow-hidden" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
+      <button onClick={() => setExpanded(v => !v)} className="w-full flex items-center justify-between px-3 py-2 text-left" style={{ color: "rgba(255,255,255,0.3)" }}>
+        <span className="text-[10.5px] font-semibold tracking-[0.06em] uppercase">Available Variables ({vars.length})</span>
+        <span className="text-[10px]">{expanded ? "▲" : "▼"}</span>
+      </button>
+      {expanded && (
+        <div className="px-3 pb-2 space-y-1">
+          {vars.map((v, i) => (
+            <div key={`${v.name}-${i}`} className="flex items-center justify-between py-0.5">
+              <code className="text-[10.5px] font-mono" style={{ color: "rgba(52,211,153,0.8)" }}>{`{{${v.name}}}`}</code>
+              <span className="text-[9.5px]" style={{ color: "rgba(255,255,255,0.18)" }}>{v.source}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── NODE VALIDATION DISPLAY ─────────────────────────────────────────────────
+function NodeValidationDisplay({ nodeId }: { nodeId: string }) {
+  const validation = React.useMemo(() => {
+    const { nodes, edges } = useFlowStore.getState();
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return null;
+    return validateNode(node, nodes, edges);
+  }, [nodeId]);
+  if (!validation || validation.status === 'ok') return null;
+  return (
+    <div className="space-y-1.5">
+      {validation.issues.map((issue, i) => (
+        <div key={i} className="flex items-start gap-2 px-2.5 py-1.5 rounded-lg" style={{
+          background: issue.severity === 'error' ? 'rgba(239,68,68,0.06)' : 'rgba(245,158,11,0.06)',
+          border: `1px solid ${issue.severity === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)'}`,
+        }}>
+          <span className="text-[10px] mt-0.5">{issue.severity === 'error' ? '🔴' : '🟡'}</span>
+          <span className="text-[10.5px]" style={{ color: issue.severity === 'error' ? '#f87171' : '#fbbf24' }}>{issue.message}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -364,19 +439,42 @@ function ContentTab({
   }
 
   if (nodeType === "standard") {
+    const contentVal = (localData.content as string) || "";
+    const contentLen = contentVal.length;
+    const overMsgLimit = contentLen > WA_LIMITS.MESSAGE_LENGTH;
+    const allVars = buildVariableRegistry(useFlowStore.getState().nodes);
+    const allVarNames = new Set(allVars.map(v => v.name));
+    const unknownVars = findUnknownVariables(contentVal, allVarNames);
     return (
-      <Field label="Message Content">
-        <textarea
-          value={(localData.content as string) || ""}
-          onChange={e => commitField("content", e.target.value)}
-          onBlur={e => flushField("content", e.target.value)}
-          rows={5}
-          className={INPUT_CLS + " resize-none"}
-          placeholder="Type your message here..."
-          style={f1.style}
-          onFocus={f1.onFocus}
-        />
-      </Field>
+      <>
+        <Field label="Message Content">
+          <VariableTextarea
+            value={contentVal}
+            onChange={val => { commitField("content", val); flushField("content", val); }}
+            variables={allVars}
+            placeholder="Type your message... Use {{ to insert variables"
+            rows={5}
+          />
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-[9.5px]" style={{ color: "rgba(255,255,255,0.18)" }}>{contentLen}/{WA_LIMITS.MESSAGE_LENGTH}</span>
+            {overMsgLimit && <span className="text-[10px]" style={{ color: "#f87171" }}>⚠ Over limit</span>}
+          </div>
+        </Field>
+        {unknownVars.length > 0 && (
+          <div className="rounded-xl px-3 py-2.5 space-y-1" style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.18)' }}>
+            <div className="flex items-center gap-1.5 mb-1">
+              <AlertTriangle className="w-3 h-3 text-amber-400" />
+              <span className="text-[10.5px] font-semibold text-amber-400">Unknown variables</span>
+            </div>
+            {unknownVars.map(name => (
+              <p key={name} className="text-[10px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                <code className="font-mono text-amber-300">{`{{${name}}}`}</code> — not defined in this flow
+              </p>
+            ))}
+          </div>
+        )}
+        <VariableHint />
+      </>
     );
   }
 
@@ -423,19 +521,28 @@ function ContentTab({
     return (
       <>
         <Field label="Variable Field">
-          <input type="text" value={(localData.field as string) || ""} onChange={e => commitField("field", e.target.value)} onBlur={e => flushField("field", e.target.value)} className={INPUT_CLS} style={f1.style} onFocus={f1.onFocus} />
+          <input type="text" value={(localData.field as string) || ""} onChange={e => commitField("field", e.target.value)} onBlur={e => flushField("field", e.target.value)} placeholder="e.g., guest_count, intent, status" className={INPUT_CLS} style={f1.style} onFocus={f1.onFocus} />
         </Field>
         <Field label="Operator">
           <select value={(localData.operator as string) || "=="} onChange={e => commitField("operator", e.target.value)} className={SELECT_CLS} style={INP_STYLE}>
             <option value="==">Equals (==)</option>
             <option value="!=">Not Equals (!=)</option>
-            <option value=">">&gt; Greater Than</option>
-            <option value="<">&lt; Less Than</option>
+            <option value=">">Greater Than (&gt;)</option>
+            <option value="<">Less Than (&lt;)</option>
+            <option value=">=">Greater Than or Equal (&gt;=)</option>
+            <option value="<=">Less Than or Equal (&lt;=)</option>
+            <option value="contains">Contains (text)</option>
+            <option value="startsWith">Starts With</option>
+            <option value="endsWith">Ends With</option>
+            <option value="exists">Exists / Not Null</option>
+            <option value="empty">Empty / Null</option>
           </select>
         </Field>
-        <Field label="Target Value">
-          <input type="text" value={(localData.value as string) || ""} onChange={e => commitField("value", e.target.value)} onBlur={e => flushField("value", e.target.value)} className={INPUT_CLS} style={f2.style} onFocus={f2.onFocus} />
-        </Field>
+        {((localData.operator as string) || "==") !== "exists" && ((localData.operator as string) || "==") !== "empty" && (
+          <Field label="Target Value">
+            <input type="text" value={(localData.value as string) || ""} onChange={e => commitField("value", e.target.value)} onBlur={e => flushField("value", e.target.value)} placeholder="Compare against..." className={INPUT_CLS} style={f2.style} onFocus={f2.onFocus} />
+          </Field>
+        )}
       </>
     );
   }
@@ -481,6 +588,60 @@ function ContentTab({
         </select>
       </Field>
     );
+  }
+
+  if (nodeType === "send_buttons") {
+    const buttons: any[] = Array.isArray(localData.buttons) ? localData.buttons : [];
+    return <InteractiveButtonsConfig localData={localData} commitField={commitField} flushField={flushField} />;
+  }
+
+  if (nodeType === "button_trigger") {
+    const state = useFlowStore.getState();
+    const selectedId = state.selectedNodeId;
+    const upstreamBtns = selectedId ? getUpstreamButtonsNode(selectedId, state.nodes, state.edges) : null;
+    const availableButtons: any[] = upstreamBtns && Array.isArray((upstreamBtns.data as any)?.buttons) ? (upstreamBtns.data as any).buttons : [];
+    const isSpecific = ((localData.mode as string) || "specific") === "specific";
+    return (
+      <>
+        <Field label="Listening Mode">
+          <select value={(localData.mode as string) || "specific"} onChange={e => commitField("mode", e.target.value)} className={SELECT_CLS} style={INP_STYLE}>
+            <option value="specific">Specific Button</option>
+            <option value="any">Any Button Click</option>
+          </select>
+        </Field>
+        {isSpecific && availableButtons.length > 0 && (
+          <Field label="Select Button">
+            <select value={(localData.button as string) || ""} onChange={e => commitField("button", e.target.value)} className={SELECT_CLS} style={INP_STYLE}>
+              <option value="">— Select a button —</option>
+              {availableButtons.map((b: any) => (
+                <option key={b.id || b.value} value={b.value || b.id}>{b.label} ({b.value || b.id})</option>
+              ))}
+            </select>
+            <p className="text-[10px] mt-1.5" style={{ color: "rgba(52,211,153,0.6)" }}>Auto-populated from upstream Interactive Buttons node.</p>
+          </Field>
+        )}
+        {isSpecific && availableButtons.length === 0 && (
+          <Field label="Button Value">
+            <input type="text" value={(localData.button as string) || ""} onChange={e => commitField("button", e.target.value)} onBlur={e => flushField("button", e.target.value)} placeholder="e.g., opt_1" className={INPUT_CLS} style={f1.style} onFocus={f1.onFocus} />
+            <div className="mt-1.5 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.15)" }}>
+              <span className="text-[10px]" style={{ color: "#f59e0b" }}>⚠ No upstream Interactive Buttons node found. Connect one to auto-populate options.</span>
+            </div>
+          </Field>
+        )}
+      </>
+    );
+  }
+
+  if (nodeType === "intent_routing") {
+    return <IntentRoutingConfig localData={localData} commitField={commitField} flushField={flushField} />;
+  }
+
+  if (nodeType === "intake_form") {
+    return <IntakeFormConfig localData={localData} commitField={commitField} flushField={flushField} />;
+  }
+
+  if (nodeType === "collect_data") {
+    return <FormFieldListConfig localData={localData} commitField={commitField} flushField={flushField} />;
   }
 
   return (
@@ -529,6 +690,258 @@ function AdvancedTab({
           {nodeIdStr}
         </div>
       </Field>
+    </>
+  );
+}
+
+// ─── CONFIG COMPONENT: INTERACTIVE BUTTONS ───────────────────────────────────
+function InteractiveButtonsConfig({ localData, commitField, flushField }: { localData: Record<string, any>; commitField: (f: string, v: any) => void; flushField: (f: string, v: any) => void }) {
+  const buttons: any[] = Array.isArray(localData.buttons) ? localData.buttons : [];
+  const f1 = useFocusStyle();
+  const overLimit = buttons.length > WA_LIMITS.REPLY_BUTTONS_MAX;
+
+  const addButton = () => {
+    const next = [...buttons, { id: `btn_${Date.now()}`, label: "New Button", value: `opt_${buttons.length + 1}` }];
+    commitField("buttons", next);
+  };
+  const updateButton = (idx: number, key: string, val: any) => {
+    const next = buttons.map((b, i) => (i === idx ? { ...b, [key]: val } : b));
+    commitField("buttons", next);
+  };
+  const removeButton = (idx: number) => {
+    const next = buttons.filter((_, i) => i !== idx);
+    commitField("buttons", next);
+  };
+
+  return (
+    <>
+      <Field label="Message Text">
+        <VariableTextarea
+          value={(localData.message as string) || ""}
+          onChange={val => { commitField("message", val); flushField("message", val); }}
+          variables={buildVariableRegistry(useFlowStore.getState().nodes)}
+          placeholder="How many guests? Use {{ to insert variables"
+          rows={3}
+        />
+      </Field>
+      <Field label="Routing Mode">
+        <select value={(localData.routingMode as string) || "split"} onChange={e => commitField("routingMode", e.target.value)} className={SELECT_CLS} style={INP_STYLE}>
+          <option value="split">Split Path Per Button (each button → own route)</option>
+          <option value="continue">Continue Same Path (all buttons → one route)</option>
+        </select>
+      </Field>
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-[10.5px] font-semibold tracking-[0.08em] uppercase" style={{ color: "rgba(255,255,255,0.3)" }}>
+            Buttons <span style={{ color: overLimit ? "#ef4444" : "rgba(255,255,255,0.2)" }}>({buttons.length}/{WA_LIMITS.REPLY_BUTTONS_MAX})</span>
+          </label>
+          <button onClick={addButton} style={BTN_STYLE}>+ Add Button</button>
+        </div>
+        {overLimit && (
+          <div className="mb-2 px-2.5 py-1.5 rounded-lg" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.18)" }}>
+            <span className="text-[10px] font-medium" style={{ color: "#f87171" }}>⚠ WhatsApp allows max {WA_LIMITS.REPLY_BUTTONS_MAX} reply buttons. Reduce to publish.</span>
+          </div>
+        )}
+        <div className="space-y-2">
+          {buttons.map((b, i) => (
+            <div key={b.id} className="rounded-[12px] p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium" style={{ color: "rgba(255,255,255,0.55)" }}>Button {i + 1}</span>
+                <button onClick={() => removeButton(i)} style={{ ...BTN_STYLE, fontSize: 10, padding: "3px 8px", opacity: 0.8 }}>Remove</button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <input type="text" value={b.label || ""} onChange={e => updateButton(i, "label", e.target.value)} placeholder="Label (visible)" className={INPUT_CLS} style={INP_STYLE} maxLength={WA_LIMITS.BUTTON_LABEL_MAX} />
+                <input type="text" value={b.value || ""} onChange={e => updateButton(i, "value", e.target.value)} placeholder="Value (internal)" className={INPUT_CLS} style={INP_STYLE} />
+              </div>
+              {b.label && b.label.length > WA_LIMITS.BUTTON_LABEL_MAX - 3 && (
+                <p className="text-[9px]" style={{ color: "#f59e0b" }}>{b.label.length}/{WA_LIMITS.BUTTON_LABEL_MAX} chars</p>
+              )}
+            </div>
+          ))}
+          {buttons.length === 0 && <p className="text-[11px] py-2" style={{ color: "rgba(255,255,255,0.3)" }}>No buttons. Click Add Button.</p>}
+        </div>
+      </div>
+      {/* WhatsApp Preview */}
+      {(localData.message || buttons.length > 0) && (
+        <div className="mt-3">
+          <label className="text-[10.5px] font-semibold tracking-[0.08em] uppercase mb-2 block" style={{ color: "rgba(255,255,255,0.3)" }}>WhatsApp Preview</label>
+          <div className="rounded-[16px] p-3" style={{ background: "#202C33" }}>
+            <div className="rounded-[12px] px-3 py-2" style={{ background: "#005C4B" }}>
+              <p className="text-[13px] leading-relaxed" style={{ color: "#E9EDEF" }}>{localData.message || "Your message here..."}</p>
+            </div>
+            <div className="mt-2 space-y-1.5">
+              {buttons.slice(0, WA_LIMITS.REPLY_BUTTONS_MAX).map((b: any, i: number) => (
+                <div key={b.id || i} className="text-center py-2 rounded-lg text-[13px] font-medium" style={{ background: "rgba(255,255,255,0.06)", color: "#53bdeb", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  {b.label || `Option ${i + 1}`}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── CONFIG COMPONENT: INTENT ROUTING ────────────────────────────────────────
+function IntentRoutingConfig({ localData, commitField, flushField }: { localData: Record<string, any>; commitField: (f: string, v: any) => void; flushField: (f: string, v: any) => void }) {
+  const intents: any[] = Array.isArray(localData.intents) ? localData.intents : [];
+  const f1 = useFocusStyle();
+
+  const addIntent = () => {
+    const next = [...intents, { id: `intent_${Date.now()}`, name: "New Intent", keywords: ["keyword"] }];
+    commitField("intents", next);
+  };
+  const updateIntentName = (idx: number, val: string) => {
+    const next = intents.map((it, i) => (i === idx ? { ...it, name: val } : it));
+    commitField("intents", next);
+  };
+  const updateIntentKeywords = (idx: number, val: string) => {
+    const next = intents.map((it, i) => (i === idx ? { ...it, keywords: val.split(",").map((s: string) => s.trim()).filter(Boolean) } : it));
+    commitField("intents", next);
+  };
+  const removeIntent = (idx: number) => {
+    const next = intents.filter((_, i) => i !== idx);
+    commitField("intents", next);
+  };
+
+  return (
+    <>
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-[10.5px] font-semibold tracking-[0.08em] uppercase" style={{ color: "rgba(255,255,255,0.3)" }}>Intents</label>
+          <button onClick={addIntent} style={BTN_STYLE}>+ Add Intent</button>
+        </div>
+        <div className="space-y-2">
+          {intents.map((it, i) => (
+            <div key={it.id || i} className="rounded-[12px] p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <div className="flex items-center justify-between">
+                <input type="text" value={it.name || ""} onChange={e => updateIntentName(i, e.target.value)} placeholder="Intent Name" className={INPUT_CLS} style={{ ...INP_STYLE, flex: 1 }} />
+                <button onClick={() => removeIntent(i)} style={{ ...BTN_STYLE, fontSize: 10, padding: "3px 8px", opacity: 0.8, marginLeft: 8 }}>Remove</button>
+              </div>
+              <Field label="Keywords (comma separated)">
+                <input type="text" value={(it.keywords || []).join(", ")} onChange={e => updateIntentKeywords(i, e.target.value)} placeholder="book, reserve, schedule" className={INPUT_CLS} style={f1.style} onFocus={f1.onFocus} />
+              </Field>
+              <p className="text-[9.5px]" style={{ color: "rgba(255,255,255,0.22)" }}>Output handle: {it.name || "unnamed"}</p>
+            </div>
+          ))}
+          {intents.length === 0 && <p className="text-[11px] py-2" style={{ color: "rgba(255,255,255,0.3)" }}>No intents. Click Add Intent.</p>}
+        </div>
+      </div>
+      <div className="mt-3 space-y-3">
+        <Field label="Confidence Threshold">
+          <div className="flex items-center gap-3">
+            <input type="range" min="0" max="100" step="5" value={Math.round(((localData.confidenceThreshold as number) ?? 0.7) * 100)} onChange={e => commitField("confidenceThreshold", parseInt(e.target.value) / 100)} className="flex-1 accent-purple-500" style={{ height: 4 }} />
+            <span className="text-[12px] font-semibold w-10 text-right" style={{ color: "rgba(255,255,255,0.65)" }}>{Math.round(((localData.confidenceThreshold as number) ?? 0.7) * 100)}%</span>
+          </div>
+          <p className="text-[9.5px] mt-1" style={{ color: "rgba(255,255,255,0.2)" }}>Below this threshold, message goes to fallback route.</p>
+        </Field>
+        <Field label="Fallback Message">
+          <input type="text" value={(localData.fallbackMessage as string) || ""} onChange={e => commitField("fallbackMessage", e.target.value)} placeholder="Sorry, I didn't understand. Could you rephrase?" className={INPUT_CLS} style={INP_STYLE} />
+        </Field>
+        <div className="px-2.5 py-1.5 rounded-lg" style={{ background: "rgba(139,92,246,0.06)", border: "1px solid rgba(139,92,246,0.12)" }}>
+          <p className="text-[10px]" style={{ color: "rgba(139,92,246,0.7)" }}>All intent routing nodes include a "fallback" output for unmatched intents.</p>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── CONFIG COMPONENT: INTAKE FORM ───────────────────────────────────────────
+function IntakeFormConfig({ localData, commitField, flushField }: { localData: Record<string, any>; commitField: (f: string, v: any) => void; flushField: (f: string, v: any) => void }) {
+  const fields: any[] = Array.isArray(localData.fields) ? localData.fields : [];
+
+  const addField = () => {
+    const next = [...fields, { id: `f_${Date.now()}`, name: "New Field", type: "text", required: true, saveAs: "", placeholder: "", errorMessage: "" }];
+    commitField("fields", next);
+  };
+  const updateField = (idx: number, key: string, val: any) => {
+    const next = fields.map((f, i) => (i === idx ? { ...f, [key]: val } : f));
+    commitField("fields", next);
+  };
+  const removeField = (idx: number) => {
+    const next = fields.filter((_, i) => i !== idx);
+    commitField("fields", next);
+  };
+
+  return (
+    <>
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-[10.5px] font-semibold tracking-[0.08em] uppercase" style={{ color: "rgba(255,255,255,0.3)" }}>Form Fields</label>
+          <button onClick={addField} style={BTN_STYLE}>+ Add Field</button>
+        </div>
+        <div className="space-y-2">
+          {fields.map((f, i) => (
+            <div key={f.id || i} className="rounded-[12px] p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <div className="flex items-center gap-2">
+                <input type="text" value={f.name || ""} onChange={e => updateField(i, "name", e.target.value)} placeholder="Field Name" className={INPUT_CLS} style={{ ...INP_STYLE, flex: 1 }} />
+                <select value={f.type || "text"} onChange={e => updateField(i, "type", e.target.value)} className={SELECT_CLS} style={{ ...INP_STYLE, width: 110 }}>
+                  <option value="text">Text</option>
+                  <option value="number">Number</option>
+                  <option value="date">Date</option>
+                  <option value="time">Time</option>
+                  <option value="email">Email</option>
+                  <option value="phone">Phone</option>
+                  <option value="dropdown">Dropdown</option>
+                </select>
+                <button onClick={() => removeField(i)} style={{ ...BTN_STYLE, fontSize: 10, padding: "3px 8px", opacity: 0.8 }}>×</button>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input type="checkbox" checked={f.required !== false} onChange={e => updateField(i, "required", e.target.checked)} className="accent-emerald-500 w-3.5 h-3.5" />
+                  <span className="text-[10.5px] font-medium" style={{ color: "rgba(255,255,255,0.45)" }}>Required</span>
+                </label>
+              </div>
+              <input type="text" value={f.saveAs || ""} onChange={e => updateField(i, "saveAs", e.target.value)} placeholder={`Save as: ${f.name?.toLowerCase().replace(/\s+/g, '_') || 'variable_name'}`} className={INPUT_CLS} style={{ ...INP_STYLE, fontSize: 11 }} />
+              <input type="text" value={f.placeholder || ""} onChange={e => updateField(i, "placeholder", e.target.value)} placeholder="Prompt text: e.g., What's your name?" className={INPUT_CLS} style={{ ...INP_STYLE, fontSize: 11 }} />
+              <input type="text" value={f.errorMessage || ""} onChange={e => updateField(i, "errorMessage", e.target.value)} placeholder="Error: e.g., Please enter a valid email" className={INPUT_CLS} style={{ ...INP_STYLE, fontSize: 11 }} />
+            </div>
+          ))}
+          {fields.length === 0 && <p className="text-[11px] py-2" style={{ color: "rgba(255,255,255,0.3)" }}>No fields. Click Add Field.</p>}
+        </div>
+      </div>
+      <div className="mt-3 px-2.5 py-1.5 rounded-lg" style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.12)" }}>
+        <p className="text-[10px]" style={{ color: "rgba(245,158,11,0.7)" }}>Each field is saved as a variable. Use <code className="font-mono">{"{{variable_name}}"}</code> in downstream messages.</p>
+      </div>
+    </>
+  );
+}
+
+// ─── CONFIG COMPONENT: FORM FIELD LIST (for collect_data) ────────────────────
+function FormFieldListConfig({ localData, commitField, flushField }: { localData: Record<string, any>; commitField: (f: string, v: any) => void; flushField: (f: string, v: any) => void }) {
+  const fields: string[] = Array.isArray(localData.fields) ? localData.fields : [];
+
+  const addField = () => {
+    const next = [...fields, "New Field"];
+    commitField("fields", next);
+  };
+  const updateField = (idx: number, val: string) => {
+    const next = fields.map((f, i) => (i === idx ? val : f));
+    commitField("fields", next);
+  };
+  const removeField = (idx: number) => {
+    const next = fields.filter((_, i) => i !== idx);
+    commitField("fields", next);
+  };
+
+  return (
+    <>
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-[10.5px] font-semibold tracking-[0.08em] uppercase" style={{ color: "rgba(255,255,255,0.3)" }}>Fields to Collect</label>
+          <button onClick={addField} style={BTN_STYLE}>+ Add Field</button>
+        </div>
+        <div className="space-y-2">
+          {fields.map((f, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input type="text" value={f} onChange={e => updateField(i, e.target.value)} placeholder="Field name" className={INPUT_CLS} style={{ ...INP_STYLE, flex: 1 }} />
+              <button onClick={() => removeField(i)} style={{ ...BTN_STYLE, fontSize: 10, padding: "3px 8px", opacity: 0.8 }}>×</button>
+            </div>
+          ))}
+          {fields.length === 0 && <p className="text-[11px] py-2" style={{ color: "rgba(255,255,255,0.3)" }}>No fields. Click Add Field.</p>}
+        </div>
+      </div>
     </>
   );
 }

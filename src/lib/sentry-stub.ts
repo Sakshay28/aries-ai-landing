@@ -2,7 +2,7 @@
 export function captureException(err: unknown, _ctx?: Record<string, unknown>) {
   console.error('[Sentry stub]', err);
 }
-export function captureMessage(msg: string) {
+export function captureMessage(msg: string, _level?: string) {
   console.warn('[Sentry stub]', msg);
 }
 export function captureRequestError() {}

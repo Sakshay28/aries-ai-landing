@@ -197,6 +197,8 @@ export interface Message {
   file_size?: number | null;
   mime_type?: string | null;
   media_caption?: string | null;
+  reply_to_message_id?: string | null;
+  reaction?: string | null;
 }
 
 export type MessageType = 'text' | 'interactive' | 'template' | 'image' | 'video' | 'audio' | 'document' | 'location' | 'reaction';
