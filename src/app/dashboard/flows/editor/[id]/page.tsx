@@ -1,6 +1,10 @@
 "use client";
 
-import { Play, X, ArrowLeft, Check, Loader2, Undo2, Redo2, AlertTriangle, CheckCircle2, XCircle, History, Smartphone } from "lucide-react";
+import { Play, X, ArrowLeft, Check, Loader2, Undo2, Redo2, AlertTriangle, CheckCircle2, XCircle, History, Smartphone, BarChart2, Download, Upload, Lightbulb, Radio } from "lucide-react";
+import dynamic from "next/dynamic";
+const FlowAnalytics      = dynamic(() => import("../../_components/FlowAnalytics"),      { ssr: false });
+const FlowFlightRecorder = dynamic(() => import("../../_components/FlowFlightRecorder"), { ssr: false });
+import FlowRecommendations from "../../_components/FlowRecommendations";
 import FlowSidebar from "../../_components/FlowSidebar";
 import FlowCanvas from "../../_components/FlowCanvas";
 import FlowInspector from "../../_components/FlowInspector";
@@ -9,7 +13,7 @@ import FlowVersionPanel from "../../_components/FlowVersionPanel";
 import WhatsAppPreview from "../../_components/WhatsAppPreview";
 import { useFlowStore } from "../../store";
 import { Toaster, toast } from "sonner";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { BUSINESS_TYPE_CONFIG } from "../../config";
@@ -32,6 +36,11 @@ export default function FlowEditorPage() {
   const [showHealthModal, setShowHealthModal] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showRecs, setShowRecs] = useState(false);
+  const [showFlightRecorder, setShowFlightRecorder] = useState(false);
+  const [publishBurst, setPublishBurst] = useState(false);
+  const importRef = useRef<HTMLInputElement>(null);
 
   const runValidation = useCallback(() => {
     const { nodes, edges } = useFlowStore.getState();
@@ -65,8 +74,11 @@ export default function FlowEditorPage() {
       if (id) {
         fetch(`/api/dashboard/flows/${id}/versions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }).catch(() => {});
       }
-      toast.success('Flow published: now live', {
+      setPublishBurst(true);
+      setTimeout(() => setPublishBurst(false), 2200);
+      toast.success('🚀 Flow is live!', {
         description: 'Incoming WhatsApp messages will trigger this flow.',
+        duration: 4000,
       });
     } catch {
       toast.error('Failed to publish flow');
@@ -102,6 +114,32 @@ export default function FlowEditorPage() {
 
   const canUndo = history.past.length > 0;
   const canRedo = history.future.length > 0;
+
+  const handleExport = () => {
+    const { nodes, edges } = useFlowStore.getState();
+    const blob = new Blob([JSON.stringify({ name: flowName, nodes, edges }, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = `${flowName.replace(/\s+/g, '-').toLowerCase()}.aries.json`;
+    a.click(); URL.revokeObjectURL(url);
+    toast.success('Flow exported');
+  };
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const json = JSON.parse(ev.target?.result as string);
+        if (!json.nodes || !json.edges) throw new Error('Invalid format');
+        loadTemplate(json.nodes, json.edges);
+        if (json.name) setFlowName(json.name);
+        toast.success('Flow imported — ready to edit');
+      } catch { toast.error('Invalid .aries.json file'); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   return (
     <>
@@ -145,8 +183,24 @@ export default function FlowEditorPage() {
             />
           </div>
 
+          {/* Hidden file input for import */}
+          <input ref={importRef} type="file" accept=".json,.aries.json" className="hidden" onChange={handleImport} />
+
           {/* Right: Actions */}
           <div className="flex items-center gap-2">
+            {/* Import / Export */}
+            <div className="flex items-center rounded-lg overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)' }}>
+              <button onClick={() => importRef.current?.click()} title="Import flow (.aries.json)"
+                className="px-2.5 py-1.5 transition-all hover:bg-white/[0.06]" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                <Upload className="w-3.5 h-3.5" />
+              </button>
+              <div className="w-px h-4" style={{ background: 'rgba(255,255,255,0.07)' }} />
+              <button onClick={handleExport} title="Export flow as JSON"
+                className="px-2.5 py-1.5 transition-all hover:bg-white/[0.06]" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                <Download className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
             {/* Undo / Redo */}
             <div className="flex items-center rounded-lg overflow-hidden mr-2" style={{ border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)' }}>
               <button
@@ -196,6 +250,54 @@ export default function FlowEditorPage() {
                 }}
               >
                 <Smartphone className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            {/* Recommendations */}
+            {!isSimulating && (
+              <button
+                onClick={() => setShowRecs(v => !v)}
+                title="Smart Recommendations"
+                className="h-8 px-3 rounded-lg text-[12px] font-medium flex items-center gap-1.5 transition-all"
+                style={{
+                  background: showRecs ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.04)',
+                  color: showRecs ? '#818cf8' : 'rgba(255,255,255,0.45)',
+                  border: `1px solid ${showRecs ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.06)'}`,
+                }}
+              >
+                <Lightbulb className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            {/* Flight Recorder */}
+            {routeId !== 'new' && !isSimulating && (
+              <button
+                onClick={() => setShowFlightRecorder(v => !v)}
+                title="Flight Recorder — replay conversations"
+                className="h-8 px-3 rounded-lg text-[12px] font-medium flex items-center gap-1.5 transition-all"
+                style={{
+                  background: showFlightRecorder ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.04)',
+                  color: showFlightRecorder ? '#f87171' : 'rgba(255,255,255,0.45)',
+                  border: `1px solid ${showFlightRecorder ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.06)'}`,
+                }}
+              >
+                <Radio className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            {/* Analytics */}
+            {routeId !== 'new' && !isSimulating && (
+              <button
+                onClick={() => setShowAnalytics(v => !v)}
+                title="Flow Analytics"
+                className="h-8 px-3 rounded-lg text-[12px] font-medium flex items-center gap-1.5 transition-all"
+                style={{
+                  background: showAnalytics ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.04)',
+                  color: showAnalytics ? '#34d399' : 'rgba(255,255,255,0.45)',
+                  border: `1px solid ${showAnalytics ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.06)'}`,
+                }}
+              >
+                <BarChart2 className="w-3.5 h-3.5" />
               </button>
             )}
 
@@ -329,6 +431,18 @@ export default function FlowEditorPage() {
           {isSimulating && <FlowSimulator />}
           <FlowCanvas />
 
+          {/* Smart Recommendations floating panel */}
+          {showRecs && !isSimulating && (
+            <FlowRecommendations
+              nodes={nodes}
+              edges={useFlowStore.getState().edges}
+              onClose={() => setShowRecs(false)}
+              onNodeFocus={(nodeId) => {
+                useFlowStore.getState().setSelectedNodeId(nodeId);
+              }}
+            />
+          )}
+
           {/* WhatsApp Preview Panel */}
           {showPreview && !isSimulating && (
             <div
@@ -382,6 +496,53 @@ export default function FlowEditorPage() {
           flowId={routeId}
           onClose={() => setShowVersions(false)}
           onRestored={() => { loadFlow(routeId); }}
+        />
+      )}
+
+      {/* Flow Analytics Panel */}
+      {showAnalytics && routeId !== 'new' && (
+        <FlowAnalytics
+          flowId={routeId}
+          flowName={flowName}
+          onClose={() => setShowAnalytics(false)}
+          nodeLabels={Object.fromEntries(
+            nodes.map(n => [n.id, String((n.data as any)?.label ?? n.type)])
+          )}
+        />
+      )}
+
+      {/* Publish burst animation */}
+      {publishBurst && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 100, pointerEvents: 'none',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            fontSize: 72, animation: 'publishPop 0.5s cubic-bezier(0.34,1.56,0.64,1) forwards',
+          }}>🚀</div>
+          {[...Array(12)].map((_, i) => (
+            <div key={i} style={{
+              position: 'absolute',
+              width: 8, height: 8, borderRadius: '50%',
+              background: ['#10b981','#6366f1','#f59e0b','#8b5cf6','#06b6d4','#ef4444'][i % 6],
+              top: '50%', left: '50%',
+              animation: `burst${i} 1.8s cubic-bezier(0.16,1,0.3,1) forwards`,
+              transform: `rotate(${i * 30}deg) translateY(-60px)`,
+              opacity: 0,
+            }} />
+          ))}
+        </div>
+      )}
+
+      {/* Flight Recorder Panel */}
+      {showFlightRecorder && routeId !== 'new' && (
+        <FlowFlightRecorder
+          flowId={routeId}
+          flowName={flowName}
+          onClose={() => setShowFlightRecorder(false)}
+          nodeLabels={Object.fromEntries(
+            nodes.map(n => [n.id, String((n.data as any)?.label ?? n.type)])
+          )}
         />
       )}
     </>

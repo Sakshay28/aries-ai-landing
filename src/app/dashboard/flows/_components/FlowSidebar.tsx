@@ -5,6 +5,7 @@ import { MessageSquare, SplitSquareVertical, Webhook, Sparkles, Clock, UserIcon,
 import { useFlowStore } from "../store";
 import { BUSINESS_TYPE_CONFIG } from "../config";
 import { buildVariableRegistry, type VariableDefinition } from "@/lib/flows/variables";
+import AIFlowAssistant from "./AIFlowAssistant";
 
 export const nodeCategories = [
   {
@@ -160,7 +161,7 @@ const SOURCE_LABELS: Record<string, string> = { system: 'System', flow: 'Flow', 
 
 export default function FlowSidebar({ businessType = 'blank' }: { businessType?: string }) {
   const { addNode, setSelectedNodeId, nodes, updateNodeData, selectedNodeId } = useFlowStore();
-  const [activeTab, setActiveTab] = useState<'nodes' | 'variables'>('nodes');
+  const [activeTab, setActiveTab] = useState<'nodes' | 'variables' | 'generate'>('nodes');
   const [searchQuery, setSearchQuery] = useState("");
   const [varSearch, setVarSearch] = useState("");
   const config = BUSINESS_TYPE_CONFIG[businessType] || BUSINESS_TYPE_CONFIG['blank'];
@@ -239,18 +240,22 @@ export default function FlowSidebar({ businessType = 'blank' }: { businessType?:
 
         {/* Tab Bar */}
         <div className="flex items-center border-b flex-shrink-0" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
-          {(['nodes', 'variables'] as const).map(tab => (
+          {(['nodes', 'variables', 'generate'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className="flex-1 flex items-center justify-center gap-1.5 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] transition-all"
+              className="flex-1 flex items-center justify-center gap-1 py-3 text-[10px] font-semibold uppercase tracking-[0.06em] transition-all"
               style={{
                 color: activeTab === tab ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.25)',
-                borderBottom: activeTab === tab ? '2px solid #22c55e' : '2px solid transparent',
+                borderBottom: activeTab === tab
+                  ? tab === 'generate' ? '2px solid #8b5cf6' : '2px solid #22c55e'
+                  : '2px solid transparent',
               }}
             >
-              {tab === 'nodes' ? <Layers className="w-3.5 h-3.5" /> : <BracesIcon className="w-3.5 h-3.5" />}
-              {tab === 'nodes' ? 'Nodes' : 'Variables'}
+              {tab === 'nodes'     && <Layers    className="w-3 h-3" />}
+              {tab === 'variables' && <BracesIcon className="w-3 h-3" />}
+              {tab === 'generate'  && <Sparkles  className="w-3 h-3" />}
+              {tab === 'nodes' ? 'Nodes' : tab === 'variables' ? 'Vars' : 'AI'}
               {tab === 'variables' && allVariables.length > 0 && (
                 <span className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80' }}>{allVariables.length}</span>
               )}
@@ -447,6 +452,13 @@ export default function FlowSidebar({ businessType = 'blank' }: { businessType?:
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ── AI GENERATE TAB ──────────────────────────── */}
+        {activeTab === 'generate' && (
+          <div className="flex-1 overflow-y-auto sb-scroll">
+            <AIFlowAssistant />
           </div>
         )}
 

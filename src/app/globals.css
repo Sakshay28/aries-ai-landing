@@ -517,6 +517,26 @@
   50%        { box-shadow: 0 0 0 9px rgba(16, 185, 129, 0.2),  0 0 32px rgba(16, 185, 129, 0.2);  }
 }
 
+/* ── Publish burst delight animations ───────────────────────────────────── */
+@keyframes publishPop {
+  0%   { transform: scale(0) rotate(-20deg); opacity: 0; }
+  60%  { transform: scale(1.25) rotate(8deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 0; }
+}
+/* 12 burst particles — each travels a different angle */
+@keyframes burst0  { 0%{transform:translate(-50%,-50%) rotate(0deg)   translateY(0);opacity:1} 100%{transform:translate(-50%,-50%) rotate(0deg)   translateY(-120px);opacity:0} }
+@keyframes burst1  { 0%{transform:translate(-50%,-50%) rotate(30deg)  translateY(0);opacity:1} 100%{transform:translate(-50%,-50%) rotate(30deg)  translateY(-120px);opacity:0} }
+@keyframes burst2  { 0%{transform:translate(-50%,-50%) rotate(60deg)  translateY(0);opacity:1} 100%{transform:translate(-50%,-50%) rotate(60deg)  translateY(-120px);opacity:0} }
+@keyframes burst3  { 0%{transform:translate(-50%,-50%) rotate(90deg)  translateY(0);opacity:1} 100%{transform:translate(-50%,-50%) rotate(90deg)  translateY(-120px);opacity:0} }
+@keyframes burst4  { 0%{transform:translate(-50%,-50%) rotate(120deg) translateY(0);opacity:1} 100%{transform:translate(-50%,-50%) rotate(120deg) translateY(-120px);opacity:0} }
+@keyframes burst5  { 0%{transform:translate(-50%,-50%) rotate(150deg) translateY(0);opacity:1} 100%{transform:translate(-50%,-50%) rotate(150deg) translateY(-120px);opacity:0} }
+@keyframes burst6  { 0%{transform:translate(-50%,-50%) rotate(180deg) translateY(0);opacity:1} 100%{transform:translate(-50%,-50%) rotate(180deg) translateY(-120px);opacity:0} }
+@keyframes burst7  { 0%{transform:translate(-50%,-50%) rotate(210deg) translateY(0);opacity:1} 100%{transform:translate(-50%,-50%) rotate(210deg) translateY(-120px);opacity:0} }
+@keyframes burst8  { 0%{transform:translate(-50%,-50%) rotate(240deg) translateY(0);opacity:1} 100%{transform:translate(-50%,-50%) rotate(240deg) translateY(-120px);opacity:0} }
+@keyframes burst9  { 0%{transform:translate(-50%,-50%) rotate(270deg) translateY(0);opacity:1} 100%{transform:translate(-50%,-50%) rotate(270deg) translateY(-120px);opacity:0} }
+@keyframes burst10 { 0%{transform:translate(-50%,-50%) rotate(300deg) translateY(0);opacity:1} 100%{transform:translate(-50%,-50%) rotate(300deg) translateY(-120px);opacity:0} }
+@keyframes burst11 { 0%{transform:translate(-50%,-50%) rotate(330deg) translateY(0);opacity:1} 100%{transform:translate(-50%,-50%) rotate(330deg) translateY(-120px);opacity:0} }
+
 /* ── Premium wire flow animation ─────────────────────────────────────────── */
 /* stroke-dashoffset decreasing = dashes move forward (source → target) ✓   */
 @keyframes premiumFlowDash {

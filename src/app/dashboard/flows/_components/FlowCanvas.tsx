@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -44,6 +44,7 @@ import {
 import { useFlowStore } from "../store";
 import { getDefaultNodeData } from "./FlowSidebar";
 import { PremiumEdge } from "./PremiumEdge";
+import { Search, X } from "lucide-react";
 
 // ─── NODE TYPES (module-level — never recreated) ───────────────────────────
 const NODE_TYPES: NodeTypes = {
@@ -104,13 +105,43 @@ const NODE_WIDTHS: Record<string, number> = {
 function FlowCanvasInner() {
   const { nodes, edges, onNodesChange, onEdgesChange, onConnect, undo, redo, saveHistory } =
     useFlowStore();
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, zoomIn, zoomOut, setCenter } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
   const clipboardRef = useRef<Node | null>(null);
-  // Guards against the synthetic pane-click that fires right after a drag-drop
   const justDropped = useRef(false);
 
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const searchResults = searchQuery.trim()
+    ? nodes.filter(n => {
+        const label = String((n.data as any)?.label ?? n.type ?? "").toLowerCase();
+        return label.includes(searchQuery.toLowerCase());
+      })
+    : [];
+
+  const focusNode = useCallback((node: Node) => {
+    setCenter(node.position.x + 128, node.position.y + 60, { zoom: 1.2, duration: 450 });
+    useFlowStore.getState().setSelectedNodeId(node.id);
+    setSearchOpen(false);
+    setSearchQuery("");
+  }, [setCenter]);
+
   // ── Keyboard shortcuts ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const onSearchKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+        e.preventDefault();
+        setSearchOpen(v => !v);
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+      }
+      if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); }
+    };
+    window.addEventListener("keydown", onSearchKey);
+    return () => window.removeEventListener("keydown", onSearchKey);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const active = document.activeElement;
@@ -138,11 +169,9 @@ function FlowCanvasInner() {
           });
         }
       }
-      // Fit view
-      if (e.key === 'f' || e.key === 'F') {
-        e.preventDefault();
-        fitView({ padding: 0.15, duration: 350 });
-      }
+      if (e.key === 'f' || e.key === 'F') { e.preventDefault(); fitView({ padding: 0.18, duration: 400 }); }
+      if ((e.metaKey || e.ctrlKey) && e.key === '=') { e.preventDefault(); zoomIn({ duration: 200 }); }
+      if ((e.metaKey || e.ctrlKey) && e.key === '-') { e.preventDefault(); zoomOut({ duration: 200 }); }
       // Copy
       if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
         const { selectedNodeId } = useFlowStore.getState();
@@ -189,7 +218,7 @@ function FlowCanvasInner() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, saveHistory, fitView]);
+  }, [undo, redo, saveHistory, fitView, zoomIn, zoomOut]);
 
   // ── Drag-over + drop from sidebar ──────────────────────────────────────────
   const onDragOver = useCallback((e: React.DragEvent) => {
@@ -255,7 +284,55 @@ function FlowCanvasInner() {
   }, []);
 
   return (
-    <div className="flex-1 h-full" style={{ willChange: "transform" }}>
+    <div className="flex-1 h-full relative" style={{ willChange: "transform" }}>
+
+      {searchOpen && (
+        <div style={{
+          position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)",
+          zIndex: 50, width: 320,
+          background: "rgba(10,12,18,0.96)",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 14, boxShadow: "0 8px 40px rgba(0,0,0,0.6)",
+          backdropFilter: "blur(20px)", overflow: "hidden",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <Search size={14} color="#94a3b8" />
+            <input ref={searchInputRef} value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search nodes…"
+              style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "#fff", fontSize: 13, fontFamily: "inherit" }}
+            />
+            <button onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
+              style={{ color: "#64748b", cursor: "pointer", background: "none", border: "none", padding: 2 }}>
+              <X size={14} />
+            </button>
+          </div>
+          {searchResults.length > 0 && (
+            <div style={{ maxHeight: 240, overflowY: "auto" }}>
+              {searchResults.map(n => (
+                <button key={n.id} onClick={() => focusNode(n)}
+                  style={{
+                    width: "100%", textAlign: "left", background: "transparent",
+                    border: "none", padding: "9px 14px", cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 10,
+                    color: "#e2e8f0", fontSize: 13, fontFamily: "inherit",
+                    borderBottom: "1px solid rgba(255,255,255,0.04)",
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                >
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />
+                  <span style={{ flex: 1 }}>{String((n.data as any)?.label ?? n.type)}</span>
+                  <span style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.06em" }}>{n.type}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {searchQuery.trim() && searchResults.length === 0 && (
+            <div style={{ padding: "12px 14px", fontSize: 12, color: "#64748b" }}>No nodes found</div>
+          )}
+        </div>
+      )}
+
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -295,7 +372,9 @@ function FlowCanvasInner() {
         zoomOnDoubleClick={false}
         selectionOnDrag={false}
         nodeDragThreshold={1}
-        /* ── SNAP disabled — nodes land exactly where dropped ── */
+        /* ── MAGNETIC SNAP — 16px grid for clean alignment ── */
+        snapToGrid={true}
+        snapGrid={[16, 16]}
         /* ── PERFORMANCE ── */
         elevateEdgesOnSelect={true}
         onlyRenderVisibleElements={true}
