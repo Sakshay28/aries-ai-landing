@@ -132,10 +132,10 @@ async function getSheetsConfig(tenantId: string): Promise<{ token: string; confi
 }
 
 // ── Ensure header row exists (idempotent) ──────────────────
-const HEADERS = ['Name', 'Phone', 'Email', 'Status', 'Source', 'Score', 'Created At'];
+const HEADERS = ['Name', 'Phone', 'Email'];
 
 async function ensureHeaders(token: string, spreadsheetId: string, sheetName: string): Promise<void> {
-  const range = `${sheetName}!A1:G1`;
+  const range = `${sheetName}!A1:C1`;
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`,
     { headers: { Authorization: `Bearer ${token}` } }
@@ -170,15 +170,11 @@ export async function appendLeadRow(tenantId: string, lead: LeadRow): Promise<vo
   const { token, config } = await getSheetsConfig(tenantId);
   await ensureHeaders(token, config.spreadsheet_id, config.sheet_name);
 
-  const range   = `${config.sheet_name}!A:G`;
+  const range   = `${config.sheet_name}!A:C`;
   const values  = [[
-    lead.name        ?? '',
-    lead.phone       ?? '',
-    lead.email       ?? '',
-    lead.lead_status ?? '',
-    lead.source      ?? '',
-    String(lead.lead_score ?? ''),
-    lead.created_at  ? new Date(lead.created_at).toLocaleString('en-IN') : '',
+    lead.name  ?? '',
+    lead.phone ?? '',
+    lead.email ?? '',
   ]];
 
   const res = await fetch(
@@ -199,7 +195,7 @@ export async function syncAllLeads(tenantId: string): Promise<{ synced: number }
 
   const { data: leads, error } = await supabaseAdmin
     .from('leads')
-    .select('name, phone, email, lead_status, source, lead_score, created_at')
+    .select('name, phone, email')
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: true });
 
@@ -207,7 +203,7 @@ export async function syncAllLeads(tenantId: string): Promise<{ synced: number }
   if (!leads || leads.length === 0) return { synced: 0 };
 
   // Clear existing data and rewrite (clean sync)
-  const clearRange = `${config.sheet_name}!A:G`;
+  const clearRange = `${config.sheet_name}!A:C`;
   await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheet_id}/values/${encodeURIComponent(clearRange)}:clear`,
     { method: 'POST', headers: { Authorization: `Bearer ${token}` } }
@@ -216,13 +212,9 @@ export async function syncAllLeads(tenantId: string): Promise<{ synced: number }
   const rows = [
     HEADERS,
     ...leads.map(l => [
-      l.name        ?? '',
-      l.phone       ?? '',
-      l.email       ?? '',
-      l.lead_status ?? '',
-      l.source      ?? '',
-      String(l.lead_score ?? ''),
-      l.created_at  ? new Date(l.created_at as string).toLocaleString('en-IN') : '',
+      l.name  ?? '',
+      l.phone ?? '',
+      l.email ?? '',
     ]),
   ];
 
@@ -259,9 +251,7 @@ export interface BookingRow {
 }
 
 const BOOKING_HEADERS = [
-  'Reservation ID', 'Customer', 'Phone', 'Party Size',
-  'Slot Time', 'Date', 'Status', 'Payment Status',
-  'Deposit (₹)', 'Created At',
+  'Customer', 'Phone', 'Party Size', 'Date', 'Time', 'Status', 'Deposit (₹)',
 ];
 
 async function ensureBookingHeaders(
@@ -269,7 +259,7 @@ async function ensureBookingHeaders(
   spreadsheetId: string,
   sheetName:     string
 ): Promise<void> {
-  const range = `${sheetName}!A1:J1`;
+  const range = `${sheetName}!A1:G1`;
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`,
     { headers: { Authorization: `Bearer ${token}` } }
@@ -314,19 +304,16 @@ export async function appendBookingRow(tenantId: string, booking: BookingRow): P
   };
 
   const values = [[
-    booking.reservation_id,
     booking.customer_name,
     booking.customer_phone,
     String(booking.party_size),
-    formatTime(booking.slot_time),
     booking.booking_date,
+    formatTime(booking.slot_time),
     booking.booking_status,
-    booking.payment_status,
-    String(Math.round(booking.payment_amount / 100)), // paise → rupees
-    booking.created_at ? new Date(booking.created_at).toLocaleString('en-IN') : '',
+    String(Math.round(booking.payment_amount / 100)),
   ]];
 
-  const range = `${bookingSheetName}!A:J`;
+  const range = `${bookingSheetName}!A:G`;
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheet_id}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     {
