@@ -9,6 +9,20 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import type { ReactNode } from 'react';
 
 export default async function RestaurantLayout({ children }: { children: ReactNode }) {
-  // Temporarily bypass module gate and authentication check for visual review
+  const tenantId = await getTenantId();
+  if (!tenantId) {
+    redirect('/login');
+  }
+
+  const { data: tenant, error } = await supabaseAdmin
+    .from('tenants')
+    .select('modules')
+    .eq('id', tenantId)
+    .single();
+
+  if (error || !tenant || !Array.isArray(tenant.modules) || !tenant.modules.includes('restaurant_reservations')) {
+    redirect('/dashboard');
+  }
+
   return <>{children}</>;
 }
