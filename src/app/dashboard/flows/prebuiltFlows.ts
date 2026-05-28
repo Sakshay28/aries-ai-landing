@@ -30,6 +30,45 @@ export function getPrebuiltFlow(templateId: string, businessType: string): { nod
     return { nodes: [], edges: [] };
   }
 
+  if (templateId === 'clock-tower') {
+    const nodes: AppNode[] = [
+      { id: 'ct1',  type: 'trigger',      position: { x: 400,  y: 50   }, data: { label: 'Inbound Message',         triggerType: 'keyword', keywords: ['hi','hello','book','table','reserve','menu','dine','lunch','dinner','hours','location','help'] } },
+      { id: 'ct2',  type: 'standard',     position: { x: 400,  y: 210  }, data: { label: 'Welcome',                 content: "Welcome to Clock Tower Restaurant! 🏰\n\nWe're so glad you reached out. What can we help you with today?" } },
+      { id: 'ct3',  type: 'send_buttons', position: { x: 400,  y: 390  }, data: { label: 'Main Menu',               message: 'Choose an option below:', buttons: [{ id: 'b1', label: '📅 Book a Table', value: 'book_table' },{ id: 'b2', label: '🍽️ View Menu', value: 'view_menu' },{ id: 'b3', label: '⏰ Hours & Location', value: 'hours_info' }] } },
+      { id: 'ct4',  type: 'condition',    position: { x: 400,  y: 570  }, data: { label: 'Booking?',                field: 'button_value', operator: '==', value: 'book_table' } },
+      { id: 'ct5',  type: 'intake_form',  position: { x: 80,   y: 750  }, data: { label: 'Collect Booking Details', fields: [{ id: 'f1', name: 'Your Name', type: 'text', required: true, saveAs: 'guest_name', placeholder: 'Full name' },{ id: 'f2', name: 'Date & Time', type: 'text', required: true, saveAs: 'booking_datetime', placeholder: 'e.g. 30 May, 8:00 PM' },{ id: 'f3', name: 'Number of Guests', type: 'text', required: true, saveAs: 'party_size', placeholder: 'e.g. 4' },{ id: 'f4', name: 'Special Request', type: 'text', required: false, saveAs: 'special_request', placeholder: 'Birthday, anniversary, dietary needs…' }] } },
+      { id: 'ct6',  type: 'standard',     position: { x: 80,   y: 970  }, data: { label: 'Reservation Confirmed ✅', content: "✅ Your table is confirmed!\n\n👤 Name: {{guest_name}}\n📅 When: {{booking_datetime}}\n👥 Guests: {{party_size}}\n\nWe look forward to welcoming you at Clock Tower! 🏰 A reminder will be sent before your booking." } },
+      { id: 'ct7',  type: 'handoff',      position: { x: 80,   y: 1140 }, data: { label: 'Notify Restaurant Team',  message: '🔔 New Reservation\nGuest: {{guest_name}}\nDate/Time: {{booking_datetime}}\nParty Size: {{party_size}} guests\nSpecial: {{special_request}}' } },
+      { id: 'ct8',  type: 'end',          position: { x: 80,   y: 1290 }, data: { label: 'End' } },
+      { id: 'ct9',  type: 'condition',    position: { x: 780,  y: 570  }, data: { label: 'View Menu?',              field: 'button_value', operator: '==', value: 'view_menu' } },
+      { id: 'ct10', type: 'standard',     position: { x: 580,  y: 750  }, data: { label: 'Our Menu 🍽️',            content: "Our Signature Dishes 🍽️\n\n🥗 *Starters*\nGarden Mezze Platter ₹320 | Crispy Calamari ₹280\n\n🍖 *Mains*\nSlow-Roasted Lamb Chops ₹780\nMushroom Risotto ₹520\nGrilled Sea Bass ₹680\n\n🍰 *Desserts*\nSticky Toffee Pudding ₹220\nChocolate Lava Cake ₹240\n\n🍷 Bar open till midnight. To book, just reply *Book*!" } },
+      { id: 'ct11', type: 'end',          position: { x: 580,  y: 960  }, data: { label: 'End' } },
+      { id: 'ct12', type: 'condition',    position: { x: 1100, y: 570  }, data: { label: 'Hours & Location?',       field: 'button_value', operator: '==', value: 'hours_info' } },
+      { id: 'ct13', type: 'standard',     position: { x: 940,  y: 750  }, data: { label: 'Hours & Location',        content: "Clock Tower Restaurant 🏰\n\n📍 Near the Clock Tower landmark\n\n⏰ *Opening Hours*\nMon–Thu: 12 PM – 11 PM\nFri–Sat: 12 PM – 1 AM\nSun: 11 AM – 10 PM\n\nWalk-ins welcome! Book ahead for weekends. 😊" } },
+      { id: 'ct14', type: 'end',          position: { x: 940,  y: 970  }, data: { label: 'End' } },
+      { id: 'ct15', type: 'handoff',      position: { x: 1260, y: 750  }, data: { label: 'Connect to Staff',        message: 'A customer needs assistance — please connect them with a team member.' } },
+      { id: 'ct16', type: 'end',          position: { x: 1260, y: 940  }, data: { label: 'End' } },
+    ];
+    const edges: Edge[] = [
+      generateEdge('ct1',  'ct2'),
+      generateEdge('ct2',  'ct3'),
+      generateEdge('ct3',  'ct4'),
+      generateEdge('ct4',  'ct5',  'true'),
+      generateEdge('ct4',  'ct9',  'false'),
+      generateEdge('ct5',  'ct6'),
+      generateEdge('ct6',  'ct7'),
+      generateEdge('ct7',  'ct8'),
+      generateEdge('ct9',  'ct10', 'true'),
+      generateEdge('ct9',  'ct12', 'false'),
+      generateEdge('ct10', 'ct11'),
+      generateEdge('ct12', 'ct13', 'true'),
+      generateEdge('ct12', 'ct15', 'false'),
+      generateEdge('ct13', 'ct14'),
+      generateEdge('ct15', 'ct16'),
+    ];
+    return { nodes, edges };
+  }
+
   if (templateId === 'product-recs') {
     const nodes: AppNode[] = [
       { id: 'trigger_1', type: 'trigger', position: { x: 400, y: 50 }, data: { label: 'User Request', triggerType: 'Keyword Match' } },
