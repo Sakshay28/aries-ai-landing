@@ -365,9 +365,10 @@ export function IntegrationsClient() {
     const success = searchParams.get('success');
     const error = searchParams.get('error');
     if (success === 'google_sheets') {
-      toast.success('Google Sheets connected successfully! Leads will sync automatically.');
-      load();
+      toast.success('Google Sheets connected! Leads will sync automatically.');
       window.history.replaceState({}, '', '/dashboard/integrations');
+      // Hard reload so the CONNECTED badge renders with fresh data
+      setTimeout(() => window.location.reload(), 800);
     } else if (error === 'google_sheets_denied') {
       toast.error('Google authorization was denied.');
       window.history.replaceState({}, '', '/dashboard/integrations');
