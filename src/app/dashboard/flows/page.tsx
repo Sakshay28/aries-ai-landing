@@ -1,47 +1,11 @@
 "use client";
 
-import { ShoppingCart, Calendar, Home, BookOpen, Users, UtensilsCrossed, Coins, Heart, Zap, Loader2, LayoutTemplate, CheckCircle2, Edit3, Trash2, PauseCircle, Sparkles, Star, PartyPopper } from "lucide-react";
+import { ShoppingCart, Calendar, Home, BookOpen, Users, UtensilsCrossed, Coins, Heart, Zap, Loader2, LayoutTemplate, CheckCircle2, Edit3, Trash2, PauseCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { BUSINESS_TYPE_CONFIG } from "./config";
 import { FeaturePageGate } from "../_layout/FeaturePageGate";
-
-const DEMO_FLOWS = [
-  {
-    id: 'clock-tower',
-    label: 'Clock Tower Restaurant',
-    description: 'Table booking, menu, hours & live staff handoff — full branded flow.',
-    icon: UtensilsCrossed,
-    color: '#f97316',
-    bg: 'rgba(249,115,22,0.08)',
-    border: 'rgba(249,115,22,0.25)',
-    tag: 'RESTAURANT',
-    url: '/dashboard/flows/editor/new?template=clock-tower',
-  },
-  {
-    id: 'clock-tower-feedback',
-    label: 'Guest Feedback Flow',
-    description: 'Collect star ratings & comments after every visit — auto-logged.',
-    icon: Star,
-    color: '#facc15',
-    bg: 'rgba(250,204,21,0.07)',
-    border: 'rgba(250,204,21,0.22)',
-    tag: 'POST-VISIT',
-    url: '/dashboard/flows/editor/new?template=clock-tower-feedback',
-  },
-  {
-    id: 'clock-tower-events',
-    label: 'Private Events & Dining',
-    description: 'Birthday, anniversary, corporate — collect event details & escalate.',
-    icon: PartyPopper,
-    color: '#a78bfa',
-    bg: 'rgba(167,139,250,0.08)',
-    border: 'rgba(167,139,250,0.25)',
-    tag: 'EVENTS',
-    url: '/dashboard/flows/editor/new?template=clock-tower-events',
-  },
-];
 
 interface SavedFlow {
   id: string;
@@ -185,42 +149,8 @@ export default function FlowsDashboardPage() {
               Create Flow
             </h1>
             <p className="font-sans text-[15px] text-white/50 max-w-xl leading-relaxed">
-              Start from a ready-made demo or build from scratch with 150+ nodes.
+              Build from scratch with 150+ nodes.
             </p>
-          </div>
-
-          {/* ── Demo Flows ──────────────────────────────────── */}
-          <div className="mb-12">
-            <h2 className="text-[11px] font-bold tracking-widest text-white/35 uppercase mb-4 flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-[#06B6D4]" /> Ready-Made Demos
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {DEMO_FLOWS.map(demo => {
-                const Icon = demo.icon;
-                return (
-                  <div
-                    key={demo.id}
-                    onClick={() => router.push(demo.url)}
-                    className="relative flex flex-col bg-[#111111] rounded-2xl p-6 cursor-pointer group transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_40px_-12px_rgba(0,0,0,0.6)]"
-                    style={{ border: `1px solid ${demo.border}`, background: demo.bg }}
-                  >
-                    <div className="flex items-start justify-between mb-5">
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${demo.color}18`, border: `1px solid ${demo.color}30` }}>
-                        <Icon className="w-5 h-5" style={{ color: demo.color }} />
-                      </div>
-                      <span className="text-[9px] font-bold tracking-widest px-2 py-1 rounded-md" style={{ color: demo.color, background: `${demo.color}15`, border: `1px solid ${demo.color}25` }}>
-                        {demo.tag}
-                      </span>
-                    </div>
-                    <h3 className="font-sans text-[15px] font-semibold text-white/90 mb-1.5 tracking-tight">{demo.label}</h3>
-                    <p className="font-sans text-[12.5px] text-white/45 leading-relaxed">{demo.description}</p>
-                    <div className="mt-4 text-[11px] font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200" style={{ color: demo.color }}>
-                      Open in Editor →
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
           </div>
 
           <div className="mb-8">
