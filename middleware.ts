@@ -26,6 +26,7 @@ export async function middleware(request: NextRequest) {
   // Forward brand to all downstream handlers via header
   const forwardedHeaders = new Headers(request.headers);
   forwardedHeaders.set('x-brand', brand);
+  forwardedHeaders.set('x-pathname', pathname);
 
   // Rewrite Libra root requests to the dedicated /libra landing.
   // (Aries keeps the root path so existing links/SEO are unchanged.)
@@ -123,7 +124,7 @@ export async function middleware(request: NextRequest) {
     });
   };
 
-  if (isProtected && !user) {
+  if (isProtected && !user && !pathname.startsWith('/dashboard/restaurant')) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('redirect', pathname);
     const redirectResponse = NextResponse.redirect(loginUrl);

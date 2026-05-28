@@ -75,7 +75,12 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${syne.variable} ${dmSans.variable} ${ibmPlexMono.variable}`} suppressHydrationWarning>
       <body className="transition-colors duration-500 ease-in-out" style={{ fontFamily: "var(--font-dm-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
-        <Script id="theme-init" strategy="beforeInteractive">{`try{if(localStorage.getItem('theme')==='dark'){document.documentElement.classList.add('dark')}else{document.documentElement.classList.remove('dark')}}catch(_){}`}</Script>
+        <script
+          id="theme-init"
+          dangerouslySetInnerHTML={{
+            __html: `try{if(localStorage.getItem('theme')==='dark'){document.documentElement.classList.add('dark')}else{document.documentElement.classList.remove('dark')}}catch(_){}`
+          }}
+        />
         {children}
       </body>
     </html>

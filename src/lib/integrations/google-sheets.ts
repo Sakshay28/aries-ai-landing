@@ -239,3 +239,102 @@ export async function syncAllLeads(tenantId: string): Promise<{ synced: number }
   if (!res.ok) throw new Error(`Sheets bulk write failed: ${await res.text()}`);
   return { synced: leads.length };
 }
+
+// ══ Booking Rows (Restaurant Manager Panel) ═════════════════════
+// Appends a single booking row to the "Bookings" tab in the connected sheet.
+// If Sheets is not connected for this tenant, logs a warning and returns silently.
+// Non-blocking: caller should use void appendBookingRow(...) and not await.
+
+export interface BookingRow {
+  reservation_id:  string;
+  customer_name:   string;
+  customer_phone:  string;
+  party_size:      number;
+  slot_time:       string;   // e.g. '19:00:00'
+  booking_date:    string;   // YYYY-MM-DD
+  booking_status:  string;
+  payment_status:  string;
+  payment_amount:  number;   // paise
+  created_at:      string;
+}
+
+const BOOKING_HEADERS = [
+  'Reservation ID', 'Customer', 'Phone', 'Party Size',
+  'Slot Time', 'Date', 'Status', 'Payment Status',
+  'Deposit (₹)', 'Created At',
+];
+
+async function ensureBookingHeaders(
+  token:         string,
+  spreadsheetId: string,
+  sheetName:     string
+): Promise<void> {
+  const range = `${sheetName}!A1:J1`;
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) return;
+  const data = await res.json() as { values?: string[][] };
+  if (data.values && data.values[0]?.length > 0) return;
+
+  await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+    {
+      method:  'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ values: [BOOKING_HEADERS] }),
+    }
+  );
+}
+
+export async function appendBookingRow(tenantId: string, booking: BookingRow): Promise<void> {
+  let token: string;
+  let config: SheetsConfig;
+
+  try {
+    ({ token, config } = await getSheetsConfig(tenantId));
+  } catch {
+    // Sheets not connected for this tenant — silently skip
+    console.warn(`⚠️ Google Sheets not connected for tenant ${tenantId} — booking row skipped`);
+    return;
+  }
+
+  const bookingSheetName = 'Bookings';
+  await ensureBookingHeaders(token, config.spreadsheet_id, bookingSheetName);
+
+  // Format slot time: '19:00:00' → '7:00 PM'
+  const formatTime = (t: string) => {
+    try {
+      const [h, m] = t.split(':').map(Number);
+      const d = new Date();
+      d.setHours(h, m, 0, 0);
+      return d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
+    } catch { return t; }
+  };
+
+  const values = [[
+    booking.reservation_id,
+    booking.customer_name,
+    booking.customer_phone,
+    String(booking.party_size),
+    formatTime(booking.slot_time),
+    booking.booking_date,
+    booking.booking_status,
+    booking.payment_status,
+    String(Math.round(booking.payment_amount / 100)), // paise → rupees
+    booking.created_at ? new Date(booking.created_at).toLocaleString('en-IN') : '',
+  ]];
+
+  const range = `${bookingSheetName}!A:J`;
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheet_id}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+    {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ values }),
+    }
+  );
+
+  if (!res.ok) throw new Error(`Sheets booking append failed: ${await res.text()}`);
+}

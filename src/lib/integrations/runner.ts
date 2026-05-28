@@ -50,31 +50,6 @@ async function runRazorpay(cfg: IntegrationConfig, event: IntegrationEvent) {
   }
 }
 
-// ── Google Sheets: POST to webhook URL ──────────────────────
-async function runGoogleSheets(cfg: IntegrationConfig, event: IntegrationEvent) {
-  if (event.type !== 'new_lead') return;
-  const url = cfg.webhook_url;
-  if (!url) return;
-
-  try {
-    await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        timestamp: new Date().toISOString(),
-        name: event.lead.name,
-        phone: event.lead.phone,
-        email: event.lead.email || '',
-        status: event.lead.lead_status || 'new',
-        source: event.lead.source || 'whatsapp',
-      }),
-    });
-    console.log(`📊 Google Sheets: lead ${event.lead.phone} logged`);
-  } catch (e) {
-    console.error('Google Sheets integration error:', (e as Error).message);
-  }
-}
-
 // ── Zoho CRM: create lead ────────────────────────────────────
 async function runZohoCRM(cfg: IntegrationConfig, event: IntegrationEvent) {
   if (event.type !== 'new_lead') return;
@@ -173,7 +148,6 @@ async function runCustomWebhooks(cfg: IntegrationConfig, event: IntegrationEvent
 // ── Main runner ──────────────────────────────────────────────
 const HANDLERS: Record<string, (cfg: IntegrationConfig, event: IntegrationEvent) => Promise<string | void | undefined>> = {
   razorpay: runRazorpay,
-  googlesheets: runGoogleSheets,
   zohocrm: runZohoCRM,
   shiprocket: runShiprocket,
   pabbly: runPabbly,

@@ -22,6 +22,10 @@ import {
   UserCog,
   Library,
   Activity,
+  CalendarDays,
+  UtensilsCrossed,
+  CalendarX,
+  Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -104,9 +108,11 @@ const bottomItems: NavItem[] = [
 ];
 
 
-export default function AppSidebar({ userEmail }: { userEmail?: string }) {
+export default function AppSidebar({ userEmail, modules = [] }: { userEmail?: string; modules?: string[] }) {
   const { isOpen, isMobileOpen, toggle, setMobileOpen } = useSidebar();
   const pathname = usePathname();
+
+  const hasRestaurant = true; // Temporarily force true for visual review
 
   const isActive = (href: string) =>
     href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href);
@@ -125,6 +131,7 @@ export default function AppSidebar({ userEmail }: { userEmail?: string }) {
         initials={initials}
         userEmail={userEmail}
         displayName={displayName}
+        hasRestaurant={hasRestaurant}
       />
 
       {/* Mobile — fixed drawer */}
@@ -142,6 +149,7 @@ export default function AppSidebar({ userEmail }: { userEmail?: string }) {
           initials={initials}
           userEmail={userEmail}
           displayName={displayName}
+          hasRestaurant={hasRestaurant}
         />
       </aside>
     </>
@@ -156,6 +164,7 @@ function DesktopSidebar(props: {
   initials: string;
   userEmail?: string;
   displayName: string;
+  hasRestaurant: boolean;
 }) {
   return (
     <aside
@@ -169,6 +178,7 @@ function DesktopSidebar(props: {
         initials={props.initials}
         userEmail={props.userEmail}
         displayName={props.displayName}
+        hasRestaurant={props.hasRestaurant}
       />
     </aside>
   );
@@ -181,6 +191,7 @@ function SidebarBody({
   initials,
   userEmail,
   displayName,
+  hasRestaurant,
 }: {
   isOpen: boolean;
   onToggle: () => void;
@@ -188,6 +199,7 @@ function SidebarBody({
   initials: string;
   userEmail?: string;
   displayName: string;
+  hasRestaurant: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -259,6 +271,42 @@ function SidebarBody({
         {navigationItems.map((item) => (
           <NavButton key={item.label} item={item} isOpen={isOpen} isActive={isActive(item.href)} userPlan={plan} />
         ))}
+
+        {/* Restaurant section — module-gated */}
+        {hasRestaurant && (
+          <>
+            {isOpen && (
+              <p className="mt-4 mb-1 px-3 text-[10px] font-bold tracking-widest text-muted-foreground/60 uppercase select-none">
+                Restaurant
+              </p>
+            )}
+            {!isOpen && <div className="my-2 border-t border-sidebar-border/40" />}
+            <NavButton
+              item={{ label: "Overview", icon: CalendarDays, href: "/dashboard/restaurant" }}
+              isOpen={isOpen}
+              isActive={isActive("/dashboard/restaurant")}
+              userPlan={plan}
+            />
+            <NavButton
+              item={{ label: "Bookings", icon: UtensilsCrossed, href: "/dashboard/restaurant/bookings" }}
+              isOpen={isOpen}
+              isActive={isActive("/dashboard/restaurant/bookings")}
+              userPlan={plan}
+            />
+            <NavButton
+              item={{ label: "Slot Management", icon: Clock, href: "/dashboard/restaurant/slots" }}
+              isOpen={isOpen}
+              isActive={isActive("/dashboard/restaurant/slots")}
+              userPlan={plan}
+            />
+            <NavButton
+              item={{ label: "Block Dates", icon: CalendarX, href: "/dashboard/restaurant/blocked-dates" }}
+              isOpen={isOpen}
+              isActive={isActive("/dashboard/restaurant/blocked-dates")}
+              userPlan={plan}
+            />
+          </>
+        )}
       </nav>
 
       {/* Bottom nav */}

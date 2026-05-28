@@ -16,17 +16,19 @@ export default function DashboardLayoutClient({
   children,
   userEmail,
   userName,
+  modules = [],
 }: {
   children: ReactNode;
   userEmail?: string;
   userName?: string;
+  modules?: string[];
 }) {
   return (
     <UserContext.Provider value={{ userName: userName || "", userEmail: userEmail || "" }}>
     <SidebarProvider>
       {/* Root: full-screen flex row */}
       <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
-        <AppSidebar userEmail={userEmail} />
+        <AppSidebar userEmail={userEmail} modules={modules} />
         <Backdrop />
 
         {/* Content column */}

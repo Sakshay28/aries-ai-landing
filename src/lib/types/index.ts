@@ -356,3 +356,92 @@ export const PLAN_DETAILS: Record<Plan, {
     features: ['Everything in Pro', 'Multi-location', 'Custom integrations', 'Dedicated account manager', 'SLA guarantee'],
   },
 };
+
+// ═══════════════════════════════════════
+// Restaurant Manager Panel Types
+// ═══════════════════════════════════════
+
+export type RestaurantDayType = 'weekday' | 'weekend' | 'both';
+export type RestaurantBookingStatus = 'confirmed' | 'cancelled' | 'no_show' | 'completed';
+export type RestaurantPaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
+
+export interface RestaurantSlot {
+  id: string;
+  restaurant_id: string;
+  slot_time: string;          // e.g. "19:00:00"
+  day_type: RestaurantDayType;
+  total_capacity: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  // Computed on GET /api/restaurant/slots
+  remaining_capacity?: number;
+}
+
+export interface RestaurantBooking {
+  id: string;
+  restaurant_id: string;
+  slot_id: string;
+  booking_date: string;        // YYYY-MM-DD
+  customer_name: string;
+  customer_phone: string;
+  party_size: number;
+  payment_amount: number;      // paise
+  payment_status: RestaurantPaymentStatus;
+  razorpay_payment_id: string | null;
+  booking_status: RestaurantBookingStatus;
+  reservation_id: string;      // e.g. CT-20240528-0042
+  created_at: string;
+  updated_at: string;
+  // Joined
+  slot_time?: string;
+}
+
+export interface RestaurantBlockedDate {
+  id: string;
+  restaurant_id: string;
+  blocked_date: string;        // YYYY-MM-DD
+  reason: string | null;
+  specific_slot_id: string | null;  // null = entire day blocked
+  created_at: string;
+}
+
+export interface SeatLock {
+  id: string;
+  slot_id: string;
+  booking_date: string;
+  locked_seats: number;
+  session_token: string;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface RestaurantStats {
+  bookings_today: number;
+  bookings_this_week: number;
+  no_show_rate: number;               // percentage, last 30 days
+  total_deposit_collected_this_month: number;  // rupees (payment_amount / 100)
+  most_popular_slot: string | null;   // slot_time string
+  upcoming_bookings_today: RestaurantBooking[];
+}
+
+export interface SlotAvailabilityResult {
+  available: boolean;
+  remaining_seats: number;
+  error?: string;
+}
+
+export interface SeatLockResult {
+  locked: boolean;
+  expires_at?: string;
+  reason?: string;
+}
+
+export interface BookingConfirmResult {
+  success: boolean;
+  reservation_id?: string;
+  booking_id?: string;
+  idempotent?: boolean;
+  reason?: string;
+  slot_time?: string;
+}
