@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
@@ -21,7 +21,7 @@ import { validateFlow, type FlowHealthReport } from "../../utils";
 const FlowAnalytics      = dynamic(() => import("../../_components/FlowAnalytics"),      { ssr: false });
 const FlowFlightRecorder = dynamic(() => import("../../_components/FlowFlightRecorder"), { ssr: false });
 
-export default function FlowEditorPage() {
+function FlowEditorPage() {
   const { selectedNodeId, isSimulating, setIsSimulating, isPublishing, isSaving, publishFlow, loadTemplate, loadFlow, saveFlow, undo, redo, history, nodes } = useFlowStore();
   const params = useParams();
   const searchParams = useSearchParams();
@@ -105,8 +105,12 @@ export default function FlowEditorPage() {
     } else {
       const isBlank = businessType === 'blank' && !templateId;
       if (!isBlank) {
-        const { nodes, edges } = getPrebuiltFlow(templateId || businessType, businessType);
-        loadTemplate(nodes, edges);
+        try {
+          const { nodes, edges } = getPrebuiltFlow(templateId || businessType, businessType);
+          loadTemplate(nodes, edges);
+        } catch {
+          loadTemplate([], []);
+        }
       } else {
         loadTemplate([], []);
       }
@@ -547,5 +551,13 @@ export default function FlowEditorPage() {
         />
       )}
     </>
+  );
+}
+
+export default function FlowEditorPageWrapper() {
+  return (
+    <Suspense fallback={<div className="flex h-screen w-full items-center justify-center bg-[#06070a]"><div className="w-6 h-6 border-2 border-white/20 border-t-white/70 rounded-full animate-spin" /></div>}>
+      <FlowEditorPage />
+    </Suspense>
   );
 }
