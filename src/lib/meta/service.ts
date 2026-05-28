@@ -414,7 +414,7 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
           timestamp,
           isStatusUpdate: false,
           isReaction: true,
-          reactionEmoji: reactionObj?.emoji || '👍',
+          reactionEmoji: reactionObj?.emoji || '',
           reactedToMessageId: reactionObj?.message_id || '',
         };
       } else {
@@ -454,6 +454,47 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
   }
 
   return null;
+}
+
+// ═══════════════════════════════════════
+// DELETE: Outbound Message (Unsend)
+// ═══════════════════════════════════════
+export async function deleteWhatsAppMessage(
+  accessToken: string,
+  phoneNumberId: string,
+  waMessageId: string
+): Promise<boolean> {
+  if (!accessToken || !phoneNumberId || !waMessageId) {
+    throw new Error('Meta deleteWhatsAppMessage: missing required parameters');
+  }
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    status: 'deleted',
+    message_id: waMessageId,
+  };
+
+  return withMetaRetry(async () => {
+    try {
+      const res = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
+        method: 'POST',
+        headers: headers(accessToken),
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('❌ Meta deleteWhatsAppMessage failed:', errorText);
+        return false;
+      }
+
+      const data = await res.json();
+      return data.success || false;
+    } catch (err) {
+      console.error('❌ Meta deleteWhatsAppMessage exception:', err);
+      return false;
+    }
+  });
 }
 
 // ═══════════════════════════════════════

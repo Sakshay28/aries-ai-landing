@@ -54,11 +54,14 @@ export const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap');
 
   *, *::before, *::after { box-sizing: border-box; }
+  html, body { max-width: 100%; overflow-x: hidden; }
 
   /* ─── Navbar ─── */
-  .nav-inner { padding: 0 40px; height: 68px; display: flex; align-items: center; justify-content: space-between; }
+  .nav-inner { padding: 0 40px; height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .nav-links { display: flex; align-items: center; gap: 32px; }
   .nav-actions { display: flex; align-items: center; gap: 16px; }
+  .nav-center-group { display: flex; align-items: center; gap: 48px; }
+  .mobile-cta-inline { display: none; background: #25D366; color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; flex-shrink: 0; height: 40px; align-items: center; }
   .hamburger { display: none; background: none; border: none; cursor: pointer; padding: 8px; flex-direction: column; gap: 5px; }
   .hamburger span { display: block; width: 24px; height: 2px; background: #111; border-radius: 2px; transition: all 0.3s; }
   .mobile-menu { display: none; position: fixed; top: 68px; left: 0; right: 0; bottom: 0; background: #fff; z-index: 998; flex-direction: column; padding: 28px 24px; gap: 4px; overflow-y: auto; border-top: 1px solid #eee; }
@@ -72,6 +75,7 @@ export const CSS = `
   /* ─── Hero ─── */
   .hero-grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 60px; align-items: center; max-width: 1400px; margin: 0 auto; padding: 60px 40px; }
   .hero-cta { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 40px; }
+  .hero-image-wrap { display: flex; justify-content: center; position: relative; }
 
   /* ─── Section padding ─── */
   .section { padding: 96px 40px; }
@@ -154,12 +158,14 @@ export const CSS = `
 
   /* ─── Mobile (≤768px) ─── */
   @media (max-width: 768px) {
-    .nav-inner { padding: 0 20px; }
+    .nav-inner { padding: 0 16px; }
     .nav-links { display: none; }
     .nav-actions { display: none; }
+    .nav-center-group { display: none; }
     .hamburger { display: flex; }
+    .mobile-cta-inline { display: flex; }
 
-    .hero-grid { padding: 80px 20px 40px; min-height: auto; }
+    .hero-grid { padding: 72px 16px 40px; min-height: auto; }
     .hero-cta { flex-direction: column; }
     .hero-cta a, .hero-cta-outline { width: 100%; text-align: center; justify-content: center; }
 
@@ -488,7 +494,7 @@ export function Navbar() {
           </Link>
 
           {/* Desktop nav */}
-          <div style={{ display: "flex", alignItems: "center", gap: 48 }}>
+          <div className="nav-center-group">
             <div className="nav-links">
               {navItems.map(item => (
                 <a key={item} href={`#${item.toLowerCase().replace(/ /g, "-")}`}
@@ -497,7 +503,7 @@ export function Navbar() {
                 </a>
               ))}
             </div>
-            <div className="nav-actions" style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <div className="nav-actions">
               <motion.div whileTap={{ scale: 0.96 }}>
                 <Link href="/login" className="btn-anim" style={{ display: "block", background: G, color: "#fff", padding: "10px 22px", borderRadius: 8, fontSize: 14, fontWeight: 700, textDecoration: "none", minWidth: 80, textAlign: "center" }}>Login</Link>
               </motion.div>
@@ -506,6 +512,9 @@ export function Navbar() {
               </motion.div>
             </div>
           </div>
+
+          {/* Mobile CTA — only visible on mobile, replaces Login+Trial in navbar */}
+          <Link href="/signup" className="mobile-cta-inline btn-anim">Start Free Trial</Link>
 
           {/* Hamburger */}
           <button className="hamburger" onClick={() => setMenuOpen(o => !o)} aria-label="Toggle menu">
@@ -613,7 +622,7 @@ export function Hero() {
             ))}
           </motion.div>
         </div>
-        <div className="hero-image-wrap" style={{ display: "flex", justifyContent: "center", position: "relative" }}>
+        <div className="hero-image-wrap">
           <motion.div
             animate={{ y: [0, -12, 0] }}
             transition={{ duration: 6, ease: "easeInOut", repeat: Infinity }}

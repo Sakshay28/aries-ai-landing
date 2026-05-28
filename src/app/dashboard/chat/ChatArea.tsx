@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from "framer-motion";
 import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -109,10 +110,12 @@ const SWIPE_THRESHOLD = 60; // px needed to trigger reply
 function SwipeToReplyRow({
   isInbound,
   onReply,
+  isActive = false,
   children,
 }: {
   isInbound: boolean;
   onReply: () => void;
+  isActive?: boolean;
   children: ReactNode;
 }) {
   const x = useMotionValue(0);
@@ -169,7 +172,10 @@ function SwipeToReplyRow({
         dragMomentum={false}
         onDrag={handleDrag}
         onDragEnd={handleDragEnd}
-        className="relative z-10 touch-pan-y will-change-transform"
+        className={cn(
+          "relative touch-pan-y",
+          isActive ? "z-[50]" : "z-10 will-change-transform"
+        )}
       >
         {children}
       </motion.div>
@@ -200,7 +206,9 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const [uploading, setUploading] = useState(false);
   const [replyToMsg, setReplyToMsg] = useState<Message | null>(null);
   const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null);
+  const [messageMenuRect, setMessageMenuRect] = useState<DOMRect | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [deleteConfirmMsg, setDeleteConfirmMsg] = useState<Message | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
   const conversationId = searchParams.get('conversationId');
@@ -281,7 +289,9 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     if (!pendingFile || !conversationId || uploading) return;
 
     const file = pendingFile;
+    const replyCtx = replyToMsg;  // capture before clearing
     setPendingFile(null);
+    setReplyToMsg(null);           // clear immediately — strip gone on send
     setUploading(true);
 
     // Optimistic message bubble
@@ -306,7 +316,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       file_size: file.size,
       mime_type: file.type,
       media_caption: inputMsg.trim() || null,
-      reply_to_message_id: replyToMsg?.id || null,
+      reply_to_message_id: replyCtx?.id || null,
     };
     setMessages(prev => [...prev, optimisticMsg]);
     setTimeout(() => scrollToBottom(true), 30);
@@ -316,7 +326,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       formData.append('file', file);
       formData.append('conversationId', conversationId);
       if (inputMsg.trim()) formData.append('caption', inputMsg.trim());
-      if (replyToMsg) formData.append('replyToMessageId', replyToMsg.id);
+      if (replyCtx) formData.append('replyToMessageId', replyCtx.id);
 
       console.log('[attachment] Uploading:', file.name, file.type, file.size);
 
@@ -341,9 +351,8 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         return [...withoutOpt, realMsg];
       });
 
-      // Clear caption and reply state after successful send
+      // Clear caption after successful send (reply already cleared above)
       setInputMsg('');
-      setReplyToMsg(null);
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
       console.log('[attachment] ✅ Sent successfully:', realMsg.id);
@@ -507,13 +516,27 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           const incoming = (data.messages as Message[]).filter(m => !existingIds.has(m.id));
           if (incoming.length === 0) return prev;
 
-          // Remove optimistic placeholders that match incoming real messages
-          const cleaned = prev.filter(m => {
-            if (!m.id.startsWith('__optimistic__')) return true;
-            return !incoming.some(n => n.content === m.content && n.direction === m.direction);
+          // Remove optimistic placeholders that match an incoming real message.
+          // Merge reply_to_message_id from the optimistic into the polled message
+          // in case the polled version arrives before the DB field propagates.
+          const mergedIncoming = incoming.map(n => {
+            const matchedOptimistic = prev.find(
+              m => m.id.startsWith('__optimistic__')
+                && m.content === n.content
+                && m.direction === n.direction
+            );
+            if (matchedOptimistic?.reply_to_message_id && !n.reply_to_message_id) {
+              return { ...n, reply_to_message_id: matchedOptimistic.reply_to_message_id };
+            }
+            return n;
           });
 
-          return [...cleaned, ...incoming];
+          const cleaned = prev.filter(m => {
+            if (!m.id.startsWith('__optimistic__')) return true;
+            return !mergedIncoming.some(n => n.content === m.content && n.direction === m.direction);
+          });
+
+          return [...cleaned, ...mergedIncoming];
         });
         setTimeout(() => scrollToBottom(true), 50);
       } catch { /* ignore polling errors */ }
@@ -545,6 +568,10 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     setSending(true);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
+    // Capture reply context BEFORE clearing it — strip disappears instantly ✓
+    const replyCtx = replyToMsg;
+    setReplyToMsg(null); // ← clear immediately so strip is gone the moment user hits send
+
     // Add optimistic bubble immediately (shows clock icon while API processes)
     const optimisticId = `__optimistic__${++optimisticIdRef.current}`;
     const optimisticMsg: Message = {
@@ -555,7 +582,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       status: 'pending',
       created_at: new Date().toISOString(),
       ai_generated: false,
-      reply_to_message_id: replyToMsg?.id || null,
+      reply_to_message_id: replyCtx?.id || null,
     } as unknown as Message;
     setMessages(prev => [...prev, optimisticMsg]);
     setTimeout(() => scrollToBottom(true), 30);
@@ -563,7 +590,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     try {
       const res = await fetch('/api/chat/send', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId, message: text, replyToMessageId: replyToMsg?.id }),
+        body: JSON.stringify({ conversationId, message: text, replyToMessageId: replyCtx?.id }),
       });
       const apiData = await res.json();
       if (!res.ok || !apiData.success) throw new Error(apiData.error || 'Failed');
@@ -581,9 +608,6 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         if (exists) return withoutOptimistic;
         return [...withoutOptimistic, realMsg];
       });
-      
-      // Clear reply state after successful send
-      setReplyToMsg(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Message failed to send.';
       toast.error(msg);
@@ -745,59 +769,39 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     }
   };
 
-  const handleDeleteMessage = async (msgId: string) => {
-    try {
-      const supabase = supabaseRef.current;
-      const { error } = await supabase.from('messages').delete().eq('id', msgId);
-      if (error) throw error;
+  const handleDeleteMessageConfirm = async (msgId: string, type: 'me' | 'everyone') => {
+    // Close modal first
+    setDeleteConfirmMsg(null);
+    setActiveMessageMenuId(null);
 
-      // Optimistically delete locally
+    const toastId = toast.loading(type === 'me' ? 'Deleting message...' : 'Unsending message...');
+    
+    // Save original messages for rollback on error
+    const originalMessages = [...messages];
+    if (type === 'me') {
       setMessages(prev => prev.filter(m => m.id !== msgId));
-      toast.success('Message deleted');
-    } catch (err) {
-      console.error('Failed to delete:', err);
-      toast.error('Failed to delete message');
+    } else {
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, content: '__DELETED__', reaction: null } : m));
     }
-  };
 
-  const handleSaveToFAQ = async (msg: Message) => {
     try {
-      // Find the previous inbound message as the question
-      const index = messages.findIndex(m => m.id === msg.id);
-      let question = '';
-      let answer = '';
+      const res = await fetch('/api/dashboard/chat/delete-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId: msgId, type }),
+      });
 
-      if (msg.direction === 'inbound') {
-        question = msg.content;
-        answer = 'Placeholder Answer (Please update in settings)';
-      } else {
-        // Find the last inbound message before this one
-        const prevInbound = messages.slice(0, index).reverse().find(m => m.direction === 'inbound');
-        question = prevInbound ? prevInbound.content : 'Placeholder Question (Please update in settings)';
-        answer = msg.content;
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to delete message');
       }
 
-      // Fetch the settings first
-      const getRes = await fetch('/api/dashboard/settings');
-      const getData = await getRes.json();
-      if (!getRes.ok || !getData.success) throw new Error('Failed to fetch settings');
-
-      const existingFaqs = getData.data.custom_faqs || [];
-      const updatedFaqs = [...existingFaqs, { question, answer }];
-
-      // PATCH the updated custom_faqs
-      const patchRes = await fetch('/api/dashboard/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ custom_faqs: updatedFaqs }),
-      });
-      const patchData = await patchRes.json();
-      if (!patchRes.ok || !patchData.success) throw new Error(patchData.error || 'Failed to update settings');
-
-      toast.success('Saved to FAQs!', { description: 'You can customize it in the Settings tab.' });
+      toast.success(type === 'me' ? 'Message deleted' : 'Message unsent for everyone', { id: toastId });
     } catch (err) {
-      console.error('Failed to save FAQ:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to save FAQ');
+      console.error('Failed to delete message:', err);
+      toast.error('Failed to delete message. Reverting...', { id: toastId });
+      // Revert optimistic update
+      setMessages(originalMessages);
     }
   };
 
@@ -830,7 +834,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     <div className="flex-1 flex flex-col relative overflow-hidden" style={chatBgStyle}>
 
       {/* ── Header ── */}
-      <div className="h-[60px] flex items-center justify-between px-5 bg-white dark:bg-[#1C2333] shadow-[0_1px_3px_rgba(0,0,0,0.06)] z-20 flex-shrink-0">
+      <div className="h-[60px] flex items-center justify-between px-5 bg-white dark:bg-[#1C2333] shadow-[0_1px_3px_rgba(0,0,0,0.06)] relative z-30 flex-shrink-0">
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.push('/dashboard/chat')}
@@ -893,23 +897,34 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             </button>
             <AnimatePresence>
               {moreMenuOpen && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.92, y: -4 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.92, y: -4 }}
-                  transition={{ duration: 0.12 }}
-                  className="absolute right-0 top-10 z-50 bg-card border border-border rounded-xl shadow-xl py-1 min-w-[160px]"
-                >
-                  {[
-                    { label: '✅ Mark resolved', action: () => { toggleHumanMode(); setMoreMenuOpen(false); } },
-                    { label: '📋 Copy chat link', action: () => { navigator.clipboard.writeText(window.location.href); toast.success('Chat link copied!'); setMoreMenuOpen(false); } },
-                    { label: '🔇 Mute notifications', action: () => { toast.success('Conversation muted for 24h'); setMoreMenuOpen(false); } },
-                  ].map(item => (
-                    <button key={item.label} onClick={item.action}
-                      className="w-full text-left px-4 py-2 text-[12.5px] hover:bg-muted transition-colors"
-                    >{item.label}</button>
-                  ))}
-                </motion.div>
+                <>
+                  {/* Backdrop */}
+                  <div 
+                    className="fixed inset-0 z-40 cursor-default" 
+                    onClick={() => setMoreMenuOpen(false)}
+                  />
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: -8 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: -8 }}
+                    transition={{ type: "spring", stiffness: 450, damping: 30 }}
+                    className="absolute right-0 top-10 z-50 bg-white/98 dark:bg-[#1C2333]/98 backdrop-blur-md border border-black/5 dark:border-white/10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.06)] py-1.5 min-w-[190px] overflow-hidden"
+                  >
+                    {[
+                      { label: '✅ Mark resolved', action: () => { toggleHumanMode(); setMoreMenuOpen(false); } },
+                      { label: '📋 Copy chat link', action: () => { navigator.clipboard.writeText(window.location.href); toast.success('Chat link copied!'); setMoreMenuOpen(false); } },
+                      { label: '🔇 Mute notifications', action: () => { toast.success('Conversation muted for 24h'); setMoreMenuOpen(false); } },
+                    ].map(item => (
+                      <button 
+                        key={item.label} 
+                        onClick={item.action}
+                        className="w-full text-left px-4 py-2.5 text-[13px] font-medium text-foreground/90 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors flex items-center gap-2.5 cursor-pointer"
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </motion.div>
+                </>
               )}
             </AnimatePresence>
           </div>
@@ -1049,7 +1064,10 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                       
                       <div className="relative">
                         <button 
-                          onClick={() => setActiveMessageMenuId(activeMessageMenuId === msg.id ? null : msg.id)} 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMessageMenuId(activeMessageMenuId === msg.id ? null : msg.id);
+                          }} 
                           title="More options" 
                           className={cn(
                             "w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors",
@@ -1064,7 +1082,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                             <>
                               {/* Backdrop */}
                               <div 
-                                className="fixed inset-0 z-40 cursor-default" 
+                                className="fixed inset-0 z-40 cursor-default bg-black/[0.01]" 
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setActiveMessageMenuId(null);
@@ -1074,24 +1092,24 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                                 initial={{ opacity: 0, scale: 0.88, y: 6 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.88, y: 6 }}
-                                transition={{ type: 'spring', stiffness: 420, damping: 32, mass: 0.7 }}
+                                transition={{ type: 'spring', stiffness: 450, damping: 30 }}
                                 style={{ transformOrigin: isInbound ? 'top left' : 'top right' }}
                                 className={cn(
                                   "absolute z-50 flex flex-col bottom-9 cursor-default select-none",
-                                  "w-[210px] rounded-[18px] overflow-hidden",
-                                  "bg-[rgba(14,18,30,0.96)] backdrop-blur-xl",
-                                  "border border-white/[0.07]",
-                                  "shadow-[0_16px_48px_rgba(0,0,0,0.55),0_2px_8px_rgba(0,0,0,0.3)]",
+                                  "w-[190px] rounded-[22px] overflow-hidden p-1.5 gap-1.5",
+                                  "bg-white/98 dark:bg-[#1C2333]/98 backdrop-blur-xl",
+                                  "border border-black/5 dark:border-white/10",
+                                  "shadow-[0_12px_42px_rgba(0,0,0,0.16),0_2px_8px_rgba(0,0,0,0.08)]",
                                   isInbound ? "left-0" : "right-0"
                                 )}
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 {/* ── Reaction row ── */}
-                                <div className="flex items-center justify-between px-3 py-3">
+                                <div className="flex items-center justify-between px-1 py-1">
                                   {['👍', '❤️', '😂', '😮', '😢', '🙏'].map(emoji => (
                                     <motion.button
                                       key={emoji}
-                                      whileHover={{ scale: 1.22, y: -2 }}
+                                      whileHover={{ scale: 1.25, y: -2 }}
                                       whileTap={{ scale: 0.92 }}
                                       transition={{ type: 'spring', stiffness: 500, damping: 25 }}
                                       onClick={() => {
@@ -1099,11 +1117,11 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                                         setActiveMessageMenuId(null);
                                       }}
                                       className={cn(
-                                        "w-8 h-8 rounded-xl flex items-center justify-center text-[18px]",
-                                        "transition-colors duration-150",
+                                        "w-7 h-7 rounded-lg flex items-center justify-center text-[17px]",
+                                        "transition-colors duration-150 cursor-pointer text-foreground/80 hover:text-foreground",
                                         msg.reaction === emoji
-                                          ? "bg-white/[0.12] ring-1 ring-white/20"
-                                          : "hover:bg-white/[0.08]"
+                                          ? "bg-black/[0.08] dark:bg-white/[0.12] ring-1 ring-black/10 dark:ring-white/20"
+                                          : "hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
                                       )}
                                     >
                                       {emoji}
@@ -1112,68 +1130,48 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                                 </div>
 
                                 {/* Divider */}
-                                <div className="mx-3 h-px bg-white/[0.06]" />
+                                <div className="h-px bg-black/[0.06] dark:bg-white/[0.06] mx-2" />
 
                                 {/* ── Menu items ── */}
-                                <div className="py-1.5 px-1.5 flex flex-col gap-0.5">
-                                  <motion.button
-                                    whileHover={{ backgroundColor: 'rgba(255,255,255,0.06)', x: 0 }}
-                                    transition={{ duration: 0.12 }}
+                                <div className="flex flex-col gap-0.5">
+                                  <button
                                     onClick={() => {
                                       setReplyToMsg(msg);
                                       setActiveMessageMenuId(null);
                                     }}
-                                    className="group flex items-center gap-3 px-3 rounded-xl text-left w-full"
-                                    style={{ minHeight: '42px' }}
+                                    className="group flex items-center gap-3 px-3 py-2 rounded-xl text-left w-full hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors cursor-pointer text-foreground/90 font-semibold text-[13px]"
+                                    style={{ minHeight: '38px' }}
                                   >
-                                    <Reply className="w-[15px] h-[15px] flex-shrink-0" style={{ color: 'rgba(255,255,255,0.55)' }} />
-                                    <span className="text-[13.5px] font-[500]" style={{ color: 'rgba(255,255,255,0.88)' }}>Reply</span>
-                                  </motion.button>
+                                    <Reply className="w-4 h-4 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
+                                    <span>Reply</span>
+                                  </button>
 
-                                  <motion.button
-                                    whileHover={{ backgroundColor: 'rgba(255,255,255,0.06)' }}
-                                    transition={{ duration: 0.12 }}
+                                  <button
                                     onClick={() => {
                                       copyMessage(msg.id, msg.media_url || msg.content || '');
                                       setActiveMessageMenuId(null);
                                     }}
-                                    className="group flex items-center gap-3 px-3 rounded-xl text-left w-full"
-                                    style={{ minHeight: '42px' }}
+                                    className="group flex items-center gap-3 px-3 py-2 rounded-xl text-left w-full hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors cursor-pointer text-foreground/90 font-semibold text-[13px]"
+                                    style={{ minHeight: '38px' }}
                                   >
-                                    <Copy className="w-[15px] h-[15px] flex-shrink-0" style={{ color: 'rgba(255,255,255,0.55)' }} />
-                                    <span className="text-[13.5px] font-[500]" style={{ color: 'rgba(255,255,255,0.88)' }}>{msg.media_url ? 'Copy link' : 'Copy text'}</span>
-                                  </motion.button>
-
-                                  <motion.button
-                                    whileHover={{ backgroundColor: 'rgba(255,255,255,0.06)' }}
-                                    transition={{ duration: 0.12 }}
-                                    onClick={() => {
-                                      handleSaveToFAQ(msg);
-                                      setActiveMessageMenuId(null);
-                                    }}
-                                    className="group flex items-center gap-3 px-3 rounded-xl text-left w-full"
-                                    style={{ minHeight: '42px' }}
-                                  >
-                                    <HelpCircle className="w-[15px] h-[15px] flex-shrink-0" style={{ color: 'rgba(255,255,255,0.55)' }} />
-                                    <span className="text-[13.5px] font-[500]" style={{ color: 'rgba(255,255,255,0.88)' }}>Save to FAQ</span>
-                                  </motion.button>
+                                    <Copy className="w-4 h-4 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
+                                    <span>{msg.media_url ? 'Copy link' : 'Copy text'}</span>
+                                  </button>
 
                                   {/* Delete divider */}
-                                  <div className="mx-1.5 my-1 h-px bg-white/[0.06]" />
+                                  <div className="h-px bg-black/[0.06] dark:bg-white/[0.06] mx-2 my-0.5" />
 
-                                  <motion.button
-                                    whileHover={{ backgroundColor: 'rgba(255,107,107,0.10)' }}
-                                    transition={{ duration: 0.12 }}
+                                  <button
                                     onClick={() => {
-                                      handleDeleteMessage(msg.id);
+                                      setDeleteConfirmMsg(msg);
                                       setActiveMessageMenuId(null);
                                     }}
-                                    className="group flex items-center gap-3 px-3 rounded-xl text-left w-full"
-                                    style={{ minHeight: '42px' }}
+                                    className="group flex items-center gap-3 px-3 py-2 rounded-xl text-left w-full hover:bg-red-500/10 dark:hover:bg-red-500/20 transition-colors cursor-pointer text-red-500 font-semibold text-[13px]"
+                                    style={{ minHeight: '38px' }}
                                   >
-                                    <Trash2 className="w-[15px] h-[15px] flex-shrink-0" style={{ color: '#FF6B6B' }} />
-                                    <span className="text-[13.5px] font-[500]" style={{ color: '#FF6B6B' }}>Delete</span>
-                                  </motion.button>
+                                    <Trash2 className="w-4 h-4 text-red-500" />
+                                    <span>Delete</span>
+                                  </button>
                                 </div>
                               </motion.div>
                             </>
@@ -1245,12 +1243,12 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                       transition={{ duration: 0.15, ease: 'easeOut' }}
                       className={cn('group w-full relative', msg.reaction && 'mb-2.5')}
                     >
-                    <SwipeToReplyRow isInbound={isInbound} onReply={() => setReplyToMsg(msg)}>
+                    <SwipeToReplyRow isInbound={isInbound} onReply={() => setReplyToMsg(msg)} isActive={activeMessageMenuId === msg.id}>
                       <div className={cn('w-full flex items-end gap-1', isInbound ? 'justify-start' : 'justify-end')}>
                       {/* Outbound: toolbar floats LEFT of bubble */}
-                      {!isInbound && hoverToolbar}
+                      {!isInbound && msg.content !== '__DELETED__' && hoverToolbar}
 
-                      {msg.media_url ? (
+                      {msg.media_url && msg.content !== '__DELETED__' ? (
                         /* ── Attachment bubble ── */
                         <div 
                           id={`msg-${msg.id}`}
@@ -1296,13 +1294,47 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
                           {/* Reaction badge */}
                           {msg.reaction && (
-                            <div className={cn(
-                              "absolute bottom-[-10px] bg-white dark:bg-[#1C2333] border border-border rounded-full px-1.5 py-0.5 text-[12px] shadow-sm flex items-center justify-center select-none z-10",
-                              isInbound ? "right-2" : "left-2"
-                            )}>
-                              {msg.reaction}
-                            </div>
+                            <motion.button
+                              whileHover={{ scale: 1.1, y: -1 }}
+                              whileTap={{ scale: 0.95 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEmojiReaction(msg.id, null);
+                              }}
+                              className={cn(
+                                "absolute bottom-[-12px] z-20 flex items-center justify-center select-none cursor-pointer",
+                                "bg-white dark:bg-[#1F2B3E]",
+                                "border border-black/5 dark:border-white/10",
+                                "rounded-full px-2 py-0.5 shadow-[0_4px_12px_rgba(0,0,0,0.08),0_2px_4px_rgba(0,0,0,0.04)]",
+                                "text-[12px] font-semibold transition-all duration-150 hover:bg-black/[0.02] dark:hover:bg-white/[0.04]",
+                                isInbound ? "right-3.5" : "left-3.5"
+                              )}
+                            >
+                              <span>{msg.reaction}</span>
+                            </motion.button>
                           )}
+                        </div>
+                      ) : msg.content === '__DELETED__' ? (
+                        /* ── Deleted message placeholder ── */
+                        <div 
+                          id={`msg-${msg.id}`}
+                          className={cn(
+                            'max-w-[65%] px-3.5 py-2.5 text-[13px] leading-relaxed border transition-all duration-150 relative select-none flex items-center gap-2',
+                            isInbound
+                              ? 'bg-black/[0.03] dark:bg-white/[0.03] border-black/5 dark:border-white/5 text-muted-foreground/60 rounded-2xl rounded-tl-sm'
+                              : 'bg-black/[0.06] dark:bg-white/[0.06] border-black/5 dark:border-white/5 text-white/50 rounded-2xl rounded-tr-sm'
+                          )}
+                        >
+                          <AlertCircle className="w-3.5 h-3.5 opacity-55 flex-shrink-0" />
+                          <span className="italic font-medium">
+                            {isInbound ? "This message was deleted" : "You deleted this message"}
+                          </span>
+                          <span className={cn(
+                            'text-[9px] ml-1 self-end whitespace-nowrap opacity-60',
+                            isInbound ? 'text-black/30 dark:text-white/30' : 'text-white/40'
+                          )}>
+                            {formatTime(msg.created_at)}
+                          </span>
                         </div>
                       ) : (
                         /* ── Text bubble ── */
@@ -1344,18 +1376,30 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
                           {/* Reaction badge */}
                           {msg.reaction && (
-                            <div className={cn(
-                              "absolute bottom-[-10px] bg-white dark:bg-[#1C2333] border border-border rounded-full px-1.5 py-0.5 text-[12px] shadow-sm flex items-center justify-center select-none z-10",
-                              isInbound ? "right-2" : "left-2"
-                            )}>
-                              {msg.reaction}
-                            </div>
+                            <motion.button
+                              whileHover={{ scale: 1.1, y: -1 }}
+                              whileTap={{ scale: 0.95 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEmojiReaction(msg.id, null);
+                              }}
+                              className={cn(
+                                "absolute bottom-[-12px] z-20 flex items-center justify-center select-none cursor-pointer",
+                                "bg-white dark:bg-[#1F2B3E]",
+                                "border border-black/5 dark:border-white/10",
+                                "rounded-full px-2 py-0.5 shadow-[0_4px_12px_rgba(0,0,0,0.08),0_2px_4px_rgba(0,0,0,0.04)]",
+                                "text-[12px] font-semibold transition-all duration-150 hover:bg-black/[0.02] dark:hover:bg-white/[0.04]",
+                                isInbound ? "right-3.5" : "left-3.5"
+                              )}
+                            >
+                              <span>{msg.reaction}</span>
+                            </motion.button>
                           )}
                         </div>
                       )}
 
                       {/* Inbound: toolbar floats RIGHT of bubble */}
-                      {isInbound && hoverToolbar}
+                      {isInbound && msg.content !== '__DELETED__' && hoverToolbar}
                       </div>
                     </SwipeToReplyRow>
                     </motion.div>
@@ -1567,6 +1611,57 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           </button>
         </div>
       </div>
+
+      {/* ── Delete Confirmation Modal ── */}
+      <AnimatePresence>
+        {deleteConfirmMsg && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDeleteConfirmMsg(null)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-xs cursor-default"
+            />
+            
+            {/* Modal Body */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 15 }}
+              transition={{ type: 'spring', stiffness: 450, damping: 30 }}
+              className="relative w-full max-w-[340px] bg-white/95 dark:bg-[#1C2333]/95 backdrop-blur-md rounded-[24px] overflow-hidden p-6 text-center shadow-[0_10px_40px_rgba(0,0,0,0.12)] border border-black/5 dark:border-white/10"
+            >
+              <h3 className="text-[17px] font-bold text-foreground mb-1.5">Delete message?</h3>
+              <p className="text-[13px] text-muted-foreground/80 leading-normal mb-6 px-2">
+                Choose how you want to remove this message.
+              </p>
+
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => handleDeleteMessageConfirm(deleteConfirmMsg.id, 'me')}
+                  className="w-full h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white font-semibold text-[13.5px] transition-colors flex items-center justify-center cursor-pointer shadow-sm shadow-red-500/10"
+                >
+                  Delete for me
+                </button>
+                <button
+                  onClick={() => handleDeleteMessageConfirm(deleteConfirmMsg.id, 'everyone')}
+                  className="w-full h-11 rounded-xl bg-black/[0.04] dark:bg-white/[0.06] hover:bg-black/[0.06] dark:hover:bg-white/[0.08] text-foreground font-semibold text-[13.5px] transition-colors flex items-center justify-center cursor-pointer border border-black/[0.04] dark:border-white/[0.04]"
+                >
+                  Delete for everyone
+                </button>
+                <button
+                  onClick={() => setDeleteConfirmMsg(null)}
+                  className="w-full h-11 rounded-xl text-muted-foreground hover:text-foreground font-semibold text-[13.5px] transition-colors flex items-center justify-center cursor-pointer mt-1"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

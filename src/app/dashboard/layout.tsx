@@ -14,6 +14,7 @@ export default async function DashboardLayout({
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   let userEmail = "";
+  let userName = "";
 
   if (supabaseUrl && supabaseKey && supabaseUrl !== "https://your-project.supabase.co") {
     const supabase = createServerClient(supabaseUrl, supabaseKey, {
@@ -42,9 +43,17 @@ export default async function DashboardLayout({
     // without SELECT policies, causing the onboarding check to be skipped.
     const { data: userData } = await supabaseAdmin
       .from("users")
-      .select("tenant_id, tenants(onboarding_completed)")
+      .select("tenant_id, full_name, tenants(onboarding_completed)")
       .eq("auth_id", user.id)
       .maybeSingle();
+
+    if (userData?.full_name) {
+      userName = (userData.full_name as string).split(" ")[0];
+    } else if (user.user_metadata?.full_name) {
+      userName = (user.user_metadata.full_name as string).split(" ")[0];
+    } else if (user.email) {
+      userName = user.email.split("@")[0];
+    }
 
     if (userData?.tenant_id) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -59,5 +68,5 @@ export default async function DashboardLayout({
     }
   }
 
-  return <DashboardLayoutClient userEmail={userEmail}>{children}</DashboardLayoutClient>;
+  return <DashboardLayoutClient userEmail={userEmail} userName={userName}>{children}</DashboardLayoutClient>;
 }

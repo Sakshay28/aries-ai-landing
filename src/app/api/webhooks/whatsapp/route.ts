@@ -97,7 +97,7 @@ async function processWebhookAsync(parsed: NonNullable<ReturnType<typeof parseMe
   }
 
   if (parsed.isReaction) {
-    console.log(`👍 Meta Webhook: reaction ignored (emoji: ${parsed.reactionEmoji}, to: ${parsed.reactedToMessageId})`);
+    await handleIncomingReaction(parsed);
     return;
   }
 
@@ -672,5 +672,44 @@ async function handleStatusUpdate(msg: NonNullable<ReturnType<typeof parseMetaWe
     console.warn(`⚠️ Meta status update: No message matched wa_message_id="${msg.messageId}" in DB.`);
   } else {
     console.log(`📬 Meta status update success: ${msg.messageId} → ${mappedStatus} (updated message ${updated[0].id})`);
+  }
+}
+
+// ── Inbound Reaction Processing ──
+async function handleIncomingReaction(msg: NonNullable<ReturnType<typeof parseMetaWebhook>>) {
+  if (!msg.reactedToMessageId || !msg.appPhoneId) {
+    console.warn('⚠️ Meta Webhook: skipping reaction with missing identifiers');
+    return;
+  }
+
+  // 1. Resolve Tenant by App Phone Number ID
+  const tenant = await getTenantByPhoneNumberId(msg.appPhoneId);
+  if (!tenant) {
+    console.error(`❌ Meta Webhook reaction: no tenant found with wa_phone_number_id="${msg.appPhoneId}"`);
+    return;
+  }
+
+  const emoji = msg.reactionEmoji || null;
+  console.log(`👍 Meta Webhook reaction: updating message ${msg.reactedToMessageId} to ${emoji || 'no reaction'}`);
+
+  const { data: updated, error } = await supabaseAdmin
+    .from('messages')
+    .update({ reaction: emoji })
+    .eq('tenant_id', tenant.id)
+    .eq('wa_message_id', msg.reactedToMessageId)
+    .select('id, conversation_id');
+
+  if (error) {
+    console.error(`❌ Meta Webhook reaction update failed: ${error.message}`);
+  } else if (!updated || updated.length === 0) {
+    console.warn(`⚠️ Meta Webhook reaction: No message matched wa_message_id="${msg.reactedToMessageId}" in DB.`);
+  } else {
+    console.log(`👍 Meta Webhook reaction: successfully updated reaction for message ${updated[0].id}`);
+    
+    // Update conversation last_message_at for UI responsiveness
+    void supabaseAdmin
+      .from('conversations')
+      .update({ last_message_at: new Date().toISOString() })
+      .eq('id', updated[0].conversation_id);
   }
 }

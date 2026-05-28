@@ -103,9 +103,15 @@ const NODE_WIDTHS: Record<string, number> = {
 
 // ─── INNER COMPONENT ─────────────────────────────────────────────────────────
 function FlowCanvasInner() {
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, undo, redo, saveHistory } =
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, undo, redo, saveHistory, fitViewTrigger } =
     useFlowStore();
   const { screenToFlowPosition, fitView, zoomIn, zoomOut, setCenter } = useReactFlow();
+
+  useEffect(() => {
+    if (fitViewTrigger === 0) return;
+    const id = setTimeout(() => fitView({ padding: 0.2, duration: 400 }), 50);
+    return () => clearTimeout(id);
+  }, [fitViewTrigger, fitView]);
   const updateNodeInternals = useUpdateNodeInternals();
   const clipboardRef = useRef<Node | null>(null);
   const justDropped = useRef(false);

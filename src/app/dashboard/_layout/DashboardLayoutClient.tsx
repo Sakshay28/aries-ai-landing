@@ -1,19 +1,28 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { createContext, useContext } from "react";
 import AppHeader from "./AppHeader";
 import AppSidebar from "./AppSidebar";
 import Backdrop from "./Backdrop";
 import { SidebarProvider } from "./SidebarContext";
 
+// ── User context: makes server-fetched user info available to any client child ──
+interface UserCtx { userName: string; userEmail: string; }
+const UserContext = createContext<UserCtx>({ userName: "", userEmail: "" });
+export const useUserContext = () => useContext(UserContext);
+
 export default function DashboardLayoutClient({
   children,
   userEmail,
+  userName,
 }: {
   children: ReactNode;
   userEmail?: string;
+  userName?: string;
 }) {
   return (
+    <UserContext.Provider value={{ userName: userName || "", userEmail: userEmail || "" }}>
     <SidebarProvider>
       {/* Root: full-screen flex row */}
       <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
@@ -42,5 +51,6 @@ export default function DashboardLayoutClient({
         </div>
       </div>
     </SidebarProvider>
+    </UserContext.Provider>
   );
 }

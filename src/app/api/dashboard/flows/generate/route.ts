@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTenantId } from '@/lib/auth/getTenantId';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 
 // ── Deterministic flow templates keyed by intent keyword ─────────────────────
 // The AI layer normalises the prompt into an intent, then we return a
@@ -122,8 +123,22 @@ function detectIntent(prompt: string): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const tenantId = await getTenantId();
-    if (!tenantId) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    // Lightweight auth check: only needs anon key + valid session cookie.
+    // We do NOT need getTenantId (which requires the users table + service role
+    // key) because this endpoint returns hardcoded blueprints only.
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (supabaseUrl && supabaseKey && supabaseUrl !== 'https://your-project.supabase.co') {
+      const cookieStore = await cookies();
+      const supabase = createServerClient(supabaseUrl, supabaseKey, {
+        cookies: {
+          getAll() { return cookieStore.getAll(); },
+          setAll() {},
+        },
+      });
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
 
     const { prompt } = await req.json() as { prompt: string };
     if (!prompt?.trim()) return NextResponse.json({ success: false, error: 'Prompt is required' }, { status: 400 });

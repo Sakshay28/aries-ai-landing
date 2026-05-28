@@ -144,9 +144,37 @@ function SignupInner() {
   }
 
   return (
-    <div style={styles.root}>
+    <>
+      <style>{`
+        @media (max-width: 768px) {
+          .signup-root { display: block !important; }
+          .signup-left { display: none !important; }
+          .signup-right {
+            flex: unset !important;
+            padding: 40px 24px 64px !important;
+            min-height: 100vh !important;
+            align-items: stretch !important;
+          }
+          .signup-topright {
+            position: relative !important;
+            top: auto !important;
+            right: auto !important;
+            margin-bottom: 20px !important;
+            text-align: center !important;
+          }
+          .signup-form-card {
+            max-width: 100% !important;
+          }
+        }
+        @media (max-width: 480px) {
+          .signup-right {
+            padding: 32px 20px 60px !important;
+          }
+        }
+      `}</style>
+      <div style={styles.root} className="signup-root">
       {/* ── LEFT PANE: value prop ─────────────────────────────── */}
-      <aside style={styles.left}>
+      <aside style={styles.left} className="signup-left">
         <div style={styles.leftInner}>
           <Link href="/" style={styles.logoWrap}>
             <img src="/logo.png" alt="Aries AI" style={{ height: 38 }} />
@@ -185,15 +213,15 @@ function SignupInner() {
       </aside>
 
       {/* ── RIGHT PANE: form ──────────────────────────────────── */}
-      <main style={styles.right}>
-        <div style={styles.topRight}>
+      <main style={styles.right} className="signup-right">
+        <div style={styles.topRight} className="signup-topright">
           Already a member?{" "}
           <Link href="/login" style={{ color: G, fontWeight: 700, textDecoration: "none" }}>
             Log in
           </Link>
         </div>
 
-        <div style={styles.formCard}>
+        <div style={styles.formCard} className="signup-form-card">
           <h2 style={styles.formTitle}>Create your Aries AI account</h2>
           <p style={styles.formSub}>
             Fill in the details below to launch your free 14-day trial.
@@ -385,6 +413,7 @@ function SignupInner() {
         </div>
       </main>
     </div>
+    </>
   );
 }
 

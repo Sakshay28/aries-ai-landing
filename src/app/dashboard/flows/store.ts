@@ -37,6 +37,7 @@ type FlowState = {
   undo: () => void;
   redo: () => void;
   setConnectingNodeId: (id: string | null) => void;
+  fitViewTrigger: number;
   loadTemplate: (nodes: AppNode[], edges: Edge[]) => void;
   loadFlow: (id: string) => Promise<void>;
   saveFlow: (name?: string) => Promise<string | null>;
@@ -57,6 +58,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   isPublishing: false,
   isSaving: false,
   connectingNodeId: null,
+  fitViewTrigger: 0,
   history: { past: [], future: [] },
   
   saveHistory: () => {
@@ -69,7 +71,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   },
 
   loadTemplate: (nodes: AppNode[], edges: Edge[]) => {
-    set({ nodes, edges, history: { past: [], future: [] } });
+    set(s => ({ nodes, edges, history: { past: [], future: [] }, fitViewTrigger: s.fitViewTrigger + 1 }));
   },
 
   undo: () => {
