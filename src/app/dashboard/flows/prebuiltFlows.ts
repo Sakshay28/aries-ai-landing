@@ -26,7 +26,7 @@ const generateEdge = (source: string, target: string, sourceHandle?: string) => 
 };
 
 export function getPrebuiltFlow(templateId: string, businessType: string): { nodes: AppNode[], edges: Edge[] } {
-  if (templateId === 'blank' || businessType === 'blank') {
+  if (templateId === 'blank') {
     return { nodes: [], edges: [] };
   }
 
