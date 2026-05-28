@@ -372,7 +372,8 @@ export function IntegrationsClient() {
       toast.error('Google authorization was denied.');
       window.history.replaceState({}, '', '/dashboard/integrations');
     } else if (error === 'google_sheets_failed') {
-      toast.error('Failed to connect Google Sheets. Please try again.');
+      const detail = searchParams.get('detail');
+      toast.error(`Google Sheets failed: ${detail || 'unknown error'}`, { duration: 8000 });
       window.history.replaceState({}, '', '/dashboard/integrations');
     }
   }, [searchParams, load]);

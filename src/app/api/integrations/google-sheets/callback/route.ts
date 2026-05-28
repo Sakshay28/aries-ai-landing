@@ -18,10 +18,14 @@ export async function GET(req: NextRequest) {
       Buffer.from(state, 'base64url').toString('utf-8')
     ) as { tenantId: string; spreadsheetId: string };
 
+    if (!tenantId) throw new Error('No tenantId in state');
+
     await exchangeAndStoreSheets(code, tenantId, spreadsheetId || '');
+    console.log(`✅ Google Sheets connected for tenant ${tenantId}`);
     return NextResponse.redirect(`${base}/dashboard/integrations?success=google_sheets`);
   } catch (e) {
-    console.error('Google Sheets callback error:', e);
-    return NextResponse.redirect(`${base}/dashboard/integrations?error=google_sheets_failed`);
+    const msg = (e as Error).message ?? 'unknown';
+    console.error('Google Sheets callback error:', msg);
+    return NextResponse.redirect(`${base}/dashboard/integrations?error=google_sheets_failed&detail=${encodeURIComponent(msg)}`);
   }
 }

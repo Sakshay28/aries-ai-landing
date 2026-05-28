@@ -68,12 +68,15 @@ export async function exchangeAndStoreSheets(
     sheet_name:     'Leads',
   };
 
-  await supabaseAdmin
+  const now = new Date().toISOString();
+  const { error: upsertError } = await supabaseAdmin
     .from('tenant_integrations')
     .upsert(
-      { tenant_id: tenantId, integration_id: 'google_sheets', config, is_active: true },
+      { tenant_id: tenantId, integration_id: 'google_sheets', config, is_active: true, connected_at: now, updated_at: now },
       { onConflict: 'tenant_id,integration_id' }
     );
+
+  if (upsertError) throw new Error(`Failed to save Google Sheets config: ${upsertError.message}`);
 }
 
 // ── Load + auto-refresh token ──────────────────────────────
