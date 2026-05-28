@@ -69,6 +69,52 @@ export function getPrebuiltFlow(templateId: string, businessType: string): { nod
     return { nodes, edges };
   }
 
+  if (templateId === 'clock-tower-feedback') {
+    const nodes: AppNode[] = [
+      { id: 'fb1', type: 'trigger',     position: { x: 400, y: 50  }, data: { label: 'Post-Visit Trigger',      triggerType: 'keyword', keywords: ['feedback','review','rate','experience','visited'] } },
+      { id: 'fb2', type: 'standard',    position: { x: 400, y: 210 }, data: { label: 'Thank You Message',       content: "Thank you for dining at Clock Tower Restaurant! 🏰\n\nWe'd love to hear about your experience. It only takes 30 seconds! 😊" } },
+      { id: 'fb3', type: 'send_buttons',position: { x: 400, y: 390 }, data: { label: 'Rate Your Visit',         message: 'How would you rate your overall experience?', buttons: [{ id: 'b1', label: '⭐⭐⭐⭐⭐ Excellent', value: 'rating_5' },{ id: 'b2', label: '⭐⭐⭐⭐ Good', value: 'rating_4' },{ id: 'b3', label: '⭐⭐⭐ Needs Work', value: 'rating_low' }] } },
+      { id: 'fb4', type: 'condition',   position: { x: 400, y: 570 }, data: { label: 'High Rating?',            field: 'button_value', operator: '!=', value: 'rating_low' } },
+      { id: 'fb5', type: 'standard',    position: { x: 150, y: 750 }, data: { label: 'Ask for Review',          content: "That's wonderful to hear! 🌟\n\nWould you mind sharing your experience on Google? It truly helps us grow:\n👉 g.page/clocktowerrestaurant\n\nThank you so much!" } },
+      { id: 'fb6', type: 'standard',    position: { x: 700, y: 750 }, data: { label: 'Service Recovery',        content: "We're really sorry to hear that. 😔\n\nYour feedback means a lot and we'd love to make it right. A manager will reach out to you shortly." } },
+      { id: 'fb7', type: 'handoff',     position: { x: 700, y: 940 }, data: { label: 'Alert Manager',           message: '⚠️ Low Rating Alert\nA guest left a low rating. Please follow up immediately.' } },
+      { id: 'fb8', type: 'end',         position: { x: 150, y: 960 }, data: { label: 'End' } },
+      { id: 'fb9', type: 'end',         position: { x: 700, y: 1100}, data: { label: 'End' } },
+    ];
+    const edges: Edge[] = [
+      generateEdge('fb1', 'fb2'),
+      generateEdge('fb2', 'fb3'),
+      generateEdge('fb3', 'fb4'),
+      generateEdge('fb4', 'fb5', 'true'),
+      generateEdge('fb4', 'fb6', 'false'),
+      generateEdge('fb5', 'fb8'),
+      generateEdge('fb6', 'fb7'),
+      generateEdge('fb7', 'fb9'),
+    ];
+    return { nodes, edges };
+  }
+
+  if (templateId === 'clock-tower-events') {
+    const nodes: AppNode[] = [
+      { id: 'ev1',  type: 'trigger',     position: { x: 400, y: 50   }, data: { label: 'Event Enquiry Trigger',   triggerType: 'keyword', keywords: ['event','birthday','anniversary','corporate','private','party','celebration','book event','function'] } },
+      { id: 'ev2',  type: 'standard',    position: { x: 400, y: 210  }, data: { label: 'Welcome',                 content: "Welcome to Clock Tower Restaurant! 🏰🎉\n\nWe'd love to host your special occasion. We offer private dining for birthdays, anniversaries, corporate events, and more!" } },
+      { id: 'ev3',  type: 'send_buttons',position: { x: 400, y: 390  }, data: { label: 'Event Type',              message: 'What type of event are you planning?', buttons: [{ id: 'b1', label: '🎂 Birthday / Anniversary', value: 'personal' },{ id: 'b2', label: '💼 Corporate Event', value: 'corporate' },{ id: 'b3', label: '🎊 Other Celebration', value: 'other' }] } },
+      { id: 'ev4',  type: 'intake_form', position: { x: 400, y: 570  }, data: { label: 'Collect Event Details',   fields: [{ id: 'f1', name: 'Your Name', type: 'text', required: true, saveAs: 'host_name', placeholder: 'Full name' },{ id: 'f2', name: 'Event Date', type: 'text', required: true, saveAs: 'event_date', placeholder: 'e.g. 15 June 2025' },{ id: 'f3', name: 'Number of Guests', type: 'text', required: true, saveAs: 'guest_count', placeholder: 'e.g. 25' },{ id: 'f4', name: 'Budget per person (approx)', type: 'text', required: false, saveAs: 'budget', placeholder: 'e.g. ₹800' },{ id: 'f5', name: 'Special Requirements', type: 'text', required: false, saveAs: 'requirements', placeholder: 'Decor, menu, AV setup...' }] } },
+      { id: 'ev5',  type: 'standard',    position: { x: 400, y: 800  }, data: { label: 'Acknowledgement',         content: "Thank you, {{host_name}}! 🎉\n\nWe've received your enquiry for {{guest_count}} guests on {{event_date}}.\n\nOur events team will contact you within 2 hours to discuss your personalised package. We can't wait to celebrate with you! 🥂" } },
+      { id: 'ev6',  type: 'handoff',     position: { x: 400, y: 980  }, data: { label: 'Notify Events Team',      message: '🎉 New Event Enquiry!\nHost: {{host_name}}\nDate: {{event_date}}\nGuests: {{guest_count}}\nBudget: {{budget}}\nRequirements: {{requirements}}\n\n📞 Please call back within 2 hours.' } },
+      { id: 'ev7',  type: 'end',         position: { x: 400, y: 1140 }, data: { label: 'End' } },
+    ];
+    const edges: Edge[] = [
+      generateEdge('ev1', 'ev2'),
+      generateEdge('ev2', 'ev3'),
+      generateEdge('ev3', 'ev4'),
+      generateEdge('ev4', 'ev5'),
+      generateEdge('ev5', 'ev6'),
+      generateEdge('ev6', 'ev7'),
+    ];
+    return { nodes, edges };
+  }
+
   if (templateId === 'product-recs') {
     const nodes: AppNode[] = [
       { id: 'trigger_1', type: 'trigger', position: { x: 400, y: 50 }, data: { label: 'User Request', triggerType: 'Keyword Match' } },
