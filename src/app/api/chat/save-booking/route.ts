@@ -2,6 +2,82 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
 
+// ── Parse a free-form datetime string from an intake form ────────────────────
+// Handles inputs like:
+//   "Tomorrow 8 PM", "31 May 7:30 PM", "2026-05-31 20:00", "31st May 2026 8pm"
+// Returns { bookingDate: 'YYYY-MM-DD', slotTime: 'HH:MM:00' }
+function parseDatetime(raw: string): { bookingDate: string; slotTime: string } {
+  const now = new Date();
+  const nowIST = new Date(now.getTime() + (5.5 * 60 * 60 * 1000)); // IST offset
+  let bookingDate = nowIST.toISOString().slice(0, 10);
+  let slotTime = '19:30:00';
+
+  try {
+    const s = raw.trim().toLowerCase();
+
+    // ── Relative day keywords ──────────────────────────────────────────────
+    let baseDate = new Date(nowIST);
+    if (s.includes('tomorrow')) {
+      baseDate.setDate(baseDate.getDate() + 1);
+    } else if (s.includes('day after')) {
+      baseDate.setDate(baseDate.getDate() + 2);
+    } else if (s.includes('today')) {
+      // keep baseDate as today
+    } else {
+      // Try to find DD MMM / MMM DD / YYYY-MM-DD patterns
+      const isoMatch = raw.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (isoMatch) {
+        baseDate = new Date(`${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`);
+      } else {
+        const months: Record<string, number> = {
+          // 3-letter abbreviations
+          jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11,
+          // Full names
+          january:0, february:1, march:2, april:3, june:5, july:6, august:7,
+          september:8, october:9, november:10, december:11,
+        };
+        const monthKeys = Object.keys(months).sort((a,b) => b.length - a.length).join('|');
+        const dayMonthMatch = raw.match(new RegExp(`(\\d{1,2})(?:st|nd|rd|th)?\\s+(${monthKeys})`, 'i'));
+        const monDayMatch  = raw.match(new RegExp(`(${monthKeys})\\s+(\\d{1,2})(?:st|nd|rd|th)?`, 'i'));
+        const matched = dayMonthMatch || monDayMatch;
+        if (matched) {
+          const [, a, b] = matched;
+          const day = parseInt(dayMonthMatch ? a : b);
+          const mon = months[(dayMonthMatch ? b : a).toLowerCase()];
+          if (!isNaN(day) && mon !== undefined) {
+            // Use UTC to avoid timezone shift corrupting the date string
+            baseDate = new Date(Date.UTC(nowIST.getUTCFullYear(), mon, day));
+            // If the parsed date is in the past (before today IST), assume next year
+            const todayStr = nowIST.toISOString().slice(0, 10);
+            if (baseDate.toISOString().slice(0, 10) < todayStr) {
+              baseDate = new Date(Date.UTC(nowIST.getUTCFullYear() + 1, mon, day));
+            }
+          }
+        }
+      }
+    }
+    // Use UTC date string directly (no timezone offset corruption)
+    bookingDate = baseDate.toISOString().slice(0, 10);
+
+    // ── Time parsing ──────────────────────────────────────────────────────
+    // Matches: "8 PM", "8:30 PM", "20:00", "8pm", "8.30pm"
+    const timeMatch = raw.match(/(\d{1,2})[:\.]?(\d{2})?\s*(am|pm)/i)
+                   || raw.match(/(\d{2}):(\d{2})/);
+    if (timeMatch) {
+      let h = parseInt(timeMatch[1]);
+      const m = parseInt(timeMatch[2] || '0');
+      const meridiem = (timeMatch[3] || '').toLowerCase();
+      if (meridiem === 'pm' && h < 12) h += 12;
+      if (meridiem === 'am' && h === 12) h = 0;
+      slotTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
+    }
+  } catch {
+    // On any parse failure, fall back to defaults already set
+  }
+
+  return { bookingDate, slotTime };
+}
+
 export async function POST(req: NextRequest) {
   try {
     // 1. Resolve Tenant ID from server-sent X-Aries-Tenant header
@@ -12,10 +88,12 @@ export async function POST(req: NextRequest) {
 
     // 2. Parse request payload
     const body = await req.json().catch(() => ({}));
-    const { phone, name, party_size, datetime, special_request = '' } = body;
+    // Accept 'booking_datetime' (from intake_form saveAs) or 'datetime' as aliases
+    const { phone, name, party_size, special_request = '' } = body;
+    const datetime: string = body.booking_datetime || body.datetime || '';
 
-    if (!phone || !name || !party_size || !datetime) {
-      return NextResponse.json({ success: false, error: 'Missing phone, name, party_size, or datetime in payload' }, { status: 400 });
+    if (!phone || !name || !party_size) {
+      return NextResponse.json({ success: false, error: 'Missing phone, name, or party_size in payload' }, { status: 400 });
     }
 
     // 3. Fetch Tenant details for Short Code generating Reservation ID
@@ -38,11 +116,10 @@ export async function POST(req: NextRequest) {
     // 5. Build Booking Row for Google Sheets Sync
     const cleanPhoneStr = phone.replace(/\D/g, '');
     const guestCount = parseInt(String(party_size)) || 2;
-    
-    // Parse time / date from intake string if possible, or fallback gracefully
-    // Standard format for date: YYYY-MM-DD. Time: HH:MM:SS
-    const bookingDate = new Date().toISOString().slice(0, 10); // fallback to today
-    const slotTime = '19:30:00'; // fallback to standard dinner slot
+
+    // Parse the user-typed datetime string (e.g. "Tomorrow 8 PM", "31 May 7:30 PM")
+    const { bookingDate, slotTime } = parseDatetime(datetime);
+    console.log(`   ↳ datetime parsed: "${datetime}" → date=${bookingDate} time=${slotTime}`);
 
     const bookingPayload = {
       reservation_id: reservationId,
@@ -54,7 +131,8 @@ export async function POST(req: NextRequest) {
       booking_status: 'confirmed',
       payment_status: 'paid',
       payment_amount: 0, // No payment required for standard flow bookings
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      special_request, // store for logging / future use
     };
 
     console.log(`🚀 [SAVE BOOKING] Saving reservation ${reservationId} for tenant ${tenant.business_name}...`);

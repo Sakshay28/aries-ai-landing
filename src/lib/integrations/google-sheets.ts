@@ -329,7 +329,7 @@ export interface BookingRow {
 }
 
 const BOOKING_HEADERS = [
-  'Customer', 'Phone', 'Party Size', 'Date', 'Time', 'Status', 'Deposit (₹)',
+  'Reservation ID', 'Customer', 'Phone', 'Party Size', 'Date', 'Time', 'Status', 'Deposit (₹)', 'Special Request',
 ];
 
 async function ensureBookingHeaders(
@@ -339,7 +339,7 @@ async function ensureBookingHeaders(
 ): Promise<void> {
   await ensureSheetExists(token, spreadsheetId, sheetName);
 
-  const range = `${sheetName}!A1:G1`;
+  const range = `${sheetName}!A1:I1`;
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`,
     { headers: { Authorization: `Bearer ${token}` } }
@@ -384,6 +384,7 @@ export async function appendBookingRow(tenantId: string, booking: BookingRow): P
   };
 
   const values = [[
+    booking.reservation_id,
     booking.customer_name,
     booking.customer_phone,
     String(booking.party_size),
@@ -391,9 +392,10 @@ export async function appendBookingRow(tenantId: string, booking: BookingRow): P
     formatTime(booking.slot_time),
     booking.booking_status,
     String(Math.round(booking.payment_amount / 100)),
+    (booking as BookingRow & { special_request?: string }).special_request ?? '',
   ]];
 
-  const range = `${bookingSheetName}!A:G`;
+  const range = `${bookingSheetName}!A:I`;
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheet_id}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     {
