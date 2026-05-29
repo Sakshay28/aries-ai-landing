@@ -88,9 +88,15 @@ export async function POST(req: NextRequest) {
 
     // 2. Parse request payload
     const body = await req.json().catch(() => ({}));
-    // Accept 'booking_datetime' (from intake_form saveAs) or 'datetime' as aliases
+    // The intake form saves date and time as SEPARATE fields: booking_date + booking_time
+    // Accept all variants: separate fields, combined booking_datetime, or legacy datetime
     const { phone, name, party_size, special_request = '' } = body;
-    const datetime: string = body.booking_datetime || body.datetime || '';
+    const datetime: string =
+      // Separate date + time (current intake form format)
+      (body.booking_date && body.booking_time)
+        ? `${body.booking_date} ${body.booking_time}`
+        // Combined single field
+        : body.booking_datetime || body.datetime || '';
 
     if (!phone || !name || !party_size) {
       return NextResponse.json({ success: false, error: 'Missing phone, name, or party_size in payload' }, { status: 400 });
