@@ -31,6 +31,7 @@ import { processMessageWithAI, TenantAIConfig } from '@/lib/ai/engine';
 import { getTenantConfig } from '@/lib/tenant/manager';
 import { createBookingEvent } from '@/lib/integrations/google-calendar';
 import type { Tenant } from '@/lib/types';
+import { getFlowVariables } from './variables';
 
 // ── Types ────────────────────────────────────────────────────
 interface FlowNode {
@@ -134,7 +135,7 @@ export async function runFlowsForMessage(
   const [{ data: tenant }, { data: lead }] = await Promise.all([
     supabaseAdmin
       .from('tenants')
-      .select('wa_access_token, wa_phone_number_id')
+      .select('wa_access_token, wa_phone_number_id, business_name')
       .eq('id', tenantId)
       .single(),
     leadId
@@ -162,7 +163,16 @@ export async function runFlowsForMessage(
     phoneNumberId: tenant.wa_phone_number_id as string,
     messageText,
     isFirstMessage,
-    variables: {},
+    variables: {
+      wa_name: (lead as { name?: string } | null)?.name || 'there',
+      wa_phone: phone,
+      tenant_name: tenant?.business_name || 'Business',
+      current_date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+      current_time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }),
+      language: 'en',
+      last_message: messageText,
+      conversation_id: conversationId,
+    },
   };
 
   // ── Check for a pending wait_for_reply node from a previous flow run ──
@@ -185,7 +195,7 @@ export async function runFlowsForMessage(
     // Find the flow that owns this node and resume, with restored variables
     const ownerFlow = (flows as FlowRecord[]).find(f => f.nodes.some(n => n.id === pendingNode));
     if (ownerFlow) {
-      const resumeCtx: ExecContext = { ...ctx, variables: savedCtx };
+      const resumeCtx: ExecContext = { ...ctx, variables: { ...ctx.variables, ...savedCtx } };
       const handled = await executeFlowFromNode(ownerFlow, resumeCtx, pendingNode);
       if (handled) return true;
     }
@@ -854,14 +864,14 @@ async function executeNode(
     return { stop: true };
   }
 
-  // ── Collect Data / Resume Parser — multi-field capture ───
-  if (type === 'collect_data' || type === 'resume_parser') {
+  // ── Collect Data / Resume Parser / Intake Form — multi-field capture ───
+  if (type === 'collect_data' || type === 'resume_parser' || type === 'intake_form') {
     const fields = Array.isArray(node.data?.fields)
-      ? (node.data.fields as string[]).slice(0, 4).join(', ')
+      ? (node.data.fields as any[]).map(f => typeof f === 'string' ? f : String(f.name || '')).slice(0, 4).join(', ')
       : String(node.data?.extracts || '');
     if (ctx.dryRun) {
-      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'collect_data', payload: fields || 'collecting user input', nextId: getNextNode(node.id, 'success', edges) });
-      return { nextId: getNextNode(node.id, 'success', edges) };
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'collect_data', payload: fields || 'collecting user input', nextId: getNextNode(node.id, null, edges) });
+      return { nextId: getNextNode(node.id, null, edges) };
     }
     return { nextId: getNextNode(node.id, null, edges) };
   }
@@ -901,24 +911,61 @@ export async function simulateFlow(
     return { matched: false, flowName: '', trace: [], variables: {}, messageSent: false };
   }
 
+  const nodes = (flow as FlowRecord).nodes as FlowNode[];
+  const edges = (flow as FlowRecord).edges as FlowEdge[];
+
   const trace: TraceStep[] = [];
   const ctx: ExecContext = {
     tenantId,
     leadId:          null,
-    leadName:        'Test User',
+    leadName:        'Sakshay',
     conversationId:  'sim-' + flowId,
-    phone:           '+910000000000',
+    phone:           '+919875152290',
     accessToken:     'sim',
     phoneNumberId:   'sim',
     messageText:     testMessage,
     isFirstMessage:  false,
-    variables:       {},
+    variables:       {
+      wa_name: 'Sakshay',
+      wa_phone: '+919875152290',
+      tenant_name: 'Clock Tower Restaurant',
+      current_date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+      current_time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }),
+      language: 'en',
+      last_message: testMessage,
+      conversation_id: 'sim-' + flowId,
+    },
     dryRun:          true,
     trace,
   };
 
-  const nodes = (flow as FlowRecord).nodes as FlowNode[];
-  const edges = (flow as FlowRecord).edges as FlowEdge[];
+  // Pre-populate mock values for flow-registered variables in dry-run mode
+  const flowVars = getFlowVariables(nodes as any);
+  const mockValues: Record<string, unknown> = {
+    booking_id: 'CT-20260529-8130',
+    guest_name: 'Sakshay',
+    booking_datetime: '2026-06-01 8:00 PM',
+    party_size: '4',
+    special_request: 'Window seat please',
+    reservation_id: 'CT-20260529-8130',
+    selected_button: 'book_table',
+    button_value: 'book_table',
+    host_name: 'Sakshay',
+    event_date: '2026-06-15',
+    guest_count: '25',
+    budget: '₹800',
+    requirements: 'Decor and AV setup',
+  };
+
+  for (const v of flowVars) {
+    if (mockValues[v.name] === undefined) {
+      ctx.variables[v.name] = `[Mock: ${v.label || v.name}]`;
+    }
+  }
+
+  // Direct overlay to ensure they all exist in ctx.variables
+  Object.assign(ctx.variables, mockValues);
+
   const triggerNode = nodes.find(n => n.type === 'trigger' || n.type === 'keyword_trigger');
   if (!triggerNode) return { matched: false, flowName: flow.name as string, trace, variables: {}, messageSent: false };
 
