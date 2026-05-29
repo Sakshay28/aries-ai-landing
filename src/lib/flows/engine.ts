@@ -253,8 +253,8 @@ async function executeFlowGraph(nodes: FlowNode[], edges: FlowEdge[], ctx: ExecC
     if (!node) break;
 
     const result = await executeNode(node, ctx, edges, nodes);
-    if (result.stop) break;
     if (result.sent) messageSent = true;
+    if (result.stop) break;
     currentId = result.nextId ?? null;
   }
 
