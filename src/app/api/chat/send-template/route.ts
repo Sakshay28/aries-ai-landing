@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
 
     // 2. Parse request payload
     const body = await req.json().catch(() => ({}));
-    const { phone, templateName, variables = [], language = 'en', conversationId } = body;
+    const { phone, templateName, variables = [], language = 'en', conversationId, headerImageUrl } = body;
 
     if (!phone || !templateName) {
       return NextResponse.json({ success: false, error: 'Missing phone or templateName in payload' }, { status: 400 });
@@ -43,11 +43,45 @@ export async function POST(req: NextRequest) {
     // Mapping clean, simple array variables to Meta body parameters
     const mappedVariables = Array.isArray(variables) ? variables.map(String) : [];
     
+    // Transform parameters into proper components when headerImageUrl exists (image-header template)
+    let componentsToSend: any[] = [];
+    if (headerImageUrl && typeof headerImageUrl === 'string' && headerImageUrl.trim()) {
+      componentsToSend = [
+        {
+          type: 'header',
+          parameters: [
+            {
+              type: 'image',
+              image: {
+                link: headerImageUrl.trim()
+              }
+            }
+          ]
+        },
+        {
+          type: 'body',
+          parameters: mappedVariables.map(val => ({
+            type: 'text',
+            text: String(val)
+          }))
+        }
+      ];
+    } else {
+      // Backward compatibility: pass simple string array directly
+      componentsToSend = mappedVariables;
+    }
+
+    // Verification logs for outgoing payload in dev mode
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🧪 [DEV MODE] Outgoing WhatsApp template components:', JSON.stringify(componentsToSend, null, 2));
+    }
+
     console.log(`🚀 [SEND TEMPLATE] Hitting Meta Cloud API for ${tenant.business_name}:`, {
       destination: phone,
       template: templateName,
       language,
-      varsCount: mappedVariables.length
+      varsCount: mappedVariables.length,
+      hasHeaderImage: !!headerImageUrl
     });
 
     const waResult = await sendTemplateMessage(
@@ -55,7 +89,7 @@ export async function POST(req: NextRequest) {
       tenant.wa_phone_number_id,
       phone,
       templateName,
-      mappedVariables,
+      componentsToSend,
       language
     );
 
