@@ -40,6 +40,9 @@ export async function exchangeAndStoreSheets(
   tenantId:        string,
   spreadsheetId:   string,   // from query param state or post-auth config
 ): Promise<void> {
+  console.log('🔍 [GSHEETS exchange] starting for tenant:', tenantId, 'spreadsheet:', spreadsheetId);
+
+  console.log('🔍 [GSHEETS exchange] calling Google token endpoint...');
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -52,23 +55,40 @@ export async function exchangeAndStoreSheets(
     }),
   });
 
-  if (!res.ok) throw new Error(`Sheets token exchange failed: ${await res.text()}`);
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error('🔍 [GSHEETS exchange] token exchange failed:', errText);
+    throw new Error(`Sheets token exchange failed: ${errText}`);
+  }
 
   const tokens = await res.json() as {
     access_token:  string;
     refresh_token: string;
     expires_in:    number;
   };
+  console.log('🔍 [GSHEETS exchange] got tokens (has refresh_token:', !!tokens.refresh_token, ')');
+
+  let encryptedAccess: string | null;
+  let encryptedRefresh: string | null;
+  try {
+    encryptedAccess = encryptToken(tokens.access_token);
+    encryptedRefresh = encryptToken(tokens.refresh_token);
+    console.log('🔍 [GSHEETS exchange] encrypted tokens OK');
+  } catch (encErr) {
+    console.error('🔍 [GSHEETS exchange] encryption failed:', encErr);
+    throw new Error(`Token encryption failed: ${(encErr as Error).message}`);
+  }
 
   const config = {
-    access_token:   encryptToken(tokens.access_token),
-    refresh_token:  encryptToken(tokens.refresh_token),
+    access_token:   encryptedAccess,
+    refresh_token:  encryptedRefresh,
     expires_at:     Date.now() + tokens.expires_in * 1000,
     spreadsheet_id: spreadsheetId,
     sheet_name:     'Leads',
   };
 
   const now = new Date().toISOString();
+  console.log('🔍 [GSHEETS exchange] upserting to DB...');
   const { error: upsertError } = await supabaseAdmin
     .from('tenant_integrations')
     .upsert(
@@ -76,7 +96,12 @@ export async function exchangeAndStoreSheets(
       { onConflict: 'tenant_id,integration_id' }
     );
 
-  if (upsertError) throw new Error(`Failed to save Google Sheets config: ${upsertError.message}`);
+  if (upsertError) {
+    console.error('🔍 [GSHEETS exchange] DB upsert failed:', upsertError.message);
+    throw new Error(`Failed to save Google Sheets config: ${upsertError.message}`);
+  }
+
+  console.log('✅ [GSHEETS exchange] SUCCESS — row saved for tenant:', tenantId);
 }
 
 // ── Load + auto-refresh token ──────────────────────────────
