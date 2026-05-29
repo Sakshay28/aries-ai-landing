@@ -195,7 +195,7 @@ export async function runFlowsForMessage(
     // Find the flow that owns this node and resume, with restored variables
     const ownerFlow = (flows as FlowRecord[]).find(f => f.nodes.some(n => n.id === pendingNode));
     if (ownerFlow) {
-      const resumeCtx: ExecContext = { ...ctx, variables: { ...ctx.variables, ...savedCtx } };
+      const resumeCtx: ExecContext = { ...ctx, variables: { ...ctx.variables, ...savedCtx }, pendingFlowNode: pendingNode };
       const handled = await executeFlowFromNode(ownerFlow, resumeCtx, pendingNode);
       if (handled) return true;
     }
@@ -864,8 +864,101 @@ async function executeNode(
     return { stop: true };
   }
 
-  // ── Collect Data / Resume Parser / Intake Form — multi-field capture ───
-  if (type === 'collect_data' || type === 'resume_parser' || type === 'intake_form') {
+  // ── Intake Form — Multi-field sequential interactive capture ─────────────
+  if (type === 'intake_form') {
+    const fields = Array.isArray(node.data?.fields) ? (node.data.fields as any[]) : [];
+    if (fields.length === 0) {
+      return { nextId: getNextNode(node.id, null, edges) };
+    }
+
+    const mappedFields = fields.map(f => {
+      const saveAs = String(f.saveAs ?? '').trim();
+      const fieldName = String(f.name ?? '').toLowerCase().replace(/\s+/g, '_');
+      return {
+        ...f,
+        varName: saveAs || fieldName,
+      };
+    });
+
+    const isResume = (ctx.pendingFlowNode === node.id);
+
+    // If resuming, save incoming reply to the first missing field
+    if (isResume) {
+      const activeField = mappedFields.find(f => ctx.variables[f.varName] == null || String(ctx.variables[f.varName]).trim() === '');
+      if (activeField) {
+        ctx.variables[activeField.varName] = ctx.messageText;
+        if (!ctx.dryRun) {
+          try {
+            await supabaseAdmin
+              .from('conversations')
+              .update({ context: ctx.variables })
+              .eq('id', ctx.conversationId);
+          } catch (e) {
+            console.error('Failed to save intake answer to DB context:', e);
+          }
+        }
+      }
+    }
+
+    // Find the next incomplete field
+    const nextField = mappedFields.find(f => ctx.variables[f.varName] == null || String(ctx.variables[f.varName]).trim() === '');
+
+    if (nextField) {
+      const prompt = nextField.placeholder || `Please enter your ${nextField.name}:`;
+      
+      if (ctx.dryRun) {
+        ctx.trace?.push({
+          nodeId: node.id,
+          nodeType: type,
+          action: 'send_message',
+          payload: prompt,
+          variables: { ...ctx.variables },
+          nextId: node.id,
+        });
+        return { stop: true };
+      }
+
+      try {
+        await sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, prompt);
+        await supabaseAdmin.from('messages').insert({
+          tenant_id: ctx.tenantId,
+          conversation_id: ctx.conversationId,
+          direction: 'outbound',
+          content: prompt,
+          message_type: 'text',
+          channel: 'whatsapp',
+          status: 'sent',
+          ai_generated: false,
+        });
+        // Save pending flow node to conversation context
+        await supabaseAdmin
+          .from('conversations')
+          .update({ context: { ...ctx.variables, pending_flow_node: node.id } })
+          .eq('id', ctx.conversationId);
+
+        return { stop: true, sent: true };
+      } catch (e) {
+        console.error(`Flow engine: intake prompt send failed for node ${node.id}:`, (e as Error).message);
+        return { nextId: getNextNode(node.id, null, edges) };
+      }
+    }
+
+    // All fields populated — transition to next node
+    if (ctx.dryRun) {
+      ctx.trace?.push({
+        nodeId: node.id,
+        nodeType: type,
+        action: 'collect_data',
+        payload: 'Form completed successfully',
+        variables: { ...ctx.variables },
+        nextId: getNextNode(node.id, null, edges),
+      });
+    }
+    return { nextId: getNextNode(node.id, null, edges) };
+  }
+
+  // ── Collect Data / Resume Parser — multi-field capture ───
+  if (type === 'collect_data' || type === 'resume_parser') {
     const fields = Array.isArray(node.data?.fields)
       ? (node.data.fields as any[]).map(f => typeof f === 'string' ? f : String(f.name || '')).slice(0, 4).join(', ')
       : String(node.data?.extracts || '');
