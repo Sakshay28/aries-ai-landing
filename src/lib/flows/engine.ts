@@ -501,8 +501,6 @@ async function executeNode(
         // Refinement 2: zero-config fallback — still works out of the box
         bodyStr = JSON.stringify({
           phone:    ctx.phone,
-          message:  ctx.messageText,
-          lead_id:  ctx.leadId,
           ...ctx.variables,
         });
       }

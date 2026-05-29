@@ -275,6 +275,7 @@ export default function FlowInspector() {
             localData={localData}
             commitField={commitField}
             flushField={flushField}
+            nodeIdStr={nodeIdStr}
           />
         )}
         {activeTab === "advanced" && (
@@ -394,12 +395,13 @@ function NodeValidationDisplay({ nodeId }: { nodeId: string }) {
 
 // ─── CONTENT TAB ───────────────────────────────────────────────────────────────
 function ContentTab({
-  nodeType, localData, commitField, flushField,
+  nodeType, localData, commitField, flushField, nodeIdStr,
 }: {
   nodeType: string;
   localData: Record<string, any>;
   commitField: (field: string, value: any) => void;
   flushField: (field: string, value: any) => void;
+  nodeIdStr: string;
 }) {
   const f1 = useFocusStyle();
   const f2 = useFocusStyle();
@@ -551,7 +553,7 @@ function ContentTab({
   }
 
   if (nodeType === "webhook") {
-    return <WebhookContentConfig localData={localData} commitField={commitField} flushField={flushField} />;
+    return <WebhookContentConfig nodeId={nodeIdStr} localData={localData} commitField={commitField} flushField={flushField} />;
   }
 
   if (nodeType === "delay") {
@@ -686,7 +688,7 @@ function AdvancedTab({
         </div>
       </Field>
       {nodeType === "webhook" && (
-        <WebhookAdvancedConfig localData={localData} commitField={commitField} />
+        <WebhookAdvancedConfig nodeId={nodeIdStr} localData={localData} commitField={commitField} />
       )}
     </>
   );
@@ -949,9 +951,13 @@ function FormFieldListConfig({ localData, commitField, flushField }: { localData
 // ════════════════════════════════════════════════════════════════════════════════
 type TestResult = { status: number; ms: number; body: string } | { error: string; ms: number } | null;
 
+// Module-level in-memory cache to store last debug logs per webhook node (reset on page refresh)
+const webhookDebugLogs = new Map<string, { status: number | string; url: string; body: string }>();
+
 function WebhookContentConfig({
-  localData, commitField, flushField,
+  nodeId, localData, commitField, flushField,
 }: {
+  nodeId: string;
   localData: Record<string, any>;
   commitField: (f: string, v: any) => void;
   flushField: (f: string, v: any) => void;
@@ -997,9 +1003,21 @@ function WebhookContentConfig({
         : await res.text();
       setTestResult({ status: res.status, ms, body: body.slice(0, 600) });
       setShowResponse(true);
+
+      // Store in global in-memory debug log so it is available on Advanced Tab
+      webhookDebugLogs.set(nodeId, {
+        status: res.status,
+        url: finalUrl,
+        body: body,
+      });
     } catch (e: any) {
       setTestResult({ error: e.message || 'Network error', ms: Date.now() - t0 });
       setShowResponse(true);
+      webhookDebugLogs.set(nodeId, {
+        status: 'Error',
+        url: url,
+        body: e.message || 'Network error',
+      });
     } finally {
       setTesting(false);
     }
@@ -1260,6 +1278,36 @@ function WebhookContentConfig({
             <p className="mt-1 text-[10px]" style={{ color: 'rgba(255,255,255,0.2)' }}>
               Type <span style={{ color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>{'{{'}</span> to insert a variable. Must be valid JSON.
             </p>
+            {/* Suggested variables clickable pills */}
+            <div className="mt-2.5">
+              <label className="text-[10px] font-semibold tracking-[0.06em] uppercase block mb-1.5" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                Suggested Variables
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {['wa_phone', 'wa_name', 'guest_name', 'booking_datetime', 'party_size', 'special_request'].map(v => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => {
+                      const current = bodyVal || '';
+                      const updated = current + `{{${v}}}`;
+                      commitField('body', updated);
+                      flushField('body', updated);
+                    }}
+                    className="text-[10px] px-2.5 py-1 rounded font-mono transition-all hover:bg-emerald-500/20"
+                    style={{
+                      background: 'rgba(16,185,129,0.08)',
+                      color: '#34d399',
+                      border: '1px solid rgba(16,185,129,0.2)',
+                      cursor: 'pointer',
+                      borderRadius: 6,
+                    }}
+                  >
+                    {`{{${v}}}`}
+                  </button>
+                ))}
+              </div>
+            </div>
           </>
         )}
 
@@ -1289,8 +1337,9 @@ function WebhookContentConfig({
 // ─── WEBHOOK NODE: ADVANCED CONFIG ──────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════════════
 function WebhookAdvancedConfig({
-  localData, commitField,
+  nodeId, localData, commitField,
 }: {
+  nodeId: string;
   localData: Record<string, any>;
   commitField: (f: string, v: any) => void;
 }) {
@@ -1336,7 +1385,7 @@ function WebhookAdvancedConfig({
 
   const authPreset: string = (localData.authPreset as string) || 'none';
   const authValue: string = (localData.authValue as string) || '';
-  const lastDebug = localData._lastDebug as { status?: number; url?: string; body?: string } | undefined;
+  const lastDebug = (webhookDebugLogs.get(nodeId) || localData._lastDebug) as { status?: number | string; url?: string; body?: string } | undefined;
 
   // ── Shared styles ─────────────────────────────────────────────────────────────
   const rowBox: React.CSSProperties = {
