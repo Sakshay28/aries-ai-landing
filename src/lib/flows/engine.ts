@@ -456,11 +456,12 @@ async function executeNode(
     return { nextId: getNextNode(node.id, null, edges) };
   }
 
-  // ── Webhook — real HTTP call, stores JSON response in variables ──
+  // ── Webhook — real HTTP call, stores JSON response in variables ──────────
   if (type === 'webhook') {
-    const method = ((node.data?.method as string) || 'GET').toUpperCase();
-    const rawUrl = (node.data?.url as string) || '';
-    const url = interpolate(rawUrl, ctx);
+    const method = ((node.data?.method as string) || 'POST').toUpperCase();
+    const rawUrl  = (node.data?.url as string) || '';
+    const url     = interpolate(rawUrl, ctx);
+
     if (ctx.dryRun) {
       ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'webhook_call', payload: { method, url }, variables: { ...ctx.variables }, nextId: getNextNode(node.id, 'success', edges) });
       return { nextId: getNextNode(node.id, 'success', edges) };
@@ -469,40 +470,136 @@ async function executeNode(
       console.error(`Flow engine: webhook node ${node.id} has invalid url: "${url}"`);
       return { nextId: getNextNode(node.id, 'error', edges) };
     }
-    try {
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 10_000);
-      const init: RequestInit = {
-        method,
-        headers: { 'Content-Type': 'application/json', 'X-Aries-Tenant': ctx.tenantId },
-        signal: controller.signal,
-      };
-      if (method !== 'GET') {
-        init.body = JSON.stringify({
-          phone: ctx.phone,
-          message: ctx.messageText,
-          lead_id: ctx.leadId,
+
+    // ── Build headers from node.data.headers (key-value array) ──────────────
+    const headersObj: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-Aries-Tenant': ctx.tenantId,
+    };
+    const customHeaders = Array.isArray(node.data?.headers) ? (node.data.headers as Array<{ key: string; value: string }>) : [];
+    for (const h of customHeaders) {
+      if (h.key?.trim()) headersObj[h.key.trim()] = interpolate(h.value || '', ctx);
+    }
+
+    // ── Build query params ───────────────────────────────────────────────────
+    const qp = new URLSearchParams();
+    const customParams = Array.isArray(node.data?.queryParams) ? (node.data.queryParams as Array<{ key: string; value: string }>) : [];
+    for (const p of customParams) {
+      if (p.key?.trim()) qp.set(p.key.trim(), interpolate(p.value || '', ctx));
+    }
+    const finalUrl = qp.toString() ? `${url}?${qp}` : url;
+
+    // ── Build request body ───────────────────────────────────────────────────
+    const bodyMode  = (node.data?.bodyMode as string) || 'json';
+    const rawBody   = (node.data?.body as string) || '';
+    let bodyStr: string | undefined;
+    if (method !== 'GET' && bodyMode !== 'none') {
+      if (rawBody.trim()) {
+        // Interpolate {{variables}} inside the JSON body string
+        bodyStr = interpolate(rawBody, ctx);
+      } else {
+        // Refinement 2: zero-config fallback — still works out of the box
+        bodyStr = JSON.stringify({
+          phone:    ctx.phone,
+          message:  ctx.messageText,
+          lead_id:  ctx.leadId,
           ...ctx.variables,
         });
       }
-      const res = await fetch(url, init);
-      clearTimeout(tid);
+    }
+
+    // ── Timeout & retry config ───────────────────────────────────────────────
+    const timeoutMs   = Math.min(Number(node.data?.timeout   ?? 10_000), 30_000);
+    const retryCount  = Math.min(Number(node.data?.retryCount  ?? 1),  3);
+    const retryStrat  = (node.data?.retryStrategy as string) || 'exponential';
+    const errorBehav  = (node.data?.errorBehavior as string) || 'error_branch';
+
+    // ── Dot-path getter for response mapping (Refinement 5) ─────────────────
+    const dotGet = (obj: unknown, path: string): unknown => {
+      if (!path) return obj;
+      return path.split('.').reduce<unknown>((acc, key) => {
+        if (acc == null || typeof acc !== 'object') return undefined;
+        return (acc as Record<string, unknown>)[key];
+      }, obj);
+    };
+
+    // ── Execute with retry ───────────────────────────────────────────────────
+    const attempt = async (): Promise<Response> => {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), timeoutMs);
+      const init: RequestInit = {
+        method,
+        headers: headersObj,
+        signal: controller.signal,
+        ...(bodyStr !== undefined ? { body: bodyStr } : {}),
+      };
+      try {
+        const res = await fetch(finalUrl, init);
+        clearTimeout(tid);
+        return res;
+      } catch (e) {
+        clearTimeout(tid);
+        throw e;
+      }
+    };
+
+    try {
+      let res: Response | null = null;
+      let lastErr: unknown = null;
+
+      for (let attempt_n = 0; attempt_n <= retryCount; attempt_n++) {
+        if (attempt_n > 0) {
+          const delay = retryStrat === 'exponential'
+            ? Math.min(500 * Math.pow(2, attempt_n - 1), 8_000)
+            : 1_000;
+          await new Promise(r => setTimeout(r, delay));
+        }
+        try {
+          res = await attempt();
+          if (res.ok) break; // success — stop retrying
+          // HTTP error: retry
+        } catch (e) {
+          lastErr = e;
+          if (attempt_n === retryCount) throw e;
+        }
+      }
+
+      if (!res) throw lastErr ?? new Error('Webhook failed after retries');
+
       if (res.ok) {
         const ct = res.headers.get('content-type') || '';
         const data: unknown = ct.includes('application/json') ? await res.json() : await res.text();
         ctx.variables[`${node.id}_response`] = data;
-        ctx.variables.webhook_response = data; // convenient shorthand for last webhook
-        // Flatten top-level object keys directly into variables for easy condition checks
+        ctx.variables.webhook_response = data;
+
+        // Auto-flatten top-level keys (backwards compat)
         if (data && typeof data === 'object' && !Array.isArray(data)) {
           Object.assign(ctx.variables, data as Record<string, unknown>);
         }
+
+        // Apply explicit response mappings (dot-path, Refinement 5)
+        const mappings = Array.isArray(node.data?.responseMappings)
+          ? (node.data.responseMappings as Array<{ from: string; to: string }>)
+          : [];
+        for (const m of mappings) {
+          if (m.to?.trim()) {
+            const val = dotGet(data, (m.from || '').replace(/^response\./, ''));
+            if (val !== undefined) ctx.variables[m.to.trim()] = val;
+          }
+        }
+
         return { nextId: getNextNode(node.id, 'success', edges) };
       }
+
+      // HTTP error response
       ctx.variables[`${node.id}_error`] = res.status;
+      if (errorBehav === 'continue') return { nextId: getNextNode(node.id, 'success', edges) };
       return { nextId: getNextNode(node.id, 'error', edges) };
+
     } catch (e) {
       console.error(`Flow engine: webhook ${node.id} failed:`, (e as Error).message);
       ctx.variables[`${node.id}_error`] = (e as Error).message;
+      if (errorBehav === 'continue') return { nextId: getNextNode(node.id, 'success', edges) };
       return { nextId: getNextNode(node.id, 'error', edges) };
     }
   }

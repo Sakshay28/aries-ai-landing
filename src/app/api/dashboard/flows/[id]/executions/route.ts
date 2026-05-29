@@ -4,13 +4,13 @@ import { getTenantId } from '@/lib/auth/getTenantId';
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const tenantId = await getTenantId();
     if (!tenantId) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
-    const flowId = params.id;
+    const { id: flowId } = await params;
     const url = new URL(req.url);
     const convId = url.searchParams.get('conversation_id');
 

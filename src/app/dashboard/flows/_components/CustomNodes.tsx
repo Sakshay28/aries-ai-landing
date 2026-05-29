@@ -452,19 +452,33 @@ export const LogicNode = React.memo(function LogicNode({ id, data, selected }: a
 });
 
 export const WebhookNode = React.memo(function WebhookNode({ id, data, selected }: any) {
+  // Smart URL preview: extract path only, keep compact
+  const rawUrl = (data.url as string) || '';
+  let urlPreview = rawUrl;
+  try { urlPreview = new URL(rawUrl).pathname; } catch { /* use raw */ }
+  if (!urlPreview || urlPreview === '/') urlPreview = rawUrl;
+
+  const headerCount = Array.isArray(data.headers) ? data.headers.filter((h: any) => h.key).length : 1;
+  const bodyMode = (data.bodyMode as string) || (data.body ? 'json' : '');
+  const bodyLabel = bodyMode === 'json' ? 'JSON' : bodyMode === 'form' ? 'Form' : bodyMode === 'none' ? 'No body' : '';
+  const metaLine = [bodyLabel, headerCount > 0 ? `${headerCount} header${headerCount !== 1 ? 's' : ''}` : ''].filter(Boolean).join(' • ');
+
   return (
     <Root width={264}>
       <Handle type="source" position={Position.Bottom} id="success" isConnectable className="flow-handle flow-handle--green" style={{ left: '28%' }} />
       <Handle type="source" position={Position.Bottom} id="error" isConnectable className="flow-handle flow-handle--red" style={{ left: '72%' }} />
-      <Card id={id} selected={selected} color="#06B6D4" Icon={Webhook} title={data.label || "API Request"}
+      <Card id={id} selected={selected} color="#06B6D4" Icon={Webhook} title={data.label || "Custom Webhook"}
         footer={<OutLabels items={[{ label: "200 OK", color: "#10b981", dir: "↙" }, { label: "ERROR", color: "#ef4444", dir: "↘" }]} />}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <Badge label={data.method || "POST"} color="#06b6d4" />
-          <span style={{ fontSize: 11, color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-            {data.url || "https://api.example.com"}
+          <span style={{ fontSize: 11, color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, fontFamily: "monospace" }}>
+            {urlPreview || "https://api.example.com"}
           </span>
         </div>
+        {metaLine && (
+          <div style={{ marginTop: 4, fontSize: 10, color: "#64748b", letterSpacing: "0.01em" }}>{metaLine}</div>
+        )}
       </Card>
     </Root>
   );

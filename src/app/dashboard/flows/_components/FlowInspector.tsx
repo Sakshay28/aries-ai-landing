@@ -282,6 +282,9 @@ export default function FlowInspector() {
             nodeIdStr={nodeIdStr}
             inCount={inCount}
             outCount={outCount}
+            nodeType={nodeType}
+            localData={localData}
+            commitField={commitField}
           />
         )}
       </div>
@@ -548,18 +551,7 @@ function ContentTab({
   }
 
   if (nodeType === "webhook") {
-    return (
-      <>
-        <Field label="Method">
-          <select value={(localData.method as string) || "POST"} onChange={e => commitField("method", e.target.value)} className={SELECT_CLS} style={INP_STYLE}>
-            <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option>
-          </select>
-        </Field>
-        <Field label="Endpoint URL">
-          <input type="url" value={(localData.url as string) || ""} onChange={e => commitField("url", e.target.value)} onBlur={e => flushField("url", e.target.value)} placeholder="https://api..." className={INPUT_CLS} style={f1.style} onFocus={f1.onFocus} />
-        </Field>
-      </>
-    );
+    return <WebhookContentConfig localData={localData} commitField={commitField} flushField={flushField} />;
   }
 
   if (nodeType === "delay") {
@@ -658,11 +650,14 @@ function ContentTab({
 
 // ─── ADVANCED TAB ──────────────────────────────────────────────────────────────
 function AdvancedTab({
-  nodeIdStr, inCount, outCount,
+  nodeIdStr, inCount, outCount, nodeType, localData, commitField,
 }: {
   nodeIdStr: string;
   inCount: number;
   outCount: number;
+  nodeType: string;
+  localData: Record<string, any>;
+  commitField: (field: string, value: any) => void;
 }) {
   return (
     <>
@@ -690,6 +685,9 @@ function AdvancedTab({
           {nodeIdStr}
         </div>
       </Field>
+      {nodeType === "webhook" && (
+        <WebhookAdvancedConfig localData={localData} commitField={commitField} />
+      )}
     </>
   );
 }
@@ -945,3 +943,613 @@ function FormFieldListConfig({ localData, commitField, flushField }: { localData
     </>
   );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════
+// ─── WEBHOOK NODE: CONTENT CONFIG ───────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════
+type TestResult = { status: number; ms: number; body: string } | { error: string; ms: number } | null;
+
+function WebhookContentConfig({
+  localData, commitField, flushField,
+}: {
+  localData: Record<string, any>;
+  commitField: (f: string, v: any) => void;
+  flushField: (f: string, v: any) => void;
+}) {
+  const f1 = useFocusStyle();
+  const allVars = buildVariableRegistry(useFlowStore.getState().nodes);
+
+  // ── Test Request state (in-memory only, never persisted) ─────────────────────
+  const [testResult, setTestResult] = React.useState<TestResult>(null);
+  const [testing, setTesting] = React.useState(false);
+  const [showResponse, setShowResponse] = React.useState(false);
+
+  const runTestRequest = async () => {
+    const url = (localData.url as string) || '';
+    if (!url.startsWith('http')) return;
+    setTesting(true);
+    setTestResult(null);
+    setShowResponse(false);
+    const t0 = Date.now();
+    try {
+      const method = ((localData.method as string) || 'POST').toUpperCase();
+      const hdrs: Record<string, string> = { 'Content-Type': 'application/json' };
+      (Array.isArray(localData.headers) ? localData.headers : []).forEach(
+        (h: { key: string; value: string }) => { if (h.key?.trim()) hdrs[h.key.trim()] = h.value; }
+      );
+      const qp = new URLSearchParams();
+      (Array.isArray(localData.queryParams) ? localData.queryParams : []).forEach(
+        (p: { key: string; value: string }) => { if (p.key?.trim()) qp.set(p.key.trim(), p.value); }
+      );
+      const finalUrl = qp.toString() ? `${url}?${qp}` : url;
+      const bodyStr = (localData.bodyMode !== 'none' && method !== 'GET')
+        ? ((localData.body as string)?.trim() || JSON.stringify({ _test: true }))
+        : undefined;
+      const res = await fetch(finalUrl, {
+        method,
+        headers: hdrs,
+        ...(bodyStr ? { body: bodyStr } : {}),
+      });
+      const ms = Date.now() - t0;
+      const ct = res.headers.get('content-type') || '';
+      const body = ct.includes('application/json')
+        ? JSON.stringify(await res.json(), null, 2)
+        : await res.text();
+      setTestResult({ status: res.status, ms, body: body.slice(0, 600) });
+      setShowResponse(true);
+    } catch (e: any) {
+      setTestResult({ error: e.message || 'Network error', ms: Date.now() - t0 });
+      setShowResponse(true);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  // ── Headers ──────────────────────────────────────────────────────────────────
+  const headers: Array<{ id: string; key: string; value: string }> =
+    Array.isArray(localData.headers) ? localData.headers
+      : [{ id: 'h_ct', key: 'Content-Type', value: 'application/json' }];
+
+  const addHeader = () => commitField('headers', [
+    ...headers,
+    { id: `h_${Date.now()}`, key: '', value: '' },
+  ]);
+  const updateHeader = (idx: number, k: 'key' | 'value', v: string) =>
+    commitField('headers', headers.map((h, i) => i === idx ? { ...h, [k]: v } : h));
+  const removeHeader = (idx: number) =>
+    commitField('headers', headers.filter((_, i) => i !== idx));
+
+  // ── Query Params ──────────────────────────────────────────────────────────────
+  const queryParams: Array<{ id: string; key: string; value: string }> =
+    Array.isArray(localData.queryParams) ? localData.queryParams : [];
+
+  const addParam = () => commitField('queryParams', [
+    ...queryParams,
+    { id: `qp_${Date.now()}`, key: '', value: '' },
+  ]);
+  const updateParam = (idx: number, k: 'key' | 'value', v: string) =>
+    commitField('queryParams', queryParams.map((p, i) => i === idx ? { ...p, [k]: v } : p));
+  const removeParam = (idx: number) =>
+    commitField('queryParams', queryParams.filter((_, i) => i !== idx));
+
+  // ── Body ──────────────────────────────────────────────────────────────────────
+  const bodyMode: string = (localData.bodyMode as string) || 'json';
+  const bodyVal: string = (localData.body as string) || '';
+
+  // ── Shared row style ──────────────────────────────────────────────────────────
+  const rowBox: React.CSSProperties = {
+    background: 'rgba(255,255,255,0.04)',
+    border: '1px solid rgba(255,255,255,0.07)',
+    borderRadius: 10,
+    padding: '8px 10px',
+  };
+  const kvKey: React.CSSProperties = {
+    ...INP_STYLE, fontSize: 12, borderRadius: 8, padding: '5px 8px',
+    width: 0, flex: '0 0 38%', fontFamily: 'monospace',
+  };
+  const kvVal: React.CSSProperties = {
+    ...INP_STYLE, fontSize: 12, borderRadius: 8, padding: '5px 8px', flex: 1,
+  };
+  const removeBtn: React.CSSProperties = {
+    ...BTN_STYLE, fontSize: 11, padding: '4px 8px', flexShrink: 0, opacity: 0.7,
+  };
+
+  return (
+    <>
+      {/* ── Method ─────────────────────────────────────────────────────────── */}
+      <Field label="Method">
+        <select
+          value={(localData.method as string) || 'POST'}
+          onChange={e => commitField('method', e.target.value)}
+          className={SELECT_CLS}
+          style={INP_STYLE}
+        >
+          <option>GET</option><option>POST</option><option>PUT</option>
+          <option>PATCH</option><option>DELETE</option>
+        </select>
+      </Field>
+
+      {/* ── Endpoint URL + Test Request ──────────────────────────────────────── */}
+      <Field label="Endpoint URL">
+        <input
+          type="url"
+          value={(localData.url as string) || ''}
+          onChange={e => commitField('url', e.target.value)}
+          onBlur={e => flushField('url', e.target.value)}
+          placeholder="https://ariesai.in/api/chat/save-booking"
+          className={INPUT_CLS}
+          style={f1.style}
+          onFocus={f1.onFocus}
+        />
+        {/* Test Request button */}
+        <div className="flex items-center gap-2 mt-2">
+          <button
+            onClick={runTestRequest}
+            disabled={testing || !((localData.url as string) || '').startsWith('http')}
+            style={{
+              ...BTN_STYLE,
+              fontSize: 11.5,
+              padding: '6px 12px',
+              opacity: testing || !((localData.url as string) || '').startsWith('http') ? 0.45 : 1,
+              background: testing ? 'rgba(6,182,212,0.12)' : 'rgba(6,182,212,0.1)',
+              border: '1px solid rgba(6,182,212,0.25)',
+              color: '#06b6d4',
+              transition: 'all 0.15s',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <span style={{ fontSize: 12 }}>{testing ? '⟳' : '▶'}</span>
+            {testing ? 'Testing…' : 'Test Request'}
+          </button>
+          {testResult && !testing && (
+            <button
+              onClick={() => setShowResponse(v => !v)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '5px 10px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                background: 'error' in testResult
+                  ? 'rgba(239,68,68,0.1)'
+                  : testResult.status >= 200 && testResult.status < 300
+                    ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)',
+                color: 'error' in testResult
+                  ? '#f87171'
+                  : testResult.status >= 200 && testResult.status < 300
+                    ? '#4ade80' : '#fbbf24',
+                fontSize: 11.5, fontWeight: 600, transition: 'all 0.12s',
+              }}
+            >
+              <span style={{ fontSize: 11 }}>
+                {'error' in testResult ? '✕' : testResult.status >= 200 && testResult.status < 300 ? '✓' : '!'}
+              </span>
+              {'error' in testResult
+                ? `Error • ${testResult.ms}ms`
+                : `${testResult.status} ${'error' in testResult ? '' : testResult.status >= 200 && testResult.status < 300 ? 'OK' : 'ERR'} • ${testResult.ms}ms`
+              }
+              <span style={{ fontSize: 9, opacity: 0.6 }}>{showResponse ? '▲' : '▼'}</span>
+            </button>
+          )}
+        </div>
+        {showResponse && testResult && (
+          <div
+            className="mt-2 rounded-[10px] p-3"
+            style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.07)' }}
+          >
+            {'error' in testResult ? (
+              <p className="text-[11px] font-mono" style={{ color: '#f87171' }}>{testResult.error}</p>
+            ) : (
+              <pre
+                className="text-[10.5px] leading-relaxed overflow-x-auto"
+                style={{ color: 'rgba(255,255,255,0.5)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 200, overflowY: 'auto' }}
+              >
+                {testResult.body || '(empty response)'}
+              </pre>
+            )}
+          </div>
+        )}
+      </Field>
+
+      {/* ── Headers ─────────────────────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label
+            className="text-[10.5px] font-semibold tracking-[0.08em] uppercase"
+            style={{ color: 'rgba(255,255,255,0.3)' }}
+          >
+            Headers
+          </label>
+          <button onClick={addHeader} style={BTN_STYLE}>+ Add Header</button>
+        </div>
+        <div className="space-y-1.5">
+          {headers.map((h, i) => (
+            <div key={h.id} style={rowBox} className="flex items-center gap-2">
+              <input
+                type="text"
+                value={h.key}
+                onChange={e => updateHeader(i, 'key', e.target.value)}
+                placeholder="Header name"
+                className={INPUT_CLS}
+                style={kvKey}
+              />
+              <input
+                type="text"
+                value={h.value}
+                onChange={e => updateHeader(i, 'value', e.target.value)}
+                placeholder="Value or {{variable}}"
+                className={INPUT_CLS}
+                style={kvVal}
+              />
+              <button onClick={() => removeHeader(i)} style={removeBtn}>✕</button>
+            </div>
+          ))}
+          {headers.length === 0 && (
+            <p className="text-[11px] py-1" style={{ color: 'rgba(255,255,255,0.28)' }}>No headers. Click Add Header.</p>
+          )}
+        </div>
+      </div>
+
+      {/* ── Query Params ────────────────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label
+            className="text-[10.5px] font-semibold tracking-[0.08em] uppercase"
+            style={{ color: 'rgba(255,255,255,0.3)' }}
+          >
+            Query Params
+          </label>
+          <button onClick={addParam} style={BTN_STYLE}>+ Add Param</button>
+        </div>
+        <div className="space-y-1.5">
+          {queryParams.map((p, i) => (
+            <div key={p.id} style={rowBox} className="flex items-center gap-2">
+              <input
+                type="text"
+                value={p.key}
+                onChange={e => updateParam(i, 'key', e.target.value)}
+                placeholder="param"
+                className={INPUT_CLS}
+                style={kvKey}
+              />
+              <input
+                type="text"
+                value={p.value}
+                onChange={e => updateParam(i, 'value', e.target.value)}
+                placeholder="value or {{variable}}"
+                className={INPUT_CLS}
+                style={kvVal}
+              />
+              <button onClick={() => removeParam(i)} style={removeBtn}>✕</button>
+            </div>
+          ))}
+          {queryParams.length === 0 && (
+            <p className="text-[11px] py-1" style={{ color: 'rgba(255,255,255,0.28)' }}>No params. Click Add Param.</p>
+          )}
+        </div>
+      </div>
+
+      {/* ── Request Body ────────────────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label
+            className="text-[10.5px] font-semibold tracking-[0.08em] uppercase"
+            style={{ color: 'rgba(255,255,255,0.3)' }}
+          >
+            Request Body
+          </label>
+          <select
+            value={bodyMode}
+            onChange={e => commitField('bodyMode', e.target.value)}
+            className={SELECT_CLS}
+            style={{ ...INP_STYLE, fontSize: 11, padding: '4px 8px', borderRadius: 8 }}
+          >
+            <option value="json">JSON</option>
+            <option value="form">Form Data</option>
+            <option value="none">None</option>
+          </select>
+        </div>
+
+        {bodyMode === 'json' && (
+          <>
+            <VariableTextarea
+              value={bodyVal}
+              onChange={val => { commitField('body', val); flushField('body', val); }}
+              variables={allVars}
+              placeholder={'{\n  "phone": "{{wa_phone}}",\n  "name": "{{guest_name}}",\n  "party_size": "{{party_size}}",\n  "datetime": "{{booking_datetime}}",\n  "special_request": "{{special_request}}"\n}'}
+              rows={9}
+              className="font-mono text-[12px]"
+            />
+            <p className="mt-1 text-[10px]" style={{ color: 'rgba(255,255,255,0.2)' }}>
+              Type <span style={{ color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>{'{{'}</span> to insert a variable. Must be valid JSON.
+            </p>
+          </>
+        )}
+
+        {bodyMode === 'form' && (
+          <div
+            className="px-3 py-2.5 rounded-[12px] text-[11px]"
+            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.35)' }}
+          >
+            Form Data — use query params above to specify key-value fields.
+          </div>
+        )}
+
+        {bodyMode === 'none' && (
+          <div
+            className="px-3 py-2.5 rounded-[12px] text-[11px]"
+            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.35)' }}
+          >
+            No body will be sent with this request.
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// ─── WEBHOOK NODE: ADVANCED CONFIG ──────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════
+function WebhookAdvancedConfig({
+  localData, commitField,
+}: {
+  localData: Record<string, any>;
+  commitField: (f: string, v: any) => void;
+}) {
+  const [showDebug, setShowDebug] = React.useState(false);
+
+  // ── Response Mappings ─────────────────────────────────────────────────────────
+  const responseMappings: Array<{ id: string; from: string; to: string }> =
+    Array.isArray(localData.responseMappings) ? localData.responseMappings : [];
+
+  const addMapping = () => commitField('responseMappings', [
+    ...responseMappings,
+    { id: `rm_${Date.now()}`, from: '', to: '' },
+  ]);
+  const updateMapping = (idx: number, k: 'from' | 'to', v: string) =>
+    commitField('responseMappings', responseMappings.map((m, i) => i === idx ? { ...m, [k]: v } : m));
+  const removeMapping = (idx: number) =>
+    commitField('responseMappings', responseMappings.filter((_, i) => i !== idx));
+
+  // ── Auth preset auto-populates headers ────────────────────────────────────────
+  const applyAuthPreset = (preset: string, val: string) => {
+    commitField('authPreset', preset);
+    commitField('authValue', val);
+    const currentHeaders: Array<{ id: string; key: string; value: string }> =
+      Array.isArray(localData.headers) ? localData.headers
+        : [{ id: 'h_ct', key: 'Content-Type', value: 'application/json' }];
+
+    if (preset === 'none') {
+      commitField('headers', currentHeaders.filter(h => h.key.toLowerCase() !== 'authorization'));
+      return;
+    }
+    let hVal = '';
+    if (preset === 'bearer') hVal = `Bearer ${val}`;
+    if (preset === 'apikey') hVal = val;
+    if (preset === 'basic') hVal = `Basic ${typeof btoa !== 'undefined' ? btoa(val) : val}`;
+
+    const idx = currentHeaders.findIndex(h => h.key.toLowerCase() === 'authorization');
+    if (idx >= 0) {
+      commitField('headers', currentHeaders.map((h, i) => i === idx ? { ...h, value: hVal } : h));
+    } else {
+      commitField('headers', [...currentHeaders, { id: `h_auth_${Date.now()}`, key: 'Authorization', value: hVal }]);
+    }
+  };
+
+  const authPreset: string = (localData.authPreset as string) || 'none';
+  const authValue: string = (localData.authValue as string) || '';
+  const lastDebug = localData._lastDebug as { status?: number; url?: string; body?: string } | undefined;
+
+  // ── Shared styles ─────────────────────────────────────────────────────────────
+  const rowBox: React.CSSProperties = {
+    background: 'rgba(255,255,255,0.04)',
+    border: '1px solid rgba(255,255,255,0.07)',
+    borderRadius: 10,
+    padding: '8px 10px',
+  };
+  const kvKey: React.CSSProperties = {
+    ...INP_STYLE, fontSize: 12, borderRadius: 8, padding: '5px 8px', flex: '0 0 45%', fontFamily: 'monospace',
+  };
+  const removeBtn: React.CSSProperties = {
+    ...BTN_STYLE, fontSize: 11, padding: '4px 8px', flexShrink: 0, opacity: 0.7,
+  };
+
+  return (
+    <>
+      <div className="h-px" style={{ background: 'rgba(255,255,255,0.05)' }} />
+
+      {/* ── Timeout & Retry ─────────────────────────────────────────────────── */}
+      <div
+        className="rounded-[12px] p-3.5 space-y-3"
+        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}
+      >
+        <p className="text-[10.5px] font-semibold tracking-[0.07em] uppercase" style={{ color: 'rgba(255,255,255,0.3)' }}>Request Settings</p>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-[10px] block mb-1" style={{ color: 'rgba(255,255,255,0.25)' }}>Timeout (ms)</label>
+            <input
+              type="number"
+              min={1000} max={30000} step={1000}
+              value={(localData.timeout as number) || 10000}
+              onChange={e => commitField('timeout', parseInt(e.target.value, 10))}
+              className={INPUT_CLS}
+              style={{ ...INP_STYLE, fontSize: 12 }}
+            />
+          </div>
+          <div>
+            <label className="text-[10px] block mb-1" style={{ color: 'rgba(255,255,255,0.25)' }}>Retry Count</label>
+            <input
+              type="number"
+              min={0} max={3}
+              value={(localData.retryCount as number) ?? 1}
+              onChange={e => commitField('retryCount', parseInt(e.target.value, 10))}
+              className={INPUT_CLS}
+              style={{ ...INP_STYLE, fontSize: 12 }}
+            />
+          </div>
+        </div>
+
+        {((localData.retryCount as number) ?? 0) > 0 && (
+          <div>
+            <label className="text-[10px] block mb-1" style={{ color: 'rgba(255,255,255,0.25)' }}>Retry Strategy</label>
+            <select
+              value={(localData.retryStrategy as string) || 'exponential'}
+              onChange={e => commitField('retryStrategy', e.target.value)}
+              className={SELECT_CLS}
+              style={{ ...INP_STYLE, fontSize: 12 }}
+            >
+              <option value="linear">Linear (same delay)</option>
+              <option value="exponential">Exponential backoff</option>
+            </select>
+          </div>
+        )}
+
+        <div>
+          <label className="text-[10px] block mb-1" style={{ color: 'rgba(255,255,255,0.25)' }}>On Error</label>
+          <select
+            value={(localData.errorBehavior as string) || 'error_branch'}
+            onChange={e => commitField('errorBehavior', e.target.value)}
+            className={SELECT_CLS}
+            style={{ ...INP_STYLE, fontSize: 12 }}
+          >
+            <option value="error_branch">Route to ERROR branch</option>
+            <option value="continue">Continue (ignore error)</option>
+            <option value="fail">Fail entire flow</option>
+          </select>
+        </div>
+      </div>
+
+      {/* ── Auth Helper ─────────────────────────────────────────────────────── */}
+      <div
+        className="rounded-[12px] p-3.5 space-y-2.5"
+        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}
+      >
+        <p className="text-[10.5px] font-semibold tracking-[0.07em] uppercase" style={{ color: 'rgba(255,255,255,0.3)' }}>Auth Helper</p>
+        <select
+          value={authPreset}
+          onChange={e => applyAuthPreset(e.target.value, authValue)}
+          className={SELECT_CLS}
+          style={{ ...INP_STYLE, fontSize: 12 }}
+        >
+          <option value="none">None</option>
+          <option value="bearer">Bearer Token</option>
+          <option value="apikey">API Key (raw)</option>
+          <option value="basic">Basic Auth (user:pass)</option>
+        </select>
+        {authPreset !== 'none' && (
+          <>
+            <input
+              type="text"
+              value={authValue}
+              onChange={e => { commitField('authValue', e.target.value); applyAuthPreset(authPreset, e.target.value); }}
+              placeholder={
+                authPreset === 'bearer' ? 'your-token-here' :
+                authPreset === 'basic' ? 'username:password' :
+                'api-key-value'
+              }
+              className={INPUT_CLS}
+              style={{ ...INP_STYLE, fontSize: 12, fontFamily: 'monospace' }}
+            />
+            <p className="text-[9.5px]" style={{ color: 'rgba(255,255,255,0.2)' }}>
+              Auto-populates the <code className="font-mono">Authorization</code> header in the Content tab.
+            </p>
+          </>
+        )}
+      </div>
+
+      {/* ── Response Mapping ────────────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label
+            className="text-[10.5px] font-semibold tracking-[0.08em] uppercase"
+            style={{ color: 'rgba(255,255,255,0.3)' }}
+          >
+            Response Mapping
+          </label>
+          <button onClick={addMapping} style={BTN_STYLE}>+ Add Mapping</button>
+        </div>
+        <div className="space-y-1.5">
+          {responseMappings.map((m, i) => (
+            <div key={m.id} style={rowBox} className="flex items-center gap-2">
+              <input
+                type="text"
+                value={m.from}
+                onChange={e => updateMapping(i, 'from', e.target.value)}
+                placeholder="response.booking_id"
+                className={INPUT_CLS}
+                style={kvKey}
+              />
+              <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12, flexShrink: 0 }}>→</span>
+              <input
+                type="text"
+                value={m.to}
+                onChange={e => updateMapping(i, 'to', e.target.value)}
+                placeholder="booking_id"
+                className={INPUT_CLS}
+                style={{ ...INP_STYLE, fontSize: 12, borderRadius: 8, padding: '5px 8px', flex: 1, fontFamily: 'monospace' }}
+              />
+              <button onClick={() => removeMapping(i)} style={removeBtn}>✕</button>
+            </div>
+          ))}
+          {responseMappings.length === 0 && (
+            <p className="text-[11px] py-1" style={{ color: 'rgba(255,255,255,0.28)' }}>
+              No mappings. Response JSON keys are auto-mapped to flow variables.
+            </p>
+          )}
+        </div>
+        {responseMappings.length > 0 && (
+          <p className="text-[9.5px] mt-1.5" style={{ color: 'rgba(255,255,255,0.2)' }}>
+            Explicit mappings take priority over auto-mapping.
+          </p>
+        )}
+      </div>
+
+      {/* ── Debug Log ───────────────────────────────────────────────────────── */}
+      <div>
+        <button
+          onClick={() => setShowDebug(v => !v)}
+          className="w-full flex items-center justify-between px-3 py-2 rounded-[10px]"
+          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.35)' }}
+        >
+          <span className="text-[10.5px] font-semibold tracking-[0.07em] uppercase">Request Debug Log</span>
+          <span className="text-[10px]">{showDebug ? '▲' : '▼'}</span>
+        </button>
+        {showDebug && (
+          <div
+            className="mt-1.5 rounded-[10px] p-3 space-y-2"
+            style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.07)' }}
+          >
+            {lastDebug ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="text-[11px] font-bold px-2 py-0.5 rounded"
+                    style={{
+                      background: (lastDebug.status ?? 0) >= 200 && (lastDebug.status ?? 0) < 300
+                        ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                      color: (lastDebug.status ?? 0) >= 200 && (lastDebug.status ?? 0) < 300
+                        ? '#4ade80' : '#f87171',
+                    }}
+                  >
+                    {lastDebug.status ?? '—'}
+                  </span>
+                  <span className="text-[10px] font-mono truncate" style={{ color: 'rgba(255,255,255,0.4)' }}>{lastDebug.url}</span>
+                </div>
+                {lastDebug.body && (
+                  <pre
+                    className="text-[10px] leading-relaxed overflow-x-auto"
+                    style={{ color: 'rgba(255,255,255,0.45)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
+                  >
+                    {String(lastDebug.body).slice(0, 400)}
+                  </pre>
+                )}
+              </>
+            ) : (
+              <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.25)' }}>No requests recorded. Trigger a live flow to see debug logs.</p>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+

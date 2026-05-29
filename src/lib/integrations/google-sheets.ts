@@ -159,10 +159,60 @@ async function getSheetsConfig(tenantId: string): Promise<{ token: string; confi
   return { token: refreshed.access_token, config: newCfg };
 }
 
+// ── Ensure sheet/tab exists dynamically ─────────────────────
+async function ensureSheetExists(token: string, spreadsheetId: string, sheetName: string): Promise<void> {
+  const metaRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!metaRes.ok) {
+    console.error(`🔍 [GSHEETS] failed to fetch spreadsheet metadata:`, await metaRes.text());
+    return;
+  }
+
+  const meta = await metaRes.json() as { sheets?: Array<{ properties?: { title?: string } }> };
+  const sheets = meta.sheets || [];
+  const exists = sheets.some(s => s.properties?.title === sheetName);
+
+  if (exists) return;
+
+  console.log(`🔍 [GSHEETS] Sheet "${sheetName}" not found. Creating it...`);
+
+  const createRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        requests: [
+          {
+            addSheet: {
+              properties: {
+                title: sheetName
+              }
+            }
+          }
+        ]
+      })
+    }
+  );
+
+  if (!createRes.ok) {
+    console.error(`🔍 [GSHEETS] failed to create sheet "${sheetName}":`, await createRes.text());
+  } else {
+    console.log(`✅ [GSHEETS] Created sheet "${sheetName}" successfully.`);
+  }
+}
+
 // ── Ensure header row exists (idempotent) ──────────────────
 const HEADERS = ['Name', 'Phone', 'Email'];
 
 async function ensureHeaders(token: string, spreadsheetId: string, sheetName: string): Promise<void> {
+  await ensureSheetExists(token, spreadsheetId, sheetName);
+
   const range = `${sheetName}!A1:C1`;
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`,
@@ -287,6 +337,8 @@ async function ensureBookingHeaders(
   spreadsheetId: string,
   sheetName:     string
 ): Promise<void> {
+  await ensureSheetExists(token, spreadsheetId, sheetName);
+
   const range = `${sheetName}!A1:G1`;
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`,
