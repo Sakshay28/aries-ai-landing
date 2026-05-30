@@ -523,6 +523,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     ...(matchedAgent ? {
       botName: matchedAgent.bot_name || baseConfig.botName,
       botPersonality: matchedAgent.bot_personality || baseConfig.botPersonality,
+      systemPrompt: matchedAgent.system_prompt || baseConfig.systemPrompt,
     } : {}),
   };
   const context = (conversation.context as Record<string, any>) || {};

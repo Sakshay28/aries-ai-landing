@@ -72,6 +72,9 @@ export interface Tenant {
   // Custom FAQs (Fix #7)
   custom_faqs: Array<{ question: string; answer: string }>;
 
+  // Custom Prompt (Staff Guidelines)
+  system_prompt?: string | null;
+
   // Off-Hours Config (Fix #8)
   off_hours_message: string | null;
   off_hours_capture_lead: boolean;

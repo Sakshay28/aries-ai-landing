@@ -25,7 +25,7 @@ export async function GET() {
       escalation_timeout_mins, hot_keywords, warm_keywords,
       custom_faqs, off_hours_message, off_hours_capture_lead,
       wa_phone_number_id, wa_business_account_id, wa_access_token, wa_verify_token,
-      outbound_webhook_url
+      outbound_webhook_url, system_prompt
     `)
     .eq('id', tenantId)
     .single();
@@ -61,7 +61,7 @@ export async function PATCH(req: NextRequest) {
     'escalation_timeout_mins', 'hot_keywords', 'warm_keywords',
     'custom_faqs', 'off_hours_message', 'off_hours_capture_lead',
     'wa_phone_number_id', 'wa_business_account_id', 'wa_verify_token',
-    'outbound_webhook_url'
+    'outbound_webhook_url', 'system_prompt'
   ];
 
   const updates: Record<string, unknown> = {};

@@ -667,57 +667,35 @@ export default function SettingsPage() {
 
       {activeTab === 'bot' && (
         <motion.div key="bot" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
-          <SectionCard title="AI Identity" icon={Bot}>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <Field label="Bot Name">
-                <Input value={settings.bot_name} onChange={v => update('bot_name', v)} placeholder="Aria" />
-              </Field>
-              <Field label="AI Persona">
-                <select 
-                  value={settings.bot_personality || 'sales_pro'} 
-                  onChange={e => update('bot_personality', e.target.value)}
-                  className="w-full h-10 px-3 rounded-xl text-sm outline-none transition-all"
-                  style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
-                >
-                  <option value="sales_pro">Sales Pro (Persuasive, handles objections)</option>
-                  <option value="educator">Educator (Teaching tone, breaks down complexity)</option>
-                  <option value="support_hero">Support Hero (Empathetic, de-escalates)</option>
-                  <option value="lead_magnet">Lead Magnet (Qualifies and collects info)</option>
-                  <option value="advisor">Advisor (Consultative, builds trust)</option>
-                  <option value="concierge">Concierge (Premium service, proactive)</option>
-                </select>
-              </Field>
+          <div 
+            className="p-8 rounded-2xl border text-center space-y-5"
+            style={{ 
+              background: 'var(--card)',
+              borderColor: 'var(--border)'
+            }}
+          >
+            <div className="w-16 h-16 mx-auto rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+              <Bot className="w-8 h-8" />
             </div>
-            <Field label="Welcome Message">
-              <Textarea value={settings.welcome_message || ''} onChange={v => update('welcome_message', v)} placeholder="Hi! Welcome to {business_name}. How can I help you today?" rows={3} />
-            </Field>
-            <Field label="Welcome Offer / Promotion">
-              <Textarea value={settings.welcome_offer || ''} onChange={v => update('welcome_offer', v)} placeholder="Get 10% off on your first order! Use code WELCOME10" rows={2} />
-            </Field>
-          </SectionCard>
-
-          <SectionCard title="AI Lead Scoring" icon={BrainCircuit}>
-            <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-              Keywords that trigger lead scoring. The AI automatically classifies contacts based on these signals.
-            </p>
-            <Field label="Hot Keywords (High Intent)">
-              <TagInput tags={settings.hot_keywords || []} onChange={v => update('hot_keywords', v)} placeholder="buy now, place order, book appointment…" />
-            </Field>
-            <Field label="Warm Keywords (Medium Intent)">
-              <TagInput tags={settings.warm_keywords || []} onChange={v => update('warm_keywords', v)} placeholder="interested, pricing, how much…" />
-            </Field>
-          </SectionCard>
-
-          <SectionCard title="Unique Selling Points" icon={Zap}>
-            <p className="text-xs mb-3" style={{ color: 'var(--muted-foreground)' }}>
-              These are used by the AI to describe your business's strengths.
-            </p>
-            <TagInput
-              tags={settings.usps || []}
-              onChange={v => update('usps', v)}
-              placeholder="Fast delivery, 24/7 support, Free returns…"
-            />
-          </SectionCard>
+            
+            <div className="space-y-2">
+              <h3 className="text-lg font-bold text-foreground">AI Configuration has Moved!</h3>
+              <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
+                We have consolidated your Bot Name, Persona, Welcomes, Offers, Staff Guidelines, FAQs, and Knowledge files into a single, unified **AI Staff Manager** page.
+              </p>
+            </div>
+            
+            <button
+              onClick={() => window.location.href = '/dashboard/agents'}
+              className="inline-flex items-center gap-2 h-10 px-5 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+              style={{
+                background: 'var(--foreground)',
+                color: 'var(--background)'
+              }}
+            >
+              Go to AI Staff Manager
+            </button>
+          </div>
         </motion.div>
       )}
 

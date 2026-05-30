@@ -67,12 +67,12 @@ const navigationItems: NavItem[] = [
     ) 
   },
   { 
-    label: "AI Agents", 
+    label: "AI Staff Manager", 
     icon: Bot, 
     href: "/dashboard/agents",
     badge: (
       <div className="flex items-center gap-1.5">
-        <span className="text-[10px] tracking-wide text-sidebar-foreground/50">2 Active</span>
+        <span className="text-[10px] tracking-wide text-sidebar-foreground/50">Active</span>
       </div>
     ) 
   },
@@ -94,7 +94,7 @@ const navigationItems: NavItem[] = [
     href: "/dashboard/automations",
     badge: <SmartRulesBadge />,
   },
-  { label: "Knowledge Base", icon: Library, href: "/dashboard/knowledge" },
+  { label: "Knowledge Base", icon: Library, href: "/dashboard/agents?ref=kb" },
   { label: "Templates", icon: FileText, href: "/dashboard/templates" },
   { label: "Event Logs", icon: Activity, href: "/dashboard/logs" },
   { label: "Integrations", icon: Puzzle, href: "/dashboard/integrations" },

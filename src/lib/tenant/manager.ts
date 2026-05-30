@@ -357,5 +357,7 @@ export function getTenantConfig(tenant: Tenant) {
     // Fix #8: Off-hours config
     offHoursMessage: tenant.off_hours_message,
     offHoursCaptureLead: tenant.off_hours_capture_lead ?? true,
+    // Unified Staff Guidelines
+    systemPrompt: tenant.system_prompt || '',
   };
 }

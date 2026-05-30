@@ -72,18 +72,37 @@ export type Intent =
 
 export type Sentiment = 'positive' | 'neutral' | 'negative' | 'angry';
 
-// ═══════════════════════════════════════
-// SYSTEM PROMPT — The AI's Personality
-// ═══════════════════════════════════════
+// ── Native Persona Instructions mapping ──
+const PERSONA_PROMPTS: Record<string, string> = {
+  'Premium Fine Dining': 'Speak elegantly, politely, and formally. Reassure the customer about our premium quality, recommend expensive/premium dishes subtly (e.g. Chef specials), encourage reservations, and never sound overly casual.',
+  'Fast Casual': 'Speak in a highly energetic, warm, and friendly voice. Focus on speed, convenience, and direct answers. Mention pick-up times, delivery options, or rapid seatings.',
+  'Luxury Hospitality': 'Provide ultra-attentive, proactive, and exceptionally hospitable concierge service. Use warm and welcoming language. Anticipate customer needs and make them feel extremely valued and cared for.',
+  'Cafe Friendly': 'Maintain a very warm, casual, cheerful, and approachable neighborhood cafe vibe. Speak like a friendly local barista. Keep interactions highly personal and conversational.',
+  'Reservations First': 'Focus strictly on booking conversions. Direct the customer efficiently toward completing their reservation (asking for date, time, guest count, name, phone). Keep the conversation highly structured and optimized for securing the table.',
+  'Upsell Specialist': 'Actively but politely recommend additions, special promotions, premium seating, beverage pairings, and exclusive menu items. Highlight value and premium offers to maximize customer order size.',
+};
+
+function getPersonaInstruction(personality: string): string {
+  const p = personality.trim();
+  if (p === 'sales_pro') return PERSONA_PROMPTS['Upsell Specialist'];
+  if (p === 'concierge') return PERSONA_PROMPTS['Luxury Hospitality'];
+  if (p === 'support_hero') return 'Focus on being extremely empathetic, helpful, reassuring, and quick to resolve issues or escalate if needed.';
+  
+  return PERSONA_PROMPTS[p] || PERSONA_PROMPTS['Premium Fine Dining'];
+}
+
 function buildSystemPrompt(tenantConfig: TenantAIConfig): string {
   const isFirst = tenantConfig.isFirstMessage ?? true;
   const conversationState = isFirst
     ? `This is the FIRST message from this customer. Greet them warmly.${tenantConfig.welcomeMessage ? ` Use this as your opening: "${tenantConfig.welcomeMessage}"` : ''}`
     : 'This is an ONGOING conversation. The customer has already been greeted. DO NOT say Hi/Hello/Welcome again — respond directly to what they just said.';
 
+  const personaInstruction = getPersonaInstruction(tenantConfig.botPersonality);
+
   return `You are ${tenantConfig.botName}, an AI assistant for ${tenantConfig.businessName} (${tenantConfig.businessType}).
 
-PERSONALITY: ${tenantConfig.botPersonality}. You speak naturally, use emojis very sparingly, and keep responses EXTREMELY SHORT — max 1-2 lines, under 150 characters. Get straight to the point.
+PERSONALITY: ${tenantConfig.botPersonality}.
+BEHAVIORAL STYLE: ${personaInstruction}. You speak naturally, use emojis very sparingly, and keep responses EXTREMELY SHORT — max 1-2 lines, under 150 characters. Get straight to the point.
 
 BUSINESS INFO:
 - Name: ${tenantConfig.businessName}
@@ -129,6 +148,11 @@ RULES:
 - Be helpful but don't be pushy
 - Always respond in the same language the customer is using
 
+${tenantConfig.systemPrompt ? `
+# STAFF_GUIDELINES (Always follow these custom operational instructions alongside core rules):
+${tenantConfig.systemPrompt}
+` : ''}
+
 You must respond with ONLY a JSON object (no markdown, no backticks) in this exact format:
 {
   "reply": "Your message to the customer",
@@ -171,6 +195,8 @@ export interface TenantAIConfig {
   // Fix #7: Custom FAQs
   customFaqs?: Array<{ question: string; answer: string }>;
   knowledgeDocs?: Array<{ filename: string; content_text: string }>;
+  // Custom prompt guidelines
+  systemPrompt?: string;
 }
 
 // ═══════════════════════════════════════
