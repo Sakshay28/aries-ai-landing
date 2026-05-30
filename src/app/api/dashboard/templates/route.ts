@@ -82,6 +82,32 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
+    const components = (body.components || []) as any[];
+
+    // Auto-inject examples for components with placeholders to satisfy Meta Graph API requirements
+    const processedComponents = components.map((comp) => {
+      if (comp.type === 'BODY' && typeof comp.text === 'string') {
+        const matches = comp.text.match(/{{\s*\d+\s*}}/g);
+        if (matches && matches.length > 0) {
+          // Extract unique placeholder numbers
+          const nums = matches.map((m: string) => parseInt(m.replace(/[{}]/g, ''), 10));
+          const maxNum = Math.max(...nums);
+          if (maxNum > 0) {
+            const examples: string[] = [];
+            for (let i = 1; i <= maxNum; i++) {
+              examples.push(`Val${i}`);
+            }
+            return {
+              ...comp,
+              example: {
+                body_text: [examples],
+              },
+            };
+          }
+        }
+      }
+      return comp;
+    });
 
     const res = await fetch(`${META_BASE}/${tenant.wa_business_account_id}/message_templates`, {
       method: 'POST',
@@ -94,7 +120,7 @@ export async function POST(request: Request) {
         name: body.name as string,
         category: (body.category as string) || 'MARKETING',
         language: (body.language as string) || 'en',
-        components: body.components || [],
+        components: processedComponents,
       }),
       signal: AbortSignal.timeout(10000),
     });

@@ -139,6 +139,7 @@ export default function TemplatesPage() {
 
   const fetchTemplates = () => {
     setLoadingTemplates(true);
+    setTemplateError(null);
     fetch('/api/dashboard/templates')
       .then(r => r.json())
       .then(j => {
@@ -298,7 +299,36 @@ export default function TemplatesPage() {
               </div>
             )}
 
-            {!loadingTemplates && (templateError || templates.length === 0) && (
+            {!loadingTemplates && templateError && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="p-6 rounded-2xl bg-rose-500/5 border border-rose-500/10 text-sm text-rose-600 dark:text-rose-400 space-y-4 shadow-sm"
+              >
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-semibold text-foreground text-sm">Failed to Sync WhatsApp Templates</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      We encountered a transient error connecting to Meta's Business servers. This is usually temporary and resolves quickly.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 pt-1">
+                  <button
+                    onClick={fetchTemplates}
+                    className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-xl transition-all shadow-sm active:scale-95"
+                  >
+                    Try Again
+                  </button>
+                  <span className="text-[10px] font-mono text-muted-foreground/60 uppercase">
+                    Status: {templateError === 'network' ? 'Connection Timeout' : templateError}
+                  </span>
+                </div>
+              </motion.div>
+            )}
+
+            {!loadingTemplates && !templateError && templates.length === 0 && (
               <div className="p-6 rounded-2xl bg-card border border-border text-sm text-muted-foreground space-y-3 shadow-inner">
                 <p className="font-semibold text-foreground">No approved templates yet.</p>
                 <p className="leading-relaxed">
