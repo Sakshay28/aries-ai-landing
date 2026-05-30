@@ -410,10 +410,30 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   }
 
   // 10. Pause / Escalated checks
-  if (conversation.bot_paused || conversation.escalated) {
-    console.log(`🔇 Meta: bot paused for conversation ${conversation.id}, skipping AI`);
+  // bot_paused = hard stop (human agent has taken over — never override)
+  if (conversation.bot_paused) {
+    console.log(`🔇 Meta: bot paused (human takeover) for conversation ${conversation.id}, skipping AI`);
     return;
   }
+
+  // escalated = soft state — if booking is already saved, auto-clear so bot can handle follow-up
+  if (conversation.escalated) {
+    const ctx = (conversation.context as Record<string, any>) || {};
+    if (ctx.booking_saved) {
+      // Auto-clear escalation after a completed booking so bot handles follow-up messages
+      console.log(`🔄 Auto-clearing escalation for conversation ${conversation.id} (booking already saved)`);
+      await supabaseAdmin
+        .from('conversations')
+        .update({ escalated: false, escalation_reason: null })
+        .eq('id', conversation.id);
+      conversation.escalated = false;
+    } else {
+      // Still in escalation with no completed booking — skip AI (human should handle)
+      console.log(`🔇 Meta: conversation ${conversation.id} escalated (no booking), skipping AI`);
+      return;
+    }
+  }
+
 
   // 11. AI Cost Cap Checks
   const aiLimit = tenant.ai_conversation_limit ?? 1000;
