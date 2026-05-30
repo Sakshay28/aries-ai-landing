@@ -3,6 +3,7 @@ import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantById } from '@/lib/tenant/manager';
+import { retrieveRelevantDocs } from '@/lib/ai/rag';
 
 export async function POST(req: NextRequest) {
   const tenantId = await getTenantId();
@@ -23,13 +24,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Tenant not found' }, { status: 404 });
     }
 
-    // 2. Fetch actual RAG documents from DB to support real-time training queries
-    const { data: ragDocs } = await supabaseAdmin
-      .from('knowledge_docs')
-      .select('filename, content_text')
-      .eq('tenant_id', tenantId)
-      .neq('content_text', '')
-      .limit(5);
+    // 2. Fetch semantically relevant RAG documents from DB for sandbox query grounding
+    let ragDocs: Array<{ filename: string; content_text: string }> = [];
+    try {
+      ragDocs = await retrieveRelevantDocs(tenantId, message, 3);
+    } catch (e) {
+      console.error('Playground RAG retrieval error:', e);
+    }
+
+    // Fallback to latest 5 docs if RAG similarity search returns empty
+    if (!ragDocs || ragDocs.length === 0) {
+      const { data: fallback } = await supabaseAdmin
+        .from('knowledge_docs')
+        .select('filename, content_text')
+        .eq('tenant_id', tenantId)
+        .neq('content_text', '')
+        .limit(5);
+      ragDocs = (fallback || []) as Array<{ filename: string; content_text: string }>;
+    }
 
     // 3. Assemble TenantAIConfig from draftConfig (with fallbacks to stored tenant config)
     const tenantConfig = {

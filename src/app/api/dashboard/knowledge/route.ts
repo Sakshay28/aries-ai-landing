@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { enqueueEmbedding } from '@/lib/ai/embedding-queue';
+import { GoogleGenAI } from '@google/genai';
 
 const TEXT_TYPES = new Set(['txt', 'md', 'csv', 'json', 'html', 'xml']);
 const MAX_BYTES = 500_000; // 500 KB text cap before truncation
@@ -13,12 +14,12 @@ export async function GET() {
 
   const { data, error } = await supabaseAdmin
     .from('knowledge_docs')
-    .select('id, filename, file_type, file_url, created_at')
+    .select('id, filename, file_type, file_url, created_at, embedding')
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true, data: data || [] });
+  return NextResponse.json({ success: true, data: data || [], docs: data || [] });
 }
 
 // ── POST: upload a file, extract text, store ─────────────────
@@ -56,6 +57,25 @@ export async function POST(req: NextRequest) {
   if (isText) {
     const raw = buffer.toString('utf-8');
     contentText = raw.length > MAX_BYTES ? raw.slice(0, MAX_BYTES) + '\n...[truncated]' : raw;
+  } else if (ext === 'pdf') {
+    try {
+      const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const genAIResponse = await genAI.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [
+          {
+            inlineData: {
+              mimeType: 'application/pdf',
+              data: buffer.toString('base64'),
+            },
+          },
+          'Extract all text content from this document exactly as it is written. Do not summarize, do not translate, do not add any comments. Just return the raw extracted text.',
+        ],
+      });
+      contentText = genAIResponse.text || '';
+    } catch (err) {
+      console.error('Failed to extract text from PDF using Gemini:', err);
+    }
   }
 
   const { data, error } = await supabaseAdmin
@@ -67,7 +87,7 @@ export async function POST(req: NextRequest) {
       content_text: contentText,
       file_url: fileUrl,
     })
-    .select('id, filename, file_type, file_url, created_at')
+    .select('id, filename, file_type, file_url, created_at, embedding')
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -26,6 +26,8 @@ interface KnowledgeDoc {
   file_type: string;
   content_text: string;
   created_at: string;
+  file_url?: string | null;
+  embedding?: string | null;
 }
 
 interface DraftConfig {
@@ -273,7 +275,7 @@ export default function AISettingsPage() {
       }
 
       if (docsData.success) {
-        setDocs(docsData.docs || []);
+        setDocs(docsData.data || docsData.docs || []);
       }
     } catch {
       toast.error('Network error loading data');
@@ -340,6 +342,39 @@ export default function AISettingsPage() {
   };
 
   // ── RAG Knowledge File Uploader ──
+  const pollDocStatus = (docId: string) => {
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts++;
+      if (attempts > 30) { // 60 seconds max poll
+        clearInterval(interval);
+        return;
+      }
+      try {
+        const res = await fetch('/api/dashboard/knowledge');
+        const json = await res.json();
+        if (json.success && (json.data || json.docs)) {
+          const docsList = json.data || json.docs || [];
+          const doc = docsList.find((d: any) => d.id === docId);
+          if (doc && doc.embedding) {
+            // Document has been indexed!
+            setDocs(prev => prev.map(d => d.id === docId ? doc : d));
+            toast.success(
+              <div className="flex flex-col gap-0.5">
+                <span className="font-semibold text-emerald-500">✅ AI Finished Learning</span>
+                <span className="text-xs text-muted-foreground">AI finished learning from "{doc.filename}"</span>
+              </div>,
+              { duration: 4000 }
+            );
+            clearInterval(interval);
+          }
+        }
+      } catch (err) {
+        console.error('Polling status error:', err);
+      }
+    }, 2000);
+  };
+
   const handleFileUpload = async (file: File) => {
     const ext = file.name.split('.').pop()?.toLowerCase();
     const accepted = ['txt', 'md', 'csv', 'json', 'pdf'];
@@ -352,24 +387,46 @@ export default function AISettingsPage() {
       return;
     }
 
+    const tempId = `temp-${Date.now()}`;
+    const optimisticDoc = {
+      id: tempId,
+      filename: file.name,
+      file_type: ext,
+      file_url: null,
+      content_text: '',
+      created_at: new Date().toISOString(),
+      embedding: null, // processing state
+      isOptimistic: true
+    };
+
+    // Prepend optimistic doc to document list immediately
+    setDocs(prev => [optimisticDoc, ...prev]);
+
+    const uploadToastId = toast.loading("Uploading knowledge...");
     const formData = new FormData();
     formData.append('file', file);
     setUploading(true);
 
     try {
       const res = await fetch('/api/dashboard/knowledge', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (data.success) {
-        toast.success(`${file.name} trained successfully!`);
-        // reload knowledge list
-        const docsRes = await fetch('/api/dashboard/knowledge');
-        const docsData = await docsRes.json();
-        if (docsData.success) setDocs(docsData.docs || []);
+      const json = await res.json();
+      
+      if (json.success && json.data) {
+        toast.success("Knowledge uploaded successfully", { id: uploadToastId });
+        
+        // Replace optimistic doc with real uploaded doc from DB
+        setDocs(prev => prev.map(d => d.id === tempId ? json.data : d));
+        
+        // Start polling for real-time indexing status transition!
+        pollDocStatus(json.data.id);
       } else {
-        throw new Error(data.error || 'Upload failed');
+        throw new Error(json.error || 'Upload failed');
       }
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error("Upload failed. Please try again.", { id: uploadToastId });
+      // Remove optimistic doc on failure
+      setDocs(prev => prev.filter(d => d.id !== tempId));
+      console.error('Upload error:', e);
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -878,10 +935,10 @@ export default function AISettingsPage() {
                       <button
                         onClick={() => fileInputRef.current?.click()}
                         disabled={uploading}
-                        className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold bg-foreground text-background hover:opacity-90 disabled:opacity-50 transition-all"
+                        className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold bg-foreground text-background hover:opacity-90 disabled:opacity-50 transition-all cursor-pointer"
                       >
                         {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
-                        {uploading ? 'Training...' : 'Upload File'}
+                        {uploading ? 'Uploading...' : 'Upload File'}
                       </button>
                       <input
                         ref={fileInputRef}
@@ -895,9 +952,26 @@ export default function AISettingsPage() {
                     {/* Health Signals */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <div className="p-3 rounded-xl border bg-background/30 text-center">
-                        <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Menu Knowledge</div>
+                        <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Knowledge Status</div>
+                        <div className={cn(
+                          "text-xs font-bold mt-1",
+                          docs.some(d => !d.embedding) 
+                            ? "text-amber-500 animate-pulse" 
+                            : docs.length > 0 
+                              ? "text-emerald-500" 
+                              : "text-muted-foreground"
+                        )}>
+                          {docs.some(d => !d.embedding) 
+                            ? 'Processing' 
+                            : docs.length > 0 
+                              ? 'Active' 
+                              : 'Not Added'}
+                        </div>
+                      </div>
+                      <div className="p-3 rounded-xl border bg-background/30 text-center">
+                        <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Files Indexed</div>
                         <div className="text-xs font-bold mt-1 text-foreground">
-                          {docs.length > 0 ? `${docs.length} Active` : 'Not Added'}
+                          {docs.filter(d => d.embedding).length} of {docs.length}
                         </div>
                       </div>
                       <div className="p-3 rounded-xl border bg-background/30 text-center">
@@ -905,42 +979,86 @@ export default function AISettingsPage() {
                         <div className="text-xs font-bold mt-1 text-foreground">{draft.custom_faqs.length} Items</div>
                       </div>
                       <div className="p-3 rounded-xl border bg-background/30 text-center">
-                        <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Sync Status</div>
-                        <div className="text-xs font-bold mt-1 text-emerald-500">Healthy</div>
+                        <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">AI Readiness</div>
+                        <div className="text-[11px] font-bold mt-1 text-foreground truncate">
+                          {docs.some(d => !d.embedding) ? 'Learning...' : 'Ready to Answer'}
+                        </div>
                       </div>
-                      <div className="p-3 rounded-xl border bg-background/30 text-center">
-                        <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">AI Status</div>
-                        <div className="text-[11px] font-bold mt-1 text-foreground truncate">Ready to Answer</div>
-                      </div>
+                    </div>
+
+                    {/* Uploaded Knowledge Documents Section */}
+                    <div className="text-xs font-bold text-foreground mt-4 block">
+                      Uploaded Knowledge
                     </div>
 
                     {/* Docs list */}
                     <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                       {docs.map(doc => {
+                        const isIndexed = !!doc.embedding;
+                        const isOptimistic = (doc as any).isOptimistic;
                         const ext = doc.file_type || doc.filename.split('.').pop() || 'txt';
                         return (
-                          <div key={doc.id} className="flex items-center justify-between p-3 bg-background border border-border/80 rounded-xl hover:border-border transition-colors text-xs">
+                          <div key={doc.id} className="flex items-center justify-between p-3.5 bg-background border border-border/80 rounded-xl hover:border-border transition-colors text-xs relative group">
                             <div className="flex items-center gap-2.5 min-w-0">
-                              <div className="p-2 rounded-lg bg-secondary/50">
-                                <FileText className="w-3.5 h-3.5 text-emerald-500" />
+                              <div className={cn(
+                                "p-2.5 rounded-lg shrink-0",
+                                isIndexed ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500 animate-pulse"
+                              )}>
+                                <FileText className="w-4 h-4" />
                               </div>
                               <div className="min-w-0">
                                 <p className="font-bold text-foreground truncate">{doc.filename}</p>
-                                <p className="text-[10px] text-muted-foreground mt-0.5">Trained successfully</p>
+                                <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-muted-foreground">
+                                  <span className="uppercase tracking-wider font-semibold">{ext}</span>
+                                  <span>•</span>
+                                  <span className={cn(
+                                    "font-bold flex items-center gap-1",
+                                    isIndexed ? "text-emerald-500" : "text-amber-500"
+                                  )}>
+                                    {isIndexed ? (
+                                      <>
+                                        <Check className="w-3 h-3 text-emerald-500" /> Indexed
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Loader2 className="w-3 h-3 animate-spin" /> Processing knowledge...
+                                      </>
+                                    )}
+                                  </span>
+                                </div>
                               </div>
                             </div>
-                            <button
-                              onClick={() => handleDocDelete(doc.id, doc.filename)}
-                              className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex items-center gap-1">
+                              {doc.file_url && (
+                                <a
+                                  href={doc.file_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors"
+                                  title="Preview Document"
+                                >
+                                  <Library className="w-3.5 h-3.5" />
+                                </a>
+                              )}
+                              <button
+                                onClick={() => handleDocDelete(doc.id, doc.filename)}
+                                disabled={isOptimistic}
+                                className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-30 cursor-pointer"
+                                title="Delete Document"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
                         );
                       })}
                       {docs.length === 0 && (
-                        <div className="text-xs text-muted-foreground italic text-center py-4 border border-dashed rounded-xl">
-                          No menu uploaded yet. Upload PDFs or text menus in 1 click.
+                        <div className="p-6 rounded-2xl border border-dashed border-border bg-secondary/10 flex flex-col items-center justify-center text-center space-y-2">
+                          <HardDrive className="w-8 h-8 text-muted-foreground/50" />
+                          <div className="text-xs font-bold text-foreground">No menu or documents uploaded yet</div>
+                          <p className="text-[11px] text-muted-foreground max-w-xs leading-relaxed">
+                            Upload PDFs, TXT, CSV or JSON files to teach your AI about menus, timings, FAQs and business policies.
+                          </p>
                         </div>
                       )}
                     </div>
@@ -989,6 +1107,22 @@ export default function AISettingsPage() {
                 </span>
               )}
             </div>
+
+            {/* Active Brain Knowledge Trust Banners */}
+            {docs.filter(d => d.embedding).length > 0 && (
+              <div className="bg-emerald-500/10 px-4 py-2 border-b border-white/5 flex items-center justify-center text-center shrink-0">
+                <span className="text-[9px] font-bold tracking-wide text-emerald-400">
+                  ✅ AI is trained on: {docs.filter(d => d.embedding).map(d => d.filename).join(', ')}
+                </span>
+              </div>
+            )}
+            {docs.filter(d => !d.embedding).length > 0 && (
+              <div className="bg-amber-500/10 px-4 py-2 border-b border-white/5 flex items-center justify-center text-center shrink-0 animate-pulse">
+                <span className="text-[9px] font-bold tracking-wide text-amber-400">
+                  ⏳ AI is learning from: {docs.filter(d => !d.embedding).map(d => d.filename).join(', ')}
+                </span>
+              </div>
+            )}
 
             {/* Mock messages container list with increased top padding */}
             <div className="flex-1 overflow-y-auto p-4 pt-8 space-y-4 flex flex-col">
