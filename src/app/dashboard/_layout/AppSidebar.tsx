@@ -94,7 +94,6 @@ const navigationItems: NavItem[] = [
     href: "/dashboard/automations",
     badge: <SmartRulesBadge />,
   },
-  { label: "Knowledge Base", icon: Library, href: "/dashboard/agents?ref=kb" },
   { label: "Templates", icon: FileText, href: "/dashboard/templates" },
   { label: "Event Logs", icon: Activity, href: "/dashboard/logs" },
   { label: "Integrations", icon: Puzzle, href: "/dashboard/integrations" },
