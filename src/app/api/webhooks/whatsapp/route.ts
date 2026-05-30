@@ -599,6 +599,29 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   // 17. Update Conversation Context
   const updatedContext = { ...context, ...aiResponse.extractedData };
+
+  // Reset booking_saved when a NEW booking flow starts (so repeat bookings work)
+  // If AI is asking for guests/date/name = new booking, clear the old saved flag
+  const newBookingIntents = ['reserve_table', 'private_event', 'corporate_booking'];
+  const newBookingSteps = ['ask_guests', 'ask_date', 'ask_time', 'ask_name', 'ask_phone'];
+  const isNewBookingFlow = 
+    newBookingIntents.includes(aiResponse.intent) ||
+    newBookingSteps.includes(aiResponse.nextStep);
+  
+  if (isNewBookingFlow && (updatedContext as Record<string, any>).booking_saved) {
+    console.log(`🔄 New booking flow detected — resetting booking_saved flag`);
+    const uc = updatedContext as Record<string, any>;
+    uc.booking_saved = false;
+    uc.booking_reservation_id = null;
+    // Also clear old booking data so fresh data gets used
+    uc.date = aiResponse.extractedData?.date || undefined;
+    uc.time = aiResponse.extractedData?.time || undefined;
+    uc.guestCount = aiResponse.extractedData?.guestCount || undefined;
+    uc.name = aiResponse.extractedData?.name || undefined;
+    uc.phone = aiResponse.extractedData?.phone || undefined;
+  }
+
+
   await supabaseAdmin
     .from('conversations')
     .update({
@@ -610,6 +633,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       escalation_reason: aiResponse.escalationReason || null,
     })
     .eq('id', conversation.id);
+
 
   // 18. Update Lead Score
   if (lead?.id && aiResponse.intent) {
