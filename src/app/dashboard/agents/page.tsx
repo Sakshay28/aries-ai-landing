@@ -62,7 +62,13 @@ const STARTER_TEMPLATES = [
         { question: 'Do you offer valet parking?', answer: 'Yes, we offer complimentary valet parking for all our dining guests at the entrance.' },
         { question: 'What is your cancellation policy?', answer: 'Reservations can be canceled or rescheduled up to 2 hours before the booking time without any fee.' }
       ]
-    }
+    },
+    sample_chat: [
+      { role: 'user', content: 'Do you have valet parking?' },
+      { role: 'assistant', content: 'Yes, we offer complimentary valet parking for all our dining guests right at the main entrance. 🍷' },
+      { role: 'user', content: 'Can I book a table for 4 tonight?' },
+      { role: 'assistant', content: 'Certainly! I would be delighted to assist. May I know your preferred dining time?' }
+    ] as const
   },
   {
     id: 'cafe_setup',
@@ -78,7 +84,13 @@ const STARTER_TEMPLATES = [
         { question: 'Do you have dairy-free milk options?', answer: 'Absolutely! We offer Oat, Almond, and Soy milk for all our coffee beverages at no extra charge.' },
         { question: 'Is there seating for work?', answer: 'Yes, we have high-speed Wi-Fi and plenty of power outlets, perfect for working or studying!' }
       ]
-    }
+    },
+    sample_chat: [
+      { role: 'user', content: 'Do you have oat milk?' },
+      { role: 'assistant', content: 'Absolutely! We offer Oat, Almond, and Soy milk for all our coffee beverages at no extra charge. ☕' },
+      { role: 'user', content: 'Is there seating for work?' },
+      { role: 'assistant', content: 'Yes! We have high-speed Wi-Fi and plenty of power outlets throughout the cafe, perfect for working.' }
+    ] as const
   },
   {
     id: 'fast_casual',
@@ -91,10 +103,16 @@ const STARTER_TEMPLATES = [
       usps: ['10-Min Prep Time', 'Flame-Grilled Burgers', 'Family Meal Combos', 'Local Delivery'],
       system_prompt: '- Focus on speed, convenience, and extremely direct answers.\n- Recommend popular combos and direct delivery ordering links.\n- Keep replies extremely active, brief, and under 2 lines.\n- Always be enthusiastic and friendly.',
       custom_faqs: [
-        { question: 'Do you deliver directly?', answer: 'Yes! We deliver directly within a 5km radius when ordered via our website, or you can find us on Swiggy and Zomato.' },
+        { question: 'Do you deliver directly?', answer: 'Yes! We deliver directly within a 5km radius when ordered via our website, or you can find us on Zomato and Swiggy.' },
         { question: 'What are your popular dishes?', answer: 'Our absolute bestsellers are the Classic Flame-Grilled Cheeseburger and the Spicy Buffalo Wings!' }
       ]
-    }
+    },
+    sample_chat: [
+      { role: 'user', content: 'What are your popular dishes?' },
+      { role: 'assistant', content: 'Our absolute bestsellers are the Classic Flame-Grilled Cheeseburger and the Spicy Buffalo Wings! 🍔' },
+      { role: 'user', content: 'Do you deliver directly?' },
+      { role: 'assistant', content: 'Yes, we deliver directly within a 5km radius via our website! You can also find us on Zomato and Swiggy.' }
+    ] as const
   },
   {
     id: 'luxury_hospitality',
@@ -110,7 +128,13 @@ const STARTER_TEMPLATES = [
         { question: 'How do I book a private event?', answer: 'Simply share your preferred date, time, and guest count, and our dedicated VIP concierge manager will contact you directly to curate the experience.' },
         { question: 'Is there a dress code?', answer: 'We maintain a smart casual dress code to ensure a premium atmosphere for all our lounge guests.' }
       ]
-    }
+    },
+    sample_chat: [
+      { role: 'user', content: 'How do I book a private event?' },
+      { role: 'assistant', content: 'Simply share your preferred date, time, and guest count, and our dedicated VIP concierge manager will contact you directly to curate the experience. ✨' },
+      { role: 'user', content: 'Is there a dress code?' },
+      { role: 'assistant', content: 'We maintain a smart casual dress code to ensure an elegant and premium atmosphere for all of our lounge guests.' }
+    ] as const
   }
 ];
 
@@ -156,6 +180,7 @@ export default function AISettingsPage() {
   const [publishing, setPublishing] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
   
   // Knowledge docs & stats state
   const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
@@ -169,6 +194,7 @@ export default function AISettingsPage() {
   const [sendingMsg, setSendingMsg] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const workspacePanelRef = useRef<HTMLDivElement>(null);
 
   // Check dirty state
   useEffect(() => {
@@ -194,16 +220,19 @@ export default function AISettingsPage() {
     loadAllData();
   }, []);
 
-  // Pre-populate chat simulator on mount for premium showroom experience
+  // Listen for scroll in workspace panel to collapse header
   useEffect(() => {
-    if (chatHistory.length === 0) {
-      setChatHistory([
-        { role: 'user', content: 'Table for 4 tomorrow?', timestamp: new Date(Date.now() - 3 * 60 * 1000) },
-        { role: 'assistant', content: 'Certainly! May I know your preferred time?', timestamp: new Date(Date.now() - 2.5 * 60 * 1000) },
-        { role: 'user', content: 'Around 8 PM', timestamp: new Date(Date.now() - 2 * 60 * 1000) },
-        { role: 'assistant', content: 'Great, I can help with that. May I have your name and phone number?', timestamp: new Date(Date.now() - 1.5 * 60 * 1000) }
-      ]);
-    }
+    const panel = workspacePanelRef.current;
+    if (!panel) return;
+    const handleScroll = () => {
+      if (panel.scrollTop > 30) {
+        setScrolled(true);
+      } else {
+        setScrolled(false);
+      }
+    };
+    panel.addEventListener('scroll', handleScroll);
+    return () => panel.removeEventListener('scroll', handleScroll);
   }, []);
 
   // Auto-scroll chat simulator
@@ -257,13 +286,24 @@ export default function AISettingsPage() {
     setDraft(prev => ({ ...prev, [key]: value }));
   }, []);
 
-  const handleApplyTemplate = (tplConfig: Partial<DraftConfig>) => {
+  const handleApplyTemplate = (tpl: typeof STARTER_TEMPLATES[number]) => {
     setDraft(prev => ({
       ...prev,
-      ...tplConfig
+      ...tpl.config
     }));
+    if (tpl.sample_chat) {
+      setChatHistory(
+        tpl.sample_chat.map(chat => ({
+          role: chat.role,
+          content: chat.content,
+          timestamp: new Date()
+        }))
+      );
+    } else {
+      setChatHistory([]);
+    }
     setShowOnboarding(false);
-    toast.success('Starter template loaded! Type in the simulator to test it.');
+    toast.success(`${tpl.label} template loaded! Try testing in the simulator.`);
   };
 
   const handleAddChip = (chipText: string) => {
@@ -405,14 +445,11 @@ export default function AISettingsPage() {
   };
 
   const handleTrySampleConversation = () => {
-    handleSendMessage(undefined, "Hi, I want dinner for 2 tonight");
+    handleSendMessage(undefined, "Do you have valet parking?");
   };
 
   const handleResetChat = () => {
-    setChatHistory([
-      { role: 'user', content: 'Table for 4 tomorrow?', timestamp: new Date() },
-      { role: 'assistant', content: 'Certainly! May I know your preferred time?', timestamp: new Date() }
-    ]);
+    setChatHistory([]);
     toast.success('Simulation chat reset');
   };
 
@@ -461,17 +498,54 @@ export default function AISettingsPage() {
       <div className="flex flex-col lg:flex-row h-full bg-background text-foreground overflow-hidden font-sans relative">
         
         {/* Workspace Panel (Left 65%) */}
-        <div className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-6 lg:max-w-[65%] border-r border-border/60 pb-24 relative">
+        <div ref={workspacePanelRef} className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-6 lg:max-w-[65%] border-r border-border/60 pb-24 relative">
           
           {/* Sticky Header with vibrant Publish button */}
-          <header className="sticky top-0 z-30 bg-background/95 backdrop-filter backdrop-blur-md py-4 border-b border-border/30 flex items-center justify-between gap-4 -mx-6 px-6 mb-6">
+          <header className={cn(
+            "sticky top-0 z-30 transition-all duration-300 -mx-6 px-6 flex items-center justify-between gap-4 border-b border-border/30 backdrop-filter backdrop-blur-md",
+            scrolled 
+              ? "py-2.5 bg-background/98 shadow-sm shadow-black/5" 
+              : "py-4 bg-background/95"
+          )}>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-bold tracking-tight text-foreground">AI Staff Manager</h1>
-                <span className="text-[10px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                  Active
-                </span>
-              </div>
+              {scrolled ? (
+                <motion.div 
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center gap-2"
+                >
+                  <h2 className="text-sm font-extrabold text-foreground tracking-tight">AI Staff Manager</h2>
+                  <span className="text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.2 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
+                    Active
+                  </span>
+                  <span className="text-xs text-muted-foreground/60 select-none">•</span>
+                  <span className={cn(
+                    "text-xs font-bold transition-all duration-300 flex items-center gap-1 shrink-0",
+                    dirty ? "text-amber-500 dark:text-amber-400" : "text-emerald-500 dark:text-emerald-400"
+                  )}>
+                    {dirty ? "⚡ Unsaved changes" : "✅ All changes published"}
+                  </span>
+                </motion.div>
+              ) : (
+                <div className="flex flex-col gap-0.5">
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-2xl font-bold tracking-tight text-foreground">AI Staff Manager</h1>
+                    <span className="text-[10px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
+                      Active
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs mt-0.5">
+                    <span className="text-muted-foreground">Manage your 24/7 autonomous restaurant staff</span>
+                    <span className="text-muted-foreground/40 select-none">•</span>
+                    <span className={cn(
+                      "font-bold transition-all duration-300 flex items-center gap-1",
+                      dirty ? "text-amber-500 dark:text-amber-400 animate-pulse" : "text-emerald-500 dark:text-emerald-400"
+                    )}>
+                      {dirty ? "⚡ Unsaved changes" : "✅ All changes published"}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
             
             {/* Publish button */}
@@ -481,18 +555,21 @@ export default function AISettingsPage() {
               onClick={handlePublish}
               disabled={publishing || !dirty}
               className={cn(
-                "flex items-center gap-2 h-11 px-6 rounded-xl text-sm font-extrabold transition-all shadow-lg focus:outline-none shrink-0 border",
+                "flex items-center justify-center gap-2 font-extrabold transition-all shadow-lg focus:outline-none shrink-0 border",
+                scrolled 
+                  ? "h-8 px-4 rounded-lg text-xs" 
+                  : "h-11 px-6 rounded-xl text-sm",
                 dirty 
                   ? "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500/30 cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.3)]" 
                   : "bg-secondary text-muted-foreground border-border cursor-not-allowed shadow-none"
               )}
             >
               {publishing ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : dirty ? (
-                <Sparkles className="w-4 h-4 text-emerald-300 animate-pulse" />
+                <Sparkles className="w-3.5 h-3.5 text-emerald-300 animate-pulse" />
               ) : (
-                <CheckCircle2 className="w-4 h-4 text-muted-foreground/60" />
+                <CheckCircle2 className="w-3.5 h-3.5 text-muted-foreground/60" />
               )}
               {publishing ? 'Publishing...' : dirty ? '⚡ Publish AI Changes' : '✅ All changes published'}
             </motion.button>
@@ -501,46 +578,74 @@ export default function AISettingsPage() {
           {/* ONBOARDING QUICK START WIZARD */}
           {showOnboarding ? (
             <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="p-8 rounded-3xl border bg-gradient-to-br from-emerald-500/5 to-cyan-500/5 relative overflow-hidden my-auto"
-              style={{ borderColor: 'rgba(16,185,129,0.15)' }}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.98 }}
+              className="py-12 px-6 flex flex-col items-center justify-center text-center space-y-8 max-w-2xl mx-auto h-full my-auto"
             >
-              <div className="flex items-start gap-4">
-                <div className="p-3.5 rounded-2xl bg-emerald-500/10 text-emerald-500 shrink-0">
-                  <Sparkles className="w-7 h-7 animate-pulse" />
+              <div className="space-y-3">
+                <div className="inline-flex p-3 rounded-2xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 mb-2">
+                  <Sparkles className="w-8 h-8 animate-pulse" />
                 </div>
-                <div className="space-y-1">
-                  <h3 className="text-xl font-bold text-foreground">Meet Your New AI Staff Member</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    Select your restaurant style below to instantly pre-fill industry-expert personalities, guidelines, and FAQs in 15 seconds!
-                  </p>
-                </div>
+                <h2 className="text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl">
+                  Meet Your New AI Staff Member
+                </h2>
+                <p className="text-muted-foreground text-sm max-w-md mx-auto leading-relaxed">
+                  Aries AI operates 24/7 over WhatsApp to greet guests, handle reservations, and answer menu questions. Let's pre-fill its instructions in 15 seconds.
+                </p>
               </div>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8">
-                {STARTER_TEMPLATES.map(tpl => (
-                  <button
-                    key={tpl.id}
-                    onClick={() => handleApplyTemplate(tpl.config)}
-                    className="p-5 rounded-2xl border border-border/80 bg-card hover:border-emerald-500/50 hover:bg-emerald-500/[0.02] text-left transition-all group duration-200"
-                  >
-                    <div className="font-bold text-sm text-foreground flex items-center justify-between">
-                      {tpl.label}
-                      <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-emerald-500" />
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{tpl.description}</p>
-                  </button>
-                ))}
+
+              <div className="w-full">
+                <div className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground/60 mb-4 block">
+                  Select your establishment type
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {STARTER_TEMPLATES.map(tpl => (
+                    <motion.button
+                      key={tpl.id}
+                      whileHover={{ scale: 1.02, y: -2 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => handleApplyTemplate(tpl)}
+                      className="p-6 rounded-2xl border border-border bg-card hover:border-emerald-500/40 hover:shadow-[0_0_20px_rgba(16,185,129,0.05)] text-left transition-all group duration-200 cursor-pointer flex flex-col justify-between h-40"
+                    >
+                      <div>
+                        <div className="font-extrabold text-base text-foreground flex items-center justify-between">
+                          <span>{tpl.label}</span>
+                          <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-all text-emerald-500 translate-x-[-4px] group-hover:translate-x-0" />
+                        </div>
+                        <p className="text-xs text-muted-foreground/90 mt-2 leading-relaxed font-medium">
+                          {tpl.description}
+                        </p>
+                      </div>
+                      <div className="text-[10px] text-emerald-500 font-extrabold uppercase tracking-wider mt-4">
+                        Instant 1-Click Setup
+                      </div>
+                    </motion.button>
+                  ))}
+                </div>
               </div>
             </motion.div>
           ) : (
             <>
               {/* SECTION 1: PERSONALITY & BRAND */}
               <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
-                <div className="flex items-center gap-3 px-6 py-4 border-b border-border bg-secondary/30">
-                  <Bot className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm font-bold text-foreground uppercase tracking-wider">Personality & Brand</span>
+                <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-border bg-secondary/30">
+                  <div className="flex items-center gap-3">
+                    <Bot className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-sm font-bold text-foreground uppercase tracking-wider">Personality & Brand</span>
+                  </div>
+                  
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm("Reset current configuration and show preset templates? This will overwrite your unsaved changes.")) {
+                        setShowOnboarding(true);
+                      }
+                    }}
+                    className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-emerald-500 hover:text-emerald-400 transition-colors cursor-pointer select-none"
+                  >
+                    <RotateCcw className="w-3 h-3" /> Quick Start Presets
+                  </button>
                 </div>
                 
                 <div className="p-6 space-y-5">
@@ -569,8 +674,8 @@ export default function AISettingsPage() {
                         <option value="Reservations First">Reservations First</option>
                         <option value="Upsell Specialist">Upsell Specialist</option>
                       </select>
-                      <p className="text-[11px] text-muted-foreground italic mt-1 pl-1">
-                        * {PERSONA_HELPERS[draft.bot_personality] || PERSONA_HELPERS['Premium Fine Dining']}
+                      <p className="text-[11.5px] text-foreground/75 font-medium mt-1.5 pl-1 leading-normal">
+                        ✨ {PERSONA_HELPERS[draft.bot_personality] || PERSONA_HELPERS['Premium Fine Dining']}
                       </p>
                     </div>
                   </div>
@@ -712,8 +817,27 @@ export default function AISettingsPage() {
                         </div>
                       ))}
                       {draft.custom_faqs.length === 0 && (
-                        <div className="text-xs text-muted-foreground italic text-center py-4 border border-dashed rounded-xl">
-                          No custom Q&A pairs added. Put quick questions here instead of creating whole documents.
+                        <div className="p-4 rounded-xl border border-dashed border-border/60 bg-secondary/10 space-y-3">
+                          <div className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground/60 text-center select-none">
+                            💡 Example FAQ (Add yours below to teach the AI)
+                          </div>
+                          <div className="p-3.5 rounded-xl border border-border bg-background/50 flex justify-between gap-3 text-xs leading-relaxed opacity-65 select-none select-text">
+                            <div className="space-y-2 w-full">
+                              <div className="flex items-center gap-1 text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                                👤 Customer asks
+                              </div>
+                              <div className="font-semibold text-foreground bg-secondary/30 px-2.5 py-1.5 rounded-lg border border-border/40 pl-3">
+                                “Do you have valet parking?”
+                              </div>
+                              
+                              <div className="flex items-center gap-1 text-[11px] font-bold text-muted-foreground uppercase tracking-widest pt-1">
+                                🤖 Assistant replies
+                              </div>
+                              <div className="text-muted-foreground bg-emerald-500/[0.02] px-2.5 py-1.5 rounded-lg border border-emerald-500/10 pl-3">
+                                “Yes, complimentary valet parking is available for all our dining guests at the main entrance.”
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -839,33 +963,22 @@ export default function AISettingsPage() {
             </div>
 
             {/* Mock Chat Header with expanded top padding */}
-            <div className="px-5 pt-10 pb-4 bg-slate-900 flex items-center justify-between shrink-0 z-10 border-b border-white/5">
+            <div className="px-5 pt-12 pb-4.5 bg-slate-900 flex items-center justify-between shrink-0 z-10 border-b border-white/5">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-bold text-sm shrink-0">
                   <Bot className="w-4.5 h-4.5" />
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   <h4 className="font-bold text-xs text-white leading-tight">{draft.bot_name || 'Assistant'}</h4>
                   <span className="inline-flex items-center gap-1.5 text-[9px] font-bold bg-white/10 px-2 py-0.5 rounded-full text-slate-300">
                     👤 Customer Simulation
                   </span>
                 </div>
               </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleResetChat}
-                  title="Reset Conversation"
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                </button>
-              </div>
             </div>
 
             {/* Unsaved Draft mode trust indicator banner */}
-            <div className="bg-[#121E31] px-4 py-2 border-b border-white/5 flex items-center justify-center shrink-0">
+            <div className="bg-[#121E31] px-4 py-2.5 border-b border-white/5 flex items-center justify-center shrink-0">
               {dirty ? (
                 <span className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-amber-400">
                   <AlertTriangle className="w-3 h-3 animate-pulse" /> Draft Mode • Unsaved changes testing
@@ -878,7 +991,7 @@ export default function AISettingsPage() {
             </div>
 
             {/* Mock messages container list with increased top padding */}
-            <div className="flex-1 overflow-y-auto p-4 pt-6 space-y-4 flex flex-col">
+            <div className="flex-1 overflow-y-auto p-4 pt-8 space-y-4 flex flex-col">
               
               {/* Bot standard welcome intro */}
               <div className="max-w-[85%] self-start rounded-2xl px-3.5 py-2.5 text-xs bg-slate-800 text-slate-200 rounded-tl-none leading-relaxed border border-slate-700/30 shadow-sm">
@@ -909,16 +1022,27 @@ export default function AISettingsPage() {
               <div ref={chatEndRef} />
             </div>
 
-            {/* Try Sample Conversation Button */}
+            {/* Dynamic Play Pill or Reset Pill Button */}
             <div className="px-4 py-2.5 bg-slate-950/40 border-t border-white/5 flex justify-center shrink-0">
-              <button
-                type="button"
-                onClick={handleTrySampleConversation}
-                disabled={sendingMsg}
-                className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all"
-              >
-                <Play className="w-3 h-3 fill-current animate-pulse" /> Try Sample Conversation
-              </button>
+              {chatHistory.length === 0 ? (
+                <button
+                  type="button"
+                  onClick={handleTrySampleConversation}
+                  disabled={sendingMsg}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all cursor-pointer"
+                >
+                  <Play className="w-3 h-3 fill-current animate-pulse" /> Try Sample Conversation
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleResetChat}
+                  disabled={sendingMsg}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-800 border border-slate-700/50 text-slate-300 hover:bg-slate-700 hover:text-white transition-all cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" /> Reset Conversation
+                </button>
+              )}
             </div>
 
             {/* Mock input text editor */}
