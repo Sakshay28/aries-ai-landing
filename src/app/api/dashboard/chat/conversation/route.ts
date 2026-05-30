@@ -80,15 +80,22 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { bot_paused } = body;
+    const updateData: Record<string, any> = {};
 
-    if (typeof bot_paused !== 'boolean') {
-      return NextResponse.json({ success: false, error: 'bot_paused must be a boolean' }, { status: 400 });
+    if (typeof body.bot_paused === 'boolean') {
+      updateData.bot_paused = body.bot_paused;
+    }
+    if (typeof body.escalated === 'boolean') {
+      updateData.escalated = body.escalated;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return NextResponse.json({ success: false, error: 'No valid fields provided for update' }, { status: 400 });
     }
 
     const { error } = await supabaseAdmin
       .from("conversations")
-      .update({ bot_paused })
+      .update(updateData)
       .eq("id", id)
       .eq("tenant_id", tenantId);
 
@@ -96,7 +103,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, bot_paused });
+    return NextResponse.json({ success: true, ...updateData });
   } catch (error: any) {
     console.error('Conversation PATCH error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

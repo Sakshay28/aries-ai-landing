@@ -1573,9 +1573,9 @@ function WebhookAdvancedConfig({
                   <span
                     className="text-[11px] font-bold px-2 py-0.5 rounded"
                     style={{
-                      background: (lastDebug.status ?? 0) >= 200 && (lastDebug.status ?? 0) < 300
+                      background: Number(lastDebug.status ?? 0) >= 200 && Number(lastDebug.status ?? 0) < 300
                         ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
-                      color: (lastDebug.status ?? 0) >= 200 && (lastDebug.status ?? 0) < 300
+                      color: Number(lastDebug.status ?? 0) >= 200 && Number(lastDebug.status ?? 0) < 300
                         ? '#4ade80' : '#f87171',
                     }}
                   >

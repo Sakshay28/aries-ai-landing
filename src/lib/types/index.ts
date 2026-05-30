@@ -81,6 +81,7 @@ export interface Tenant {
   onboarding_completed: boolean;
   lead_assignment_counter?: number | null;
   outbound_webhook_url?: string | null;
+  short_code?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -11,7 +11,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { isDuplicateMessage, getRedisClient } from '@/lib/redis/client';
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
-import { appendLeadRow } from '@/lib/integrations/google-sheets';
+import { appendLeadRow, appendBookingRow } from '@/lib/integrations/google-sheets';
 import { parseMetaWebhook, sendTextMessage, getMediaUrl, verifySignature } from '@/lib/meta/service';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
@@ -610,6 +610,120 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       .eq('id', lead.id);
   }
 
+  // 19. Auto-Save AI Booking to Database & Google Sheets
+  const contextObj = updatedContext as Record<string, any>;
+  const bookingDateRaw = contextObj.date || contextObj.booking_date;
+  const bookingTimeRaw = contextObj.time || contextObj.booking_time;
+  const bookingGuestsRaw = contextObj.guestCount || contextObj.party_size;
+
+  const replyLower = aiResponse.reply.toLowerCase();
+  const isAIConfirmBooking = 
+    ((aiResponse.intent === 'confirm' || 
+      aiResponse.nextStep === 'completed' || 
+      aiResponse.nextStep === 'confirmation' ||
+      replyLower.includes('confirm') ||
+      replyLower.includes('booked') ||
+      replyLower.includes('booking for') ||
+      replyLower.includes('reservation for')) &&
+     bookingDateRaw && 
+     bookingTimeRaw && 
+     bookingGuestsRaw &&
+     !contextObj.booking_saved);
+
+  if (isAIConfirmBooking) {
+    try {
+      console.log(`🤖 [AI AUTO-BOOK] AI confirmed a booking for tenant ${tenant.business_name || tenant.id}...`);
+      
+      const shortCode = tenant.short_code || 'RES';
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const seq = Math.floor(Math.random() * 9000) + 1000;
+      const reservationId = `${shortCode}-${dateStr}-${seq}`;
+      
+      const guestCount = parseInt(String(bookingGuestsRaw)) || 2;
+      const customerName = contextObj.name || lead?.name || 'Customer';
+      
+      // Parse the freeform datetime from context
+      const rawDateTime = `${bookingDateRaw} ${bookingTimeRaw}`;
+      const { bookingDate, slotTime } = parseDatetime(rawDateTime);
+      console.log(`   ↳ AI raw: "${rawDateTime}" → parsed: date=${bookingDate} time=${slotTime}`);
+
+      const bookingPayload = {
+        reservation_id: reservationId,
+        customer_name: customerName,
+        customer_phone: cleanPhone,
+        party_size: guestCount,
+        slot_time: slotTime,
+        booking_date: bookingDate,
+        booking_status: 'confirmed',
+        payment_status: 'paid',
+        payment_amount: 0,
+        created_at: new Date().toISOString(),
+      };
+
+      // 1. Sync to Google Sheets
+      await appendBookingRow(tenant.id, bookingPayload).catch(err => {
+        console.error('❌ AI Auto-Book Sheets sync failed:', err.message);
+      });
+
+      // 2. Insert into Supabase restaurant_bookings so it registers in the manager dashboard
+      const { data: slots } = await supabaseAdmin
+        .from('restaurant_slots')
+        .select('id')
+        .eq('restaurant_id', tenant.id)
+        .eq('is_active', true)
+        .limit(1);
+
+      let slotId: string | null = slots?.[0]?.id || null;
+
+      if (!slotId) {
+        const { data: newSlot } = await supabaseAdmin
+          .from('restaurant_slots')
+          .insert({
+            restaurant_id: tenant.id,
+            slot_time: '19:30:00',
+            day_type: 'both',
+            total_capacity: 50,
+            is_active: true
+          })
+          .select()
+          .single();
+        if (newSlot) slotId = newSlot.id;
+      }
+
+      if (slotId) {
+        const { error: dbInsertErr } = await supabaseAdmin.from('restaurant_bookings').insert({
+          restaurant_id: tenant.id,
+          slot_id: slotId,
+          booking_date: bookingDate,
+          customer_name: customerName,
+          customer_phone: cleanPhone,
+          party_size: guestCount,
+          payment_amount: 0,
+          payment_status: 'paid',
+          booking_status: 'confirmed',
+          reservation_id: reservationId
+        });
+        if (dbInsertErr) {
+          console.error('❌ AI Auto-Book DB save failed:', dbInsertErr.message);
+        } else {
+          console.log(`   ✓ Saved successfully to restaurant_bookings table via AI Auto-Book.`);
+          
+          // 3. Mark context as saved in conversation to prevent duplicate bookings
+          contextObj.booking_saved = true;
+          contextObj.booking_reservation_id = reservationId;
+
+          await supabaseAdmin
+            .from('conversations')
+            .update({ context: contextObj })
+            .eq('id', conversation.id);
+          console.log(`   ✓ Conversation context updated with booking_saved: true.`);
+        }
+      }
+    } catch (autoBookErr: any) {
+      console.error('❌ AI Auto-Book error:', autoBookErr.message);
+    }
+  }
+
   console.log(`✅ Meta: processed message from ${cleanPhone}, AI intent: ${aiResponse.intent}`);
 }
 
@@ -712,4 +826,78 @@ async function handleIncomingReaction(msg: NonNullable<ReturnType<typeof parseMe
       .update({ last_message_at: new Date().toISOString() })
       .eq('id', updated[0].conversation_id);
   }
+}
+
+// ── Parse a free-form datetime string ────────────────────
+function parseDatetime(raw: string): { bookingDate: string; slotTime: string } {
+  const now = new Date();
+  const utcTime = now.getTime() + (now.getTimezoneOffset() * 60 * 1000);
+  const istTime = new Date(utcTime + (5.5 * 60 * 60 * 1000)); // IST offset
+
+  let bookingDate = istTime.toISOString().slice(0, 10);
+  let slotTime = '19:30:00';
+
+  try {
+    const s = raw.trim().toLowerCase();
+
+    // Construct baseDate as a pure UTC date representing the IST day
+    const baseDate = new Date(Date.UTC(
+      istTime.getFullYear(),
+      istTime.getMonth(),
+      istTime.getDate()
+    ));
+
+    if (s.includes('tomorrow')) {
+      baseDate.setUTCDate(baseDate.getUTCDate() + 1);
+    } else if (s.includes('day after')) {
+      baseDate.setUTCDate(baseDate.getUTCDate() + 2);
+    } else if (s.includes('today')) {
+      // keep baseDate as today
+    } else {
+      // Try to find DD MMM / MMM DD / YYYY-MM-DD patterns
+      const isoMatch = raw.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (isoMatch) {
+        baseDate.setUTCFullYear(parseInt(isoMatch[1]), parseInt(isoMatch[2]) - 1, parseInt(isoMatch[3]));
+      } else {
+        const months: Record<string, number> = {
+          jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11,
+          january:0, february:1, march:2, april:3, june:5, july:6, august:7,
+          september:8, october:9, november:10, december:11,
+        };
+        const monthKeys = Object.keys(months).sort((a,b) => b.length - a.length).join('|');
+        const dayMonthMatch = raw.match(new RegExp(`(\\d{1,2})(?:st|nd|rd|th)?\\s+(${monthKeys})`, 'i'));
+        const monDayMatch  = raw.match(new RegExp(`(${monthKeys})\\s+(\\d{1,2})(?:st|nd|rd|th)?`, 'i'));
+        const matched = dayMonthMatch || monDayMatch;
+        if (matched) {
+          const [, a, b] = matched;
+          const day = parseInt(dayMonthMatch ? a : b);
+          const mon = months[(dayMonthMatch ? b : a).toLowerCase()];
+          if (!isNaN(day) && mon !== undefined) {
+            baseDate.setUTCFullYear(istTime.getFullYear(), mon, day);
+            const todayStr = istTime.toISOString().slice(0, 10);
+            if (baseDate.toISOString().slice(0, 10) < todayStr) {
+              baseDate.setUTCFullYear(istTime.getFullYear() + 1);
+            }
+          }
+        }
+      }
+    }
+    bookingDate = baseDate.toISOString().slice(0, 10);
+
+    // Time parsing
+    const timeMatch = raw.match(/(\d{1,2})[:\.]?(\d{2})?\s*(am|pm)/i)
+                   || raw.match(/(\d{2}):(\d{2})/);
+    if (timeMatch) {
+      let h = parseInt(timeMatch[1]);
+      const m = parseInt(timeMatch[2] || '0');
+      const meridiem = (timeMatch[3] || '').toLowerCase();
+      if (meridiem === 'pm' && h < 12) h += 12;
+      if (meridiem === 'am' && h === 12) h = 0;
+      slotTime = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
+    }
+  } catch {
+    // keep defaults
+  }
+
+  return { bookingDate, slotTime };
 }

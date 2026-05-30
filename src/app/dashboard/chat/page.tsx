@@ -10,6 +10,7 @@ export interface SharedConversationMeta {
   id: string;
   is_active: boolean;
   bot_paused: boolean;
+  escalated: boolean;
   sender_name: string | null;
   sender_id: string | null;
   leads?: {

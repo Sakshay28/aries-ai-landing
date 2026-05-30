@@ -635,15 +635,18 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
   const toggleHumanMode = async () => {
     if (!conversationId || !conversationMeta || togglingMode) return;
-    const newPaused = !conversationMeta.bot_paused;
+    const currentlyHuman = conversationMeta.bot_paused || conversationMeta.escalated;
+    const newPaused = !currentlyHuman;
+    const newEscalated = false; // Always clear escalation when activating AI / resolving
+
     setTogglingMode(true);
     try {
       const res = await fetch(`/api/dashboard/chat/conversation?id=${conversationId}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bot_paused: newPaused }),
+        body: JSON.stringify({ bot_paused: newPaused, escalated: newEscalated }),
       });
       if ((await res.json()).success) {
-        const updated = { ...conversationMeta, bot_paused: newPaused };
+        const updated = { ...conversationMeta, bot_paused: newPaused, escalated: newEscalated };
         setConversationMeta(updated);
         onDataLoaded?.(updated, messages);
       }
@@ -857,7 +860,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
               <>
                 <p className="text-[13.5px] font-semibold text-foreground leading-none">{displayName}</p>
                 <p className="text-[11.5px] text-muted-foreground/70 mt-0.5">
-                  {conversationMeta.bot_paused ? 'Human mode active' : 'AI responding'}
+                  {(conversationMeta.bot_paused || conversationMeta.escalated) ? 'Human mode active' : 'AI responding'}
                 </p>
               </>
             ) : (
@@ -933,31 +936,36 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           <div className="w-px h-5 bg-black/[0.06] dark:bg-white/[0.06] mx-1" />
 
           {/* AI / Human toggle */}
-          <motion.button
-            onClick={toggleHumanMode}
-            disabled={togglingMode}
-            whileTap={{ scale: 0.95 }}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11.5px] font-semibold transition-all duration-300 select-none',
-              conversationMeta?.bot_paused
-                ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800 shadow-[0_0_0_3px_rgba(96,165,250,0.08)]'
-                : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-300 ring-1 ring-emerald-200 dark:ring-emerald-800 shadow-[0_0_0_3px_rgba(52,211,153,0.08)]',
-              togglingMode && 'opacity-40 pointer-events-none'
-            )}
-          >
-            <motion.div animate={{ rotate: togglingMode ? 360 : 0 }} transition={{ duration: 0.4 }}>
-              {conversationMeta?.bot_paused ? <User className="w-3 h-3" /> : <Bot className="w-3 h-3" />}
-            </motion.div>
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.span
-                key={conversationMeta?.bot_paused ? 'human' : 'ai'}
-                initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
-                transition={{ duration: 0.12 }}
+          {(() => {
+            const isSuspended = !!(conversationMeta?.bot_paused || conversationMeta?.escalated);
+            return (
+              <motion.button
+                onClick={toggleHumanMode}
+                disabled={togglingMode}
+                whileTap={{ scale: 0.95 }}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11.5px] font-semibold transition-all duration-300 select-none',
+                  isSuspended
+                    ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800 shadow-[0_0_0_3px_rgba(96,165,250,0.08)]'
+                    : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-300 ring-1 ring-emerald-200 dark:ring-emerald-800 shadow-[0_0_0_3px_rgba(52,211,153,0.08)]',
+                  togglingMode && 'opacity-40 pointer-events-none'
+                )}
               >
-                {conversationMeta?.bot_paused ? 'Human' : 'AI'}
-              </motion.span>
-            </AnimatePresence>
-          </motion.button>
+                <motion.div animate={{ rotate: togglingMode ? 360 : 0 }} transition={{ duration: 0.4 }}>
+                  {isSuspended ? <User className="w-3 h-3" /> : <Bot className="w-3 h-3" />}
+                </motion.div>
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.span
+                    key={isSuspended ? 'human' : 'ai'}
+                    initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
+                    transition={{ duration: 0.12 }}
+                  >
+                    {isSuspended ? 'Human' : 'AI'}
+                  </motion.span>
+                </AnimatePresence>
+              </motion.button>
+            );
+          })()}
         </div>
       </div>
 

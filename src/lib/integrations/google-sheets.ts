@@ -326,10 +326,12 @@ export interface BookingRow {
   payment_status:  string;
   payment_amount:  number;   // paise
   created_at:      string;
+  special_request?: string;
+  discount?:       string;
 }
 
 const BOOKING_HEADERS = [
-  'Reservation ID', 'Customer', 'Phone', 'Party Size', 'Date', 'Time', 'Status', 'Deposit (₹)', 'Special Request',
+  'Customer', 'Phone', 'Guests', 'Date', 'Time', 'Status', 'Deposit (₹)', 'Special Request', 'Discount',
 ];
 
 async function ensureBookingHeaders(
@@ -373,26 +375,51 @@ export async function appendBookingRow(tenantId: string, booking: BookingRow): P
   const bookingSheetName = 'Bookings';
   await ensureBookingHeaders(token, config.spreadsheet_id, bookingSheetName);
 
-  // Format slot time: '19:00:00' → '7:00 PM'
-  const formatTime = (t: string) => {
+  // Format slot time: '19:00:00' → '7:00 PM' (timezone-independent pure arithmetic)
+  const formatTime = (t: string): string => {
     try {
-      const [h, m] = t.split(':').map(Number);
-      const d = new Date();
-      d.setHours(h, m, 0, 0);
-      return d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
+      const parts = t.split(':');
+      let h = parseInt(parts[0], 10);
+      const m = parseInt(parts[1] || '0', 10);
+      if (isNaN(h)) return t;
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      h = h % 12;
+      h = h ? h : 12; // midnight/noon → 12
+      const mStr = String(m).padStart(2, '0');
+      return `${h}:${mStr} ${ampm}`;
     } catch { return t; }
   };
 
+  // Format booking date: 'YYYY-MM-DD' → '31 May 2026' (human-readable, no timezone shifting)
+  const formatDate = (d: string): string => {
+    try {
+      const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      // Parse YYYY-MM-DD directly without Date object to avoid UTC/timezone offset
+      const isoMatch = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (isoMatch) {
+        const year  = parseInt(isoMatch[1], 10);
+        const month = parseInt(isoMatch[2], 10) - 1; // 0-indexed
+        const day   = parseInt(isoMatch[3], 10);
+        return `${day} ${MONTH_NAMES[month]} ${year}`;
+      }
+      return d; // fallback: return as-is
+    } catch { return d; }
+  };
+
+  const formattedDate = formatDate(booking.booking_date);
+  const formattedTime = formatTime(booking.slot_time);
+  console.log(`📊 [GSHEETS] Appending booking row: ${booking.customer_name} | Date: ${formattedDate} | Time: ${formattedTime}`);
+
   const values = [[
-    booking.reservation_id,
     booking.customer_name,
     booking.customer_phone,
     String(booking.party_size),
-    booking.booking_date,
-    formatTime(booking.slot_time),
+    formattedDate,
+    formattedTime,
     booking.booking_status,
     String(Math.round(booking.payment_amount / 100)),
-    (booking as BookingRow & { special_request?: string }).special_request ?? '',
+    booking.special_request ?? '',
+    booking.discount ?? '',
   ]];
 
   const range = `${bookingSheetName}!A:I`;
