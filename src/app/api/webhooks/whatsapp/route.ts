@@ -111,10 +111,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     return;
   }
 
-  // 1. Deduplication
+  // 1. Early dedup soft-check (non-atomic, just quick filter)
   const isDup = await isDuplicateMessage(msg.messageId);
   if (isDup) {
-    console.log(`⚡ Meta Webhook: duplicate message skipped: ${msg.messageId}`);
+    console.log(`⚡ Meta Webhook: duplicate message skipped early: ${msg.messageId}`);
     return;
   }
 
@@ -342,25 +342,16 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     }
   } catch {}
 
-  // 7. Verify message doesn't already exist in database
-  if (msg.messageId) {
-    const { data: existingMsg } = await supabaseAdmin
-      .from('messages')
-      .select('id')
-      .eq('wa_message_id', msg.messageId)
-      .maybeSingle();
-    if (existingMsg) {
-      console.log(`⚠️ Duplicate inbound message ignored: ${msg.messageId}`);
-      return;
-    }
-  }
-
-  // 8. Insert Inbound Message
+  // 7 + 8. ATOMIC DISTRIBUTED LOCK: Insert inbound message as the dedup gate.
+  // The DB has a unique index on wa_message_id. If 3 concurrent webhook calls all
+  // pass the soft-check above, only ONE can insert successfully.
+  // The others get a unique_violation (code 23505) → return immediately.
+  // This permanently eliminates triple/duplicate replies.
   const isMedia = ['image', 'video', 'audio', 'document', 'voice'].includes(msg.type);
-  const { error: insertErr } = await supabaseAdmin.from('messages').insert({
+  const inboundMsgPayload = {
     tenant_id: tenant.id,
     conversation_id: conversation.id,
-    direction: 'inbound',
+    direction: 'inbound' as const,
     content,
     message_type: isMedia ? msg.type : 'text',
     channel: 'whatsapp',
@@ -368,16 +359,22 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     status: 'delivered',
     ai_generated: false,
     wa_message_id: msg.messageId,
-    // Add attachment metadata fields for inbound media
     ...(isMedia && {
-      media_url: content, // The resolved Meta media CDN URL
+      media_url: content,
       file_name: msg.mediaFilename || `${msg.type}_${msg.messageId}.${msg.mediaMimeType?.split('/')?.[1]?.split(';')?.[0] || 'bin'}`,
       mime_type: msg.mediaMimeType || (msg.type === 'image' ? 'image/jpeg' : msg.type === 'video' ? 'video/mp4' : msg.type === 'audio' || msg.type === 'voice' ? 'audio/ogg' : 'application/octet-stream'),
       media_caption: msg.mediaCaption || null,
     }),
-  });
+  };
+
+  const { error: insertErr } = await supabaseAdmin.from('messages').insert(inboundMsgPayload);
 
   if (insertErr) {
+    // code 23505 = unique_violation — another concurrent request already processing this message
+    if (insertErr.code === '23505' || insertErr.message?.includes('duplicate') || insertErr.message?.includes('unique')) {
+      console.log(`⚡ Concurrent duplicate blocked at insert: ${msg.messageId}`);
+      return;
+    }
     console.error('❌ Message insert failed:', insertErr.message);
     return;
   }
@@ -615,24 +612,33 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const bookingDateRaw = contextObj.date || contextObj.booking_date;
   const bookingTimeRaw = contextObj.time || contextObj.booking_time;
   const bookingGuestsRaw = contextObj.guestCount || contextObj.party_size;
+  const customerPhone = contextObj.phone || cleanPhone; // use context phone if captured, else WhatsApp number
 
   const replyLower = aiResponse.reply.toLowerCase();
-  const isAIConfirmBooking = 
-    ((aiResponse.intent === 'confirm' || 
-      aiResponse.nextStep === 'completed' || 
-      aiResponse.nextStep === 'confirmation' ||
-      replyLower.includes('confirm') ||
-      replyLower.includes('booked') ||
-      replyLower.includes('booking for') ||
-      replyLower.includes('reservation for')) &&
-     bookingDateRaw && 
-     bookingTimeRaw && 
-     bookingGuestsRaw &&
-     !contextObj.booking_saved);
+  
+  // Detect booking confirmation signals from AI reply
+  const hasConfirmSignal =
+    aiResponse.intent === 'confirm' ||
+    aiResponse.nextStep === 'completed' ||
+    aiResponse.nextStep === 'confirmation' ||
+    replyLower.includes('confirmed') ||
+    replyLower.includes('booking is confirmed') ||
+    replyLower.includes('table is confirmed') ||
+    replyLower.includes('reservation is confirmed') ||
+    replyLower.includes('booked for') ||
+    replyLower.includes('table for') ||
+    replyLower.includes('reservation for');
+
+  const hasBookingData = !!(bookingDateRaw && bookingTimeRaw && bookingGuestsRaw);
+  const alreadySaved = !!contextObj.booking_saved;
+
+  console.log(`📋 [BOOKING CHECK] signal=${hasConfirmSignal} data=${hasBookingData} saved=${alreadySaved} date="${bookingDateRaw}" time="${bookingTimeRaw}" guests="${bookingGuestsRaw}"`);
+
+  const isAIConfirmBooking = hasConfirmSignal && hasBookingData && !alreadySaved;
 
   if (isAIConfirmBooking) {
     try {
-      console.log(`🤖 [AI AUTO-BOOK] AI confirmed a booking for tenant ${tenant.business_name || tenant.id}...`);
+      console.log(`🤖 [AI AUTO-BOOK] Saving booking for tenant ${tenant.business_name || tenant.id}...`);
       
       const shortCode = tenant.short_code || 'RES';
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -645,12 +651,13 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       // Parse the freeform datetime from context
       const rawDateTime = `${bookingDateRaw} ${bookingTimeRaw}`;
       const { bookingDate, slotTime } = parseDatetime(rawDateTime);
-      console.log(`   ↳ AI raw: "${rawDateTime}" → parsed: date=${bookingDate} time=${slotTime}`);
+      console.log(`   ↳ Datetime raw: "${rawDateTime}" → date=${bookingDate} time=${slotTime}`);
+      console.log(`   ↳ Customer: ${customerName} | Phone: ${customerPhone} | Guests: ${guestCount}`);
 
       const bookingPayload = {
         reservation_id: reservationId,
         customer_name: customerName,
-        customer_phone: cleanPhone,
+        customer_phone: customerPhone,
         party_size: guestCount,
         slot_time: slotTime,
         booking_date: bookingDate,
@@ -658,14 +665,18 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         payment_status: 'paid',
         payment_amount: 0,
         created_at: new Date().toISOString(),
+        special_request: contextObj.specialRequests || '',
       };
 
-      // 1. Sync to Google Sheets
-      await appendBookingRow(tenant.id, bookingPayload).catch(err => {
-        console.error('❌ AI Auto-Book Sheets sync failed:', err.message);
-      });
+      // 1. Sync to Google Sheets — await so we can log success/failure
+      try {
+        await appendBookingRow(tenant.id, bookingPayload);
+        console.log(`   ✅ Google Sheets booking row saved successfully.`);
+      } catch (sheetsErr: any) {
+        console.error(`   ❌ Google Sheets booking save FAILED: ${sheetsErr.message}`);
+      }
 
-      // 2. Insert into Supabase restaurant_bookings so it registers in the manager dashboard
+      // 2. Insert into Supabase restaurant_bookings
       const { data: slots } = await supabaseAdmin
         .from('restaurant_slots')
         .select('id')
@@ -696,7 +707,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           slot_id: slotId,
           booking_date: bookingDate,
           customer_name: customerName,
-          customer_phone: cleanPhone,
+          customer_phone: customerPhone,
           party_size: guestCount,
           payment_amount: 0,
           payment_status: 'paid',
@@ -706,22 +717,24 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         if (dbInsertErr) {
           console.error('❌ AI Auto-Book DB save failed:', dbInsertErr.message);
         } else {
-          console.log(`   ✓ Saved successfully to restaurant_bookings table via AI Auto-Book.`);
-          
-          // 3. Mark context as saved in conversation to prevent duplicate bookings
-          contextObj.booking_saved = true;
-          contextObj.booking_reservation_id = reservationId;
-
-          await supabaseAdmin
-            .from('conversations')
-            .update({ context: contextObj })
-            .eq('id', conversation.id);
-          console.log(`   ✓ Conversation context updated with booking_saved: true.`);
+          console.log(`   ✅ Saved to restaurant_bookings (ID: ${reservationId}).`);
         }
       }
+
+      // 3. Mark booking as saved in conversation context to prevent duplicates
+      contextObj.booking_saved = true;
+      contextObj.booking_reservation_id = reservationId;
+      await supabaseAdmin
+        .from('conversations')
+        .update({ context: contextObj })
+        .eq('id', conversation.id);
+      console.log(`   ✅ Conversation context marked booking_saved=true.`);
+
     } catch (autoBookErr: any) {
       console.error('❌ AI Auto-Book error:', autoBookErr.message);
     }
+  } else if (!alreadySaved && hasBookingData) {
+    console.log(`📋 [BOOKING CHECK] Data present but no confirmation signal yet — waiting for explicit confirmation.`);
   }
 
   console.log(`✅ Meta: processed message from ${cleanPhone}, AI intent: ${aiResponse.intent}`);

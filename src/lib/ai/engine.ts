@@ -83,7 +83,7 @@ function buildSystemPrompt(tenantConfig: TenantAIConfig): string {
 
   return `You are ${tenantConfig.botName}, an AI assistant for ${tenantConfig.businessName} (${tenantConfig.businessType}).
 
-PERSONALITY: ${tenantConfig.botPersonality}. You speak naturally, use emojis very sparingly, and keep responses EXTREMELY SHORT, crisp, and concise (max 1-2 brief sentences or lines, under 150 characters total). Avoid generic greetings or filler text after the first contact.
+PERSONALITY: ${tenantConfig.botPersonality}. You speak naturally, use emojis very sparingly, and keep responses EXTREMELY SHORT — max 1-2 lines, under 150 characters. Get straight to the point.
 
 BUSINESS INFO:
 - Name: ${tenantConfig.businessName}
@@ -102,9 +102,17 @@ CONVERSATION STATE: ${conversationState}
 YOUR JOB:
 1. ${isFirst ? 'Greet the customer warmly (first contact only)' : 'Continue helping — no re-introduction needed'}
 2. Understand what they want (table booking, event, enquiry, etc.)
-3. Collect required info naturally through conversation (guests, date, name, phone)
-4. Confirm the booking and alert staff
+3. Collect required info naturally: guests → date → time → name → phone
+4. Once all info is collected, CONFIRM the booking immediately — do not wait
 5. Answer general questions about the business
+
+BOOKING FLOW RULES:
+- When customer says "same number" or "this number" for phone — use their WhatsApp number, confirm it directly
+- Once you have guests + date + time + name + phone, IMMEDIATELY confirm the booking
+- Confirmation message format: "✅ Booked! [Name], table for [N] on [date] at [time]. See you then!"
+- Do NOT say "our team will contact you" — the booking is instantly confirmed, no team needed
+- Do NOT ask the customer to wait for anything after booking is confirmed
+- Do NOT promise callbacks, follow-ups, or team contact
 
 ${tenantConfig.smartRules && tenantConfig.smartRules.length > 0 ? `SMART RULES (always follow these alongside your core job):
 ${tenantConfig.smartRules.map((r, i) => `${i + 1}. [${r.name}] When: ${r.trigger_source} → ${r.ai_summary}`).join('\n')}` : ''}
@@ -115,10 +123,10 @@ ${tenantConfig.knowledgeDocs.map(d => `--- ${d.filename} ---\n${d.content_text}`
 RULES:
 - NEVER make up information you don't have
 - NEVER start with a greeting if this is not the first message in the conversation
+- NEVER say "our team will contact you" or "someone will reach out" — the booking is confirmed instantly
 - If someone is angry or asks for a human, say you're connecting them to the team
-- Keep responses EXTREMELY direct and short (max 1-2 brief sentences/lines, under 150 characters total). Absolutely avoid long-winded paragraphs or essays. Get straight to the point.
+- Keep responses EXTREMELY direct and short (max 1-2 lines, under 150 characters). No essays.
 - Be helpful but don't be pushy
-- If you can't understand something, ask for clarification politely
 - Always respond in the same language the customer is using
 
 You must respond with ONLY a JSON object (no markdown, no backticks) in this exact format:
@@ -279,11 +287,16 @@ function parseAIResponse(text: string): AIResponse {
     if (cleaned.startsWith('```')) {
       cleaned = cleaned.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
     }
+    // Strip any trailing content after the closing brace
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (lastBrace !== -1 && lastBrace < cleaned.length - 1) {
+      cleaned = cleaned.slice(0, lastBrace + 1);
+    }
 
     const parsed = JSON.parse(cleaned);
 
     return {
-      reply: parsed.reply || "I'd love to help! Could you tell me more?",
+      reply: parsed.reply || "Got it! How can I help?",
       extractedData: parsed.extractedData || {},
       intent: parsed.intent || 'unknown',
       sentiment: parsed.sentiment || 'neutral',
@@ -293,27 +306,36 @@ function parseAIResponse(text: string): AIResponse {
       confidence: parsed.confidence || 0.5,
     };
   } catch {
-    // Try to extract the reply using regex if it's a malformed/truncated JSON
+    // Try to extract the reply field using regex if JSON is malformed/truncated
     const replyMatch = text.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
     if (replyMatch) {
       try {
         const extractedReply = JSON.parse(`"${replyMatch[1]}"`);
+        // Also try to extract other fields
+        const intentMatch = text.match(/"intent"\s*:\s*"([^"]+)"/);
+        const nextStepMatch = text.match(/"nextStep"\s*:\s*"([^"]+)"/);
+        const extractedDataMatch = text.match(/"extractedData"\s*:\s*(\{[^}]*\})/);
+        let extractedData = {};
+        if (extractedDataMatch) {
+          try { extractedData = JSON.parse(extractedDataMatch[1]); } catch {}
+        }
         return {
           reply: extractedReply,
-          extractedData: {},
-          intent: 'unknown',
+          extractedData,
+          intent: (intentMatch?.[1] as any) || 'unknown',
           sentiment: 'neutral',
           shouldEscalate: false,
-          nextStep: 'ask_intent',
-          confidence: 0.3,
+          nextStep: nextStepMatch?.[1] || 'ask_intent',
+          confidence: 0.4,
         };
       } catch {}
     }
 
-    // If it looks like JSON but we couldn't parse or extract a reply, don't show the raw JSON markup to the user
+    // Last resort: if the raw text looks like JSON but we couldn't parse it,
+    // return a neutral holding message instead of the confusing fallback
     if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
       return {
-        reply: "I'd love to help! Could you tell me what you're looking for?",
+        reply: "Sorry, one moment! Could you repeat that?",
         extractedData: {},
         intent: 'unknown',
         sentiment: 'neutral',
@@ -323,9 +345,9 @@ function parseAIResponse(text: string): AIResponse {
       };
     }
 
-    // If JSON parsing fails and it doesn't look like JSON, use the raw text as the reply
+    // Raw text as reply (non-JSON response from model)
     return {
-      reply: text || "I'd love to help! Could you tell me what you're looking for?",
+      reply: text || "How can I help you?",
       extractedData: {},
       intent: 'unknown',
       sentiment: 'neutral',
