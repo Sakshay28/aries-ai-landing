@@ -166,184 +166,7 @@ const SUGGESTED_CHIPS = [
   'Ask for allergy details before confirming'
 ];
 
-// ────────────────────────────────────────────────────────────
-// Business Mode Types & Scalable Dynamic Demo Packs
-// ────────────────────────────────────────────────────────────
-type BusinessMode = 'restaurant' | 'saas' | 'trekking' | 'hotel' | 'clinic' | 'salon' | 'ecommerce' | 'education' | 'generic';
 
-function inferBusinessMode(draft: DraftConfig, docs: KnowledgeDoc[]): BusinessMode {
-  const keywords: Record<Exclude<BusinessMode, 'generic'>, string[]> = {
-    restaurant: [
-      'restaurant', 'reservation', 'table', 'menu', 'chef', 'booking', 'guest', 'valet', 'dining',
-      'food', 'cafe', 'dinner', 'lunch', 'specials', 'table booking', 'seating'
-    ],
-    saas: [
-      'platform', 'automation', 'crm', 'software', 'dashboard', 'workflow', 'integration', 'api',
-      'whatsapp automation', 'ai platform', 'business automation', 'pricing', 'demo', 'product', 'tool'
-    ],
-    trekking: [
-      'trek', 'camp', 'mountain', 'hiking', 'adventure', 'difficulty', 'gear', 'transport',
-      'basecamp', 'itinerary', 'trail', 'summit', 'guide', 'backpacking', 'travel package'
-    ],
-    hotel: [
-      'room', 'check-in', 'check out', 'suite', 'stay', 'airport pickup', 'breakfast',
-      'concierge', 'booking room', 'amenities', 'hotel'
-    ],
-    clinic: [
-      'appointment', 'doctor', 'consultation', 'clinic', 'medical', 'patient', 'health',
-      'diagnosis', 'timing', 'treatment'
-    ],
-    salon: [
-      'haircut', 'stylist', 'facial', 'appointment', 'salon', 'beauty', 'spa', 'nails', 'grooming'
-    ],
-    ecommerce: [
-      'delivery', 'shipping', 'order', 'refund', 'product', 'cart', 'return', 'discount', 'purchase'
-    ],
-    education: [
-      'course', 'student', 'class', 'admission', 'mentor', 'training', 'syllabus', 'education',
-      'batch', 'program'
-    ]
-  };
-
-  const textSources: string[] = [];
-  
-  if (draft.bot_name) textSources.push(draft.bot_name);
-  if (draft.bot_personality) textSources.push(draft.bot_personality);
-  if (draft.welcome_message) textSources.push(draft.welcome_message);
-  if (draft.welcome_offer) textSources.push(draft.welcome_offer);
-  if (draft.system_prompt) textSources.push(draft.system_prompt);
-  
-  if (draft.usps) {
-    textSources.push(...draft.usps);
-  }
-  
-  if (draft.custom_faqs) {
-    draft.custom_faqs.forEach(faq => {
-      textSources.push(faq.question);
-      textSources.push(faq.answer);
-    });
-  }
-
-  if (docs) {
-    docs.forEach(doc => {
-      if (doc.filename) textSources.push(doc.filename);
-      if (doc.content_text) textSources.push(doc.content_text);
-    });
-  }
-
-  const combinedText = textSources.join(' ').toLowerCase();
-
-  const scores: Record<BusinessMode, number> = {
-    restaurant: 0,
-    saas: 0,
-    trekking: 0,
-    hotel: 0,
-    clinic: 0,
-    salon: 0,
-    ecommerce: 0,
-    education: 0,
-    generic: 0
-  };
-
-  Object.entries(keywords).forEach(([mode, list]) => {
-    const bMode = mode as Exclude<BusinessMode, 'generic'>;
-    list.forEach(keyword => {
-      let index = combinedText.indexOf(keyword);
-      while (index !== -1) {
-        scores[bMode]++;
-        index = combinedText.indexOf(keyword, index + keyword.length);
-      }
-    });
-  });
-
-  let highestMode: BusinessMode = 'generic';
-  let highestScore = 0;
-
-  Object.entries(scores).forEach(([mode, score]) => {
-    const bMode = mode as BusinessMode;
-    if (score > highestScore) {
-      highestScore = score;
-      highestMode = bMode;
-    }
-  });
-
-  return highestMode;
-}
-
-const demoConversationPacks: Record<BusinessMode, { label: string; prompts: string[] }> = {
-  restaurant: {
-    label: "Try Restaurant Demo",
-    prompts: [
-      "Table for 4 tomorrow",
-      "Do you have valet parking?",
-      "What time do you close?"
-    ]
-  },
-  saas: {
-    label: "Try Product Demo",
-    prompts: [
-      "What is Aries AI?",
-      "Can Aries automate bookings?",
-      "We already have staff"
-    ]
-  },
-  trekking: {
-    label: "Try Trek Demo",
-    prompts: [
-      "I am a beginner, which trek should I do?",
-      "What gear is needed?",
-      "Is transport included?"
-    ]
-  },
-  hotel: {
-    label: "Try Hotel Demo",
-    prompts: [
-      "Do you have airport pickup?",
-      "What time is check-in?",
-      "Is breakfast included?"
-    ]
-  },
-  clinic: {
-    label: "Try Clinic Demo",
-    prompts: [
-      "How do I book an appointment?",
-      "What are your timings?",
-      "Are walk-ins allowed?"
-    ]
-  },
-  salon: {
-    label: "Try Salon Demo",
-    prompts: [
-      "How much for a haircut and grooming?",
-      "Do I need an appointment?",
-      "Do you offer spa packages?"
-    ]
-  },
-  ecommerce: {
-    label: "Try Shop Demo",
-    prompts: [
-      "What is your refund policy?",
-      "Do you offer free shipping?",
-      "How do I track my order?"
-    ]
-  },
-  education: {
-    label: "Try Course Demo",
-    prompts: [
-      "What courses are starting next month?",
-      "Is there mentor support included?",
-      "Do you offer certificate programs?"
-    ]
-  },
-  generic: {
-    label: "Try Example Questions",
-    prompts: [
-      "What services do you offer?",
-      "How do I get started?",
-      "What makes you different?"
-    ]
-  }
-};
 
 export default function AISettingsPage() {
   const [draft, setDraft] = useState<DraftConfig>({
@@ -378,13 +201,68 @@ export default function AISettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workspacePanelRef = useRef<HTMLDivElement>(null);
 
-  // Auto-detected Business Mode (Internal Only)
-  const businessMode = React.useMemo(() => {
-    return inferBusinessMode(draft, docs);
-  }, [draft, docs]);
-
   // Demo play queue state
   const [demoQueue, setDemoQueue] = useState<string[]>([]);
+
+  // User-customizable sample simulator questions
+  const [sampleQuestions, setSampleQuestions] = useState<string[]>([
+    "How can you help me?",
+    "Tell me more",
+    "What services do you provide?"
+  ]);
+  const [newQuestionInput, setNewQuestionInput] = useState('');
+
+  // Load custom sample questions from localStorage on data mount/change
+  useEffect(() => {
+    if (loading || !draft.bot_name) return;
+    const key = `aries_sample_questions_${draft.bot_name}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      try {
+        setSampleQuestions(JSON.parse(saved));
+      } catch (e) {
+        console.error('Failed to parse saved sample questions', e);
+      }
+    } else {
+      // Set initial defaults based on the loaded welcome message/persona
+      const name = draft.bot_name.toLowerCase();
+      const welcome = draft.welcome_message.toLowerCase();
+      const personality = draft.bot_personality.toLowerCase();
+      
+      if (name.includes('aries') || welcome.includes('aries') || welcome.includes('software') || welcome.includes('automation') || personality.includes('saas')) {
+        setSampleQuestions([
+          "What is Aries AI?",
+          "Can Aries automate bookings?",
+          "How much does Aries cost?",
+          "We already have staff, why do we need Aries?"
+        ]);
+      } else if (welcome.includes('trek') || welcome.includes('hike') || welcome.includes('camp') || personality.includes('trekking')) {
+        setSampleQuestions([
+          "Is Kedarkantha beginner friendly?",
+          "What gear should I carry?",
+          "Do you provide guides?"
+        ]);
+      } else if (welcome.includes('room') || welcome.includes('hotel') || welcome.includes('stay') || personality.includes('hospitality')) {
+        setSampleQuestions([
+          "Do you have airport pickup?",
+          "What time is check-in?",
+          "Is breakfast included?"
+        ]);
+      } else if (welcome.includes('table') || welcome.includes('restaurant') || welcome.includes('menu') || welcome.includes('dining') || personality.includes('dining') || personality.includes('casual')) {
+        setSampleQuestions([
+          "Do you have valet parking?",
+          "Can I reserve a table for 4?",
+          "What time do you close?"
+        ]);
+      } else {
+        setSampleQuestions([
+          "How can you help me?",
+          "Tell me more",
+          "What services do you provide?"
+        ]);
+      }
+    }
+  }, [loading, draft.bot_name]);
 
   // Check dirty state
   useEffect(() => {
@@ -492,6 +370,22 @@ export default function AISettingsPage() {
     } else {
       setChatHistory([]);
     }
+    
+    // Set matching sample questions for templates
+    if (tpl.id === 'premium_fine_dining' || tpl.id === 'fast_casual' || tpl.id === 'luxury_hospitality') {
+      setSampleQuestions([
+        "Do you have valet parking?",
+        "Can I reserve a table for 4?",
+        "What time do you close?"
+      ]);
+    } else if (tpl.id === 'cafe_setup') {
+      setSampleQuestions([
+        "Do you have oat milk?",
+        "Is there seating for work?",
+        "What daily specials do you have?"
+      ]);
+    }
+    
     setShowOnboarding(false);
     toast.success(`${tpl.label} template loaded! Try testing in the simulator.`);
   };
@@ -721,12 +615,11 @@ export default function AISettingsPage() {
   }, [demoQueue, chatHistory, sendingMsg]);
 
   const handleTrySampleConversation = () => {
-    const pack = demoConversationPacks[businessMode] || demoConversationPacks.generic;
-    if (!pack || pack.prompts.length === 0) return;
+    if (sampleQuestions.length === 0) return;
 
     setChatHistory([]);
-    const firstPrompt = pack.prompts[0];
-    const remaining = pack.prompts.slice(1);
+    const firstPrompt = sampleQuestions[0];
+    const remaining = sampleQuestions.slice(1);
     setDemoQueue(remaining);
     handleSendMessage(undefined, firstPrompt);
   };
@@ -751,6 +644,13 @@ export default function AISettingsPage() {
       if (data.success) {
         setOriginal(JSON.parse(JSON.stringify(draft)));
         setDirty(false);
+
+        // Save custom sample questions to localStorage securely
+        if (draft.bot_name) {
+          const key = `aries_sample_questions_${draft.bot_name}`;
+          localStorage.setItem(key, JSON.stringify(sampleQuestions));
+        }
+
         toast.success(
           <div className="flex flex-col gap-0.5">
             <span className="font-semibold text-emerald-500">✅ AI Updated Successfully</span>
@@ -1020,6 +920,87 @@ export default function AISettingsPage() {
                         className="flex-1 h-9 px-3 rounded-xl text-sm border border-border bg-background outline-none transition-all focus:border-foreground/30"
                       />
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 1.5: SIMULATOR DEMO QUESTIONS */}
+              <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+                <div className="flex items-center gap-3 px-6 py-4 border-b border-border bg-secondary/30">
+                  <Play className="w-4 h-4 text-muted-foreground fill-current animate-pulse" />
+                  <span className="text-sm font-bold text-foreground uppercase tracking-wider">Simulator Demo Questions</span>
+                </div>
+                
+                <div className="p-6 space-y-4">
+                  <div>
+                    <h3 className="text-xs font-bold text-foreground uppercase tracking-wider mb-1">
+                      Choose what visitors should test in the simulator
+                    </h3>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Customizing these questions dynamically updates the demo play menu inside the playground simulator. Visitors can sequentially autoplay them.
+                    </p>
+                  </div>
+
+                  {/* Chips for sample questions */}
+                  <div className="flex flex-wrap gap-2">
+                    {sampleQuestions.map((q, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-secondary text-foreground text-xs border border-border"
+                      >
+                        <span>{q}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = sampleQuestions.filter((_, i) => i !== idx);
+                            setSampleQuestions(updated);
+                            setDirty(true);
+                          }}
+                          className="hover:text-red-500 transition-colors text-muted-foreground select-none cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </span>
+                    ))}
+                    {sampleQuestions.length === 0 && (
+                      <span className="text-xs text-muted-foreground italic">No sample questions added. The simulator will use default fallbacks.</span>
+                    )}
+                  </div>
+
+                  {/* Input field to add a new question */}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newQuestionInput}
+                      onChange={e => setNewQuestionInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const val = newQuestionInput.trim();
+                          if (val && !sampleQuestions.includes(val)) {
+                            setSampleQuestions([...sampleQuestions, val]);
+                            setNewQuestionInput('');
+                            setDirty(true);
+                          }
+                        }
+                      }}
+                      placeholder="Add a sample question and press Enter..."
+                      className="flex-1 h-9 px-3 rounded-xl text-sm border border-border bg-background outline-none transition-all focus:border-foreground/30"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const val = newQuestionInput.trim();
+                        if (val && !sampleQuestions.includes(val)) {
+                          setSampleQuestions([...sampleQuestions, val]);
+                          setNewQuestionInput('');
+                          setDirty(true);
+                        }
+                      }}
+                      className="h-9 px-4 rounded-xl text-xs font-bold bg-secondary hover:bg-secondary/80 border border-border text-foreground transition-all cursor-pointer flex items-center justify-center gap-1 shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1440,7 +1421,7 @@ export default function AISettingsPage() {
                   disabled={sendingMsg || demoQueue.length > 0}
                   className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-50"
                 >
-                  <Play className="w-3 h-3 fill-current animate-pulse" /> {(demoConversationPacks[businessMode] || demoConversationPacks.generic).label}
+                  <Play className="w-3 h-3 fill-current animate-pulse animate-duration-1000" /> Try Sample Conversation
                 </button>
               ) : (
                 <button
