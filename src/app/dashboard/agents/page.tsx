@@ -166,6 +166,185 @@ const SUGGESTED_CHIPS = [
   'Ask for allergy details before confirming'
 ];
 
+// ────────────────────────────────────────────────────────────
+// Business Mode Types & Scalable Dynamic Demo Packs
+// ────────────────────────────────────────────────────────────
+type BusinessMode = 'restaurant' | 'saas' | 'trekking' | 'hotel' | 'clinic' | 'salon' | 'ecommerce' | 'education' | 'generic';
+
+function inferBusinessMode(draft: DraftConfig, docs: KnowledgeDoc[]): BusinessMode {
+  const keywords: Record<Exclude<BusinessMode, 'generic'>, string[]> = {
+    restaurant: [
+      'restaurant', 'reservation', 'table', 'menu', 'chef', 'booking', 'guest', 'valet', 'dining',
+      'food', 'cafe', 'dinner', 'lunch', 'specials', 'table booking', 'seating'
+    ],
+    saas: [
+      'platform', 'automation', 'crm', 'software', 'dashboard', 'workflow', 'integration', 'api',
+      'whatsapp automation', 'ai platform', 'business automation', 'pricing', 'demo', 'product', 'tool'
+    ],
+    trekking: [
+      'trek', 'camp', 'mountain', 'hiking', 'adventure', 'difficulty', 'gear', 'transport',
+      'basecamp', 'itinerary', 'trail', 'summit', 'guide', 'backpacking', 'travel package'
+    ],
+    hotel: [
+      'room', 'check-in', 'check out', 'suite', 'stay', 'airport pickup', 'breakfast',
+      'concierge', 'booking room', 'amenities', 'hotel'
+    ],
+    clinic: [
+      'appointment', 'doctor', 'consultation', 'clinic', 'medical', 'patient', 'health',
+      'diagnosis', 'timing', 'treatment'
+    ],
+    salon: [
+      'haircut', 'stylist', 'facial', 'appointment', 'salon', 'beauty', 'spa', 'nails', 'grooming'
+    ],
+    ecommerce: [
+      'delivery', 'shipping', 'order', 'refund', 'product', 'cart', 'return', 'discount', 'purchase'
+    ],
+    education: [
+      'course', 'student', 'class', 'admission', 'mentor', 'training', 'syllabus', 'education',
+      'batch', 'program'
+    ]
+  };
+
+  const textSources: string[] = [];
+  
+  if (draft.bot_name) textSources.push(draft.bot_name);
+  if (draft.bot_personality) textSources.push(draft.bot_personality);
+  if (draft.welcome_message) textSources.push(draft.welcome_message);
+  if (draft.welcome_offer) textSources.push(draft.welcome_offer);
+  if (draft.system_prompt) textSources.push(draft.system_prompt);
+  
+  if (draft.usps) {
+    textSources.push(...draft.usps);
+  }
+  
+  if (draft.custom_faqs) {
+    draft.custom_faqs.forEach(faq => {
+      textSources.push(faq.question);
+      textSources.push(faq.answer);
+    });
+  }
+
+  if (docs) {
+    docs.forEach(doc => {
+      if (doc.filename) textSources.push(doc.filename);
+      if (doc.content_text) textSources.push(doc.content_text);
+    });
+  }
+
+  const combinedText = textSources.join(' ').toLowerCase();
+
+  const scores: Record<BusinessMode, number> = {
+    restaurant: 0,
+    saas: 0,
+    trekking: 0,
+    hotel: 0,
+    clinic: 0,
+    salon: 0,
+    ecommerce: 0,
+    education: 0,
+    generic: 0
+  };
+
+  Object.entries(keywords).forEach(([mode, list]) => {
+    const bMode = mode as Exclude<BusinessMode, 'generic'>;
+    list.forEach(keyword => {
+      let index = combinedText.indexOf(keyword);
+      while (index !== -1) {
+        scores[bMode]++;
+        index = combinedText.indexOf(keyword, index + keyword.length);
+      }
+    });
+  });
+
+  let highestMode: BusinessMode = 'generic';
+  let highestScore = 0;
+
+  Object.entries(scores).forEach(([mode, score]) => {
+    const bMode = mode as BusinessMode;
+    if (score > highestScore) {
+      highestScore = score;
+      highestMode = bMode;
+    }
+  });
+
+  return highestMode;
+}
+
+const demoConversationPacks: Record<BusinessMode, { label: string; prompts: string[] }> = {
+  restaurant: {
+    label: "Try Restaurant Demo",
+    prompts: [
+      "Table for 4 tomorrow",
+      "Do you have valet parking?",
+      "What time do you close?"
+    ]
+  },
+  saas: {
+    label: "Try Product Demo",
+    prompts: [
+      "What is Aries AI?",
+      "Can Aries automate bookings?",
+      "We already have staff"
+    ]
+  },
+  trekking: {
+    label: "Try Trek Demo",
+    prompts: [
+      "I am a beginner, which trek should I do?",
+      "What gear is needed?",
+      "Is transport included?"
+    ]
+  },
+  hotel: {
+    label: "Try Hotel Demo",
+    prompts: [
+      "Do you have airport pickup?",
+      "What time is check-in?",
+      "Is breakfast included?"
+    ]
+  },
+  clinic: {
+    label: "Try Clinic Demo",
+    prompts: [
+      "How do I book an appointment?",
+      "What are your timings?",
+      "Are walk-ins allowed?"
+    ]
+  },
+  salon: {
+    label: "Try Salon Demo",
+    prompts: [
+      "How much for a haircut and grooming?",
+      "Do I need an appointment?",
+      "Do you offer spa packages?"
+    ]
+  },
+  ecommerce: {
+    label: "Try Shop Demo",
+    prompts: [
+      "What is your refund policy?",
+      "Do you offer free shipping?",
+      "How do I track my order?"
+    ]
+  },
+  education: {
+    label: "Try Course Demo",
+    prompts: [
+      "What courses are starting next month?",
+      "Is there mentor support included?",
+      "Do you offer certificate programs?"
+    ]
+  },
+  generic: {
+    label: "Try Example Questions",
+    prompts: [
+      "What services do you offer?",
+      "How do I get started?",
+      "What makes you different?"
+    ]
+  }
+};
+
 export default function AISettingsPage() {
   const [draft, setDraft] = useState<DraftConfig>({
     bot_name: '',
@@ -198,6 +377,14 @@ export default function AISettingsPage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workspacePanelRef = useRef<HTMLDivElement>(null);
+
+  // Auto-detected Business Mode (Internal Only)
+  const businessMode = React.useMemo(() => {
+    return inferBusinessMode(draft, docs);
+  }, [draft, docs]);
+
+  // Demo play queue state
+  const [demoQueue, setDemoQueue] = useState<string[]>([]);
 
   // Check dirty state
   useEffect(() => {
@@ -455,6 +642,10 @@ export default function AISettingsPage() {
     const msg = customMsg || inputValue.trim();
     if (!msg || sendingMsg) return;
 
+    if (e || !customMsg) {
+      setDemoQueue([]);
+    }
+
     if (!customMsg) setInputValue('');
     const newMsg: ChatMessage = { role: 'user', content: msg, timestamp: new Date() };
     setChatHistory(prev => [...prev, newMsg]);
@@ -502,12 +693,47 @@ export default function AISettingsPage() {
     }
   };
 
+  // Ref to hold the handleSendMessage callback securely
+  const handleSendMessageRef = useRef<((e?: React.FormEvent, customMsg?: string) => Promise<void>) | null>(null);
+
+  useEffect(() => {
+    handleSendMessageRef.current = handleSendMessage;
+  });
+
+  // Auto-play the next prompt in the demo queue
+  useEffect(() => {
+    if (demoQueue.length === 0 || sendingMsg) return;
+
+    // Check if the last message is from the assistant
+    const lastMsg = chatHistory[chatHistory.length - 1];
+    if (!lastMsg || lastMsg.role !== 'assistant') return;
+
+    // Simulate natural read/type delay (2.5 seconds)
+    const timer = setTimeout(() => {
+      const nextPrompt = demoQueue[0];
+      setDemoQueue(prev => prev.slice(1));
+      if (handleSendMessageRef.current) {
+        handleSendMessageRef.current(undefined, nextPrompt);
+      }
+    }, 2500);
+
+    return () => clearTimeout(timer);
+  }, [demoQueue, chatHistory, sendingMsg]);
+
   const handleTrySampleConversation = () => {
-    handleSendMessage(undefined, "Do you have valet parking?");
+    const pack = demoConversationPacks[businessMode] || demoConversationPacks.generic;
+    if (!pack || pack.prompts.length === 0) return;
+
+    setChatHistory([]);
+    const firstPrompt = pack.prompts[0];
+    const remaining = pack.prompts.slice(1);
+    setDemoQueue(remaining);
+    handleSendMessage(undefined, firstPrompt);
   };
 
   const handleResetChat = () => {
     setChatHistory([]);
+    setDemoQueue([]);
     toast.success('Simulation chat reset');
   };
 
@@ -1205,16 +1431,16 @@ export default function AISettingsPage() {
               <div ref={chatEndRef} />
             </div>
 
-            {/* Dynamic Play Pill or Reset Pill Button */}
+             {/* Dynamic Play Pill or Reset Pill Button */}
             <div className="px-4 py-2.5 bg-slate-950/40 border-t border-white/5 flex justify-center shrink-0">
               {chatHistory.length === 0 ? (
                 <button
                   type="button"
                   onClick={handleTrySampleConversation}
-                  disabled={sendingMsg}
-                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all cursor-pointer"
+                  disabled={sendingMsg || demoQueue.length > 0}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-50"
                 >
-                  <Play className="w-3 h-3 fill-current animate-pulse" /> Try Sample Conversation
+                  <Play className="w-3 h-3 fill-current animate-pulse" /> {(demoConversationPacks[businessMode] || demoConversationPacks.generic).label}
                 </button>
               ) : (
                 <button
