@@ -698,7 +698,7 @@ export default function AISettingsPage() {
                   animate={{ opacity: 1, y: 0 }}
                   className="flex items-center gap-2 text-xs font-medium"
                 >
-                  <h2 className="text-sm font-semibold text-foreground tracking-tight">AI Staff Manager</h2>
+                  <h2 className="text-sm font-semibold text-foreground tracking-tight">AI Assistant</h2>
                   <span className="text-muted-foreground/30 select-none">•</span>
                   <span className="text-emerald-500 dark:text-emerald-400 font-medium select-none">Live</span>
                   <span className="text-muted-foreground/30 select-none">•</span>
@@ -712,13 +712,13 @@ export default function AISettingsPage() {
               ) : (
                 <div className="flex flex-col gap-1">
                   <div className="flex items-baseline gap-2.5">
-                    <h1 className="text-2xl font-bold tracking-tight text-foreground">AI Staff Manager</h1>
+                    <h1 className="text-2xl font-bold tracking-tight text-foreground">AI Assistant</h1>
                     <span className="text-xs font-medium text-emerald-500 dark:text-emerald-400 select-none tracking-wide">
                       Live
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground leading-normal">
-                    Manage your autonomous restaurant staff
+                    Manage your autonomous AI assistant
                   </p>
                   <div className="flex items-center gap-1.5 text-[11px] font-medium tracking-wide mt-0.5">
                     <span className="text-muted-foreground/50">Status:</span>

@@ -55,37 +55,9 @@ type NavItem = {
 
 const navigationItems: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
-  { 
-    label: "Live Chat", 
-    icon: MessageSquare, 
-    href: "/dashboard/chat", 
-    badge: (
-      <div className="flex items-center gap-1.5">
-        <div className="w-1.5 h-1.5 rounded-full bg-sidebar-foreground/30" />
-        <span className="text-[10px] tracking-wide text-sidebar-foreground/50">12 / 3</span>
-      </div>
-    ) 
-  },
-  { 
-    label: "AI Staff Manager", 
-    icon: Bot, 
-    href: "/dashboard/agents",
-    badge: (
-      <div className="flex items-center gap-1.5">
-        <span className="text-[10px] tracking-wide text-sidebar-foreground/50">Active</span>
-      </div>
-    ) 
-  },
-  { 
-    label: "AI Flows", 
-    icon: Network, 
-    href: "/dashboard/flows",
-    badge: (
-      <div className="flex items-center gap-1.5">
-        <span className="text-[10px] tracking-wide text-sidebar-foreground/50">Active</span>
-      </div>
-    ) 
-  },
+  { label: "Live Chat", icon: MessageSquare, href: "/dashboard/chat" },
+  { label: "AI Assistant", icon: Bot, href: "/dashboard/agents" },
+  { label: "AI Flows", icon: Network, href: "/dashboard/flows" },
   { label: "Broadcast", icon: Megaphone, href: "/dashboard/broadcast" },
   { label: "Contacts", icon: Users, href: "/dashboard/contacts" },
   { 
