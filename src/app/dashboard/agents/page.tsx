@@ -556,48 +556,49 @@ export default function AISettingsPage() {
       <div className="flex flex-col lg:flex-row h-full bg-background text-foreground overflow-hidden font-sans relative">
         
         {/* Workspace Panel (Left 65%) */}
-        <div ref={workspacePanelRef} className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-6 lg:max-w-[65%] border-r border-border/60 pb-24 relative">
+        <div className="flex-1 flex flex-col h-full lg:max-w-[65%] border-r border-border/60 relative overflow-hidden bg-background">
           
           {/* Sticky Header with vibrant Publish button */}
           <header className={cn(
-            "sticky top-0 z-30 transition-all duration-300 -mx-6 px-6 flex items-center justify-between gap-4 border-b border-border/30 backdrop-filter backdrop-blur-md",
+            "z-30 transition-all duration-300 px-6 lg:px-8 flex items-center justify-between gap-4 border-b border-border/30 backdrop-filter backdrop-blur-md shrink-0 bg-background/95",
             scrolled 
-              ? "py-2.5 bg-background/98 shadow-sm shadow-black/5" 
-              : "py-4 bg-background/95"
+              ? "py-2.5 shadow-sm shadow-black/5" 
+              : "py-5"
           )}>
             <div>
               {scrolled ? (
                 <motion.div 
                   initial={{ opacity: 0, y: -4 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-2 text-xs font-medium"
                 >
-                  <h2 className="text-sm font-extrabold text-foreground tracking-tight">AI Staff Manager</h2>
-                  <span className="text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.2 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
-                    Active
-                  </span>
-                  <span className="text-xs text-muted-foreground/60 select-none">•</span>
+                  <h2 className="text-sm font-semibold text-foreground tracking-tight">AI Staff Manager</h2>
+                  <span className="text-muted-foreground/30 select-none">•</span>
+                  <span className="text-emerald-500 dark:text-emerald-400 font-medium select-none">Live</span>
+                  <span className="text-muted-foreground/30 select-none">•</span>
                   <span className={cn(
-                    "text-xs font-bold transition-all duration-300 flex items-center gap-1 shrink-0",
-                    dirty ? "text-amber-500 dark:text-amber-400" : "text-emerald-500 dark:text-emerald-400"
+                    "transition-all duration-300 flex items-center gap-1 font-semibold shrink-0",
+                    dirty ? "text-amber-500 dark:text-amber-400 animate-pulse" : "text-emerald-500 dark:text-emerald-400"
                   )}>
                     {dirty ? "⚡ Unsaved changes" : "✅ All changes published"}
                   </span>
                 </motion.div>
               ) : (
-                <div className="flex flex-col gap-0.5">
-                  <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-baseline gap-2.5">
                     <h1 className="text-2xl font-bold tracking-tight text-foreground">AI Staff Manager</h1>
-                    <span className="text-[10px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
-                      Active
+                    <span className="text-xs font-medium text-emerald-500 dark:text-emerald-400 select-none tracking-wide">
+                      Live
                     </span>
                   </div>
-                  <div className="flex items-center gap-1.5 text-xs mt-0.5">
-                    <span className="text-muted-foreground">Manage your 24/7 autonomous restaurant staff</span>
-                    <span className="text-muted-foreground/40 select-none">•</span>
+                  <p className="text-xs text-muted-foreground leading-normal">
+                    Manage your autonomous restaurant staff
+                  </p>
+                  <div className="flex items-center gap-1.5 text-[11px] font-medium tracking-wide mt-0.5">
+                    <span className="text-muted-foreground/50">Status:</span>
                     <span className={cn(
-                      "font-bold transition-all duration-300 flex items-center gap-1",
-                      dirty ? "text-amber-500 dark:text-amber-400 animate-pulse" : "text-emerald-500 dark:text-emerald-400"
+                      "transition-all duration-300 flex items-center gap-1",
+                      dirty ? "text-amber-500 dark:text-amber-400 font-semibold" : "text-emerald-500 dark:text-emerald-400 font-semibold"
                     )}>
                       {dirty ? "⚡ Unsaved changes" : "✅ All changes published"}
                     </span>
@@ -632,6 +633,9 @@ export default function AISettingsPage() {
               {publishing ? 'Publishing...' : dirty ? '⚡ Publish AI Changes' : '✅ All changes published'}
             </motion.button>
           </header>
+
+          {/* Scrollable Content Area */}
+          <div ref={workspacePanelRef} className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-6 pb-24">
 
           {/* ONBOARDING QUICK START WIZARD */}
           {showOnboarding ? (
@@ -1069,6 +1073,7 @@ export default function AISettingsPage() {
             </>
           )}
         </div>
+      </div>
 
         {/* Live Simulator Preview Panel (Right 35%) */}
         <div className="w-full lg:w-[35%] bg-secondary/15 flex flex-col p-6 lg:p-8 shrink-0 overflow-y-auto max-h-screen">
