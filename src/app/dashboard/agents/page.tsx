@@ -155,6 +155,7 @@ export default function AISettingsPage() {
   const [loading, setLoading] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   
   // Knowledge docs & stats state
   const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
@@ -233,6 +234,11 @@ export default function AISettingsPage() {
         };
         setDraft(d);
         setOriginal(JSON.parse(JSON.stringify(d)));
+        
+        // Show Onboarding Setup if no custom rules exist
+        if (!d.welcome_message && !d.system_prompt && d.custom_faqs.length === 0) {
+          setShowOnboarding(true);
+        }
       } else {
         toast.error('Failed to load AI configuration');
       }
@@ -256,6 +262,7 @@ export default function AISettingsPage() {
       ...prev,
       ...tplConfig
     }));
+    setShowOnboarding(false);
     toast.success('Starter template loaded! Type in the simulator to test it.');
   };
 
@@ -362,6 +369,7 @@ export default function AISettingsPage() {
     }));
 
     try {
+      const start = Date.now();
       const res = await fetch('/api/dashboard/playground', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -373,19 +381,25 @@ export default function AISettingsPage() {
       });
       const json = await res.json();
 
-      if (json.success && json.data) {
-        const replyMsg: ChatMessage = {
-          role: 'assistant',
-          content: json.data.reply,
-          timestamp: new Date()
-        };
-        setChatHistory(prev => [...prev, replyMsg]);
-      } else {
-        toast.error(json.error || 'Failed to simulate response');
-      }
+      const elapsed = Date.now() - start;
+      const delay = Math.max(800 - elapsed, 0); // Guarantee 800ms minimum typing animation delay
+
+      setTimeout(() => {
+        if (json.success && json.data) {
+          const replyMsg: ChatMessage = {
+            role: 'assistant',
+            content: json.data.reply,
+            timestamp: new Date()
+          };
+          setChatHistory(prev => [...prev, replyMsg]);
+        } else {
+          toast.error(json.error || 'Failed to simulate response');
+        }
+        setSendingMsg(false);
+      }, delay);
+
     } catch {
       toast.error('Network error contacting playground');
-    } finally {
       setSendingMsg(false);
     }
   };
@@ -442,18 +456,15 @@ export default function AISettingsPage() {
     );
   }
 
-  // Pre-fill check to render Onboarding Quick Start templates
-  const showQuickStart = !draft.welcome_message && !draft.system_prompt && draft.custom_faqs.length === 0;
-
   return (
     <FeaturePageGate feature="AI Agents" allowedPlans={["growth", "pro", "enterprise"]}>
       <div className="flex flex-col lg:flex-row h-full bg-background text-foreground overflow-hidden font-sans relative">
         
         {/* Workspace Panel (Left 65%) */}
-        <div className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-6 lg:max-w-[65%] border-r border-border/60 pb-24">
+        <div className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-6 lg:max-w-[65%] border-r border-border/60 pb-24 relative">
           
-          {/* Header */}
-          <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          {/* Sticky Header with vibrant Publish button */}
+          <header className="sticky top-0 z-30 bg-background/95 backdrop-filter backdrop-blur-md py-4 border-b border-border/30 flex items-center justify-between gap-4 -mx-6 px-6 mb-6">
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-2xl font-bold tracking-tight text-foreground">AI Staff Manager</h1>
@@ -461,40 +472,38 @@ export default function AISettingsPage() {
                   Active
                 </span>
               </div>
-              <p className="text-sm mt-1 text-muted-foreground leading-relaxed">
-                Design the personality, instructions, and facts for your 24/7 automated WhatsApp staff member.
-              </p>
             </div>
             
             {/* Publish button */}
             <motion.button
-              whileHover={{ scale: 1.02, boxShadow: '0 0 15px rgba(16,185,129,0.3)' }}
-              whileTap={{ scale: 0.98 }}
+              whileHover={dirty ? { scale: 1.02, boxShadow: '0 0 18px rgba(16,185,129,0.45)' } : {}}
+              whileTap={dirty ? { scale: 0.98 } : {}}
               onClick={handlePublish}
               disabled={publishing || !dirty}
-              className="flex items-center gap-2 h-11 px-6 rounded-xl text-sm font-bold transition-all shadow-lg focus:outline-none shrink-0"
-              style={{
-                background: dirty ? '#10B981' : 'var(--muted)',
-                color: dirty ? 'white' : 'var(--muted-foreground)',
-                cursor: dirty ? 'pointer' : 'not-allowed',
-                border: dirty ? '1px solid rgba(16,185,129,0.4)' : '1px solid transparent'
-              }}
+              className={cn(
+                "flex items-center gap-2 h-11 px-6 rounded-xl text-sm font-extrabold transition-all shadow-lg focus:outline-none shrink-0 border",
+                dirty 
+                  ? "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500/30 cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.3)]" 
+                  : "bg-secondary text-muted-foreground border-border cursor-not-allowed shadow-none"
+              )}
             >
               {publishing ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
+              ) : dirty ? (
+                <Sparkles className="w-4 h-4 text-emerald-300 animate-pulse" />
               ) : (
-                <Sparkle className="w-4 h-4" />
+                <CheckCircle2 className="w-4 h-4 text-muted-foreground/60" />
               )}
-              {publishing ? 'Publishing...' : 'Publish AI Changes'}
+              {publishing ? 'Publishing...' : dirty ? '⚡ Publish AI Changes' : '✅ All changes published'}
             </motion.button>
           </header>
 
           {/* ONBOARDING QUICK START WIZARD */}
-          {showQuickStart ? (
+          {showOnboarding ? (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="p-8 rounded-3xl border bg-gradient-to-br from-emerald-500/5 to-cyan-500/5 relative overflow-hidden"
+              className="p-8 rounded-3xl border bg-gradient-to-br from-emerald-500/5 to-cyan-500/5 relative overflow-hidden my-auto"
               style={{ borderColor: 'rgba(16,185,129,0.15)' }}
             >
               <div className="flex items-start gap-4">
@@ -651,7 +660,9 @@ export default function AISettingsPage() {
                     
                     {/* Suggested Chips */}
                     <div className="space-y-1.5 mt-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Quick-Add Suggested Guidelines:</span>
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground">
+                        Quick suggestions commonly used by restaurants:
+                      </span>
                       <div className="flex flex-wrap gap-1.5">
                         {SUGGESTED_CHIPS.map(chip => (
                           <button
@@ -673,14 +684,29 @@ export default function AISettingsPage() {
                       Custom FAQs Q&A List
                     </label>
                     
-                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
                       {draft.custom_faqs.map((faq, i) => (
-                        <div key={i} className="p-3 rounded-xl border border-border bg-background/50 flex justify-between gap-3 text-xs leading-relaxed">
-                          <div className="space-y-1">
-                            <div className="font-bold text-foreground">Q: {faq.question}</div>
-                            <div className="text-muted-foreground">A: {faq.answer}</div>
+                        <div key={i} className="p-3.5 rounded-xl border border-border bg-background/50 flex justify-between gap-3 text-xs leading-relaxed relative group">
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-1 text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                              👤 Customer asks
+                            </div>
+                            <div className="font-semibold text-foreground bg-secondary/30 px-2.5 py-1.5 rounded-lg border border-border/40 pl-3">
+                              “{faq.question}”
+                            </div>
+                            
+                            <div className="flex items-center gap-1 text-[11px] font-bold text-muted-foreground uppercase tracking-widest pt-1">
+                              🤖 Assistant replies
+                            </div>
+                            <div className="text-muted-foreground bg-emerald-500/[0.02] px-2.5 py-1.5 rounded-lg border border-emerald-500/10 pl-3">
+                              “{faq.answer}”
+                            </div>
                           </div>
-                          <button onClick={() => handleRemoveFaq(i)} className="text-muted-foreground hover:text-red-500 p-1 self-start transition-colors">
+                          
+                          <button 
+                            onClick={() => handleRemoveFaq(i)} 
+                            className="text-muted-foreground hover:text-red-500 p-1.5 absolute top-2 right-2 rounded-lg hover:bg-red-500/5 transition-all opacity-0 group-hover:opacity-100"
+                          >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
@@ -803,7 +829,7 @@ export default function AISettingsPage() {
 
         {/* Live Simulator Preview Panel (Right 35%) */}
         <div className="w-full lg:w-[35%] bg-secondary/15 flex flex-col p-6 lg:p-8 shrink-0 overflow-y-auto max-h-screen">
-          <div className="w-full max-w-sm mx-auto flex flex-col h-full bg-[#080F1E] rounded-[36px] border-8 border-slate-900 shadow-2xl relative overflow-hidden min-h-[560px]">
+          <div className="w-full max-w-sm mx-auto flex flex-col h-full bg-[#080F1E] rounded-[36px] border-8 border-slate-900 shadow-2xl relative overflow-hidden min-h-[580px]">
             
             {/* Phone Speaker & Notch */}
             <div className="absolute top-0 inset-x-0 h-6 bg-slate-900 flex items-center justify-center z-20">
@@ -812,15 +838,15 @@ export default function AISettingsPage() {
               </div>
             </div>
 
-            {/* Mock Chat Header */}
-            <div className="px-5 pt-8 pb-3 bg-slate-900 flex items-center justify-between shrink-0 z-10 border-b border-white/5">
+            {/* Mock Chat Header with expanded top padding */}
+            <div className="px-5 pt-10 pb-4 bg-slate-900 flex items-center justify-between shrink-0 z-10 border-b border-white/5">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-bold text-sm shrink-0">
                   <Bot className="w-4.5 h-4.5" />
                 </div>
-                <div>
+                <div className="space-y-1">
                   <h4 className="font-bold text-xs text-white leading-tight">{draft.bot_name || 'Assistant'}</h4>
-                  <span className="inline-flex items-center gap-1 mt-0.5 text-[9px] font-bold bg-white/10 px-2 py-0.5 rounded-full text-slate-300">
+                  <span className="inline-flex items-center gap-1.5 text-[9px] font-bold bg-white/10 px-2 py-0.5 rounded-full text-slate-300">
                     👤 Customer Simulation
                   </span>
                 </div>
@@ -851,8 +877,8 @@ export default function AISettingsPage() {
               )}
             </div>
 
-            {/* Mock messages container list */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3.5 flex flex-col">
+            {/* Mock messages container list with increased top padding */}
+            <div className="flex-1 overflow-y-auto p-4 pt-6 space-y-4 flex flex-col">
               
               {/* Bot standard welcome intro */}
               <div className="max-w-[85%] self-start rounded-2xl px-3.5 py-2.5 text-xs bg-slate-800 text-slate-200 rounded-tl-none leading-relaxed border border-slate-700/30 shadow-sm">
@@ -876,7 +902,7 @@ export default function AISettingsPage() {
               {sendingMsg && (
                 <div className="self-start rounded-2xl px-3.5 py-2.5 bg-slate-800 border border-slate-700/30 text-slate-400 rounded-tl-none flex items-center gap-2">
                   <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
-                  <span className="text-[10px] tracking-wide font-medium">Assistant is thinking...</span>
+                  <span className="text-[10px] tracking-wide font-medium">Assistant is typing...</span>
                 </div>
               )}
               
@@ -884,14 +910,14 @@ export default function AISettingsPage() {
             </div>
 
             {/* Try Sample Conversation Button */}
-            <div className="px-4 py-2 bg-slate-950/40 border-t border-white/5 flex justify-center shrink-0">
+            <div className="px-4 py-2.5 bg-slate-950/40 border-t border-white/5 flex justify-center shrink-0">
               <button
                 type="button"
                 onClick={handleTrySampleConversation}
                 disabled={sendingMsg}
                 className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all"
               >
-                <Play className="w-3 h-3 fill-current" /> Try Sample Conversation
+                <Play className="w-3 h-3 fill-current animate-pulse" /> Try Sample Conversation
               </button>
             </div>
 
