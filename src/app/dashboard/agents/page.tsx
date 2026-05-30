@@ -183,6 +183,7 @@ export default function AISettingsPage() {
   const [dirty, setDirty] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [showSimulatorTrainedFiles, setShowSimulatorTrainedFiles] = useState(false);
   
   // Knowledge docs & stats state
   const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
@@ -1109,18 +1110,61 @@ export default function AISettingsPage() {
             </div>
 
             {/* Active Brain Knowledge Trust Banners */}
-            {docs.filter(d => d.embedding).length > 0 && (
-              <div className="bg-emerald-500/10 px-4 py-2 border-b border-white/5 flex items-center justify-center text-center shrink-0">
-                <span className="text-[9px] font-bold tracking-wide text-emerald-400">
-                  ✅ AI is trained on: {docs.filter(d => d.embedding).map(d => d.filename).join(', ')}
-                </span>
-              </div>
-            )}
-            {docs.filter(d => !d.embedding).length > 0 && (
-              <div className="bg-amber-500/10 px-4 py-2 border-b border-white/5 flex items-center justify-center text-center shrink-0 animate-pulse">
-                <span className="text-[9px] font-bold tracking-wide text-amber-400">
-                  ⏳ AI is learning from: {docs.filter(d => !d.embedding).map(d => d.filename).join(', ')}
-                </span>
+            {docs.length > 0 && (
+              <div className="border-b border-white/5 bg-slate-950/20 shrink-0 select-none">
+                {/* Slim Clickable Pill Bar */}
+                <button
+                  type="button"
+                  onClick={() => setShowSimulatorTrainedFiles(prev => !prev)}
+                  className="w-full py-1.5 px-4 flex items-center justify-center gap-1 hover:bg-white/[0.02] transition-colors cursor-pointer"
+                >
+                  {docs.some(d => !d.embedding) ? (
+                    <span className="inline-flex items-center gap-1 text-[9px] font-bold tracking-wider uppercase text-amber-400 animate-pulse">
+                      ⏳ AI learning...
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[9px] font-bold tracking-wider uppercase text-emerald-400">
+                      ✅ AI knowledge active
+                    </span>
+                  )}
+                  <span className="text-[8px] text-slate-500 font-extrabold uppercase ml-1">
+                    ({docs.length} {docs.length === 1 ? 'source' : 'sources'} • {showSimulatorTrainedFiles ? 'Hide' : 'View'})
+                  </span>
+                </button>
+
+                {/* Expanded details list */}
+                <AnimatePresence>
+                  {showSimulatorTrainedFiles && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden bg-slate-950/40 px-5 py-2.5 space-y-1.5 border-t border-white/[0.02]"
+                    >
+                      <div className="text-[8px] font-extrabold text-slate-500 uppercase tracking-widest">
+                        Trained Knowledge Sources:
+                      </div>
+                      <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
+                        {docs.map(doc => {
+                          const isIndexed = !!doc.embedding;
+                          return (
+                            <div key={doc.id} className="flex items-center justify-between text-[9px] font-medium leading-relaxed">
+                              <span className="text-slate-300 truncate max-w-[200px]">
+                                📄 {doc.filename}
+                              </span>
+                              <span className={cn(
+                                "font-bold tracking-wide text-[8px] uppercase",
+                                isIndexed ? "text-emerald-400" : "text-amber-400 animate-pulse"
+                              )}>
+                                {isIndexed ? 'Indexed' : 'Learning...'}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             )}
 
