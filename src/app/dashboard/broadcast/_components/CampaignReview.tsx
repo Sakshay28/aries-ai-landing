@@ -10,6 +10,8 @@ import {
   Gauge,
   ClipboardList,
 } from 'lucide-react';
+import { ConfidenceScoreCard } from './ConfidenceScoreCard';
+import { CampaignFormValues } from '@/app/dashboard/broadcast/validators/broadcast.validator';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ValidationCheck {
@@ -89,6 +91,8 @@ export function CampaignReview({
   campaignName,
   templateName,
   audienceCount,
+  variablesValid,
+  quietHoursEnabled,
   throttleRate,
   scheduledAt,
   onSaveDraft,
@@ -117,6 +121,33 @@ export function CampaignReview({
     ? { title: 'Almost Ready', cls: 'text-amber-600 bg-amber-500/10 border-amber-500/20' }
     : { title: 'Ready to Launch ✓', cls: 'text-emerald-600 bg-[#008069]/10 border-[#008069]/20' };
 
+  // Construct a mock campaign object for the Confidence Scorer
+  const mockCampaign: Partial<CampaignFormValues> = {
+    name: campaignName,
+    template_name: templateName || '',
+    audience: {
+      type: 'all',
+      tags: [],
+      customFilters: [],
+      retargetCampaignId: null,
+      retargetCondition: 'unread',
+      retargetDelayDays: 1
+    },
+    delivery: {
+      mode: scheduledAt ? 'scheduled' : 'now',
+      scheduledAt,
+      timezone: 'Asia/Kolkata',
+      quietHoursEnabled,
+      throttleRate,
+      advancedOpen: false
+    },
+    variables: variablesValid ? {
+      '1': { index: '1', sourceType: 'static', staticValue: 'Sample' }
+    } : {}
+  };
+
+  const detectedVarIndices = templateName ? ['1'] : [];
+
   return (
     <div className="border border-border/30 bg-card rounded-2xl overflow-hidden shadow-sm pt-4.5">
       {/* ── Card Header ─────────────────────────────────────────────────────── */}
@@ -142,6 +173,15 @@ export function CampaignReview({
             {headerStatus.title}
           </span>
         </div>
+      </div>
+
+      {/* ── Confidence Score Banner ── */}
+      <div className="px-5 py-4 border-b border-border/25 bg-secondary/10">
+        <ConfidenceScoreCard
+          campaign={mockCampaign}
+          detectedVarIndices={detectedVarIndices}
+          netRecipients={audienceCount}
+        />
       </div>
 
       {/* ── Mission Control Editorial Pre-Flight Check Blocks ───────────────── */}

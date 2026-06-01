@@ -11,6 +11,10 @@ import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import { BroadcastBuilder } from './BroadcastBuilder';
 import type { Campaign, CampaignStatus } from '../types';
+import { BroadcastExecutionTimeline } from './BroadcastExecutionTimeline';
+import { BroadcastAuditLog } from './BroadcastAuditLog';
+import { QueueStatusCard } from './QueueStatusCard';
+import { BroadcastPerformanceCard } from './BroadcastPerformanceCard';
 
 // ── Filter config ──────────────────────────────────────────────────────────────
 const FILTERS = [
@@ -272,6 +276,7 @@ function CampaignSkeleton({ i }: { i: number }) {
 
 // ── Analytics Panel ───────────────────────────────────────────────────────────
 function AnalyticsPanel({ campaign, onClose }: { campaign: Campaign; onClose: () => void }) {
+  const [activeTab, setActiveTab] = useState<'overview' | 'timeline' | 'audit'>('overview');
   const { display: name } = cleanCampaignName(campaign.name);
   const del = deliveryRate(campaign);
   const read = readRate(campaign);
@@ -297,7 +302,7 @@ function AnalyticsPanel({ campaign, onClose }: { campaign: Campaign; onClose: ()
           <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center">
             <BarChart3 className="w-4 h-4 text-foreground/70" />
           </div>
-          <div>
+          <div className="text-left">
             <h2 className="text-[14px] font-semibold text-foreground tracking-tight">Analytics</h2>
             <p className="text-[11px] text-muted-foreground truncate max-w-[260px]">{name}</p>
           </div>
@@ -307,68 +312,109 @@ function AnalyticsPanel({ campaign, onClose }: { campaign: Campaign; onClose: ()
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
-        {/* Status */}
-        <div className="flex items-center gap-2">
-          <StatusBadge status={campaign.status} />
-          {campaign.scheduled_at && (
-            <span className="text-[12px] text-muted-foreground">
-              {formatScheduled(campaign.scheduled_at)}
-            </span>
-          )}
-        </div>
+      {/* Tabs Selector */}
+      <div className="flex border-b border-border/40 px-6 shrink-0 bg-secondary/15">
+        {[
+          { id: 'overview', label: 'Overview' },
+          { id: 'timeline', label: 'Execution Timeline' },
+          { id: 'audit', label: 'Audit Log' },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as any)}
+            className={`px-4 py-3 text-[12px] font-semibold tracking-tight transition-all relative ${
+              activeTab === tab.id
+                ? 'text-indigo-600 dark:text-indigo-400 font-bold border-b-2 border-indigo-600 dark:border-indigo-400'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-        {/* Metric cards */}
-        <div className="grid grid-cols-2 gap-3">
-          {metrics.map(({ label, value, icon: Icon, color }) => (
-            <div key={label} className="p-4 border border-border/60 rounded-xl bg-background">
-              <div className="flex items-center gap-1.5 mb-2">
-                <Icon className={`w-3.5 h-3.5 ${color}`} />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70">{label}</span>
-              </div>
-              <p className={`text-[26px] font-semibold leading-none tabular-nums ${color}`}>{(value || 0).toLocaleString()}</p>
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+        {activeTab === 'overview' && (
+          <div className="space-y-6">
+            {/* Status */}
+            <div className="flex items-center gap-2 text-left">
+              <StatusBadge status={campaign.status} />
+              {campaign.scheduled_at && (
+                <span className="text-[12px] text-muted-foreground">
+                  {formatScheduled(campaign.scheduled_at)}
+                </span>
+              )}
             </div>
-          ))}
-        </div>
 
-        {/* Delivery funnel */}
-        {campaign.sent_count > 0 && (
-          <div className="space-y-4 p-4 border border-border/60 rounded-xl bg-background">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/70">Delivery Funnel</p>
-            {[
-              { label: 'Delivery rate', value: campaign.delivered_count, max: campaign.sent_count, color: 'bg-emerald-400', pct: del },
-              { label: 'Read rate',     value: campaign.read_count,      max: campaign.sent_count, color: 'bg-blue-400',    pct: read },
-              ...(campaign.failed_count > 0 ? [{ label: 'Failed', value: campaign.failed_count, max: campaign.sent_count, color: 'bg-red-400', pct: Math.round((campaign.failed_count / campaign.sent_count) * 100) }] : []),
-            ].map(({ label, color, pct }) => (
-              <div key={label} className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-medium text-foreground/80">{label}</span>
-                  <span className="text-[12px] font-bold text-foreground tabular-nums">{pct}%</span>
+            {/* Live Queue Status Card (Phase 3) */}
+            {campaign.status === 'sending' && (
+              <QueueStatusCard campaignId={campaign.id} />
+            )}
+
+            {/* Metric cards */}
+            <div className="grid grid-cols-2 gap-3">
+              {metrics.map(({ label, value, icon: Icon, color }) => (
+                <div key={label} className="p-4 border border-border/60 rounded-xl bg-background text-left">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Icon className={`w-3.5 h-3.5 ${color}`} />
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70">{label}</span>
+                  </div>
+                  <p className={`text-[26px] font-semibold leading-none tabular-nums ${color}`}>{(value || 0).toLocaleString()}</p>
                 </div>
-                <div className="h-2 bg-secondary/60 rounded-full overflow-hidden">
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${pct}%` }}
-                    transition={{ duration: 0.8, ease: 'easeOut' }}
-                    className={`h-full rounded-full ${color}`}
-                  />
+              ))}
+            </div>
+
+            {/* Delivery funnel */}
+            {campaign.sent_count > 0 && (
+              <div className="space-y-4 p-4 border border-border/60 rounded-xl bg-background text-left">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/70">Delivery Funnel</p>
+                {[
+                  { label: 'Delivery rate', value: campaign.delivered_count, max: campaign.sent_count, color: 'bg-emerald-400', pct: del },
+                  { label: 'Read rate',     value: campaign.read_count,      max: campaign.sent_count, color: 'bg-blue-400',    pct: read },
+                  ...(campaign.failed_count > 0 ? [{ label: 'Failed', value: campaign.failed_count, max: campaign.sent_count, color: 'bg-red-400', pct: Math.round((campaign.failed_count / campaign.sent_count) * 100) }] : []),
+                ].map(({ label, color, pct }) => (
+                  <div key={label} className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[12px] font-medium text-foreground/80">{label}</span>
+                      <span className="text-[12px] font-bold text-foreground tabular-nums">{pct}%</span>
+                    </div>
+                    <div className="h-2 bg-secondary/60 rounded-full overflow-hidden">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${pct}%` }}
+                        transition={{ duration: 0.8, ease: 'easeOut' }}
+                        className={`h-full rounded-full ${color}`}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 30-Day Performance Analytics (Phase 6) */}
+            <BroadcastPerformanceCard />
+
+            {/* Retarget prompt */}
+            {campaign.status === 'completed' && (
+              <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-xl flex items-start gap-3 text-left">
+                <Zap className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[13px] font-semibold text-foreground">Re-engage unread contacts</p>
+                  <p className="text-[12px] text-muted-foreground mt-0.5">
+                    {Math.max(0, (campaign.sent_count || 0) - (campaign.read_count || 0))} contacts didn't read this campaign.
+                  </p>
                 </div>
               </div>
-            ))}
+            )}
           </div>
         )}
 
-        {/* Retarget prompt */}
-        {campaign.status === 'completed' && (
-          <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-xl flex items-start gap-3">
-            <Zap className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-[13px] font-semibold text-foreground">Re-engage unread contacts</p>
-              <p className="text-[12px] text-muted-foreground mt-0.5">
-                {Math.max(0, (campaign.sent_count || 0) - (campaign.read_count || 0))} contacts didn't read this campaign.
-              </p>
-            </div>
-          </div>
+        {activeTab === 'timeline' && (
+          <BroadcastExecutionTimeline campaignId={campaign.id} />
+        )}
+
+        {activeTab === 'audit' && (
+          <BroadcastAuditLog campaignId={campaign.id} />
         )}
       </div>
     </motion.div>
@@ -461,7 +507,7 @@ export function BroadcastClient() {
   // ── Builder mode ─────────────────────────────────────────────────────────────
   if (builderCampaign !== null) {
     return (
-      <div className="h-full overflow-hidden">
+      <div className="absolute inset-0 bg-background overflow-hidden">
         <BroadcastBuilder
           campaign={builderCampaign === 'new' ? null : builderCampaign}
           allCampaigns={campaigns}
@@ -474,7 +520,7 @@ export function BroadcastClient() {
 
   // ── List mode ────────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-full bg-background text-foreground overflow-hidden">
+    <div className="absolute inset-0 flex bg-background text-foreground overflow-hidden">
       {/* Left Sidebar */}
       <div className="w-60 border-r border-border/60 hidden md:flex flex-col bg-card/30 shrink-0">
         <div className="flex-1 p-4 space-y-0.5">

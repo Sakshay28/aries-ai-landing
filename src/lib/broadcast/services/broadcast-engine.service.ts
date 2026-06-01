@@ -5,6 +5,7 @@ import { AudienceEngineService } from './audience-engine.service';
 import { MetaPayloadBuilderService } from './meta-payload-builder.service';
 import { TemplateParserService } from './template-parser.service';
 import { sleep } from '@/lib/utils/safety';
+import { ExecutionEventService } from './execution-event.service';
 
 const RETRY_BACKOFF_MINUTES = [1, 5, 15, 30, 60];
 
@@ -204,12 +205,6 @@ export class BroadcastEngineService {
               .select('*')
               .eq('campaign_id', item.campaign_id);
 
-            const { data: deliverySettings } = await supabaseAdmin
-              .from('broadcast_delivery_settings')
-              .select('*')
-              .eq('campaign_id', item.campaign_id)
-              .maybeSingle();
-
             if (!campaign) {
               await supabaseAdmin
                 .from('broadcast_queue')
@@ -334,6 +329,32 @@ export class BroadcastEngineService {
           
           // Throttling safety pause: ~200ms per message (5 msgs/sec limit pacing)
           await sleep(200);
+        }
+
+        // D. Check if queue is fully cleared for each campaign processed in this batch
+        const campaignIdsInBatch = [...new Set(items.map(i => i.campaign_id))];
+        for (const campaignId of campaignIdsInBatch) {
+          const { count, error: countErr } = await supabaseAdmin
+            .from('broadcast_queue')
+            .select('*', { count: 'exact', head: true })
+            .eq('campaign_id', campaignId)
+            .in('status', ['pending', 'retrying', 'processing']);
+
+          if (!countErr && count === 0) {
+            await supabaseAdmin
+              .from('broadcast_campaigns')
+              .update({ status: 'completed', updated_at: new Date().toISOString() })
+              .eq('id', campaignId);
+
+            await ExecutionEventService.logEvent(
+              tenantId,
+              campaignId,
+              'campaign_completed',
+              'Campaign completed',
+              'All enqueued messages processed successfully.',
+              'success'
+            );
+          }
         }
       }
 

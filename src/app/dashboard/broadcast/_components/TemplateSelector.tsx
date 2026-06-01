@@ -12,6 +12,7 @@ import {
   XCircle,
   FileText,
 } from "lucide-react";
+import { TemplateHoverPreview } from "./TemplateHoverPreview";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -119,6 +120,8 @@ export function TemplateSelector({
 }: TemplateSelectorProps) {
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<Category>("ALL");
+  const [hoveredTemplate, setHoveredTemplate] = useState<Template | null>(null);
+  const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
   const chipScrollRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -308,6 +311,16 @@ export function TemplateSelector({
                   transition={{ duration: 0.18, delay: i * 0.02 }}
                   whileHover={{ scale: 1.008, y: -0.5 }}
                   onClick={() => onSelect(template)}
+                  onMouseEnter={(e) => {
+                    setHoveredTemplate(template);
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const xPos = rect.left > 320 ? rect.left - 295 : rect.right + 15;
+                    setHoverPosition({ x: xPos, y: rect.top - 10 });
+                  }}
+                  onMouseLeave={() => {
+                    setHoveredTemplate(null);
+                    setHoverPosition(null);
+                  }}
                   role="option"
                   aria-selected={isSelected}
                   className={`group relative flex items-start gap-3.5 p-3 cursor-pointer transition-all duration-200 rounded-xl border ${
@@ -386,6 +399,34 @@ export function TemplateSelector({
           </div>
         )}
       </div>
+
+      <AnimatePresence>
+        {hoveredTemplate && hoverPosition && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.12 }}
+            style={{
+              position: "fixed",
+              left: `${hoverPosition.x}px`,
+              top: `${hoverPosition.y}px`,
+              zIndex: 100
+            }}
+            className="pointer-events-none"
+          >
+            <TemplateHoverPreview
+              templateName={hoveredTemplate.name}
+              templateJson={{
+                body: hoveredTemplate.body,
+                header: hoveredTemplate.headerText || '',
+                footer: hoveredTemplate.footer || '',
+                buttons: (hoveredTemplate.buttons || []).map(b => b.text)
+              }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

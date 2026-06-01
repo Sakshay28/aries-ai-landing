@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 export default function BroadcastPage() {
   return (
     <FeaturePageGate feature="Broadcasts" allowedPlans={['growth', 'pro', 'enterprise']}>
-      <div className="h-[calc(100vh-3.5rem)]">
+      <div className="absolute inset-0 flex flex-col bg-background overflow-hidden">
         <BroadcastClient />
       </div>
     </FeaturePageGate>

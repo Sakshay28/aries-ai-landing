@@ -399,7 +399,7 @@ export function WhatsAppPreview({
   return (
     <div className="flex flex-col gap-2 w-full items-center">
       {/* ── Device Shell ──────────────────────────────────────────────────── */}
-      <div className="relative w-[90%] min-w-[315px] max-w-[385px] xl:max-w-[415px] shrink-0 select-none rounded-[44px] p-[2px] bg-gradient-to-b from-[#dfe1e8] via-[#c4c6ce] to-[#9d9fa6] dark:from-[#3a3b3e] dark:via-[#2b2c2e] dark:to-[#1a1b1c] shadow-[0_28px_70px_-15px_rgba(0,0,0,0.22),0_14px_28px_-10px_rgba(0,0,0,0.14),inset_0_1.5px_2px_rgba(255,255,255,0.5)] ring-1 ring-slate-400/15">
+      <div className="relative w-[96%] min-w-[280px] max-w-[365px] xl:max-w-[385px] 2xl:max-w-[390px] max-h-[680px] xl:max-h-[720px] 2xl:max-h-[740px] shrink-0 select-none rounded-[44px] p-[2px] bg-gradient-to-b from-[#dfe1e8] via-[#c4c6ce] to-[#9d9fa6] dark:from-[#3a3b3e] dark:via-[#2b2c2e] dark:to-[#1a1b1c] shadow-[0_28px_70px_-15px_rgba(0,0,0,0.22),0_14px_28px_-10px_rgba(0,0,0,0.14),inset_0_1.5px_2px_rgba(255,255,255,0.5)] ring-1 ring-slate-400/15">
         {/* Soft Bezel Outer Glow Ring & Thin Bezel Border */}
         <div
           className="relative rounded-[39.5px] border-[2.6px] border-[#18191c] dark:border-[#141517] overflow-hidden transition-all duration-300 ring-1 ring-[#ffffff]/15"
@@ -418,7 +418,7 @@ export function WhatsAppPreview({
           </div>
 
           {/* Screen Content Wrapper */}
-          <div className="flex flex-col bg-[#efeae2] min-h-[470px] sm:min-h-[520px] xl:min-h-[570px]">
+          <div className="flex flex-col bg-[#efeae2] flex-grow min-h-[580px] sm:min-h-[620px] xl:min-h-[660px] 2xl:min-h-[680px]">
             {/* Status bar */}
             <StatusBar />
 

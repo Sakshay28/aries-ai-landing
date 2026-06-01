@@ -100,15 +100,8 @@ function AutosaveIndicator({ status }: { status: 'idle' | 'saving' | 'saved' | '
 
 // ── Section wrapper ───────────────────────────────────────────────────────────
 function Section({ id, children, scrollRef }: { id: SectionId; children: React.ReactNode; scrollRef?: React.RefObject<HTMLDivElement> }) {
-  const { icon: Icon, label } = SECTION_META[id];
   return (
     <div id={`section-${id}`} ref={scrollRef} className="scroll-mt-6">
-      <div className="flex items-center gap-2.5 mb-4">
-        <div className="w-7 h-7 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
-          <Icon className="w-3.5 h-3.5 text-indigo-600" />
-        </div>
-        <h3 className="text-[13px] font-semibold text-foreground tracking-tight">{label}</h3>
-      </div>
       {children}
     </div>
   );
@@ -380,55 +373,60 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
-      className="flex flex-col h-full bg-background overflow-hidden"
+      className="absolute inset-0 flex flex-col bg-background overflow-hidden"
     >
-      {/* Top compact system navigation bar */}
-      <header className="h-14 border-b border-border/60 flex items-center justify-between px-6 shrink-0 bg-background/95 backdrop-blur-sm z-20">
-        <div className="flex items-center gap-3.5 min-w-0 flex-1">
-          <button
-            onClick={onClose}
-            className="flex items-center justify-center w-7 h-7 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors shrink-0"
-            aria-label="Back to dashboard"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div className="flex flex-col min-w-0 text-left">
-            <div className="flex items-center gap-2">
-              <input
-                value={campaignName}
-                onChange={e => setCampaignName(e.target.value)}
-                placeholder="Untitled Campaign"
-                className="text-[13.5px] font-bold text-foreground bg-transparent border-none outline-none placeholder:text-muted-foreground/45 min-w-[200px] w-auto h-5 leading-none focus:ring-0 p-0"
-              />
-              <AutosaveIndicator status={autosaveStatus} />
-            </div>
-            <span className="text-[10px] font-semibold text-muted-foreground/60 leading-none mt-0.5">
-              Draft &bull; WhatsApp Outreach V4
-            </span>
-          </div>
-        </div>
-
-        {/* Live Preview trigger button */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowPreview(p => !p)}
-            className={`hidden lg:flex xl:hidden items-center gap-1.5 h-8 px-3 text-[11.5px] font-bold rounded-lg border transition-colors ${
-              showPreview ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'border-border text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Eye className="w-3.5 h-3.5" />
-            Live Preview
-          </button>
-        </div>
-      </header>
-
       {/* Workspace Columns */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* ── LEFT: Builder form controls (57% optimized grid) ────────────────── */}
-        <div className={`min-w-0 relative flex flex-col transition-all duration-300 ${showPreview ? 'lg:w-[57%] shrink-0 border-r border-border/40' : 'w-full'}`}>
+        {/* ── LEFT: Builder form controls (61% optimized grid) ────────────────── */}
+        <div className={`min-w-0 relative flex flex-col transition-all duration-300 ${showPreview ? 'lg:w-[61%] shrink-0 border-r border-border/40' : 'w-full'}`}>
           {/* Scrollable Form Content */}
           <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col">
-            <div className="max-w-2xl w-full mx-auto px-6 pt-4 pb-8 space-y-6 flex-1">
+            <div className="max-w-2xl w-full mx-auto px-6 pt-6 pb-8 space-y-6 flex-1">
+
+              {/* Premium Animated Broadcast Section Header */}
+              <div className="flex items-center justify-between gap-4 mb-4 select-none">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={onClose}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center border border-border/40 bg-secondary/10 hover:bg-secondary/35 text-muted-foreground hover:text-foreground transition-all duration-[120ms] shrink-0"
+                    aria-label="Back to campaigns list"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                  </button>
+
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.28, ease: "easeOut" }}
+                    className="flex items-center gap-2.5"
+                  >
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.96 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ duration: 0.2, ease: "easeOut" }}
+                      className="w-7 h-7 rounded-lg bg-indigo-500/10 border border-indigo-500/15 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0"
+                    >
+                      <Megaphone className="w-3.5 h-3.5" />
+                    </motion.div>
+                    <h1 className="text-[22px] md:text-[24px] font-semibold tracking-tight text-foreground leading-none">
+                      Broadcast
+                    </h1>
+                  </motion.div>
+                </div>
+
+                {/* Inline campaign name setting pill */}
+                <div className="flex items-center gap-2 border border-border/45 hover:border-border/60 bg-secondary/20 hover:bg-secondary/40 rounded-xl px-3 py-1.5 transition-all duration-150 shrink-0 select-none">
+                  <span className="text-[10px] font-bold text-muted-foreground/60 tracking-wider uppercase shrink-0">Campaign:</span>
+                  <input
+                    value={campaignName}
+                    onChange={e => setCampaignName(e.target.value)}
+                    placeholder="Untitled Campaign…"
+                    className="w-28 sm:w-36 bg-transparent border-none outline-none focus:ring-0 p-0 text-[11px] text-foreground placeholder:text-muted-foreground/45 font-semibold leading-none truncate"
+                  />
+                  <span className="w-[1px] h-3.5 bg-border/40 shrink-0 mx-0.5" />
+                  <AutosaveIndicator status={autosaveStatus} />
+                </div>
+              </div>
 
               {/* Section: Template Selection */}
               <Section id="template">
@@ -577,7 +575,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
           </div>
         </div>
 
-        {/* ── RIGHT: Live WhatsApp Device Showcase (43% hero showcase) ───────── */}
+        {/* ── RIGHT: Live WhatsApp Device Showcase (39% hero showcase) ───────── */}
         <AnimatePresence>
           {showPreview && (
             <motion.aside
@@ -585,36 +583,10 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 24 }}
               transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-              className="hidden lg:flex w-[43%] shrink-0 bg-[#f6f7f9] dark:bg-secondary/10 flex-col overflow-hidden shadow-[-1px_0_0_rgba(148,163,184,0.02)]"
+              className="hidden lg:flex w-[39%] shrink-0 bg-[#f6f7f9] dark:bg-secondary/10 flex-col overflow-hidden shadow-[-1px_0_0_rgba(148,163,184,0.02)]"
             >
-              {/* Header profile picker tab selector replacing the aggressive header line */}
-              <div className="px-6 pt-5 pb-3 bg-transparent flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground/60">WhatsApp Live Preview</p>
-                </div>
-                <div className="flex items-center bg-slate-200/50 dark:bg-zinc-800/40 rounded-lg p-0.5 border border-slate-300/10 gap-0.5">
-                  {['Sakshay', 'John', 'Priya'].map((p) => {
-                    const isActive = previewRecipient === p;
-                    return (
-                      <button
-                        key={p}
-                        onClick={() => setPreviewRecipient(p as any)}
-                        className={`px-2.5 py-1 text-[10px] font-bold rounded-[6px] transition-all duration-[120ms] ease-out ${
-                          isActive
-                            ? 'bg-background text-foreground shadow-sm'
-                            : 'text-muted-foreground/60 hover:text-muted-foreground'
-                        }`}
-                      >
-                        {p}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
               {/* Centered device box with no vertical scrolling */}
-              <div className="flex-grow overflow-hidden px-8 xl:px-10 py-6 flex flex-col items-center justify-center">
+              <div className="flex-grow overflow-hidden px-6 xl:px-8 py-8 flex flex-col items-center justify-center">
                 <WhatsAppPreview
                   template={selectedTemplate}
                   variableMapping={previewValues}

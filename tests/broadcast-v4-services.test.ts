@@ -75,6 +75,7 @@ describe('VariableEngineService — Personalization Resolver', () => {
 
   it('resolves static or custom mappings correctly', () => {
     const staticCfg = {
+      index: '1',
       sourceType: 'static' as const,
       staticValue: 'Awesome Summer Offer'
     };
@@ -84,14 +85,17 @@ describe('VariableEngineService — Personalization Resolver', () => {
 
   it('resolves crm_field values correctly', () => {
     const nameCfg = {
+      index: '1',
       sourceType: 'crm_field' as const,
       crmField: 'name'
     };
     const emailCfg = {
+      index: '2',
       sourceType: 'crm_field' as const,
       crmField: 'email'
     };
     const customCfg = {
+      index: '3',
       sourceType: 'crm_field' as const,
       crmField: 'custom_field'
     };
@@ -104,6 +108,7 @@ describe('VariableEngineService — Personalization Resolver', () => {
   it('resolves fallbacks when lead data is empty or missing', () => {
     const emptyLead = { id: 'lead-empty', name: null, phone: null };
     const nameCfg = {
+      index: '1',
       sourceType: 'crm_field' as const,
       crmField: 'name'
     };
@@ -112,22 +117,22 @@ describe('VariableEngineService — Personalization Resolver', () => {
 
   it('validates variable index mapping completeness', () => {
     const validVars = {
-      '1': { sourceType: 'static' as const, staticValue: 'Hello' },
-      '2': { sourceType: 'crm_field' as const, crmField: 'name' }
+      '1': { index: '1', sourceType: 'static' as const, staticValue: 'Hello' },
+      '2': { index: '2', sourceType: 'crm_field' as const, crmField: 'name' }
     };
     expect(VariableEngineService.validate(validVars, ['1', '2'])).toBe(true);
 
     const invalidVars = {
-      '1': { sourceType: 'static' as const, staticValue: '' },
-      '2': { sourceType: 'crm_field' as const, crmField: '' }
+      '1': { index: '1', sourceType: 'static' as const, staticValue: '' },
+      '2': { index: '2', sourceType: 'crm_field' as const, crmField: '' }
     };
     expect(VariableEngineService.validate(invalidVars, ['1', '2'])).toBe(false);
   });
 
   it('builds compliant Meta Graph API parameters body payload', () => {
     const vars = {
-      '1': { sourceType: 'static' as const, staticValue: 'Discount code: SUM50' },
-      '2': { sourceType: 'crm_field' as const, crmField: 'name' }
+      '1': { index: '1', sourceType: 'static' as const, staticValue: 'Discount code: SUM50' },
+      '2': { index: '2', sourceType: 'crm_field' as const, crmField: 'name' }
     };
     const payload = VariableEngineService.buildMetaPayload(vars, ['1', '2'], mockLead);
     
@@ -170,7 +175,9 @@ describe('AudienceEngineService — Segmentation Filter & Opt-out Deduplication'
       type: 'all',
       tags: [],
       customFilters: [],
-      csvUploadId: null
+      retargetCampaignId: null,
+      retargetCondition: 'unread',
+      retargetDelayDays: 1
     });
 
     expect(res.total).toBe(1);
@@ -196,7 +203,9 @@ describe('AudienceEngineService — Segmentation Filter & Opt-out Deduplication'
       type: 'all',
       tags: [],
       customFilters: [],
-      csvUploadId: null
+      retargetCampaignId: null,
+      retargetCondition: 'unread',
+      retargetDelayDays: 1
     });
 
     expect(res.total).toBe(1);
