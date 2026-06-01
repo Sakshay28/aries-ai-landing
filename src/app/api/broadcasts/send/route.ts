@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
-import { processCampaign } from '@/lib/broadcast/queue';
+import { BroadcastEngineService } from '@/lib/broadcast/services/broadcast-engine.service';
 
 export async function POST(req: NextRequest) {
   try {
@@ -42,16 +42,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'WhatsApp is not yet active for your account. Contact support.' }, { status: 400 });
     }
 
-    // Update status to sending
-    await supabaseAdmin
-      .from('broadcast_campaigns')
-      .update({ status: 'sending' })
-      .eq('id', campaignId);
+    // Launch campaign enqueuing pipeline
+    const res = await BroadcastEngineService.launchCampaign(tenantId, campaignId);
+    if (!res.success) {
+      return NextResponse.json({ success: false, error: res.error || 'Failed to initialize campaign enqueuing' }, { status: 500 });
+    }
 
-    // after() runs after the 200 is flushed — true fire-and-forget.
-    after(() => processCampaign(tenantId, campaignId, campaign, tenant));
+    // Process the first enqueued batch in the background
+    after(() => {
+      BroadcastEngineService.processQueue(50).catch(err => {
+        console.error('❌ Async queue tick failed:', err);
+      });
+    });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, queuedCount: res.queuedCount });
   } catch (error) {
     console.error('Broadcast send error:', error);
     return NextResponse.json({ success: false, error: 'Failed to start sending campaign' }, { status: 500 });

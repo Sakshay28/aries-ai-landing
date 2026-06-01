@@ -49,20 +49,17 @@ const MODES: { id: DeliveryMode; label: string; icon: React.ElementType }[] = [
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-/** A tiny label rendered above form fields */
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
-    <label className="block text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70 mb-1.5">
+    <label className="block text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">
       {children}
     </label>
   );
 }
 
-/** Shared input / select class string */
 const inputCls =
-  'w-full h-9 px-3 bg-background border border-border/70 hover:border-border focus:border-indigo-500/50 rounded-lg text-[13px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/50';
+  'w-full h-9.5 px-3.5 bg-background border border-border/70 hover:border-border focus:border-indigo-500/50 rounded-lg text-[13px] text-foreground outline-none transition-all placeholder:text-muted-foreground/40';
 
-// ── Toggle Switch ─────────────────────────────────────────────────────────────
 function ToggleSwitch({
   checked,
   onChange,
@@ -78,15 +75,15 @@ function ToggleSwitch({
       htmlFor={id}
       className="flex items-center justify-between gap-3 cursor-pointer select-none"
     >
-      <span className="text-[13px] font-medium text-foreground">{label}</span>
+      <span className="text-[12.5px] font-bold text-foreground">{label}</span>
       <button
         id={id}
         type="button"
         role="switch"
         aria-checked={checked}
         onClick={() => onChange(!checked)}
-        className={`relative w-9 h-5 rounded-full transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 shrink-0 ${
-          checked ? 'bg-indigo-500' : 'bg-border'
+        className={`relative w-9 h-5 rounded-full transition-colors duration-200 shrink-0 ${
+          checked ? 'bg-indigo-600' : 'bg-border/70'
         }`}
       >
         <span
@@ -99,7 +96,6 @@ function ToggleSwitch({
   );
 }
 
-// ── Throttle Slider ───────────────────────────────────────────────────────────
 function ThrottleSlider({
   value,
   onChange,
@@ -115,17 +111,17 @@ function ThrottleSlider({
 
   const safetyLabel =
     value > 1000
-      ? { text: 'High Rate — Monitor Carefully', cls: 'text-amber-600 bg-amber-500/10 border-amber-500/20' }
+      ? { text: 'High Send Speed', cls: 'text-amber-600 bg-amber-500/10 border-amber-500/20' }
       : value <= 500
-      ? { text: 'Safe Rate', cls: 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20' }
-      : { text: 'Moderate Rate', cls: 'text-blue-600 bg-blue-500/10 border-blue-500/20' };
+      ? { text: 'Optimal Safe Speed', cls: 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20' }
+      : { text: 'Moderate Speed', cls: 'text-blue-600 bg-blue-500/10 border-blue-500/20' };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3.5">
       <div className="flex items-center justify-between">
-        <FieldLabel>Send Throttle</FieldLabel>
+        <FieldLabel>Delivery Speed</FieldLabel>
         <span
-          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${safetyLabel.cls}`}
+          className={`text-[9.5px] font-bold px-2.5 py-0.5 rounded-full border tracking-wide uppercase ${safetyLabel.cls}`}
         >
           {safetyLabel.text}
         </span>
@@ -133,15 +129,14 @@ function ThrottleSlider({
 
       {/* Slider track */}
       <div className="relative pt-1">
-        <div className="relative h-2 bg-secondary/70 rounded-full overflow-hidden">
-          {/* Gradient fill */}
+        <div className="relative h-2 bg-secondary/80 rounded-full overflow-hidden">
           <div
             className="absolute inset-y-0 left-0 rounded-full transition-all duration-150"
             style={{
               width: `${pct}%`,
               background:
                 'linear-gradient(90deg, #22c55e 0%, #eab308 50%, #f97316 80%, #ef4444 100%)',
-              backgroundSize: '200px 100%',
+              backgroundSize: '220px 100%',
             }}
           />
         </div>
@@ -157,17 +152,18 @@ function ThrottleSlider({
         />
       </div>
 
-      {/* Labels below */}
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-        <div className="flex items-center gap-1">
-          <Gauge className="w-3 h-3 text-indigo-500" />
+      {/* Speed Metrics */}
+      <div className="flex items-center justify-between text-[11.5px] text-muted-foreground/80 font-medium">
+        <div className="flex items-center gap-1.5">
+          <Gauge className="w-3.5 h-3.5 text-indigo-500" />
           <span>
-            <span className="font-semibold text-foreground tabular-nums">{value.toLocaleString()}</span> msgs/min
+            Target rate:{' '}
+            <span className="font-bold text-foreground tabular-nums">{value.toLocaleString()}</span> msgs/min
           </span>
         </div>
         <span>
-          Est. duration:{' '}
-          <span className="font-semibold text-foreground tabular-nums">
+          Est. completion:{' '}
+          <span className="font-bold text-foreground tabular-nums">
             {estimatedDuration > 0 ? `${estimatedDuration} min` : '—'}
           </span>
         </span>
@@ -177,6 +173,7 @@ function ThrottleSlider({
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
+
 export function DeliverySettings({
   config,
   onChange,
@@ -186,10 +183,10 @@ export function DeliverySettings({
   const update = (patch: Partial<DeliveryConfig>) => onChange({ ...config, ...patch });
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
 
-      {/* ── Segmented Control ───────────────────────────────────────────────── */}
-      <div className="flex gap-1 p-1 bg-secondary/50 rounded-xl border border-border/50">
+      {/* ── Segmented Control (Elevated Sliding Tab Bar) ───────────────────── */}
+      <div className="flex p-0.5 bg-secondary/35 rounded-xl border border-border/30 relative select-none">
         {MODES.map(({ id, label, icon: Icon }) => {
           const active = config.mode === id;
           return (
@@ -197,161 +194,161 @@ export function DeliverySettings({
               key={id}
               type="button"
               onClick={() => update({ mode: id })}
-              className={`relative flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg text-[12px] font-semibold transition-all duration-200 ${
-                active
-                  ? 'bg-background text-foreground shadow-sm border border-border/60'
-                  : 'text-muted-foreground hover:text-foreground'
+              className={`relative flex-1 flex items-center justify-center gap-2 h-8.5 rounded-lg text-[12px] font-bold transition-all duration-200 ${
+                active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              <Icon className={`w-3.5 h-3.5 ${active ? 'text-indigo-500' : ''}`} />
-              {label}
+              {active && (
+                <motion.div
+                  layoutId="active-delivery-pill"
+                  className="absolute inset-0 bg-white dark:bg-zinc-800 rounded-[10px] shadow-[0_3px_12px_rgba(0,0,0,0.08),_0_1px_3px_rgba(0,0,0,0.04)] border border-slate-200/50"
+                  transition={{ type: 'spring', damping: 20, stiffness: 350 }}
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
+                />
+              )}
+              <Icon className={`w-3.5 h-3.5 relative z-10 ${active ? 'text-indigo-600' : 'text-muted-foreground/50'}`} />
+              <span className="relative z-10">{label}</span>
             </button>
           );
         })}
       </div>
 
       {/* ── Mode Panels ─────────────────────────────────────────────────────── */}
-      <AnimatePresence mode="wait">
+      <div className="min-h-[60px]">
+        <AnimatePresence mode="wait">
 
-        {/* SEND NOW */}
-        {config.mode === 'now' && (
-          <motion.div
-            key="now"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.18 }}
-            className="flex items-center gap-3 px-4 py-3.5 bg-emerald-500/[0.05] border border-emerald-500/20 rounded-xl"
-          >
-            <span className="relative flex h-2.5 w-2.5 shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-60" />
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-            </span>
-            <p className="text-[13px] text-emerald-700 font-medium leading-snug">
-              Campaign will start immediately when you launch.
-            </p>
-          </motion.div>
-        )}
-
-        {/* SCHEDULE */}
-        {config.mode === 'scheduled' && (
-          <motion.div
-            key="scheduled"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.18 }}
-            className="space-y-4"
-          >
-            {/* Date + Time row */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <FieldLabel>Date</FieldLabel>
-                <input
-                  type="date"
-                  value={config.scheduledAt?.split('T')[0] ?? ''}
-                  onChange={(e) => {
-                    const timePart = config.scheduledAt?.split('T')[1] ?? '09:00';
-                    update({ scheduledAt: `${e.target.value}T${timePart}` });
-                  }}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <FieldLabel>Time</FieldLabel>
-                <input
-                  type="time"
-                  value={config.scheduledAt?.split('T')[1] ?? '09:00'}
-                  onChange={(e) => {
-                    const datePart =
-                      config.scheduledAt?.split('T')[0] ??
-                      new Date().toISOString().split('T')[0];
-                    update({ scheduledAt: `${datePart}T${e.target.value}` });
-                  }}
-                  className={inputCls}
-                />
-              </div>
-            </div>
-
-            {/* Timezone */}
-            <div>
-              <FieldLabel>Timezone</FieldLabel>
-              <select
-                value={config.timezone}
-                onChange={(e) => update({ timezone: e.target.value })}
-                className={inputCls}
-              >
-                {TIMEZONES.map((tz) => (
-                  <option key={tz.value} value={tz.value}>
-                    {tz.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Best Time Recommendation */}
-            <div className="flex items-start gap-2.5 px-4 py-3 bg-indigo-500/[0.05] border border-indigo-500/15 rounded-xl">
-              <Lightbulb className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
-              <p className="text-[12px] text-indigo-700 leading-snug">
-                <span className="font-semibold">Best time for Indian audiences:</span> 7–9 PM IST
-                — highest open rates for WhatsApp broadcasts.
-              </p>
-            </div>
-
-            {/* Quiet Hours Toggle */}
-            <div
-              className={`px-4 py-3.5 rounded-xl border transition-colors ${
-                config.quietHoursEnabled
-                  ? 'bg-indigo-500/[0.04] border-indigo-500/20'
-                  : 'bg-background border-border/60'
-              }`}
+          {/* SEND NOW */}
+          {config.mode === 'now' && (
+            <motion.div
+              key="now"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.15 }}
+              className="flex items-center gap-3 px-4 py-3 bg-emerald-500/[0.04] border border-emerald-500/10 rounded-xl"
             >
-              <ToggleSwitch
-                checked={config.quietHoursEnabled}
-                onChange={(v) => update({ quietHoursEnabled: v })}
-                label="Quiet Hours Protection"
-              />
-              <AnimatePresence>
-                {config.quietHoursEnabled && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                    animate={{ opacity: 1, height: 'auto', marginTop: 10 }}
-                    exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                    transition={{ duration: 0.18 }}
-                    className="flex items-center gap-2 overflow-hidden"
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-60" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+              </span>
+              <p className="text-[12px] text-emerald-700 font-bold leading-none">
+                Ready: This broadcast starts sending instantly upon launch.
+              </p>
+            </motion.div>
+          )}
+
+          {/* SCHEDULE */}
+          {config.mode === 'scheduled' && (
+            <motion.div
+              key="scheduled"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.15 }}
+              className="space-y-4"
+            >
+              {/* Date + Time Row */}
+              <div className="grid grid-cols-2 gap-3.5">
+                <div>
+                  <FieldLabel>Target Date</FieldLabel>
+                  <input
+                    type="date"
+                    value={config.scheduledAt?.split('T')[0] ?? ''}
+                    onChange={(e) => {
+                      const timePart = config.scheduledAt?.split('T')[1] ?? '09:00';
+                      update({ scheduledAt: `${e.target.value}T${timePart}` });
+                    }}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <FieldLabel>Target Time</FieldLabel>
+                  <input
+                    type="time"
+                    value={config.scheduledAt?.split('T')[1] ?? '09:00'}
+                    onChange={(e) => {
+                      const datePart =
+                        config.scheduledAt?.split('T')[0] ??
+                        new Date().toISOString().split('T')[0];
+                      update({ scheduledAt: `${datePart}T${e.target.value}` });
+                    }}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+
+              {/* Timezone */}
+              <div>
+                <FieldLabel>Timezone</FieldLabel>
+                <div className="relative">
+                  <select
+                    value={config.timezone}
+                    onChange={(e) => update({ timezone: e.target.value })}
+                    className={inputCls + " appearance-none cursor-pointer pr-9"}
                   >
-                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                    <span className="text-[12px] text-indigo-600 font-medium">
-                      Protected 9 PM → 8 AM — no messages will be sent during these hours.
-                    </span>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </motion.div>
-        )}
+                    {TIMEZONES.map((tz) => (
+                      <option key={tz.value} value={tz.value}>
+                        {tz.label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/50 pointer-events-none" />
+                </div>
+              </div>
 
-        {/* RECURRING */}
-        {config.mode === 'recurring' && (
-          <motion.div
-            key="recurring"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.18 }}
-            className="flex items-center gap-3 px-4 py-3.5 bg-secondary/40 border border-border/60 rounded-xl"
-          >
-            <RefreshCw className="w-4 h-4 text-indigo-500 shrink-0" />
-            <p className="text-[13px] text-muted-foreground leading-snug">
-              Recurring schedules can be configured via the{' '}
-              <span className="font-semibold text-foreground">Automation</span> section below.
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              {/* Quiet Hours Toggle block */}
+              <div
+                className={`px-4 py-3.5 rounded-xl border transition-colors ${
+                  config.quietHoursEnabled
+                    ? 'bg-indigo-500/[0.03] border-indigo-500/10'
+                    : 'bg-transparent border-border/50'
+                }`}
+              >
+                <ToggleSwitch
+                  checked={config.quietHoursEnabled}
+                  onChange={(v) => update({ quietHoursEnabled: v })}
+                  label="Quiet Hours Smart Protection"
+                />
+                <AnimatePresence>
+                  {config.quietHoursEnabled && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto', marginTop: 10 }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.15 }}
+                      className="flex items-center gap-2 overflow-hidden"
+                    >
+                      <ShieldCheck className="w-4 h-4 text-indigo-500 shrink-0" />
+                      <span className="text-[11.5px] text-indigo-600/90 font-medium leading-relaxed">
+                        Messages are automatically paused between 9 PM and 8 AM to guarantee user compliance.
+                      </span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </motion.div>
+          )}
 
-      {/* ── Divider ─────────────────────────────────────────────────────────── */}
-      <div className="border-t border-border/50" />
+          {/* RECURRING */}
+          {config.mode === 'recurring' && (
+            <motion.div
+              key="recurring"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.15 }}
+              className="flex items-center gap-3 px-4 py-3 bg-secondary/20 border border-border/40 rounded-xl"
+            >
+              <RefreshCw className="w-4 h-4 text-indigo-500 shrink-0 animate-spin-slow" />
+              <p className="text-[12px] text-muted-foreground/80 leading-relaxed">
+                Recurring frequencies are controlled and managed in the{' '}
+                <span className="font-semibold text-foreground">Automation Rules</span> panel below.
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* ── Throttle Slider ─────────────────────────────────────────────────── */}
       <ThrottleSlider
@@ -360,12 +357,12 @@ export function DeliverySettings({
         estimatedDuration={estimatedDuration}
       />
 
-      {/* ── Advanced Controls ────────────────────────────────────────────────── */}
-      <div className="border border-border/60 rounded-xl overflow-hidden">
+      {/* ── Borderless Advanced Controls ────────────────────────────────────── */}
+      <div className="border border-border/40 rounded-xl overflow-hidden bg-transparent">
         <button
           type="button"
           onClick={() => update({ advancedOpen: !config.advancedOpen })}
-          className="w-full flex items-center justify-between px-4 py-3 text-[12px] font-semibold text-muted-foreground hover:text-foreground hover:bg-foreground/[0.02] transition-colors"
+          className="w-full flex items-center justify-between px-4 py-3.5 text-[12px] font-bold text-muted-foreground/80 hover:text-foreground transition-colors select-none"
         >
           <span>Advanced Controls</span>
           {config.advancedOpen ? (
@@ -381,27 +378,27 @@ export function DeliverySettings({
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
+              transition={{ duration: 0.18 }}
               className="overflow-hidden"
             >
-              <div className="px-4 pb-4 pt-1 border-t border-border/50 space-y-3">
+              <div className="px-4 pb-4.5 pt-1 border-t border-border/20 space-y-3">
                 {(
                   [
-                    { label: 'Retry failed messages',        key: 'retry'   },
-                    { label: 'Pause on >20% failure rate',   key: 'pause'   },
-                    { label: 'Daily send cap: 1,000 msgs',   key: 'cap'     },
+                    { label: 'Auto-retry failed dispatch queues',        key: 'retry'   },
+                    { label: 'Pause automatically on >20% failure spikes', key: 'pause'   },
+                    { label: 'Apply default daily cap of 1,000 dispatches',   key: 'cap'     },
                   ] as const
                 ).map(({ label, key }) => (
                   <label
                     key={key}
-                    className="flex items-center gap-2.5 cursor-pointer select-none group"
+                    className="flex items-center gap-3 cursor-pointer select-none group"
                   >
                     <input
                       type="checkbox"
                       defaultChecked={key === 'retry'}
-                      className="w-3.5 h-3.5 rounded border-border/70 text-indigo-500 accent-indigo-500 cursor-pointer"
+                      className="w-3.5 h-3.5 rounded border-border/70 text-indigo-600 accent-indigo-600 cursor-pointer"
                     />
-                    <span className="text-[12px] text-muted-foreground group-hover:text-foreground transition-colors">
+                    <span className="text-[12px] text-muted-foreground group-hover:text-foreground transition-colors font-medium">
                       {label}
                     </span>
                   </label>
@@ -411,15 +408,6 @@ export function DeliverySettings({
           )}
         </AnimatePresence>
       </div>
-
-      {/* ── Audience hint ────────────────────────────────────────────────────── */}
-      {audienceCount > 0 && (
-        <p className="text-[11px] text-muted-foreground/70 text-center tabular-nums">
-          {audienceCount.toLocaleString()} recipients ·{' '}
-          {config.throttleRate.toLocaleString()} msgs/min ·{' '}
-          est. {estimatedDuration} min to complete
-        </p>
-      )}
     </div>
   );
 }

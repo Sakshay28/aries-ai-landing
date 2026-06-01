@@ -10,7 +10,7 @@ import {
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import { BroadcastBuilder } from './BroadcastBuilder';
-import type { Campaign, CampaignStatus } from './BroadcastBuilder';
+import type { Campaign, CampaignStatus } from '../types';
 
 // ── Filter config ──────────────────────────────────────────────────────────────
 const FILTERS = [

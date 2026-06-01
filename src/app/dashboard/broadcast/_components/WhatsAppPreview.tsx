@@ -65,23 +65,42 @@ export interface WhatsAppPreviewProps {
   onProfileChange: (name: string) => void;
 }
 
-// ── Profile configs ────────────────────────────────────────────────────────────
+// ── Profile configs (Rich Personalized Data for Clock Tower Jaipur) ───────────
 
 const PROFILES: { name: string; variables: Record<string, string> }[] = [
-  { name: "Sakshay", variables: { "1": "Sakshay", "2": "Monday", "3": "30%" } },
-  { name: "John",    variables: { "1": "John",    "2": "Tuesday", "3": "20%" } },
-  { name: "Priya",   variables: { "1": "Priya",   "2": "Friday",  "3": "25%" } },
+  {
+    name: "Sakshay",
+    variables: {
+      "1": "Sakshay",
+      "2": "Friday, June 5",
+      "3": "7:30 PM",
+    },
+  },
+  {
+    name: "John",
+    variables: {
+      "1": "John",
+      "2": "Saturday, June 6",
+      "3": "8:00 PM",
+    },
+  },
+  {
+    name: "Priya",
+    variables: {
+      "1": "Priya",
+      "2": "Sunday, June 7",
+      "3": "1:30 PM",
+    },
+  },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Derive effective header info from template (handles both parsed and raw components) */
 function resolveHeader(template: Template): {
   type: string;
   text: string;
   mediaUrl: string;
 } {
-  // Prefer top-level parsed fields
   if (template.headerType && template.headerType !== "NONE") {
     return {
       type: template.headerType,
@@ -90,7 +109,6 @@ function resolveHeader(template: Template): {
     };
   }
 
-  // Fall back to raw Meta components
   const headerComp = template.components?.find((c) => c.type === "HEADER");
   if (headerComp) {
     return {
@@ -103,17 +121,13 @@ function resolveHeader(template: Template): {
   return { type: "NONE", text: "", mediaUrl: "" };
 }
 
-/** Resolve footer from parsed fields or raw components */
 function resolveFooter(template: Template): string {
   if (template.footer) return template.footer;
   return (
-    template.components
-      ?.find((c) => c.type === "FOOTER")
-      ?.text ?? ""
+    template.components?.find((c) => c.type === "FOOTER")?.text ?? ""
   );
 }
 
-/** Resolve buttons from parsed fields or raw components */
 function resolveButtons(template: Template): ParsedButton[] {
   if (template.buttons && template.buttons.length > 0) return template.buttons;
 
@@ -128,12 +142,11 @@ function resolveButtons(template: Template): ParsedButton[] {
   }));
 }
 
-/** Replace {{N}} placeholders with mapped values or styled fallback spans */
+/** Substitute variables with strong styling for mapped vs fallback values */
 function substituteVariables(
   text: string,
   mapping: VariableMapping
 ): React.ReactNode[] {
-  // Split on {{N}} tokens
   const parts = text.split(/(\{\{\d+\}\})/g);
 
   return parts.map((part, idx) => {
@@ -145,7 +158,7 @@ function substituteVariables(
 
     if (value) {
       return (
-        <span key={idx} className="font-semibold text-foreground">
+        <span key={idx} className="font-semibold text-[#111b21]">
           {value}
         </span>
       );
@@ -154,8 +167,8 @@ function substituteVariables(
     return (
       <span
         key={idx}
-        className="font-medium text-indigo-500 bg-indigo-50 px-1 rounded"
-        style={{ fontStyle: "italic" }}
+        className="font-medium text-indigo-600 bg-indigo-50/80 px-1 py-0.5 rounded border border-indigo-100 text-[12px]"
+        style={{ fontStyle: "normal" }}
       >
         {`[Variable ${key}]`}
       </span>
@@ -163,7 +176,6 @@ function substituteVariables(
   });
 }
 
-/** Get initials from a name string */
 function getInitials(name: string): string {
   return name
     .trim()
@@ -175,55 +187,49 @@ function getInitials(name: string): string {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-/** Simulated device status bar */
 function StatusBar() {
   return (
-    <div className="flex items-center justify-between px-5 pt-3 pb-1 shrink-0">
-      <span className="text-[11px] font-semibold text-foreground/80 tracking-tight">
+    <div className="flex items-center justify-between px-6 pt-3 pb-1 shrink-0 bg-[#ffffff] dark:bg-[#111b21] transition-colors duration-200">
+      <span className="text-[12px] font-semibold text-[#111b21] dark:text-[#f1f2f6] tracking-tight">
         9:41
       </span>
-      <div className="flex items-center gap-1.5">
-        {/* Signal bars – SVG mimic */}
+      <div className="flex items-center gap-1.5 text-[#111b21] dark:text-[#f1f2f6]">
         <svg
-          width="16"
+          width="17"
           height="11"
-          viewBox="0 0 16 11"
+          viewBox="0 0 17 11"
           fill="none"
-          className="opacity-70"
+          className="opacity-90"
         >
           <rect x="0" y="7" width="3" height="4" rx="0.5" fill="currentColor" />
           <rect x="4.5" y="4.5" width="3" height="6.5" rx="0.5" fill="currentColor" />
           <rect x="9" y="2" width="3" height="9" rx="0.5" fill="currentColor" />
-          <rect x="13.5" y="0" width="2.5" height="11" rx="0.5" fill="currentColor" opacity="0.35" />
+          <rect x="13.5" y="0" width="3" height="11" rx="0.5" fill="currentColor" opacity="0.3" />
         </svg>
-        <Wifi className="w-3.5 h-3.5 opacity-70" />
-        <BatteryFull className="w-4 h-4 opacity-70" />
+        <Wifi className="w-3.5 h-3.5 opacity-90" />
+        <BatteryFull className="w-4 h-4 opacity-90" />
       </div>
     </div>
   );
 }
 
-/** WhatsApp-style chat header bar */
 function ChatHeader({ businessName }: { businessName: string }) {
-  const initials = getInitials(businessName || "Business");
+  const initials = getInitials(businessName || "Aries Business");
 
   return (
-    <div
-      className="flex items-center gap-3 px-3 py-2 shrink-0"
-      style={{ background: "#075E54" }}
-    >
+    <div className="flex items-center gap-3 px-4 py-2.5 shrink-0 bg-[#ffffff] border-b border-slate-100 shadow-sm">
       {/* Back chevron */}
       <svg
-        width="10"
-        height="16"
-        viewBox="0 0 10 16"
+        width="12"
+        height="20"
+        viewBox="0 0 12 20"
         fill="none"
-        className="opacity-90 shrink-0"
+        className="opacity-80 cursor-pointer shrink-0 text-[#008069]"
       >
         <path
-          d="M8.5 1.5L2 8l6.5 6.5"
-          stroke="white"
-          strokeWidth="2"
+          d="M10 2L2 10L10 18"
+          stroke="currentColor"
+          strokeWidth="2.5"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -231,32 +237,32 @@ function ChatHeader({ businessName }: { businessName: string }) {
 
       {/* Avatar */}
       <div className="relative shrink-0">
-        <div className="w-8 h-8 rounded-full bg-emerald-300/30 flex items-center justify-center border border-white/20">
-          <span className="text-[11px] font-bold text-white">{initials}</span>
+        <div className="w-9 h-9 rounded-full bg-[#008069]/10 flex items-center justify-center border border-[#008069]/20">
+          <span className="text-[11px] font-bold text-[#008069]">{initials}</span>
         </div>
+        <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white" />
       </div>
 
       {/* Name + verified */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1">
-          <p className="text-[13px] font-semibold text-white truncate leading-tight">
-            {businessName || "Business"}
+          <p className="text-[14px] font-bold text-[#111b21] truncate leading-tight">
+            {businessName}
           </p>
-          <BadgeCheck className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+          <BadgeCheck className="w-4 h-4 text-[#008069] shrink-0" />
         </div>
-        <p className="text-[10px] text-white/60 leading-tight">Business account</p>
+        <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">Online</p>
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-3.5 shrink-0">
-        <Phone className="w-4 h-4 text-white/80" />
-        <MoreVertical className="w-4 h-4 text-white/80" />
+      <div className="flex items-center gap-4 shrink-0 text-[#008069]">
+        <Phone className="w-4.5 h-4.5" />
+        <MoreVertical className="w-4.5 h-4.5" />
       </div>
     </div>
   );
 }
 
-/** Message header rendering */
 function MessageHeader({
   type,
   text,
@@ -270,7 +276,7 @@ function MessageHeader({
 
   if (type === "TEXT") {
     return (
-      <p className="text-[12px] font-bold text-foreground/90 mb-2 leading-snug">
+      <p className="text-[13px] font-bold text-[#111b21] mb-1.5 leading-snug">
         {text}
       </p>
     );
@@ -282,17 +288,17 @@ function MessageHeader({
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={mediaUrl}
-          alt="Template header"
-          className="w-full rounded-[10px] mb-2 object-cover"
-          style={{ maxHeight: 160 }}
+          alt="Header media"
+          className="w-full rounded-lg mb-2 object-cover"
+          style={{ maxHeight: 180 }}
         />
       );
     }
     return (
-      <div className="w-full h-36 rounded-[10px] mb-2 flex items-center justify-center bg-slate-100 border border-slate-200">
+      <div className="w-full h-36 rounded-lg mb-2 flex items-center justify-center bg-slate-100 border border-slate-200">
         <div className="flex flex-col items-center gap-1.5 text-slate-400">
-          <ImageIcon className="w-8 h-8 opacity-60" />
-          <span className="text-[10px] font-medium opacity-70">Image</span>
+          <ImageIcon className="w-7 h-7 opacity-60" />
+          <span className="text-[10px] font-medium opacity-70">Image Header</span>
         </div>
       </div>
     );
@@ -300,11 +306,11 @@ function MessageHeader({
 
   if (type === "VIDEO") {
     return (
-      <div className="w-full h-36 rounded-[10px] mb-2 flex items-center justify-center bg-slate-900/10 border border-slate-200 relative overflow-hidden">
-        <div className="w-10 h-10 rounded-full bg-black/20 flex items-center justify-center backdrop-blur-sm">
-          <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+      <div className="w-full h-36 rounded-lg mb-2 flex items-center justify-center bg-slate-900/10 border border-slate-200 relative overflow-hidden">
+        <div className="w-9 h-9 rounded-full bg-black/20 flex items-center justify-center backdrop-blur-sm">
+          <Play className="w-4 h-4 text-white fill-white ml-0.5" />
         </div>
-        <span className="absolute bottom-2 right-2.5 text-[10px] font-medium text-slate-500 bg-white/80 px-1.5 py-0.5 rounded-full">
+        <span className="absolute bottom-2 right-2.5 text-[9px] font-medium text-slate-500 bg-white/90 px-1.5 py-0.5 rounded-md">
           Video
         </span>
       </div>
@@ -313,15 +319,15 @@ function MessageHeader({
 
   if (type === "DOCUMENT") {
     return (
-      <div className="flex items-center gap-2.5 p-2.5 mb-2 bg-slate-50 border border-slate-200 rounded-lg">
-        <div className="w-8 h-8 rounded-md bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
-          <FileText className="w-4 h-4 text-indigo-500" />
+      <div className="flex items-center gap-2.5 p-2 mb-2 bg-[#f0f2f5] border border-slate-200/50 rounded-lg">
+        <div className="w-8 h-8 rounded bg-red-500/10 flex items-center justify-center shrink-0">
+          <FileText className="w-4 h-4 text-red-500" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[12px] font-semibold text-foreground/90 truncate">
+          <p className="text-[12px] font-semibold text-[#111b21] truncate">
             {text || "Document"}
           </p>
-          <p className="text-[10px] text-muted-foreground">PDF · Tap to open</p>
+          <p className="text-[10px] text-muted-foreground">PDF · Tap to view</p>
         </div>
       </div>
     );
@@ -330,42 +336,33 @@ function MessageHeader({
   return null;
 }
 
-/** A single rendered button */
 function PreviewButton({ button }: { button: ParsedButton }) {
   const isUrl = button.type === "URL";
   const isPhone = button.type === "PHONE_NUMBER";
 
   return (
-    <div className="flex items-center justify-center gap-1.5 py-2 px-3">
-      {isUrl && <ExternalLink className="w-3.5 h-3.5 text-[#0AB4F2] shrink-0" />}
-      {isPhone && (
-        <Phone className="w-3.5 h-3.5 text-[#0AB4F2] shrink-0" />
-      )}
-      <span
-        className={`text-[13px] font-medium leading-tight ${
-          isUrl || isPhone
-            ? "text-[#0AB4F2]"
-            : "text-[#0AB4F2]"
-        }`}
-      >
+    <div className="flex items-center justify-center gap-2 py-3 px-4 hover:bg-slate-50/50 transition-colors duration-150 cursor-pointer">
+      {isUrl && <ExternalLink className="w-3.5 h-3.5 text-[#0066cc] shrink-0" />}
+      {isPhone && <Phone className="w-3.5 h-3.5 text-[#0066cc] shrink-0" />}
+      <span className="text-[13px] font-semibold text-[#0066cc] leading-tight">
         {button.text}
       </span>
     </div>
   );
 }
 
-/** Empty state when no template is selected */
 function EmptyState() {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 py-12">
-      <div className="w-14 h-14 rounded-2xl bg-white/60 border border-white/40 shadow-sm flex items-center justify-center">
-        <MessageSquare className="w-6 h-6 text-slate-400" />
+    <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 py-16 text-center">
+      <div className="w-14 h-14 rounded-2xl bg-white border border-slate-100 shadow-md flex items-center justify-center">
+        <MessageSquare className="w-6 h-6 text-[#008069] opacity-70" />
       </div>
-      <p className="text-[12px] font-medium text-slate-500 text-center leading-snug">
-        Select a template
-        <br />
-        to preview
-      </p>
+      <div>
+        <p className="text-[13px] font-bold text-[#111b21]">Preview Personalization</p>
+        <p className="text-[11px] text-muted-foreground mt-1 max-w-[200px] leading-relaxed">
+          Select a WhatsApp template to view live dynamic variables instantly.
+        </p>
+      </div>
     </div>
   );
 }
@@ -378,7 +375,6 @@ export function WhatsAppPreview({
   previewProfile,
   onProfileChange,
 }: WhatsAppPreviewProps) {
-  // Merge profile-driven variables with external mapping (external takes precedence)
   const activeProfileVars = useMemo(() => {
     const profile = PROFILES.find((p) => p.name === previewProfile) ?? PROFILES[0];
     return { ...profile.variables, ...variableMapping };
@@ -398,138 +394,97 @@ export function WhatsAppPreview({
   );
   const bodyText = template?.body ?? "";
 
-  // Business name derived from template name (prettified)
-  const businessName = "Aries Business";
+  const businessName = "sakshay";
 
   return (
-    <div className="flex flex-col gap-4 h-full">
-      {/* ── Profile Selector ──────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2.5 shrink-0">
-        <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/60">
-          Preview as
-        </span>
-        <div className="flex items-center gap-1 p-1 bg-secondary/50 border border-border/60 rounded-lg">
-          {PROFILES.map((profile) => (
-            <button
-              key={profile.name}
-              onClick={() => onProfileChange(profile.name)}
-              className={`px-3 py-1 rounded-md text-[12px] font-semibold transition-all duration-150 ${
-                previewProfile === profile.name
-                  ? "bg-background text-foreground shadow-sm border border-border/60"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {profile.name}
-            </button>
-          ))}
-        </div>
-      </div>
-
+    <div className="flex flex-col gap-2 w-full items-center">
       {/* ── Device Shell ──────────────────────────────────────────────────── */}
-      <div
-        className="relative mx-auto flex flex-col shrink-0"
-        style={{ width: 280 }}
-      >
-        {/* Outer bezel */}
+      <div className="relative w-[90%] min-w-[315px] max-w-[385px] xl:max-w-[415px] shrink-0 select-none rounded-[44px] p-[2px] bg-gradient-to-b from-[#dfe1e8] via-[#c4c6ce] to-[#9d9fa6] dark:from-[#3a3b3e] dark:via-[#2b2c2e] dark:to-[#1a1b1c] shadow-[0_28px_70px_-15px_rgba(0,0,0,0.22),0_14px_28px_-10px_rgba(0,0,0,0.14),inset_0_1.5px_2px_rgba(255,255,255,0.5)] ring-1 ring-slate-400/15">
+        {/* Soft Bezel Outer Glow Ring & Thin Bezel Border */}
         <div
-          className="relative rounded-[36px] border-2 border-slate-200/90 shadow-2xl overflow-hidden"
+          className="relative rounded-[39.5px] border-[2.6px] border-[#18191c] dark:border-[#141517] overflow-hidden transition-all duration-300 ring-1 ring-[#ffffff]/15"
           style={{
-            background: "#f8f9fa",
+            background: "#efeae2",
             boxShadow:
-              "0 32px 64px -12px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.8)",
+              "inset 0 1px 2px rgba(255,255,255,0.15), inset 0 -1px 2px rgba(0,0,0,0.2)",
           }}
         >
-          {/* Notch */}
+          {/* Dynamic Island styled notch */}
           <div
-            className="absolute top-0 left-1/2 -translate-x-1/2 z-10 rounded-b-2xl bg-slate-100"
-            style={{ width: 90, height: 22 }}
-          />
+            className="absolute top-3 left-1/2 -translate-x-1/2 z-20 rounded-full bg-[#111b21] flex items-center justify-center border border-white/5"
+            style={{ width: 80, height: 18 }}
+          >
+            <div className="w-2 h-2 rounded-full bg-[#1d2731] ml-auto mr-3 border border-white/5" />
+          </div>
 
-          {/* Screen area */}
-          <div className="flex flex-col overflow-hidden" style={{ minHeight: 560 }}>
+          {/* Screen Content Wrapper */}
+          <div className="flex flex-col bg-[#efeae2] min-h-[470px] sm:min-h-[520px] xl:min-h-[570px]">
             {/* Status bar */}
-            <div
-              className="pt-6 pb-0"
-              style={{ background: "#075E54" }}
-            >
-              <div className="flex items-center justify-between px-5 pb-1">
-                <span className="text-[11px] font-semibold text-white/90 tracking-tight">
-                  9:41
-                </span>
-                <div className="flex items-center gap-1.5 text-white">
-                  <svg width="14" height="10" viewBox="0 0 14 10" fill="none">
-                    <rect x="0" y="6" width="2.5" height="4" rx="0.4" fill="white" />
-                    <rect x="4" y="4" width="2.5" height="6" rx="0.4" fill="white" />
-                    <rect x="8" y="2" width="2.5" height="8" rx="0.4" fill="white" />
-                    <rect x="12" y="0" width="2" height="10" rx="0.4" fill="white" opacity="0.35" />
-                  </svg>
-                  <Wifi className="w-3 h-3" />
-                  <BatteryFull className="w-3.5 h-3.5" />
-                </div>
-              </div>
+            <StatusBar />
 
-              {/* WhatsApp Chat Header */}
-              <ChatHeader businessName={businessName} />
-            </div>
+            {/* Simulated Chat Header */}
+            <ChatHeader businessName={businessName} />
 
-            {/* Chat area */}
+            {/* Chat Body (WhatsApp Default Beige Wall) */}
             <div
-              className="flex-1 relative overflow-hidden"
+              className="flex-1 relative overflow-y-auto px-4 py-4"
               style={{
-                background: "#e5ddd5",
                 backgroundImage:
-                  "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c0b4a8' fill-opacity='0.22'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")",
+                  "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c0b4a8' fill-opacity='0.16'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")",
               }}
             >
-              {/* Scrollable chat content */}
-              <div className="flex flex-col px-3 py-4 gap-1 overflow-y-auto" style={{ maxHeight: 400 }}>
-                {/* Date chip */}
-                <div className="flex justify-center mb-3">
-                  <span className="text-[10px] text-[#6b7c85] bg-white/75 px-2.5 py-0.5 rounded-full shadow-sm font-medium">
-                    TODAY
+              <div className="flex flex-col gap-4">
+                {/* Date stamp */}
+                <div className="flex justify-center">
+                  <span className="text-[10px] text-[#667781] bg-white/85 px-2.5 py-0.5 rounded-md shadow-sm font-semibold uppercase tracking-wide">
+                    Today
                   </span>
                 </div>
 
-                {/* Message bubble */}
+                {/* Sent Campaign Bubble (Aligned to RIGHT, WhatsApp light-green background) */}
                 <AnimatePresence mode="wait">
                   {template ? (
                     <motion.div
                       key={template.name}
-                      initial={{ opacity: 0, y: 12, scale: 0.97 }}
+                      initial={{ opacity: 0, y: 12, scale: 0.96 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -8, scale: 0.97 }}
-                      transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
-                      className="flex flex-col items-start"
+                      exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                      transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+                      className="flex flex-col items-end w-full relative animate-in fade-in slide-in-from-bottom-2 duration-150"
                     >
-                      {/* Bubble wrapper */}
+                      {/* WhatsApp Sent Message Bubble Container */}
                       <div
-                        className="relative max-w-[92%] rounded-[10px] rounded-tl-sm overflow-hidden"
-                        style={{
-                          background: "#ffffff",
-                          boxShadow: "0 1px 3px rgba(0,0,0,0.13)",
-                        }}
+                        className="relative max-w-[85%] rounded-2xl rounded-tr-none overflow-hidden px-4 pt-3 pb-2 bg-[#d9fdd3] text-[#111b21] shadow-[0_1px_3px_rgba(0,0,0,0.10),0_2px_6px_rgba(0,0,0,0.05)]"
                       >
-                        {/* Header */}
+                        {/* Bubble tail element */}
+                        <div
+                          className="absolute top-0 right-0 w-2.5 h-2.5 bg-[#d9fdd3]"
+                          style={{
+                            clipPath: "polygon(0 0, 100% 0, 100% 100%)",
+                          }}
+                        />
+
+                        {/* Media/Text Header */}
                         {header && header.type !== "NONE" && (
-                          <div className="px-3 pt-2.5">
+                          <div className="pt-0.5">
                             <MessageHeader
-                              type={header.type}
-                              text={header.text}
-                              mediaUrl={header.mediaUrl}
+                               type={header.type}
+                               text={header.text}
+                               mediaUrl={header.mediaUrl}
                             />
                           </div>
                         )}
 
-                        {/* Body */}
-                        <div className="px-3 pb-1 pt-2">
+                        {/* Message Body Content */}
+                        <div className="pt-0.5 select-text">
                           <AnimatePresence mode="wait">
                             <motion.p
                               key={`${template.name}-${previewProfile}`}
                               initial={{ opacity: 0 }}
                               animate={{ opacity: 1 }}
                               exit={{ opacity: 0 }}
-                              transition={{ duration: 0.15 }}
-                              className="text-[13px] text-[#303030] leading-[1.55] whitespace-pre-wrap break-words"
+                              transition={{ duration: 0.12 }}
+                              className="text-[14.5px] text-[#111b21] leading-[1.6] whitespace-pre-wrap break-words tracking-normal font-normal"
                             >
                               {substituteVariables(bodyText, activeProfileVars)}
                             </motion.p>
@@ -537,28 +492,25 @@ export function WhatsAppPreview({
 
                           {/* Footer */}
                           {footer && (
-                            <p className="text-[11px] text-[#8e9296] mt-1.5 leading-snug">
+                            <p className="text-[11px] text-[#667781] mt-2 leading-snug">
                               {footer}
                             </p>
                           )}
 
-                          {/* Timestamp */}
-                          <div className="flex items-center justify-end gap-1 mt-1.5">
-                            <span className="text-[10px] text-[#8e9296]">
+                          {/* Timestamp and Double Checkticks */}
+                          <div className="flex items-center justify-end gap-1 mt-2 pb-0.5">
+                            <span className="text-[9px] text-[#667781] font-medium leading-none">
                               9:41 AM
                             </span>
                             <CheckCheck className="w-3.5 h-3.5 text-[#53bdeb]" />
                           </div>
                         </div>
 
-                        {/* Buttons */}
+                        {/* Buttons attached bottom plate */}
                         {buttons.length > 0 && (
-                          <div className="border-t border-slate-100">
+                          <div className="border-t border-[#c5e6bd] mt-3 -mx-4 bg-white/30 divide-y divide-[#c5e6bd]/80">
                             {buttons.map((btn, i) => (
-                              <div
-                                key={i}
-                                className={i > 0 ? "border-t border-slate-100" : ""}
-                              >
+                              <div key={i}>
                                 <PreviewButton button={btn} />
                               </div>
                             ))}
@@ -573,60 +525,36 @@ export function WhatsAppPreview({
               </div>
             </div>
 
-            {/* Bottom bar — WhatsApp input stub */}
-            <div
-              className="flex items-center gap-2 px-3 py-2 shrink-0"
-              style={{ background: "#f0f2f5" }}
-            >
-              <div className="flex-1 h-8 bg-white rounded-full flex items-center px-3">
-                <span className="text-[11px] text-slate-400">Message</span>
+            {/* Bottom Keyboard stub */}
+            <div className="flex items-center gap-2.5 px-3 py-2.5 shrink-0 bg-[#f0f2f5] border-t border-slate-200/30">
+              <div className="flex-1 h-8.5 bg-white rounded-full flex items-center px-4 shadow-sm border border-slate-200/50">
+                <span className="text-[12px] text-slate-400">Message</span>
               </div>
-              {/* Mic button */}
               <div
-                className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
-                style={{ background: "#25D366" }}
+                className="w-8.5 h-8.5 rounded-full flex items-center justify-center shrink-0 cursor-pointer shadow-sm hover:brightness-95 active:scale-95 transition-all duration-150"
+                style={{ background: "#008069" }}
               >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="white"
-                >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="white">
                   <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 14 0h-2zm-5 9a7.07 7.07 0 0 1-7-7H3a9 9 0 0 0 18 0h-2a7.07 7.07 0 0 1-7 7z" />
                 </svg>
               </div>
             </div>
           </div>
         </div>
-
-        {/* Side buttons — volume + power */}
-        <div
-          className="absolute left-[-3px] rounded-l top-[100px] w-[3px] h-10 bg-slate-300 rounded-l-full"
-          aria-hidden
-        />
-        <div
-          className="absolute left-[-3px] top-[150px] w-[3px] h-10 bg-slate-300 rounded-l-full"
-          aria-hidden
-        />
-        <div
-          className="absolute right-[-3px] top-[120px] w-[3px] h-14 bg-slate-300 rounded-r-full"
-          aria-hidden
-        />
       </div>
 
-      {/* ── Bottom label ──────────────────────────────────────────────────── */}
-      {template && (
-        <motion.div
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-center gap-2 shrink-0"
-        >
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          <span className="text-[11px] text-muted-foreground font-medium">
-            Live preview · {template.name}
-          </span>
-        </motion.div>
-      )}
+      {/* ── Micro Label ───────────────────────────────────────────────────── */}
+      <motion.div
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: template ? 1 : 0, y: template ? 0 : 4 }}
+        transition={{ duration: 0.2 }}
+        className="flex items-center justify-center gap-1.5 shrink-0"
+      >
+        <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        <span className="text-[9.5px] text-muted-foreground/60 font-bold tracking-[0.1em] uppercase">
+          WhatsApp Live Preview
+        </span>
+      </motion.div>
     </div>
   );
 }

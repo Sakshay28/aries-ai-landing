@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
-import { processCampaign } from '@/lib/broadcast/queue';
+import { SchedulerService } from '@/lib/broadcast/services/scheduler.service';
+import { BroadcastEngineService } from '@/lib/broadcast/services/broadcast-engine.service';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    // Basic authorization check if needed (e.g. from environment secret or header)
-    // To allow easy cron trigger, we'll allow standard GET/POST execution,
-    // but in a production setup, we can secure it using a secret token header.
     const authHeader = req.headers.get('Authorization');
     const cronSecret = process.env.CRON_SECRET;
     
@@ -18,57 +15,17 @@ export async function GET(req: NextRequest) {
 
     const now = new Date().toISOString();
 
-    // Find all scheduled campaigns ready to be sent
-    const { data: scheduledCampaigns, error: fetchErr } = await supabaseAdmin
-      .from('broadcast_campaigns')
-      .select('*')
-      .eq('status', 'scheduled')
-      .lte('scheduled_at', now);
+    // 1. Check and dispatch scheduled campaigns
+    const dispatchedCount = await SchedulerService.checkAndDispatchScheduled();
 
-    if (fetchErr) {
-      console.error('Error fetching scheduled campaigns:', fetchErr);
-      return NextResponse.json({ success: false, error: 'Failed to fetch scheduled campaigns' }, { status: 500 });
-    }
-
-    if (!scheduledCampaigns || scheduledCampaigns.length === 0) {
-      return NextResponse.json({ success: true, message: 'No scheduled campaigns ready for execution' });
-    }
-
-    const triggeredCampaignIds: string[] = [];
-
-    for (const campaign of scheduledCampaigns) {
-      // 1. Instantly mark campaign as sending to prevent other cron sweeps from picking it up
-      await supabaseAdmin
-        .from('broadcast_campaigns')
-        .update({ status: 'sending' })
-        .eq('id', campaign.id);
-
-      // 2. Fetch tenant credentials
-      const { data: tenant } = await supabaseAdmin
-        .from('tenants')
-        .select('wa_access_token, wa_phone_number_id')
-        .eq('id', campaign.tenant_id)
-        .single();
-
-      if (tenant?.wa_access_token && tenant?.wa_phone_number_id) {
-        // 3. Process the campaign in the background safely (fire-and-forget style to avoid timeout)
-        processCampaign(campaign.tenant_id, campaign.id, campaign, tenant).catch(err => {
-          console.error(`Scheduled Campaign ${campaign.id} execution failed:`, err);
-        });
-        triggeredCampaignIds.push(campaign.id);
-      } else {
-        console.error(`Missing WhatsApp settings for campaign ${campaign.id} (Tenant ${campaign.tenant_id})`);
-        await supabaseAdmin
-          .from('broadcast_campaigns')
-          .update({ status: 'failed' })
-          .eq('id', campaign.id);
-      }
-    }
+    // 2. Process enqueued messages in the throttled queue (tick dispatch loop)
+    const queueProcessedCount = await BroadcastEngineService.processQueue(50);
 
     return NextResponse.json({
       success: true,
-      message: `Successfully swept scheduled campaigns at ${now}`,
-      triggered: triggeredCampaignIds,
+      message: `Successfully executed V4 cron sweep at ${now}`,
+      dispatchedCampaigns: dispatchedCount,
+      messagesProcessed: queueProcessedCount
     });
   } catch (error) {
     console.error('Scheduled cron sweep execution error:', error);

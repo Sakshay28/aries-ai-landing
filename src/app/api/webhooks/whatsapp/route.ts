@@ -845,6 +845,37 @@ async function handleStatusUpdate(msg: NonNullable<ReturnType<typeof parseMetaWe
   } else {
     console.log(`📬 Meta status update success: ${msg.messageId} → ${mappedStatus} (updated message ${updated[0].id})`);
   }
+
+  // ── V4 Reconciliation Pipeline ──
+  try {
+    const { data: updatedDelivery } = await supabaseAdmin
+      .from('broadcast_deliveries')
+      .update({
+        status: mappedStatus,
+        ...(mappedStatus === 'delivered' && { delivered_at: new Date().toISOString() }),
+        ...(mappedStatus === 'read' && { read_at: new Date().toISOString() })
+      })
+      .eq('message_id', msg.messageId)
+      .select('campaign_id');
+
+    if (updatedDelivery && updatedDelivery.length > 0) {
+      const campaignId = updatedDelivery[0].campaign_id;
+      const metricColMap: Record<string, string> = {
+        delivered: 'delivered_count',
+        read: 'read_count',
+        failed: 'failed_count'
+      };
+      const colToIncrement = metricColMap[mappedStatus];
+      if (colToIncrement) {
+        await supabaseAdmin.rpc('increment_broadcast_analytics', {
+          target_campaign_id: campaignId,
+          col_name: colToIncrement
+        });
+      }
+    }
+  } catch (reconcileErr) {
+    console.error('❌ Failed to reconcile broadcast deliveries:', reconcileErr);
+  }
 }
 
 // ── Inbound Reaction Processing ──

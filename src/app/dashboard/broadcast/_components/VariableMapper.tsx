@@ -66,7 +66,7 @@ function SourceTypeToggle({
   onChange: (t: SourceType) => void;
 }) {
   return (
-    <div className="flex items-center bg-secondary/50 border border-border/60 rounded-lg p-0.5 gap-0.5">
+    <div className="flex items-center bg-secondary/30 border border-border/50 rounded-lg p-0.5 gap-0.5">
       {SOURCE_TYPES.map(opt => {
         const isActive = opt.value === value;
         return (
@@ -74,17 +74,17 @@ function SourceTypeToggle({
             key={opt.value}
             type="button"
             onClick={() => onChange(opt.value)}
-            className={`relative px-2.5 py-1 text-[11px] font-medium rounded-[6px] transition-all duration-150 whitespace-nowrap ${
+            className={`relative px-2.5 py-1 text-[11px] font-semibold rounded-[6px] transition-all duration-[120ms] ease-out whitespace-nowrap ${
               isActive
                 ? 'text-foreground'
-                : 'text-muted-foreground hover:text-foreground'
+                : 'text-muted-foreground/70 hover:text-muted-foreground'
             }`}
           >
             {isActive && (
               <motion.div
                 layoutId="source-type-pill"
-                className="absolute inset-0 bg-background border border-border/60 rounded-[6px] shadow-sm"
-                transition={{ type: 'spring', damping: 26, stiffness: 320 }}
+                className="absolute inset-0 bg-background border border-border/50 rounded-[6px] shadow-sm"
+                transition={{ type: 'spring', damping: 28, stiffness: 340 }}
               />
             )}
             <span className="relative z-10">{opt.label}</span>
@@ -95,6 +95,39 @@ function SourceTypeToggle({
   );
 }
 
+// ── Semantic Label Detector ───────────────────────────────────────────────────
+
+function getSemanticLabel(bodyText: string, index: string): string {
+  const normalized = bodyText.toLowerCase();
+  const indexStr = `{{${index}}}`;
+  const pos = normalized.indexOf(indexStr);
+  if (pos === -1) return `Variable ${index}`;
+  
+  // Look at preceding text
+  const preText = normalized.substring(Math.max(0, pos - 20), pos);
+  
+  if (preText.includes("hi ") || preText.includes("hello ") || preText.includes("dear ") || preText.includes("name")) {
+    return "Name";
+  }
+  if (preText.includes("date") || preText.includes("day") || preText.includes("on ")) {
+    return "Date";
+  }
+  if (preText.includes("time") || preText.includes("at ")) {
+    return "Time";
+  }
+  if (preText.includes("status") || preText.includes("is ")) {
+    return "Status";
+  }
+  
+  // Otherwise try post text
+  const postText = normalized.substring(pos + indexStr.length, Math.min(normalized.length, pos + indexStr.length + 20));
+  if (postText.includes("name")) return "Name";
+  if (postText.includes("date")) return "Date";
+  if (postText.includes("time")) return "Time";
+  
+  return `Var ${index}`;
+}
+
 // ── Variable Row ──────────────────────────────────────────────────────────────
 
 function VariableRow({
@@ -102,130 +135,101 @@ function VariableRow({
   config,
   previewValue,
   onUpdate,
+  bodyText,
 }: {
   index: string;
   config: VariableConfig;
   previewValue: string;
   onUpdate: (patch: Partial<VariableConfig>) => void;
+  bodyText: string;
 }) {
+  const semanticLabel = React.useMemo(() => getSemanticLabel(bodyText, index), [bodyText, index]);
   const valid = isConfigValid(config);
-  const hasAttempted = config.sourceType === 'crm_field'
-    ? config.crmField !== undefined
-    : config.staticValue !== undefined;
-
-  const showError = hasAttempted && !valid;
+  const showError = !valid;
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2 }}
+      transition={{ duration: 0.15 }}
       className={`rounded-xl border transition-colors ${
         showError
-          ? 'border-red-300 bg-red-50/30'
-          : 'border-border/60 bg-background'
+          ? 'border-amber-200 bg-amber-50/10'
+          : 'border-slate-200/50 dark:border-zinc-800/50 bg-background hover:bg-secondary/5'
       }`}
     >
-      <div className="flex items-start gap-3 p-4">
-        {/* Variable chip */}
-        <div className="shrink-0 mt-0.5">
-          <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-indigo-500/8 border border-indigo-500/20 text-indigo-600 text-[12px] font-bold font-mono tracking-wide">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3">
+        {/* Left Side: Semantic name & mapping direction */}
+        <div className="flex items-center gap-2 min-w-[130px] w-[130px] select-none">
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-indigo-500/8 border border-indigo-500/10 text-indigo-600 text-[10px] font-bold font-mono tracking-wide">
             {`{{${index}}}`}
+          </span>
+          <span className="text-[12.5px] font-semibold text-foreground tracking-tight truncate">
+            {semanticLabel}
           </span>
         </div>
 
-        {/* Controls column */}
-        <div className="flex-1 min-w-0 space-y-3">
-          {/* Source type toggle */}
-          <SourceTypeToggle
-            value={config.sourceType}
-            onChange={sourceType => {
-              onUpdate({ sourceType, crmField: undefined, staticValue: undefined });
+        {/* Center: Inline Tactile Chip Picker */}
+        <div className="flex-1 flex flex-wrap items-center gap-1.5 select-none">
+          {/* CRM Fields Chips */}
+          {CRM_FIELDS.map(f => {
+            const isSelected = config.sourceType === 'crm_field' && config.crmField === f.value;
+            return (
+              <button
+                key={f.value}
+                type="button"
+                onClick={() => onUpdate({ sourceType: 'crm_field', crmField: f.value, staticValue: undefined })}
+                className={`h-[26px] px-2.5 rounded-lg text-[10.5px] font-semibold transition-all duration-[120ms] ease-out select-none ${
+                  isSelected
+                    ? 'bg-indigo-600 border border-indigo-600 text-white shadow-[0_2px_8px_rgba(99,102,241,0.16)] dark:border-indigo-500'
+                    : 'bg-secondary/25 text-muted-foreground/75 border border-border/15 hover:border-indigo-500/30 hover:bg-indigo-50/30 dark:hover:bg-indigo-950/20 hover:text-indigo-600'
+                }`}
+              >
+                {f.label}
+              </button>
+            );
+          })}
+
+          {/* Static Value Chip */}
+          <button
+            type="button"
+            onClick={() => {
+              if (config.sourceType !== 'static') {
+                onUpdate({ sourceType: 'static', crmField: undefined, staticValue: '' });
+              }
             }}
-          />
-
-          {/* Input based on source type */}
-          <div>
-            {config.sourceType === 'crm_field' && (
-              <div className="relative">
-                <select
-                  value={config.crmField ?? ''}
-                  onChange={e => onUpdate({ crmField: e.target.value })}
-                  className={`w-full h-9 pl-3.5 pr-8 rounded-lg text-[13px] text-foreground outline-none transition-colors appearance-none cursor-pointer border ${
-                    showError
-                      ? 'border-red-400 bg-red-50/50 focus:border-red-500'
-                      : 'bg-card border-border/70 hover:border-border focus:border-indigo-500/50'
-                  }`}
-                >
-                  <option value="">— Select CRM field —</option>
-                  {CRM_FIELDS.map(f => (
-                    <option key={f.value} value={f.value}>{f.label}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none" />
-              </div>
-            )}
-
-            {config.sourceType === 'static' && (
-              <input
-                type="text"
-                placeholder="Enter static value…"
-                value={config.staticValue ?? ''}
-                onChange={e => onUpdate({ staticValue: e.target.value })}
-                className={`w-full h-9 px-3.5 rounded-lg text-[13px] text-foreground outline-none transition-colors border placeholder:text-muted-foreground/40 ${
-                  showError
-                    ? 'border-red-400 bg-red-50/50 focus:border-red-500'
-                    : 'bg-card border-border/70 hover:border-border focus:border-indigo-500/50'
-                }`}
-              />
-            )}
-
-            {config.sourceType === 'custom' && (
-              <textarea
-                placeholder="Enter custom text…"
-                value={config.staticValue ?? ''}
-                onChange={e => onUpdate({ staticValue: e.target.value })}
-                rows={2}
-                className={`w-full px-3.5 py-2.5 rounded-lg text-[13px] text-foreground outline-none transition-colors border resize-none leading-relaxed placeholder:text-muted-foreground/40 ${
-                  showError
-                    ? 'border-red-400 bg-red-50/50 focus:border-red-500'
-                    : 'bg-card border-border/70 hover:border-border focus:border-indigo-500/50'
-                }`}
-              />
-            )}
-
-            {/* Inline error */}
-            <AnimatePresence>
-              {showError && (
-                <motion.p
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="text-[11px] text-red-500 mt-1.5 leading-tight"
-                >
-                  {config.sourceType === 'crm_field'
-                    ? 'Please select a CRM field'
-                    : 'This field cannot be empty'}
-                </motion.p>
-              )}
-            </AnimatePresence>
-          </div>
+            className={`h-[26px] px-2.5 rounded-lg text-[10.5px] font-semibold transition-all duration-[120ms] ease-out select-none ${
+              config.sourceType === 'static'
+                ? 'bg-indigo-600 border border-indigo-600 text-white shadow-[0_2px_8px_rgba(99,102,241,0.16)] dark:border-indigo-500'
+                : 'bg-secondary/25 text-muted-foreground/75 border border-border/15 hover:border-indigo-500/30 hover:bg-indigo-50/30 dark:hover:bg-indigo-950/20 hover:text-indigo-600'
+            }`}
+          >
+            Custom Text
+          </button>
         </div>
 
-        {/* Preview value */}
-        <div className="shrink-0 flex items-center gap-1.5 mt-1 min-w-[80px] max-w-[110px]">
-          {previewValue ? (
-            <>
-              <span className="text-muted-foreground/50 text-[12px]">→</span>
-              <span
-                className="text-[12px] text-muted-foreground font-medium truncate"
-                title={previewValue}
-              >
-                {previewValue}
-              </span>
-            </>
+        {/* Right: Inline Input (if Static selected) or Preview value */}
+        <div className="w-[130px] shrink-0 flex items-center justify-end gap-2">
+          {config.sourceType === 'static' ? (
+            <input
+              type="text"
+              placeholder="Enter text…"
+              value={config.staticValue ?? ''}
+              onChange={e => onUpdate({ staticValue: e.target.value })}
+              className={`h-[26px] w-[120px] px-2.5 rounded-lg text-[11px] text-foreground outline-none transition-colors border placeholder:text-muted-foreground/35 ${
+                showError
+                  ? 'border-amber-300 bg-amber-50/20 focus:border-amber-400'
+                  : 'bg-card border-border/60 hover:border-border/80 focus:border-indigo-500/40 focus:ring-0 p-0 text-center'
+              }`}
+            />
           ) : (
-            <span className="text-[12px] text-muted-foreground/30 italic">preview</span>
+            previewValue && (
+              <div className="flex items-center gap-1.5 bg-secondary/35 border border-border/10 px-2 py-0.5 rounded-md max-w-[120px]">
+                <span className="text-[10px] text-muted-foreground/70 font-semibold truncate" title={previewValue}>
+                  {previewValue}
+                </span>
+              </div>
+            )
           )}
         </div>
       </div>
@@ -329,26 +333,26 @@ export function VariableMapper({
       </AnimatePresence>
 
       {/* ── Column headers ─────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-4">
-        <div className="w-[72px] shrink-0">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">
+      <div className="flex items-center gap-3 px-4 text-left">
+        <div className="w-[130px] shrink-0">
+          <span className="text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground/50">
             Variable
           </span>
         </div>
         <div className="flex-1">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">
+          <span className="text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground/50">
             Mapping
           </span>
         </div>
-        <div className="w-[110px] shrink-0">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">
+        <div className="w-[130px] shrink-0 text-right pr-2">
+          <span className="text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground/50">
             Preview
           </span>
         </div>
       </div>
 
       {/* ── Variable rows ──────────────────────────────────────────────────── */}
-      <div className="space-y-2.5">
+      <div className="space-y-2">
         {detectedIndices.map((idx, i) => {
           const existing = variables[idx];
           const config: VariableConfig = existing ?? {
@@ -367,6 +371,7 @@ export function VariableMapper({
                 config={config}
                 previewValue={previewValues[idx] ?? ''}
                 onUpdate={patch => updateVariable(idx, patch)}
+                bodyText={bodyText}
               />
             </motion.div>
           );

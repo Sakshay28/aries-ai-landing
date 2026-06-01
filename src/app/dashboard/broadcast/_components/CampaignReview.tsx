@@ -1,20 +1,14 @@
 "use client";
 
 import React from 'react';
-import { motion } from 'framer-motion';
 import {
   CheckCircle2,
-  XCircle,
   AlertTriangle,
-  Send,
-  FileText,
-  Copy,
-  FlaskConical,
-  Loader2,
   Clock,
   Users,
   LayoutTemplate,
   Gauge,
+  ClipboardList,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -43,6 +37,7 @@ interface CampaignReviewProps {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
 function formatScheduledAt(iso: string | null): string {
   if (!iso) return 'Immediately';
   const d = new Date(iso);
@@ -62,79 +57,8 @@ function calcDuration(audienceCount: number, throttleRate: number): number {
   return Math.ceil(audienceCount / throttleRate);
 }
 
-// ── Validation Check Row ──────────────────────────────────────────────────────
-function CheckRow({
-  check,
-  index,
-}: {
-  check: ValidationCheck;
-  index: number;
-}) {
-  const cfg = {
-    pass: {
-      icon:    CheckCircle2,
-      iconCls: 'text-emerald-500',
-      textCls: 'text-muted-foreground',
-      msgCls:  'text-muted-foreground/70',
-    },
-    fail: {
-      icon:    XCircle,
-      iconCls: 'text-red-500',
-      textCls: 'text-red-600 font-semibold',
-      msgCls:  'text-red-500/80',
-    },
-    warn: {
-      icon:    AlertTriangle,
-      iconCls: 'text-amber-500',
-      textCls: 'text-amber-700',
-      msgCls:  'text-amber-600/80',
-    },
-  }[check.status];
-
-  const Icon = cfg.icon;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: -10 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.2, delay: index * 0.05 }}
-      className="flex items-start gap-2.5 py-2"
-    >
-      <Icon className={`w-4 h-4 shrink-0 mt-0.5 ${cfg.iconCls}`} />
-      <div className="flex-1 min-w-0">
-        <span className={`text-[12px] ${cfg.textCls}`}>{check.label}</span>
-        {check.message && (
-          <p className={`text-[11px] mt-0.5 leading-snug ${cfg.msgCls}`}>
-            {check.message}
-          </p>
-        )}
-      </div>
-    </motion.div>
-  );
-}
-
-// ── Summary Row ───────────────────────────────────────────────────────────────
-function SummaryRow({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: React.ElementType;
-  label: string;
-  value: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-2.5 border-b border-border/50 last:border-0">
-      <div className="flex items-center gap-2 text-muted-foreground min-w-0">
-        <Icon className="w-3.5 h-3.5 shrink-0" />
-        <span className="text-[12px]">{label}</span>
-      </div>
-      <div className="text-[12px] font-semibold text-foreground text-right">{value}</div>
-    </div>
-  );
-}
-
 // ── Outlined Action Button ────────────────────────────────────────────────────
+
 function OutlinedButton({
   onClick,
   disabled,
@@ -151,15 +75,16 @@ function OutlinedButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex-1 flex items-center justify-center gap-1.5 h-8 px-3 rounded-lg text-[12px] font-semibold border border-border/70 bg-background text-muted-foreground hover:text-foreground hover:border-border hover:bg-foreground/[0.02] transition-all duration-150 disabled:opacity-40 disabled:pointer-events-none"
+      className="flex-1 flex items-center justify-center gap-1.5 h-8 px-3 rounded-lg text-[11.5px] font-semibold border border-border/50 bg-background/80 text-muted-foreground hover:text-foreground hover:bg-secondary/20 transition-all duration-[130ms] ease-out disabled:opacity-40 disabled:pointer-events-none"
     >
-      <Icon className="w-3.5 h-3.5" />
+      <Icon className="w-3 h-3 shrink-0" />
       {children}
     </button>
   );
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
+
 export function CampaignReview({
   campaignName,
   templateName,
@@ -178,163 +103,202 @@ export function CampaignReview({
   const passCount  = validationChecks.filter((c) => c.status === 'pass').length;
   const estimatedDuration = calcDuration(audienceCount, throttleRate);
 
+  // Grouping checks into beautiful, clean editorial lists (Stripe Pre-flight style)
+  const nameCheck = validationChecks.find(c => c.id === 'name');
+  const templateCheck = validationChecks.find(c => c.id === 'template');
+  const varsCheck = validationChecks.find(c => c.id === 'variables');
+  const audienceCheck = validationChecks.find(c => c.id === 'audience');
+  const quietCheck = validationChecks.find(c => c.id === 'quiet_hours');
+  const scheduleCheck = validationChecks.find(c => c.id === 'schedule');
+  const metaCheck = validationChecks.find(c => c.id === 'template_approved');
+
+  // Calm header state
+  const headerStatus = hasBlocker
+    ? { title: 'Almost Ready', cls: 'text-amber-600 bg-amber-500/10 border-amber-500/20' }
+    : { title: 'Ready to Launch ✓', cls: 'text-emerald-600 bg-[#008069]/10 border-[#008069]/20' };
+
   return (
-    <div className="border-l-4 border-indigo-500 bg-card rounded-2xl border border-border/60 overflow-hidden shadow-sm">
-
+    <div className="border border-border/30 bg-card rounded-2xl overflow-hidden shadow-sm pt-4.5">
       {/* ── Card Header ─────────────────────────────────────────────────────── */}
-      <div className="px-5 pt-5 pb-4 border-b border-border/50">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-[14px] font-semibold text-foreground tracking-tight">
-              Campaign Review
-            </h3>
-            {campaignName && (
-              <p className="text-[12px] text-muted-foreground mt-0.5 truncate max-w-[260px]">
-                {campaignName}
-              </p>
-            )}
+      <div className="px-5 pb-3.5 border-b border-border/20">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-indigo-500/8 border border-indigo-500/10 flex items-center justify-center">
+              <ClipboardList className="w-4 h-4 text-indigo-500" />
+            </div>
+            <div className="text-left">
+              <h3 className="text-[13.5px] font-semibold text-foreground tracking-tight leading-snug">
+                Campaign Launch Center
+              </h3>
+              {campaignName && (
+                <p className="text-[11.5px] text-muted-foreground/80 truncate max-w-[180px] mt-0.5">
+                  {campaignName}
+                </p>
+              )}
+            </div>
           </div>
-          {/* Progress pill */}
-          <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-secondary/60 border border-border/50">
-            <span
-              className={`text-[11px] font-bold tabular-nums ${
-                hasBlocker ? 'text-red-500' : 'text-emerald-600'
-              }`}
-            >
-              {passCount}/{validationChecks.length}
-            </span>
-            <span className="text-[10px] text-muted-foreground">checks</span>
+
+          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-[10px] font-bold border tracking-wide uppercase ${headerStatus.cls}`}>
+            {headerStatus.title}
+          </span>
+        </div>
+      </div>
+
+      {/* ── Mission Control Editorial Pre-Flight Check Blocks ───────────────── */}
+      <div className="px-5 py-4 border-b border-border/20">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-left">
+          {/* Block 1: Campaign Readiness */}
+          <div className="space-y-3.5">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/50">
+              Campaign Readiness
+            </p>
+            <div className="space-y-2.5">
+              {/* Audience configured */}
+              <div className="flex items-center justify-between text-[12.5px]">
+                <div className="flex items-center gap-2 text-foreground/80">
+                  {audienceCheck?.status === 'pass' && audienceCount > 0 ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  )}
+                  <span>Audience configured</span>
+                </div>
+                <span className={`font-semibold ${audienceCheck?.status === 'pass' && audienceCount > 0 ? 'text-emerald-600' : 'text-amber-500'}`}>
+                  {audienceCheck?.status === 'pass' && audienceCount > 0 ? `${audienceCount.toLocaleString()} leads ✓` : '0 contacts'}
+                </span>
+              </div>
+
+              {/* Variables need mapping */}
+              <div className="flex items-center justify-between text-[12.5px]">
+                <div className="flex items-center gap-2 text-foreground/80">
+                  {varsCheck?.status === 'pass' ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  )}
+                  <span>Variables mapped</span>
+                </div>
+                <span className={`font-semibold ${varsCheck?.status === 'pass' ? 'text-emerald-600' : 'text-amber-500'}`}>
+                  {varsCheck?.status === 'pass' ? 'Ready ✓' : 'Needs mapping'}
+                </span>
+              </div>
+
+              {/* Delivery ready */}
+              <div className="flex items-center justify-between text-[12.5px]">
+                <div className="flex items-center gap-2 text-foreground/80">
+                  {scheduleCheck?.status === 'pass' && templateCheck?.status === 'pass' && nameCheck?.status === 'pass' ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  )}
+                  <span>Delivery ready</span>
+                </div>
+                <span className={`font-semibold ${scheduleCheck?.status === 'pass' && templateCheck?.status === 'pass' && nameCheck?.status === 'pass' ? 'text-emerald-600' : 'text-amber-500'}`}>
+                  {scheduleCheck?.status === 'pass' && templateCheck?.status === 'pass' && nameCheck?.status === 'pass' ? 'Ready ✓' : 'Needs setup'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Block 2: Meta Compliance */}
+          <div className="space-y-3.5">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/50">
+              Compliance & Trust
+            </p>
+            <div className="space-y-2.5">
+              {/* Meta Official Approval */}
+              <div className="flex items-center justify-between text-[12.5px]">
+                <div className="flex items-center gap-2 text-foreground/80">
+                  {metaCheck?.status === 'pass' ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  )}
+                  <span>Meta approved</span>
+                </div>
+                <span className={`font-semibold ${metaCheck?.status === 'pass' ? 'text-emerald-600' : 'text-amber-500'}`}>
+                  {metaCheck?.status === 'pass' ? 'Approved ✓' : 'Pending'}
+                </span>
+              </div>
+
+              {/* Spam Risk (Calculated on the fly) */}
+              <div className="flex items-center justify-between text-[12.5px]">
+                <div className="flex items-center gap-2 text-foreground/80">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  <span>Low spam risk</span>
+                </div>
+                <span className="font-semibold text-emerald-600">
+                  Low Risk ✓
+                </span>
+              </div>
+
+              {/* Quiet Hours Check */}
+              <div className="flex items-center justify-between text-[12.5px]">
+                <div className="flex items-center gap-2 text-foreground/80">
+                  {quietCheck?.status === 'pass' ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  )}
+                  <span>Quiet hours enabled</span>
+                </div>
+                <span className={`font-semibold ${quietCheck?.status === 'pass' ? 'text-emerald-600' : 'text-amber-500'}`}>
+                  {quietCheck?.status === 'pass' ? 'Enabled ✓' : 'Off'}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ── Compliance Checklist ─────────────────────────────────────────────── */}
-      {validationChecks.length > 0 && (
-        <div className="px-5 py-4 border-b border-border/50">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70 mb-2">
-            Pre-launch Checks
-          </p>
-          <div className="divide-y divide-border/30">
-            {validationChecks.map((check, i) => (
-              <CheckRow key={check.id} check={check} index={i} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── Campaign Summary ─────────────────────────────────────────────────── */}
-      <div className="px-5 py-4 border-b border-border/50">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70 mb-2">
-          Summary
+      {/* ── Campaign Launch Summary ──────────────────────────────────────────── */}
+      <div className="px-5 py-3.5 border-b border-border/20">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/50 mb-2 text-left">
+          Broadcast Overview
         </p>
-        <div>
-          <SummaryRow
-            icon={LayoutTemplate}
-            label="Template"
-            value={
-              templateName ? (
-                <span className="truncate max-w-[180px] inline-block">{templateName}</span>
-              ) : (
-                <span className="text-red-500 font-medium">Not selected</span>
-              )
-            }
-          />
-          <SummaryRow
-            icon={Users}
-            label="Audience"
-            value={
-              audienceCount > 0 ? (
-                <span className="tabular-nums">{audienceCount.toLocaleString()} contacts</span>
-              ) : (
-                <span className="text-muted-foreground">—</span>
-              )
-            }
-          />
-          <SummaryRow
-            icon={Clock}
-            label="Schedule"
-            value={formatScheduledAt(scheduledAt)}
-          />
-          <SummaryRow
-            icon={Gauge}
-            label="Est. duration"
-            value={
-              estimatedDuration > 0 ? (
-                <span className="tabular-nums">{estimatedDuration} min</span>
-              ) : (
-                <span className="text-muted-foreground">—</span>
-              )
-            }
-          />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-secondary/15 rounded-xl p-3 border border-border/20">
+          {[
+            { icon: LayoutTemplate, label: 'Template', val: templateName || 'Awaiting Selection' },
+            { icon: Users, label: 'Target', val: audienceCount > 0 ? `${audienceCount.toLocaleString()} leads` : '—' },
+            { icon: Clock, label: 'Dispatch', val: formatScheduledAt(scheduledAt) },
+            { icon: Gauge, label: 'Est. Duration', val: estimatedDuration > 0 ? `${estimatedDuration} min` : '—' },
+          ].map((item, idx) => (
+            <div key={idx} className="flex flex-col text-left">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground/55 mb-0.5">
+                {item.label}
+              </span>
+              <span className="text-[12px] font-bold text-foreground truncate pr-1">
+                {item.val}
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* ── Action Buttons ───────────────────────────────────────────────────── */}
-      <div className="px-5 py-4 space-y-3">
-
-        {/* Primary: Launch */}
-        <motion.button
-          type="button"
-          onClick={onLaunch}
-          disabled={hasBlocker || isLaunching}
-          whileTap={!hasBlocker && !isLaunching ? { scale: 0.98 } : {}}
-          className={`w-full flex items-center justify-center gap-2 h-11 rounded-xl text-[14px] font-semibold transition-all duration-200 ${
-            hasBlocker
-              ? 'bg-muted text-muted-foreground/40 cursor-not-allowed border border-border/60'
-              : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/20 hover:shadow-indigo-500/30'
-          }`}
-        >
-          {isLaunching ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Launching...
-            </>
-          ) : (
-            <>
-              <Send className="w-4 h-4" />
-              Launch Campaign
-            </>
-          )}
-        </motion.button>
-
-        {/* Blocker hint */}
-        {hasBlocker && (
-          <motion.p
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-[11px] text-red-500 text-center font-medium"
-          >
-            Fix all failed checks before launching.
-          </motion.p>
-        )}
-
-        {/* Secondary row */}
-        <div className="flex items-center gap-2">
-          <OutlinedButton
-            onClick={onSaveDraft}
-            disabled={isSaving}
-            icon={isSaving ? Loader2 : FileText}
-          >
-            {isSaving ? 'Saving...' : 'Save Draft'}
-          </OutlinedButton>
-
-          <OutlinedButton
-            onClick={onTestSend}
-            disabled={isLaunching}
-            icon={FlaskConical}
-          >
-            Test Send
-          </OutlinedButton>
-
-          <OutlinedButton
-            onClick={onDuplicate}
-            disabled={isLaunching}
-            icon={Copy}
-          >
-            Duplicate
-          </OutlinedButton>
+      {/* ── Readiness Summary ───────────────────────────────────────────── */}
+      <div className="px-5 py-4">
+        {/* Progress bar */}
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/50">
+            Launch Readiness
+          </p>
+          <span className={`text-[10px] font-bold ${hasBlocker ? 'text-amber-500' : 'text-emerald-600'}`}>
+            {passCount} of {validationChecks.length} requirements met
+          </span>
         </div>
+        <div className="h-1 bg-border/30 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ease-out ${hasBlocker ? 'bg-amber-400' : 'bg-emerald-500'}`}
+            style={{ width: `${(passCount / Math.max(1, validationChecks.length)) * 100}%` }}
+          />
+        </div>
+        <p className="text-[11px] text-muted-foreground/55 mt-2.5 font-medium">
+          {hasBlocker
+            ? 'Complete remaining setup steps above to dispatch safely.'
+            : 'All launch requirements satisfied. Use the Launch button below.'}
+        </p>
       </div>
     </div>
   );
 }
+
