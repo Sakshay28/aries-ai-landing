@@ -34,7 +34,6 @@ function SignupInner() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState(initialError);
-  const [gsiActive, setGsiActive] = useState(false);
 
   // OTP Signup States
   const [otpCode, setOtpCode] = useState("");
@@ -63,125 +62,103 @@ Please verify your production environment variables in your deployment dashboard
     }
   }, []);
 
-  // Google GSI Loader & Initializer
+  // Google Auth Popup message listener
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
-    
-    const script = document.createElement("script");
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.defer = true;
-    document.body.appendChild(script);
+    const handleMessage = async (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
 
-    script.onload = () => {
-      if ((window as any).google) {
+      if (event.data?.type === "google-login-success") {
+        const token = event.data.token;
+        setGoogleLoading(true);
+        setError("");
+
         try {
-          (window as any).google.accounts.id.initialize({
-            client_id: "355762885137-ta29hfdtbrs0sl2a22cosps57rroi07c.apps.googleusercontent.com",
-            callback: handleGoogleCredentialResponse,
+          const supabase = createBrowserSupabaseClient();
+          const { data: authData, error: authError } = await supabase.auth.signInWithIdToken({
+            provider: "google",
+            token,
           });
 
-          (window as any).google.accounts.id.renderButton(
-            document.getElementById("google-signin-btn-overlay"),
-            {
-              type: "standard",
-              theme: "outline",
-              size: "large",
-              text: "signup_with",
-              shape: "rectangular",
-              logo_alignment: "left",
-              width: "440",
-            }
-          );
-          
-          // Google button rendered successfully, mark GSI auth as active
-          setGsiActive(true);
+          if (authError) throw authError;
+
+          const sessionUser = authData?.session?.user;
+          if (!sessionUser) {
+            throw new Error("No user session created. Please try again.");
+          }
+
+          // Provision user and tenant in our public database
+          const fullNameVal = sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || sessionUser.email?.split("@")[0] || "User";
+          const businessNameVal = fullNameVal ? `${fullNameVal.split(" ")[0]}'s Business` : "My Business";
+
+          const provisionRes = await fetch("/api/auth/provision", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email: sessionUser.email,
+              fullName: fullNameVal,
+              businessName: businessNameVal,
+              authId: sessionUser.id,
+            }),
+          });
+
+          const provisionData = await provisionRes.json();
+          if (!provisionData.success) {
+            throw new Error(provisionData.error || "Failed to provision workspace");
+          }
+
+          if (provisionData.message === "Already provisioned") {
+            window.location.replace("/dashboard");
+          } else {
+            window.location.replace("/onboard");
+          }
         } catch (err) {
-          console.error("Failed to initialize Google Auth SDK:", err);
+          setError(err instanceof Error ? err.message : "Google sign-up failed. Please try again.");
+          setGoogleLoading(false);
         }
+      } else if (event.data?.type === "google-login-error") {
+        setError(event.data.error || "Google sign-up was cancelled.");
+        setGoogleLoading(false);
       }
     };
 
-    return () => {
-      try {
-        document.body.removeChild(script);
-      } catch (e) {
-        // Safe fail if script already removed
-      }
-    };
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
   }, []);
 
-  async function handleGoogleFallback() {
+  const handleGoogleClick = () => {
     if (!isSupabaseConfigured) {
       setError("Authentication setup incomplete. Please contact support or try again shortly.");
       return;
     }
     setGoogleLoading(true);
     setError("");
-    try {
-      const supabase = createBrowserSupabaseClient();
-      const origin = window.location.origin;
-      const { error: oauthError } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo: `${origin}/api/auth/callback` },
-      });
-      if (oauthError) {
-        throw oauthError;
+
+    const clientId = "355762885137-ta29hfdtbrs0sl2a22cosps57rroi07c.apps.googleusercontent.com";
+    const redirectUri = encodeURIComponent(window.location.origin + "/login/google-callback");
+    const scope = encodeURIComponent("openid email profile");
+    const nonce = Math.random().toString(36).substring(2);
+
+    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=id_token&scope=${scope}&nonce=${nonce}`;
+
+    // Centered popup window specs
+    const width = 500;
+    const height = 650;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+
+    const popup = window.open(
+      googleAuthUrl,
+      "google-auth-popup",
+      `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes,scrollbars=yes`
+    );
+
+    // Keep track of closure
+    const checkClosed = setInterval(() => {
+      if (!popup || popup.closed) {
+        clearInterval(checkClosed);
+        setGoogleLoading(false);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Google sign-up redirect failed.");
-      setGoogleLoading(false);
-    }
-  }
-
-  const handleGoogleCredentialResponse = async (response: any) => {
-    if (!response?.credential) return;
-    setGoogleLoading(true);
-    setError("");
-
-    try {
-      const supabase = createBrowserSupabaseClient();
-      const { data: authData, error: authError } = await supabase.auth.signInWithIdToken({
-        provider: "google",
-        token: response.credential,
-      });
-
-      if (authError) throw authError;
-
-      const sessionUser = authData?.session?.user;
-      if (!sessionUser) {
-        throw new Error("No user session created. Please try again.");
-      }
-
-      // Provision user and tenant in our public database
-      const fullNameVal = sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || sessionUser.email?.split("@")[0] || "User";
-      const businessNameVal = fullNameVal ? `${fullNameVal.split(" ")[0]}'s Business` : "My Business";
-
-      const provisionRes = await fetch("/api/auth/provision", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: sessionUser.email,
-          fullName: fullNameVal,
-          businessName: businessNameVal,
-          authId: sessionUser.id,
-        }),
-      });
-
-      const provisionData = await provisionRes.json();
-      if (!provisionData.success) {
-        throw new Error(provisionData.error || "Failed to provision workspace");
-      }
-
-      if (provisionData.message === "Already provisioned") {
-        window.location.replace("/dashboard");
-      } else {
-        window.location.replace("/onboard");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Google sign-up failed. Please try again.");
-      setGoogleLoading(false);
-    }
+    }, 1000);
   };
 
   async function sendSignupOtp(e: React.FormEvent) {
@@ -350,35 +327,17 @@ Please verify your production environment variables in your deployment dashboard
           </p>
 
           {/* Google OAuth */}
-          <div style={{ position: "relative", width: "100%" }}>
-            <button
-              type="button"
-              onClick={handleGoogleFallback}
-              disabled={googleLoading}
-              style={{ ...styles.googleBtn, opacity: googleLoading ? 0.7 : 1, cursor: googleLoading ? "wait" : "pointer", width: "100%" }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#f8fafc"; e.currentTarget.style.borderColor = "#cbd5e1"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#e5e7eb"; }}
-            >
-              <GoogleIcon />
-              <span>{googleLoading ? "Connecting..." : "Sign up with Google"}</span>
-            </button>
-            <div
-              id="google-signin-btn-overlay"
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: "100%",
-                opacity: 0,
-                cursor: "pointer",
-                overflow: "hidden",
-                zIndex: 10,
-                display: gsiActive ? "block" : "none",
-                pointerEvents: gsiActive ? "auto" : "none",
-              }}
-            />
-          </div>
+          <button
+            type="button"
+            onClick={handleGoogleClick}
+            disabled={googleLoading}
+            style={{ ...styles.googleBtn, opacity: googleLoading ? 0.7 : 1, cursor: googleLoading ? "wait" : "pointer" }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#f8fafc"; e.currentTarget.style.borderColor = "#cbd5e1"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#e5e7eb"; }}
+          >
+            <GoogleIcon />
+            <span>{googleLoading ? "Connecting..." : "Sign up with Google"}</span>
+          </button>
 
           <div style={styles.dividerRow}>
             <div style={styles.divider} />
