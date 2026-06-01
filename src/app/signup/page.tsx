@@ -62,6 +62,101 @@ Please verify your production environment variables in your deployment dashboard
     }
   }, []);
 
+  // Google GSI Loader & Initializer
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    document.body.appendChild(script);
+
+    script.onload = () => {
+      if ((window as any).google) {
+        try {
+          (window as any).google.accounts.id.initialize({
+            client_id: "355762885137-ta29hfdtbrs0sl2a22cosps57rroi07c.apps.googleusercontent.com",
+            callback: handleGoogleCredentialResponse,
+          });
+
+          (window as any).google.accounts.id.renderButton(
+            document.getElementById("google-signin-btn-overlay"),
+            {
+              type: "standard",
+              theme: "outline",
+              size: "large",
+              text: "signup_with",
+              shape: "rectangular",
+              logo_alignment: "left",
+              width: "440",
+            }
+          );
+        } catch (err) {
+          console.error("Failed to initialize Google Auth SDK:", err);
+        }
+      }
+    };
+
+    return () => {
+      try {
+        document.body.removeChild(script);
+      } catch (e) {
+        // Safe fail if script already removed
+      }
+    };
+  }, []);
+
+  const handleGoogleCredentialResponse = async (response: any) => {
+    if (!response?.credential) return;
+    setGoogleLoading(true);
+    setError("");
+
+    try {
+      const supabase = createBrowserSupabaseClient();
+      const { data: authData, error: authError } = await supabase.auth.signInWithIdToken({
+        provider: "google",
+        token: response.credential,
+      });
+
+      if (authError) throw authError;
+
+      const sessionUser = authData?.session?.user;
+      if (!sessionUser) {
+        throw new Error("No user session created. Please try again.");
+      }
+
+      // Provision user and tenant in our public database
+      const fullNameVal = sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || sessionUser.email?.split("@")[0] || "User";
+      const businessNameVal = fullNameVal ? `${fullNameVal.split(" ")[0]}'s Business` : "My Business";
+
+      const provisionRes = await fetch("/api/auth/provision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: sessionUser.email,
+          fullName: fullNameVal,
+          businessName: businessNameVal,
+          authId: sessionUser.id,
+        }),
+      });
+
+      const provisionData = await provisionRes.json();
+      if (!provisionData.success) {
+        throw new Error(provisionData.error || "Failed to provision workspace");
+      }
+
+      if (provisionData.message === "Already provisioned") {
+        window.location.replace("/dashboard");
+      } else {
+        window.location.replace("/onboard");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google sign-up failed. Please try again.");
+      setGoogleLoading(false);
+    }
+  };
+
   async function sendSignupOtp(e: React.FormEvent) {
     e.preventDefault();
     if (!isSupabaseConfigured) {
@@ -140,25 +235,6 @@ Please verify your production environment variables in your deployment dashboard
       setError(err instanceof Error ? err.message : "Verification failed. Check code and try again.");
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function handleGoogle() {
-    if (!isSupabaseConfigured) {
-      setError("Authentication setup incomplete. Please contact support or try again shortly.");
-      return;
-    }
-    setGoogleLoading(true);
-    setError("");
-    const supabase = createBrowserSupabaseClient();
-    const origin = window.location.origin;
-    const { error: oauthError } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: `${origin}/api/auth/callback` },
-    });
-    if (oauthError) {
-      setError(oauthError.message);
-      setGoogleLoading(false);
     }
   }
 
@@ -246,17 +322,33 @@ Please verify your production environment variables in your deployment dashboard
             Fill in the details below to launch your free 14-day trial.
           </p>
 
-          <button
-            type="button"
-            onClick={handleGoogle}
-            disabled={googleLoading}
-            style={{ ...styles.googleBtn, opacity: googleLoading ? 0.7 : 1, cursor: googleLoading ? "wait" : "pointer" }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "#f8fafc"; e.currentTarget.style.borderColor = "#cbd5e1"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#e5e7eb"; }}
-          >
-            <GoogleIcon />
-            <span>{googleLoading ? "Connecting..." : "Sign up with Google"}</span>
-          </button>
+          {/* Google OAuth */}
+          <div style={{ position: "relative", width: "100%" }}>
+            <button
+              type="button"
+              disabled={googleLoading}
+              style={{ ...styles.googleBtn, opacity: googleLoading ? 0.7 : 1, cursor: googleLoading ? "wait" : "pointer", width: "100%" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#f8fafc"; e.currentTarget.style.borderColor = "#cbd5e1"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#e5e7eb"; }}
+            >
+              <GoogleIcon />
+              <span>{googleLoading ? "Connecting..." : "Sign up with Google"}</span>
+            </button>
+            <div
+              id="google-signin-btn-overlay"
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                opacity: 0,
+                cursor: "pointer",
+                overflow: "hidden",
+                zIndex: 10,
+              }}
+            />
+          </div>
 
           <div style={styles.dividerRow}>
             <div style={styles.divider} />
