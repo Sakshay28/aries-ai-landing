@@ -92,8 +92,7 @@ export class AudienceEngineService {
             if (m.contact_id && !readIds.has(m.contact_id)) targetContactIds.push(m.contact_id);
           });
         } else if (audience.retargetCondition === 'no_reply') {
-          // No inbound response recorded (in simple queue we exclude replied leads)
-          // We fetch all active leads for the targetIds
+          // No inbound response recorded
           const sentIds = (parentMsgs || []).map(m => m.contact_id).filter(Boolean) as string[];
           targetContactIds.push(...sentIds);
         }
@@ -108,8 +107,38 @@ export class AudienceEngineService {
           rawContacts = data || [];
         }
 
+      } else if (audience.type === 'manual' && audience.manualContactIds && audience.manualContactIds.length > 0) {
+        // Particular contacts manually selected
+        const { data } = await supabaseAdmin
+          .from('leads')
+          .select('id, name, phone, tags, email, notes')
+          .eq('tenant_id', tenantId)
+          .in('id', audience.manualContactIds)
+          .not('phone', 'is', null);
+        rawContacts = data || [];
+
+      } else if (audience.type === 'csv' && audience.csvFile && Array.isArray(audience.csvFile.contacts)) {
+        // Custom spreadsheet imported contacts
+        rawContacts = audience.csvFile.contacts.map((c: any, idx: number) => ({
+          id: c.id || `csv-${idx}`,
+          name: c.name || c.contact_name || 'there',
+          phone: c.phone || c.phone_number,
+          tags: c.tags || [],
+          email: c.email || ''
+        }));
+
+      } else if (audience.type === 'csv' && (audience as any).filters?.csvFile?.contacts) {
+        // Compatibility check for nested DB fields
+        const csvContacts = (audience as any).filters.csvFile.contacts;
+        rawContacts = csvContacts.map((c: any, idx: number) => ({
+          id: c.id || `csv-${idx}`,
+          name: c.name || c.contact_name || 'there',
+          phone: c.phone || c.phone_number,
+          tags: c.tags || [],
+          email: c.email || ''
+        }));
+
       } else {
-        // Fallback or empty CSV state
         rawContacts = [];
       }
 

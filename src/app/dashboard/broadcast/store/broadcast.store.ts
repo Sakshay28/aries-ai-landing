@@ -176,13 +176,15 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
         .eq('campaign_id', id)
         .maybeSingle();
 
-      const audienceState: AudienceState = rawAudience ? {
-        type: rawAudience.audience_type,
+      const audienceState: AudienceState & { manualContactIds?: string[], csvFile?: any } = rawAudience ? {
+        type: rawAudience.audience_type as any,
         tags: rawAudience.tag_ids || [],
         customFilters: (rawAudience.filters as any)?.customFilters || [],
         retargetCampaignId: rawAudience.csv_upload_id || null, // CSV/Retarget ID mapping
         retargetCondition: (rawAudience.filters as any)?.retargetCondition || 'unread',
         retargetDelayDays: (rawAudience.filters as any)?.retargetDelayDays || 1,
+        manualContactIds: (rawAudience.filters as any)?.manualContactIds || [],
+        csvFile: (rawAudience.filters as any)?.csvFile || null,
       } : DEFAULT_AUDIENCE;
 
       // 5. Fetch delivery settings
@@ -330,6 +332,8 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
           customFilters: audience.customFilters,
           retargetCondition: audience.retargetCondition,
           retargetDelayDays: audience.retargetDelayDays,
+          manualContactIds: (audience as any).manualContactIds || [],
+          csvFile: (audience as any).csvFile || null,
         }
       };
 

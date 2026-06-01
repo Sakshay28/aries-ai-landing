@@ -38,12 +38,22 @@ export interface ParsedButton {
 }
 
 export interface AudienceState {
-  type: 'all' | 'tags' | 'custom' | 'retarget' | 'csv';
+  type: 'all' | 'tags' | 'custom' | 'retarget' | 'csv' | 'manual';
   tags: string[];
   customFilters: CustomFilter[];
   retargetCampaignId: string | null;
   retargetCondition: 'unread' | 'no_reply' | 'clicked_cta' | 'not_clicked';
   retargetDelayDays: number;
+  manualContactIds?: string[];
+  csvFile?: {
+    name: string;
+    size: string;
+    rows: number;
+    duplicates: number;
+    invalid: number;
+    valid: number;
+    contacts: Array<{ id: string; name: string; phone: string; email?: string }>;
+  } | null;
 }
 
 export interface CustomFilter {

@@ -56,14 +56,7 @@ const SECTION_META: Record<SectionId, { icon: React.ElementType; label: string }
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function calcEstimates(audienceType: AudienceState['type'], total: number): EstimateResult {
-  const excluded = Math.round(total * 0.04);
-  const duplicates = Math.round(total * 0.02);
-  const invalid = Math.round(total * 0.01);
-  const net = total - excluded - duplicates - invalid;
-  const spamRisk: EstimateResult['spamRisk'] = net > 5000 ? 'MEDIUM' : 'LOW';
-  return { total: net, excluded, duplicates, invalid, spamRisk };
-}
+// calcEstimates removed in favor of real-time multi-tenant backend calculations
 
 function calcDuration(count: number, rate: number) {
   if (!count || !rate) return 0;
@@ -144,6 +137,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   const [showPreview, setShowPreview] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isLaunching, setIsLaunching] = useState(false);
+  const [estimate, setEstimate] = useState<EstimateResult>({ total: 0, excluded: 0, duplicates: 0, invalid: 0, spamRisk: 'LOW' });
 
   // Initialize and load campaign details
   useEffect(() => {
@@ -228,17 +222,32 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
     }
   });
 
-  // Calculate recipients dynamically
-  const audienceBaseCount = React.useMemo(() => {
-    if (audience.type === 'all') return totalContacts;
-    if (audience.type === 'tags') return audience.tags.length > 0 ? totalContacts : 0;
-    if (audience.type === 'custom') return audience.customFilters.length > 0 ? totalContacts : 0;
-    if (audience.type === 'csv') return totalContacts; // Simulated CSV upload
-    if (audience.type === 'retarget') return audience.retargetCampaignId ? Math.round(totalContacts * 0.45) : 0;
-    return 0;
-  }, [audience.type, audience.tags.length, audience.customFilters.length, audience.retargetCampaignId, totalContacts]);
+  // Fetch dynamic audience estimate from database-backed estimator API
+  useEffect(() => {
+    const fetchEstimate = async () => {
+      try {
+        const res = await fetch('/api/broadcast/audience-estimate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audience })
+        });
+        const data = await res.json();
+        if (data.success && data.estimate) {
+          setEstimate({
+            total: data.estimate.eligibleRecipients,
+            excluded: data.estimate.optOutsRemoved,
+            duplicates: data.estimate.duplicatesRemoved,
+            invalid: data.estimate.invalidRemoved,
+            spamRisk: data.estimate.spamRisk
+          });
+        }
+      } catch (err) {
+        console.error('Failed to fetch dynamic estimate:', err);
+      }
+    };
+    fetchEstimate();
+  }, [audience, totalContacts]);
 
-  const estimate: EstimateResult = calcEstimates(audience.type, audienceBaseCount);
   const estimatedDuration = calcDuration(estimate.total, delivery.throttleRate);
 
   // Detect index variables inside template body
@@ -258,18 +267,26 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   });
 
   // Pre-flight check validators
-  const validationChecks = validateCampaignPreflight(
+  const validationChecks = [
+    ...validateCampaignPreflight(
+      {
+        name: campaignName,
+        template_name: selectedTemplate?.name || '',
+        variables,
+        audience: audience as any,
+        delivery,
+        automationRules,
+      },
+      detectedVarIndices,
+      estimate.total
+    ),
     {
-      name: campaignName,
-      template_name: selectedTemplate?.name || '',
-      variables,
-      audience,
-      delivery,
-      automationRules,
-    },
-    detectedVarIndices,
-    estimate.total
-  );
+      id: 'template_approved',
+      label: 'Official WhatsApp Template Verified',
+      status: (selectedTemplate?.status === 'APPROVED' ? 'pass' : 'fail') as 'pass' | 'fail' | 'warn',
+      message: selectedTemplate?.status === 'APPROVED' ? undefined : 'Template is not yet officially approved by Meta'
+    }
+  ];
 
   const canLaunch = validationChecks.every(c => c.status !== 'fail');
 
@@ -309,21 +326,22 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
       const { data: tenantData } = await supabase.from('tenants').select('id').single();
       if (!tenantData) throw new Error('No active workspace tenant found');
 
-      const launchStatus = delivery.mode === 'scheduled' ? 'scheduled' : 'sending';
-      const campaignIdSaved = await saveCampaign(supabase, tenantData.id, launchStatus);
+      // Save campaign first to write all latest parameters
+      const campaignIdSaved = await saveCampaign(supabase, tenantData.id, 'draft');
       if (!campaignIdSaved) throw new Error('Failed to save configuration before launch');
 
-      if (delivery.mode !== 'scheduled') {
-        const res = await fetch('/api/broadcasts/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ campaignId: campaignIdSaved }),
-        });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error);
-        toast.success('Campaign launched! Sending started.');
-      } else {
+      const res = await fetch('/api/broadcast/launch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId: campaignIdSaved }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      if (delivery.mode === 'scheduled') {
         toast.success('Campaign scheduled successfully.');
+      } else {
+        toast.success('Campaign launched! Sending started.');
       }
       onSaved();
     } catch (e) {
@@ -505,6 +523,9 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                   isSaving={isSaving}
                   isLaunching={isLaunching}
                   validationChecks={validationChecks}
+                  audience={audience}
+                  variables={variables}
+                  detectedVarIndices={detectedVarIndices}
                 />
               </Section>
 

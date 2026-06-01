@@ -31,7 +31,9 @@ describe('ConfidenceScoreService — Dynamic Validation Intelligence Scorer', ()
         customFilters: [],
         retargetCampaignId: null,
         retargetCondition: 'unread' as const,
-        retargetDelayDays: 1
+        retargetDelayDays: 1,
+        manualContactIds: [],
+        csvFile: null,
       },
       delivery: {
         mode: 'now' as const,

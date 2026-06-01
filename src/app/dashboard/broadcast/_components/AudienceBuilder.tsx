@@ -5,19 +5,23 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users, Tag, SlidersHorizontal, Zap, Plus, X, ChevronDown,
   ShieldCheck, ShieldAlert, ShieldX, AlertTriangle, UserCheck,
-  UploadCloud, FileSpreadsheet, Check, CheckCircle2,
+  UploadCloud, FileSpreadsheet, Check, CheckCircle2, UserCheck2
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
+import { ContactPickerDrawer } from './ContactPickerDrawer';
+import toast from 'react-hot-toast';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface AudienceState {
-  type: 'all' | 'tags' | 'custom' | 'retarget' | 'csv';
+  type: 'all' | 'tags' | 'custom' | 'retarget' | 'csv' | 'manual';
   tags: string[];
   customFilters: CustomFilter[];
   retargetCampaignId: string | null;
   retargetCondition: 'unread' | 'no_reply' | 'clicked_cta' | 'not_clicked';
   retargetDelayDays: number;
+  manualContactIds?: string[];
+  csvFile?: any;
 }
 
 interface CustomFilter {
@@ -78,6 +82,12 @@ const AUDIENCE_CHOICES: ChoiceCard[] = [
     label: 'Tags',
     description: 'Target by labeled categories (e.g. VIP, Lead)',
     icon: Tag,
+  },
+  {
+    id: 'manual',
+    label: 'Select Contacts',
+    description: 'Select individual recipients manually',
+    icon: Users,
   },
   {
     id: 'csv',
@@ -264,30 +274,70 @@ function OnboardingGrid({
 
 // ── Panel: CSV Upload (High fidelity validation experience) ───────────────────
 
-function CSVUploadPanel() {
-  const [csvFile, setCsvFile] = useState<{
-    name: string;
-    size: string;
-    rows: number;
-    duplicates: number;
-    invalid: number;
-    valid: number;
-  } | null>({
-    name: 'diwali_leads_list.csv',
-    size: '48 KB',
-    rows: 2431,
-    duplicates: 42,
-    invalid: 12,
-    valid: 2377,
-  });
+function CSVUploadPanel({ 
+  csvFile, 
+  onUpload 
+}: { 
+  csvFile: any; 
+  onUpload: (result: any) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await uploadFile(file);
+  };
+
+  const uploadFile = async (file: File) => {
+    setUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch('/api/broadcast/csv/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (data.success) {
+        onUpload({
+          name: data.fileName,
+          size: data.fileSize,
+          rows: data.totalRows,
+          duplicates: data.duplicatesRemoved,
+          invalid: data.invalidRows,
+          valid: data.validRows,
+          contacts: data.contacts
+        });
+        toast.success('Spreadsheet processed successfully!');
+      } else {
+        toast.error(data.error || 'Failed to upload CSV');
+      }
+    } catch {
+      toast.error('Connection error during upload');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
-      {/* Upload Drag & Drop zone */}
-      <div className="flex flex-col items-center justify-center p-6 border border-dashed border-border hover:border-indigo-400/80 rounded-2xl bg-secondary/10 cursor-pointer transition-all group">
-        <UploadCloud className="w-8 h-8 text-muted-foreground/50 group-hover:text-indigo-500 transition-colors mb-2.5" />
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        onChange={handleFileChange} 
+        accept=".csv,.xls,.xlsx" 
+        className="hidden" 
+      />
+      <div 
+        onClick={() => fileInputRef.current?.click()}
+        className="flex flex-col items-center justify-center p-6 border border-dashed border-border hover:border-indigo-400/80 rounded-2xl bg-secondary/10 cursor-pointer transition-all group"
+      >
+        <UploadCloud className={`w-8 h-8 ${uploading ? 'animate-bounce text-indigo-500' : 'text-muted-foreground/50 group-hover:text-indigo-500'} transition-colors mb-2.5`} />
         <p className="text-[12px] font-semibold text-foreground">
-          Drag and drop your spreadsheet here or <span className="text-indigo-600 hover:underline">browse</span>
+          {uploading ? 'Processing spreadsheet...' : 'Drag and drop your spreadsheet here or browse'}
         </p>
         <p className="text-[10.5px] text-muted-foreground/75 mt-1">
           Supports .csv, .xls, .xlsx files up to 10MB
@@ -310,7 +360,7 @@ function CSVUploadPanel() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-[12px] font-bold text-foreground truncate">{csvFile.name}</p>
-                <p className="text-[10px] text-muted-foreground">{csvFile.size} · {csvFile.rows.toLocaleString()} rows uploaded</p>
+                <p className="text-[10px] text-muted-foreground">{csvFile.size} · {(csvFile.rows || 0).toLocaleString()} rows uploaded</p>
               </div>
               <div className="flex items-center gap-1 text-[10px] font-bold text-[#22c55e] bg-[#22c55e]/10 border border-[#22c55e]/20 px-2 py-0.5 rounded-md">
                 <Check className="w-3 h-3" /> Ready
@@ -321,17 +371,17 @@ function CSVUploadPanel() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <div className="p-3 bg-secondary/15 rounded-xl border border-border/20 text-left">
                 <p className="text-[10px] font-semibold text-muted-foreground">Duplicates</p>
-                <p className="text-[15px] font-bold text-foreground mt-0.5">{csvFile.duplicates} removed</p>
+                <p className="text-[15px] font-bold text-foreground mt-0.5">{(csvFile.duplicates || 0)} removed</p>
                 <p className="text-[9.5px] text-muted-foreground/80 mt-1">Ready for compliance ✓</p>
               </div>
               <div className="p-3 bg-secondary/15 rounded-xl border border-border/20 text-left">
                 <p className="text-[10px] font-semibold text-muted-foreground">Invalid Numbers</p>
-                <p className="text-[15px] font-bold text-[#eab308] mt-0.5">{csvFile.invalid} corrected</p>
+                <p className="text-[15px] font-bold text-[#eab308] mt-0.5">{(csvFile.invalid || 0)} corrected</p>
                 <p className="text-[9.5px] text-muted-foreground/80 mt-1">Country codes resolved ✓</p>
               </div>
               <div className="p-3 bg-secondary/15 rounded-xl border border-border/20 text-left">
                 <p className="text-[10px] font-semibold text-muted-foreground">Net Recipients</p>
-                <p className="text-[15px] font-bold text-[#22c55e] mt-0.5">{csvFile.valid.toLocaleString()}</p>
+                <p className="text-[15px] font-bold text-[#22c55e] mt-0.5">{(csvFile.valid || 0).toLocaleString()}</p>
                 <p className="text-[9.5px] text-muted-foreground/80 mt-1">Verified live numbers ✓</p>
               </div>
             </div>
@@ -384,6 +434,7 @@ const AUDIENCE_STATUS_COPY: Record<string, { title: string; subtitle: string }> 
   custom:   { title: 'Segment Audience Active',     subtitle: 'Broadcast will target filtered customer groups.' },
   csv:      { title: 'CSV Audience Ready',           subtitle: 'Imported recipients available for dispatch.' },
   retarget: { title: 'Retargeting Audience Active',  subtitle: 'Re-engaging selected broadcast recipients.' },
+  manual:   { title: 'Manual Contacts Active',      subtitle: 'Targeting specific recipients selected from CRM.' },
 };
 
 function AudienceActiveBanner({ type }: { type: string }) {
@@ -763,6 +814,7 @@ export function AudienceBuilder({
   availableTags = [],
 }: AudienceBuilderProps) {
   const activeTab = audience.type as ChoiceId;
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const setChoice = useCallback((tab: ChoiceId) => {
     onChange({ ...audience, type: tab });
@@ -835,10 +887,38 @@ export function AudienceBuilder({
                 />
               </div>
             )}
+            {activeTab === 'manual' && (
+              <div>
+                <AudienceActiveBanner type="manual" />
+                <div className="flex items-start gap-4 p-4 rounded-xl bg-indigo-500/[0.04] border border-indigo-500/15">
+                  <div className="w-9 h-9 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                    <Users className="w-4 h-4 text-indigo-500" />
+                  </div>
+                  <div className="flex-grow text-left">
+                    <p className="text-[13.5px] font-semibold text-foreground tracking-tight">
+                      Manual Contacts Targeting Active
+                    </p>
+                    <p className="text-[12px] text-muted-foreground/80 mt-0.5 leading-relaxed">
+                      {(audience.manualContactIds || []).length} contact{(audience.manualContactIds || []).length !== 1 ? 's' : ''} selected manually
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setPickerOpen(true)}
+                      className="mt-3 text-[11.5px] font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-500/[0.05] border border-indigo-500/15 hover:border-indigo-500/30 px-3 py-1.5 rounded-lg transition-all"
+                    >
+                      {(audience.manualContactIds || []).length > 0 ? 'Modify Selection' : 'Select Contacts'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             {activeTab === 'csv' && (
               <div>
                 <AudienceActiveBanner type="csv" />
-                <CSVUploadPanel />
+                <CSVUploadPanel 
+                  csvFile={audience.csvFile}
+                  onUpload={(result) => onChange({ ...audience, csvFile: result })}
+                />
               </div>
             )}
             {activeTab === 'retarget' && (
@@ -858,6 +938,19 @@ export function AudienceBuilder({
 
       {/* Live Estimate Breakdown Card */}
       <EstimationCard estimate={estimate} />
+
+      {/* Slide-over Contact Picker Drawer */}
+      <ContactPickerDrawer
+        isOpen={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        selectedIds={audience.manualContactIds || []}
+        onApply={(ids) => {
+          onChange({
+            ...audience,
+            manualContactIds: ids
+          });
+        }}
+      />
     </div>
   );
 }

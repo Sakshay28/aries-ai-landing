@@ -10,7 +10,7 @@ export const variableConfigSchema = z.object({
 });
 
 export const audienceStateSchema = z.object({
-  type: z.enum(['all', 'tags', 'custom', 'retarget', 'csv']),
+  type: z.enum(['all', 'tags', 'custom', 'retarget', 'csv', 'manual']),
   tags: z.array(z.string()).default([]),
   customFilters: z.array(
     z.object({
@@ -23,6 +23,21 @@ export const audienceStateSchema = z.object({
   retargetCampaignId: z.string().nullable().default(null),
   retargetCondition: z.enum(['unread', 'no_reply', 'clicked_cta', 'not_clicked']).default('unread'),
   retargetDelayDays: z.number().min(1).default(1),
+  manualContactIds: z.array(z.string()).optional().default([]),
+  csvFile: z.object({
+    name: z.string(),
+    size: z.string(),
+    rows: z.number(),
+    duplicates: z.number(),
+    invalid: z.number(),
+    valid: z.number(),
+    contacts: z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      phone: z.string(),
+      email: z.string().optional()
+    }))
+  }).nullable().optional().default(null)
 });
 
 export const deliveryConfigSchema = z.object({
@@ -141,6 +156,12 @@ export function validateCampaignPreflight(
     } else if (aud.type === 'retarget' && !aud.retargetCampaignId) {
       audienceStatus = 'fail';
       audienceMessage = 'Please select a past completed campaign';
+    } else if (aud.type === 'manual' && (!aud.manualContactIds || aud.manualContactIds.length === 0)) {
+      audienceStatus = 'fail';
+      audienceMessage = 'Please select at least one contact recipient manually';
+    } else if (aud.type === 'csv' && !aud.csvFile) {
+      audienceStatus = 'fail';
+      audienceMessage = 'Please upload a valid CSV/Excel spreadsheet';
     } else if (netRecipients === 0) {
       audienceStatus = 'warn';
       audienceMessage = 'No active opted-in contacts qualify';

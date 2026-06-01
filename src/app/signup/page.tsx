@@ -74,10 +74,13 @@ Please verify your production environment variables in your deployment dashboard
 
         try {
           const supabase = createBrowserSupabaseClient();
+          const savedNonce = sessionStorage.getItem("google_oauth_nonce") || undefined;
           const { data: authData, error: authError } = await supabase.auth.signInWithIdToken({
             provider: "google",
             token,
+            nonce: savedNonce,
           });
+          sessionStorage.removeItem("google_oauth_nonce");
 
           if (authError) throw authError;
 
@@ -136,9 +139,9 @@ Please verify your production environment variables in your deployment dashboard
     const clientId = "1020449040321-4162fmon61egbdv2k0lci4gq8m9s03qg.apps.googleusercontent.com";
     const redirectUri = encodeURIComponent(window.location.origin + "/login/google-callback");
     const scope = encodeURIComponent("openid email profile");
-    const nonce = Math.random().toString(36).substring(2);
+    const rawNonce = Math.random().toString(36).substring(2);
 
-    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=id_token&scope=${scope}&nonce=${nonce}`;
+    sessionStorage.setItem("google_oauth_nonce", rawNonce);
 
     // Centered popup window specs
     const width = 500;
@@ -146,11 +149,25 @@ Please verify your production environment variables in your deployment dashboard
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
 
+    // Open popup synchronously to bypass Brave/Safari popup blockers
     const popup = window.open(
-      googleAuthUrl,
+      "about:blank",
       "google-auth-popup",
       `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes,scrollbars=yes`
     );
+
+    // Hash the raw nonce using SHA-256 for OIDC security requirements
+    sha256(rawNonce).then((hashedNonce) => {
+      const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=id_token&scope=${scope}&nonce=${hashedNonce}`;
+      if (popup) {
+        popup.location.href = googleAuthUrl;
+      }
+    }).catch((err) => {
+      console.error("Nonce hashing error:", err);
+      if (popup) popup.close();
+      setError("Google sign-up failed during secure initialization.");
+      setGoogleLoading(false);
+    });
 
     // Keep track of closure
     const checkClosed = setInterval(() => {
@@ -579,6 +596,13 @@ function focusOff(e: React.FocusEvent<HTMLInputElement>) {
   e.currentTarget.style.borderColor = "#e5e7eb";
   e.currentTarget.style.boxShadow = "none";
   e.currentTarget.style.background = "#fafbfc";
+}
+
+async function sha256(message: string): Promise<string> {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // ─── Styles ────────────────────────────────────────────────────────────────

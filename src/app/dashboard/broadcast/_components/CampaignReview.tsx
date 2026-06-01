@@ -36,6 +36,9 @@ interface CampaignReviewProps {
   isSaving: boolean;
   isLaunching: boolean;
   validationChecks: ValidationCheck[];
+  audience: any;
+  variables: any;
+  detectedVarIndices: string[];
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -102,6 +105,9 @@ export function CampaignReview({
   isSaving,
   isLaunching,
   validationChecks,
+  audience,
+  variables,
+  detectedVarIndices
 }: CampaignReviewProps) {
   const hasBlocker = validationChecks.some((c) => c.status === 'fail');
   const passCount  = validationChecks.filter((c) => c.status === 'pass').length;
@@ -121,17 +127,19 @@ export function CampaignReview({
     ? { title: 'Almost Ready', cls: 'text-amber-600 bg-amber-500/10 border-amber-500/20' }
     : { title: 'Ready to Launch ✓', cls: 'text-emerald-600 bg-[#008069]/10 border-[#008069]/20' };
 
-  // Construct a mock campaign object for the Confidence Scorer
-  const mockCampaign: Partial<CampaignFormValues> = {
+  // Construct the real campaign object for the Confidence Scorer
+  const realCampaign: Partial<CampaignFormValues> = {
     name: campaignName,
     template_name: templateName || '',
     audience: {
-      type: 'all',
-      tags: [],
-      customFilters: [],
-      retargetCampaignId: null,
-      retargetCondition: 'unread',
-      retargetDelayDays: 1
+      type: audience?.type || 'all',
+      tags: audience?.tags || [],
+      customFilters: audience?.customFilters || [],
+      retargetCampaignId: audience?.retargetCampaignId || null,
+      retargetCondition: audience?.retargetCondition || 'unread',
+      retargetDelayDays: audience?.retargetDelayDays || 1,
+      manualContactIds: audience?.manualContactIds || [],
+      csvFile: audience?.csvFile || null
     },
     delivery: {
       mode: scheduledAt ? 'scheduled' : 'now',
@@ -141,12 +149,8 @@ export function CampaignReview({
       throttleRate,
       advancedOpen: false
     },
-    variables: variablesValid ? {
-      '1': { index: '1', sourceType: 'static', staticValue: 'Sample' }
-    } : {}
+    variables: variables || {}
   };
-
-  const detectedVarIndices = templateName ? ['1'] : [];
 
   return (
     <div className="border border-border/30 bg-card rounded-2xl overflow-hidden shadow-sm pt-4.5">
@@ -178,7 +182,7 @@ export function CampaignReview({
       {/* ── Confidence Score Banner ── */}
       <div className="px-5 py-4 border-b border-border/25 bg-secondary/10">
         <ConfidenceScoreCard
-          campaign={mockCampaign}
+          campaign={realCampaign}
           detectedVarIndices={detectedVarIndices}
           netRecipients={audienceCount}
         />
