@@ -133,7 +133,7 @@ Please verify your production environment variables in your deployment dashboard
     setGoogleLoading(true);
     setError("");
 
-    const clientId = "1020449040321-4162fmon61egbdv2k0lci4gg8m9s03qg.apps.googleusercontent.com";
+    const clientId = "1020449040321-4162fmon61egbdv2k0lci4gq8m9s03qg.apps.googleusercontent.com";
     const redirectUri = encodeURIComponent(window.location.origin + "/login/google-callback");
     const scope = encodeURIComponent("openid email profile");
     const nonce = Math.random().toString(36).substring(2);
