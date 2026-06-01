@@ -32,6 +32,7 @@ function LoginInner() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState(initialError);
+  const [gsiActive, setGsiActive] = useState(false);
 
   // OTP Login States
   const [otpCode, setOtpCode] = useState("");
@@ -90,6 +91,9 @@ Please verify your production environment variables in your deployment dashboard
               width: "420",
             }
           );
+          
+          // Google button rendered successfully, mark GSI auth as active
+          setGsiActive(true);
         } catch (err) {
           console.error("Failed to initialize Google Auth SDK:", err);
         }
@@ -104,6 +108,28 @@ Please verify your production environment variables in your deployment dashboard
       }
     };
   }, []);
+
+  async function handleGoogleFallback() {
+    if (!isSupabaseConfigured) {
+      setError("Authentication setup incomplete. Please contact support or try again shortly.");
+      return;
+    }
+    setGoogleLoading(true);
+    setError("");
+    try {
+      const supabase = createBrowserSupabaseClient();
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: `${window.location.origin}/api/auth/callback` },
+      });
+      if (oauthError) {
+        throw oauthError;
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google sign-in redirect failed.");
+      setGoogleLoading(false);
+    }
+  }
 
   const handleGoogleCredentialResponse = async (response: any) => {
     if (!response?.credential) return;
@@ -257,6 +283,7 @@ Please verify your production environment variables in your deployment dashboard
           <div style={{ position: "relative", width: "100%" }}>
             <button
               type="button"
+              onClick={handleGoogleFallback}
               disabled={googleLoading}
               style={{ ...styles.googleBtn, opacity: googleLoading ? 0.7 : 1, cursor: googleLoading ? "wait" : "pointer", width: "100%" }}
               onMouseEnter={(e) => { e.currentTarget.style.background = "#f8fafc"; e.currentTarget.style.borderColor = "#cbd5e1"; }}
@@ -277,6 +304,8 @@ Please verify your production environment variables in your deployment dashboard
                 cursor: "pointer",
                 overflow: "hidden",
                 zIndex: 10,
+                display: gsiActive ? "block" : "none",
+                pointerEvents: gsiActive ? "auto" : "none",
               }}
             />
           </div>
