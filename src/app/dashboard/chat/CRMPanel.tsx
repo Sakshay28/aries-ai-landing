@@ -5,6 +5,7 @@ import {
   Phone, Tag, Bot, User,
   MessageSquare, ChevronDown, Plus, Trash2,
   UserPlus, StickyNote, Workflow, Loader2, Check,
+  Mail, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -12,6 +13,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import type { Message } from "@/lib/types";
 import type { SharedConversationMeta } from "./page";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { useContactsStore } from "@/lib/store/contactsStore";
 
 // ── helpers ────────────────────────────────────────────────────────
 // Same palette & hash as ChatSidebar / ChatArea — ensures avatar color is identical everywhere
@@ -29,13 +31,7 @@ function crmAvatarGradient(seed: string) {
   return CRM_AVATAR_GRADIENTS[h % CRM_AVATAR_GRADIENTS.length];
 }
 
-function formatPhone(raw: string | null | undefined): string {
-  if (!raw) return "";
-  const digits = raw.replace(/\D/g, "");
-  const local = digits.startsWith("91") && digits.length === 12 ? digits.slice(2) : digits;
-  if (local.length === 10) return `+91 ${local.slice(0, 5)} ${local.slice(5)}`;
-  return `+${digits}`;
-}
+import { formatPhoneDisplay } from "@/lib/utils/phone";
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "—";
@@ -125,6 +121,14 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editPhone, setEditPhone] = useState("");
+
+  const { setSaveContactModalOpen, setSaveContactPhone, invalidateQueries, getContactByPhone, addOrUpdateContact } = useContactsStore();
+  const [viewModalOpen, setViewModalOpen] = useState(false);
+  const [isEditingInModal, setIsEditingInModal] = useState(false);
+  const [modalEditName, setModalEditName] = useState("");
+  const [modalEditEmail, setModalEditEmail] = useState("");
+  const [modalEditNotes, setModalEditNotes] = useState("");
+  const [modalSaving, setModalSaving] = useState(false);
 
   const noteInputRef = useRef<HTMLInputElement>(null);
   const agentSelectRef = useRef<HTMLSelectElement>(null);
@@ -245,6 +249,55 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
     }
   };
 
+  const handleModalSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!localLead?.id) return;
+    if (!modalEditName.trim()) {
+      toast.error("Name is required");
+      return;
+    }
+
+    setModalSaving(true);
+    try {
+      const supabase = createBrowserSupabaseClient();
+      const { error } = await supabase
+        .from('leads')
+        .update({
+          name: modalEditName.trim(),
+          email: modalEditEmail.trim() || null,
+          notes: modalEditNotes.trim() || null,
+        })
+        .eq('id', localLead.id);
+
+      if (error) {
+        toast.error("Failed to update contact details");
+      } else {
+        toast.success("Contact details updated successfully");
+        const updatedContact = {
+          ...localLead,
+          name: modalEditName.trim(),
+          email: modalEditEmail.trim() || null,
+          notes: modalEditNotes.trim() || null,
+        };
+        addOrUpdateContact(updatedContact);
+
+        setLocalLead((prev: any) => prev ? {
+          ...prev,
+          name: modalEditName.trim(),
+          email: modalEditEmail.trim() || null,
+          notes: modalEditNotes.trim() || null,
+        } : null);
+        setIsEditingInModal(false);
+        invalidateQueries();
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("An error occurred while saving");
+    } finally {
+      setModalSaving(false);
+    }
+  };
+
   // Load notes from localStorage keyed by conversation id
   useEffect(() => {
     if (!meta?.id) { setNotes([]); return; }
@@ -269,7 +322,9 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
 
   const lead = meta?.leads;
   const rawPhone = lead?.phone || meta?.sender_id || meta?.sender_name || "";
-  const displayName = lead?.name || formatPhone(rawPhone) || "Unknown";
+  const cachedContact = getContactByPhone(rawPhone);
+  const displayName = cachedContact?.name || lead?.name || formatPhoneDisplay(rawPhone) || "Unknown";
+  const hasSavedName = cachedContact?.name && cachedContact.name !== cachedContact.phone;
 
   const inboundCount = messages.filter(m => m.direction === "inbound").length;
   const outboundCount = messages.filter(m => m.direction === "outbound").length;
@@ -336,7 +391,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 {displayName}
               </p>
             )}
-            {rawPhone && <p className="text-[11.5px] text-muted-foreground/60 mt-0.5 truncate">{formatPhone(rawPhone)}</p>}
+            {rawPhone && displayName !== formatPhoneDisplay(rawPhone) && <p className="text-[11.5px] text-muted-foreground/60 mt-0.5 truncate">{formatPhoneDisplay(rawPhone)}</p>}
             <div className="flex items-center gap-1.5 mt-1.5">
               {localLead?.lead_status && (
                 <span className={cn("px-1.5 py-0.5 rounded-md text-[9.5px] font-bold uppercase tracking-wide", STATUS_COLORS[localLead.lead_status] || STATUS_COLORS.new)}>
@@ -352,6 +407,35 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 {meta.bot_paused ? "Human" : "AI"}
               </span>
             </div>
+
+            {!hasSavedName ? (
+              <div className="mt-2.5 space-y-1.5">
+                <p className="text-[11px] text-muted-foreground/65 flex items-center gap-1.5 leading-none">
+                  <span className="text-[8px] text-amber-500/80">●</span> Unsaved Contact
+                </p>
+                <button
+                  onClick={() => {
+                    setSaveContactPhone(rawPhone);
+                    setSaveContactModalOpen(true);
+                  }}
+                  className="h-7 px-3 text-[11px] font-semibold text-foreground bg-secondary hover:bg-secondary/80 border border-border/80 rounded-full transition-all cursor-pointer"
+                >
+                  Save Contact
+                </button>
+              </div>
+            ) : (
+              <div className="mt-2.5 space-y-1.5">
+                <p className="text-[11px] text-emerald-600 dark:text-emerald-500/85 font-semibold flex items-center gap-1 leading-none">
+                  WhatsApp Contact <span className="text-[9.5px]">✓</span>
+                </p>
+                <button
+                  onClick={() => setViewModalOpen(true)}
+                  className="h-7 px-3 text-[11px] font-semibold text-foreground bg-secondary hover:bg-secondary/80 border border-border/80 rounded-full transition-all cursor-pointer"
+                >
+                  View Contact
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <p className="text-[12px] text-muted-foreground/60">Select a conversation</p>
@@ -478,7 +562,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
                 ) : (
                   <div className="flex items-center justify-between">
                     <a href={`tel:+${rawPhone.replace(/\D/g, '')}`} className="text-[12.5px] text-foreground/85 font-medium hover:underline hover:text-indigo-400 transition-colors cursor-pointer">
-                      {formatPhone(rawPhone) || "—"}
+                      {formatPhoneDisplay(rawPhone) || "—"}
                     </a>
                     <button
                       onClick={() => {
@@ -674,6 +758,205 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
           </div>
         )}
       </div>
+
+      {/* ── View Contact Detail Modal ── */}
+      <AnimatePresence>
+        {viewModalOpen && meta && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !modalSaving && setViewModalOpen(false)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-xs cursor-default"
+            />
+            
+            {/* Modal Body */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ type: 'spring', stiffness: 450, damping: 30 }}
+              className="relative w-full max-w-[380px] bg-white dark:bg-[#1C2333] border border-border rounded-2xl overflow-hidden shadow-2xl flex flex-col p-6 space-y-5"
+            >
+              {!isEditingInModal ? (
+                <>
+                  {/* Identity Header */}
+                  <div className="flex flex-col items-center text-center pb-4 border-b border-border/40 relative">
+                    <button
+                      onClick={() => setViewModalOpen(false)}
+                      className="absolute right-0 top-0 p-1.5 hover:bg-secondary rounded-lg transition-colors cursor-pointer text-muted-foreground hover:text-foreground"
+                    >
+                      <Plus className="w-4 h-4 rotate-45" />
+                    </button>
+                    
+                    <div
+                      style={{ background: crmAvatarGradient(rawPhone || meta.id) }}
+                      className="w-16 h-16 rounded-2xl flex items-center justify-center text-xl font-bold border border-border mb-3 shadow-inner text-white"
+                    >
+                      {localLead?.name
+                        ? localLead.name.charAt(0).toUpperCase()
+                        : rawPhone
+                          ? (() => { const d = rawPhone.replace(/\D/g, ''); const l = d.startsWith('91') && d.length === 12 ? d.slice(2) : d; return l.charAt(0) || '?'; })()
+                          : '?'}
+                    </div>
+                    <h3 className="text-md font-semibold text-foreground tracking-tight">{displayName}</h3>
+                    <div className="flex items-center gap-1.5 mt-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                      <span>WhatsApp Contact</span>
+                      <span>•</span>
+                      <span>Score {localLead?.lead_score || 0}</span>
+                    </div>
+                  </div>
+
+                  {/* View Panel Details */}
+                  <div className="space-y-3">
+                    <div className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">CRM Parameters</div>
+                    <div className="flex items-center gap-3 text-[13px] font-medium text-foreground bg-background p-2.5 rounded-lg border border-border/80">
+                      <Phone className="w-4 h-4 text-muted-foreground/60" />
+                      <span>{formatPhoneDisplay(rawPhone)}</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-[13px] font-medium text-foreground bg-background p-2.5 rounded-lg border border-border/80">
+                      <Mail className="w-4 h-4 text-muted-foreground/60" />
+                      <span className="text-muted-foreground">Email: </span>
+                      <span>{localLead?.email || "—"}</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-[13px] font-medium text-foreground bg-background p-2.5 rounded-lg border border-border/80">
+                      <Tag className="w-4 h-4 text-muted-foreground/60" />
+                      <span className="text-muted-foreground">Status: </span>
+                      <span className="capitalize">{localLead?.lead_status || 'new'}</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-[13px] font-medium text-foreground bg-background p-2.5 rounded-lg border border-border/80">
+                      <ChevronDown className="w-4 h-4 text-muted-foreground/60" />
+                      <span className="text-muted-foreground">Saved Date: </span>
+                      <span>{formatDate(localLead?.created_at || null)}</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-[13px] font-medium text-foreground bg-background p-2.5 rounded-lg border border-border/80">
+                      <Clock className="w-4 h-4 text-muted-foreground/60" />
+                      <span className="text-muted-foreground">Last Interaction: </span>
+                      <span>{formatDate(localLead?.last_message_at || null)}</span>
+                    </div>
+                  </div>
+
+                  {localLead?.notes && (
+                    <div className="space-y-2">
+                      <div className="text-[10px] font-bold tracking-widest text-muted-foreground uppercase">Context Notes</div>
+                      <div className="p-3 bg-secondary/30 border border-border rounded-lg text-[13px] leading-relaxed text-foreground/80 max-h-32 overflow-y-auto whitespace-pre-wrap custom-scrollbar">
+                        {localLead.notes}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3 pt-2">
+                    <button
+                      onClick={() => {
+                        setModalEditName(localLead?.name || displayName);
+                        setModalEditEmail(localLead?.email || "");
+                        setModalEditNotes(localLead?.notes || "");
+                        setIsEditingInModal(true);
+                      }}
+                      className="h-9 text-[13px] font-semibold text-foreground bg-secondary hover:bg-secondary/80 border border-border/80 rounded-xl transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      Edit Details
+                    </button>
+                    <button
+                      onClick={() => setViewModalOpen(false)}
+                      className="h-9 text-[13px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-sm transition-colors cursor-pointer"
+                    >
+                      Close Profile
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <form onSubmit={handleModalSave} className="flex flex-col space-y-4">
+                  {/* Edit Header */}
+                  <div className="flex items-center justify-between pb-3 border-b border-border/40">
+                    <div>
+                      <h3 className="text-md font-bold text-foreground">Edit Contact Details</h3>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">Update key parameters for this lead.</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={modalSaving}
+                      onClick={() => setIsEditingInModal(false)}
+                      className="p-1 hover:bg-secondary rounded-lg transition-colors cursor-pointer text-muted-foreground hover:text-foreground"
+                    >
+                      <Plus className="w-4 h-4 rotate-45" />
+                    </button>
+                  </div>
+
+                  {/* Input Fields */}
+                  <div className="space-y-3.5">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">Phone Number</label>
+                      <input
+                        type="tel"
+                        disabled
+                        value={formatPhoneDisplay(rawPhone)}
+                        className="w-full h-10 px-3 bg-secondary/60 border border-border rounded-lg text-[13px] text-muted-foreground cursor-not-allowed"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">Full Name *</label>
+                      <input
+                        type="text"
+                        required
+                        autoFocus
+                        placeholder="e.g. Rahul Sharma"
+                        value={modalEditName}
+                        onChange={(e) => setModalEditName(e.target.value)}
+                        className="w-full h-10 px-3 bg-background border border-border rounded-lg text-[13px] focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 transition-all text-foreground"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">Email Address</label>
+                      <input
+                        type="email"
+                        placeholder="e.g. rahul@example.com"
+                        value={modalEditEmail}
+                        onChange={(e) => setModalEditEmail(e.target.value)}
+                        className="w-full h-10 px-3 bg-background border border-border rounded-lg text-[13px] focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 transition-all text-foreground"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">Context Notes</label>
+                      <textarea
+                        rows={3}
+                        placeholder="Customer requirements, budget, etc."
+                        value={modalEditNotes}
+                        onChange={(e) => setModalEditNotes(e.target.value)}
+                        className="w-full px-3 py-2 bg-background border border-border rounded-lg text-[13px] focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 transition-all resize-none text-foreground"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-between pt-3 border-t border-border/40 shrink-0">
+                    <button
+                      type="button"
+                      disabled={modalSaving}
+                      onClick={() => setIsEditingInModal(false)}
+                      className="text-[13px] font-semibold text-muted-foreground hover:text-foreground cursor-pointer disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={modalSaving}
+                      className="h-9 px-5 text-[13.5px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-sm transition-colors cursor-pointer"
+                    >
+                      {modalSaving ? 'Saving...' : 'Save Changes'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

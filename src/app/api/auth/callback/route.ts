@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { PLAN_DETAILS } from '@/lib/types';
+import { env } from '@/lib/env';
 
 export async function GET(req: NextRequest) {
   const { searchParams, origin } = req.nextUrl;
@@ -30,8 +31,8 @@ export async function GET(req: NextRequest) {
   const pendingCookies: CookieEntry[] = [];
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    env.NEXT_PUBLIC_SUPABASE_URL,
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     {
       cookies: {
         getAll() {

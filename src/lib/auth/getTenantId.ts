@@ -2,6 +2,7 @@ import { cache } from 'react';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { env, isSupabaseConfigured } from '@/lib/env';
 
 // cache() deduplicates this function within a single server-request lifecycle.
 // Every dashboard route that calls getTenantId() in the same render will share
@@ -9,12 +10,9 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 export const getTenantId = cache(async (): Promise<string | null> => {
   try {
     const cookieStore = await cookies();
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!isSupabaseConfigured) return null;
 
-    if (!supabaseUrl || !supabaseKey) return null;
-
-    const supabase = createServerClient(supabaseUrl, supabaseKey, {
+    const supabase = createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
       cookies: {
         getAll() { return cookieStore.getAll(); },
         setAll() {}, // no-op in API routes

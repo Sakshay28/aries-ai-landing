@@ -8,15 +8,14 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { env, isSupabaseConfigured } from '@/lib/env';
 
 export async function POST() {
   try {
     const cookieStore = await cookies();
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-    if (supabaseUrl && supabaseKey && supabaseUrl !== 'https://your-project.supabase.co') {
-      const supabase = createServerClient(supabaseUrl, supabaseKey, {
+    if (isSupabaseConfigured) {
+      const supabase = createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
         cookies: {
           getAll() {
             return cookieStore.getAll();

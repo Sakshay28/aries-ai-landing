@@ -3,7 +3,8 @@
 import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { createBrowserSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { isSupabaseConfigured, getEnvDiagnostics } from "@/lib/env";
 
 // ═══════════════════════════════════════════════════════════════
 // 🔐 Login — premium split-pane with Google OAuth + email/password
@@ -45,8 +46,26 @@ function LoginInner() {
     return () => clearInterval(timer);
   }, [countdown]);
 
+  useEffect(() => {
+    // Hidden developer diagnostics in the browser console
+    const diagnostics = getEnvDiagnostics();
+    if (!diagnostics.isValid) {
+      console.warn(
+        `%c⚠️ ARIES AI AUTHENTICATION DIAGNOSTICS:
+[ ] Supabase URL loaded: ${diagnostics.supabaseUrlLoaded ? '✅' : '❌'}
+[ ] Anon key loaded: ${diagnostics.anonKeyLoaded ? '✅' : '❌'}
+Please verify your production environment variables in your deployment dashboard.`,
+        'color: #e11d48; font-weight: bold; font-size: 13px;'
+      );
+    }
+  }, []);
+
   async function sendOtp(e: React.FormEvent) {
     e.preventDefault();
+    if (!isSupabaseConfigured) {
+      setError("Authentication setup incomplete. Please contact support or try again shortly.");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -96,7 +115,7 @@ function LoginInner() {
 
   async function handleGoogle() {
     if (!isSupabaseConfigured) {
-      setError("Authentication is not configured yet. Set Supabase env vars first.");
+      setError("Authentication setup incomplete. Please contact support or try again shortly.");
       return;
     }
     setGoogleLoading(true);

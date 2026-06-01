@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies, headers } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import DashboardLayoutClient from "./_layout/DashboardLayoutClient";
+import { env, isSupabaseConfigured } from "@/lib/env";
 
 export default async function DashboardLayout({
   children,
@@ -17,15 +18,12 @@ export default async function DashboardLayout({
     console.log(`  HEADER ${name}: ${value}`);
   });
   console.log("DEBUG LAYOUT PATHNAME:", pathname, "isRestaurant:", isRestaurant);
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
   let userEmail = "";
   let userName = "";
   let modules: string[] = [];
 
-  if (supabaseUrl && supabaseKey && supabaseUrl !== "https://your-project.supabase.co") {
-    const supabase = createServerClient(supabaseUrl, supabaseKey, {
+  if (isSupabaseConfigured) {
+    const supabase = createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
       cookies: {
         getAll() {
           return cookieStore.getAll();

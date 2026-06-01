@@ -34,17 +34,6 @@ import { useEffect, useState } from "react";
 import { detectBrandFromHost, BRANDS } from "@/lib/brand";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
-function SmartRulesBadge() {
-  const [count, setCount] = useState<number | null>(null);
-  useEffect(() => {
-    fetch('/api/dashboard/automations')
-      .then(r => r.json())
-      .then(d => setCount((d.rules as unknown[])?.filter((r: unknown) => (r as { status: string }).status === 'active').length ?? 0))
-      .catch(() => {});
-  }, []);
-  if (count === null || count === 0) return null;
-  return <span className="text-[10px] tracking-wide text-sidebar-foreground/50">{count}</span>;
-}
 
 type NavItem = {
   label: string;
@@ -64,7 +53,6 @@ const navigationItems: NavItem[] = [
     label: "Smart Rules", 
     icon: Workflow, 
     href: "/dashboard/automations",
-    badge: <SmartRulesBadge />,
   },
   { label: "Templates", icon: FileText, href: "/dashboard/templates" },
   { label: "Event Logs", icon: Activity, href: "/dashboard/logs" },

@@ -6,6 +6,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { env, isSupabaseConfigured } from '@/lib/env';
 
 export interface TenantContext {
   userId: string;
@@ -15,11 +16,9 @@ export interface TenantContext {
 export async function getTenantFromCookies(): Promise<TenantContext | null> {
   try {
     const cookieStore = await cookies();
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!supabaseUrl || !supabaseKey) return null;
+    if (!isSupabaseConfigured) return null;
 
-    const supabase = createServerClient(supabaseUrl, supabaseKey, {
+    const supabase = createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
       cookies: { getAll() { return cookieStore.getAll(); } },
     });
 

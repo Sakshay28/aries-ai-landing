@@ -262,7 +262,7 @@ export function AutomationsClient() {
                       <div className="space-y-3 flex-1 min-w-0">
                         <div className="flex items-center gap-3">
                           <h4 className="text-[16px] font-medium tracking-tight truncate">{rule.name}</h4>
-                          <span className={cn('px-2.5 py-0.5 rounded-full text-[11px] font-medium capitalize shrink-0', STATUS_STYLE[rule.status])}>
+                          <span className={cn('px-2.5 py-0.5 rounded-lg text-[11px] font-medium capitalize shrink-0', STATUS_STYLE[rule.status])}>
                             {rule.status}
                           </span>
                         </div>

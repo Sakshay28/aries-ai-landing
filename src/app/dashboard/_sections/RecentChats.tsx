@@ -24,16 +24,11 @@ const AVATAR_COLORS = [
   "bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-500",
 ];
 
+import { formatPhoneDisplay } from "@/lib/utils/phone";
+
 function formatPhone(raw: string | null | undefined): string {
   if (!raw) return "Unknown";
-  const digits = raw.replace(/\D/g, "");
-  // Indian numbers: 91XXXXXXXXXX → +91 XXXXX XXXXX
-  if (digits.length === 12 && digits.startsWith("91")) {
-    const num = digits.slice(2);
-    return `+91 ${num.slice(0, 5)} ${num.slice(5)}`;
-  }
-  if (digits.length === 10) return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
-  return `+${digits}`;
+  return formatPhoneDisplay(raw);
 }
 
 function isPhoneNumber(str: string | null | undefined): boolean {

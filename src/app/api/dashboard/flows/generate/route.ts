@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { env, isSupabaseConfigured } from '@/lib/env';
 
 // ── Deterministic flow templates keyed by intent keyword ─────────────────────
 // The AI layer normalises the prompt into an intent, then we return a
@@ -165,11 +166,9 @@ export async function POST(req: NextRequest) {
     // Lightweight auth check: only needs anon key + valid session cookie.
     // We do NOT need getTenantId (which requires the users table + service role
     // key) because this endpoint returns hardcoded blueprints only.
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (supabaseUrl && supabaseKey && supabaseUrl !== 'https://your-project.supabase.co') {
+    if (isSupabaseConfigured) {
       const cookieStore = await cookies();
-      const supabase = createServerClient(supabaseUrl, supabaseKey, {
+      const supabase = createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
         cookies: {
           getAll() { return cookieStore.getAll(); },
           setAll() {},

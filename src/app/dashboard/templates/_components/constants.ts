@@ -167,10 +167,14 @@ export const MEDIA_CONSTRAINTS: Record<Exclude<HeaderType, 'NONE' | 'TEXT'>, {
     mimes: ['video/mp4'],
   },
   DOCUMENT: {
-    accept: 'application/pdf',
+    accept: 'application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     maxSizeMB: 100,
-    extensions: ['.pdf'],
-    mimes: ['application/pdf'],
+    extensions: ['.pdf', '.doc', '.docx'],
+    mimes: [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ],
   },
 };
 

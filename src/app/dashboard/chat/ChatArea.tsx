@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { SharedConversationMeta } from "./page";
 import AIAssistPanel from "./AIAssistPanel";
 import AttachmentBubble, { PendingAttachment } from "./AttachmentBubble";
+import { useContactsStore } from "@/lib/store/contactsStore";
 
 // ── helpers ────────────────────────────────────────────────────────────
 // Consistent with ChatSidebar: same palette, same seed strategy
@@ -35,13 +36,7 @@ function avatarGradient(seed: string) {
   return AVATAR_GRADIENTS[h % AVATAR_GRADIENTS.length];
 }
 
-function formatPhone(raw: string | null | undefined): string {
-  if (!raw) return '';
-  const digits = raw.replace(/\D/g, '');
-  const local = digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits;
-  if (local.length === 10) return `+91 ${local.slice(0, 5)} ${local.slice(5)}`;
-  return `+${digits}`;
-}
+import { formatPhoneDisplay, normalizePhone } from "@/lib/utils/phone";
 
 // Fix: format time always in IST (Asia/Kolkata) to avoid UTC/local confusion
 function formatTime(dateStr: string): string {
@@ -209,6 +204,73 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const [messageMenuRect, setMessageMenuRect] = useState<DOMRect | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [deleteConfirmMsg, setDeleteConfirmMsg] = useState<Message | null>(null);
+  
+  // Save Contact Zustand store states
+  const { 
+    saveContactModalOpen, 
+    setSaveContactModalOpen, 
+    saveContactPhone,
+    setSaveContactPhone,
+    queryTrigger,
+    invalidateQueries,
+    getContactByPhone,
+    addOrUpdateContact
+  } = useContactsStore();
+  
+  const [saveName, setSaveName] = useState('');
+  const [saveEmail, setSaveEmail] = useState('');
+  const [saveNotes, setSaveNotes] = useState('');
+  const [savingContact, setSavingContact] = useState(false);
+
+  const handleSaveContactSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!saveName.trim()) {
+      toast.error('Name is required.');
+      return;
+    }
+    if (!conversationMeta) return;
+
+    setSavingContact(true);
+    try {
+      const res = await fetch('/api/dashboard/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: saveName.trim(),
+          phone: rawPhone,
+          email: saveEmail.trim() || null,
+          notes: saveNotes.trim() || null,
+          channel: 'whatsapp',
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        toast.error(json.message || 'Failed to save contact.');
+        return;
+      }
+      toast.success('Contact saved successfully!');
+      
+      // Update the centralized Zustand contacts cache optimistically
+      if (json.data) {
+        addOrUpdateContact(json.data);
+      }
+
+      // Update local conversationMeta and propagate it upwards
+      const updatedMeta = { ...conversationMeta, leads: json.data };
+      setConversationMeta(updatedMeta);
+      onDataLoaded?.(updatedMeta, messages);
+      
+      // Close modal and invalidate Contacts list queries reactively
+      setSaveContactModalOpen(false);
+      invalidateQueries();
+    } catch (err) {
+      console.error(err);
+      toast.error('Network error saving contact.');
+    } finally {
+      setSavingContact(false);
+    }
+  };
+
   const router = useRouter();
   const searchParams = useSearchParams();
   const conversationId = searchParams.get('conversationId');
@@ -402,7 +464,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       })
       .catch(() => setLoadingMessages(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId]);
+  }, [conversationId, queryTrigger]);
 
   // ── Effect 2: Supabase Realtime — live INSERT + UPDATE ────────────────────
   // Server-side filter on conversation_id (REPLICA IDENTITY FULL is enabled).
@@ -655,15 +717,18 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
   const lead = conversationMeta?.leads;
   const rawPhone = lead?.phone || conversationMeta?.sender_id || conversationMeta?.sender_name || '';
-  const displayName = lead?.name || formatPhone(rawPhone) || conversationId?.slice(0, 8) || 'Unknown';
+  const cachedContact = getContactByPhone(rawPhone);
+  const displayName = cachedContact?.name || lead?.name || formatPhoneDisplay(rawPhone) || conversationId?.slice(0, 8) || 'Unknown';
   // Consistent avatar seed with sidebar (phone → fallback to conversationId)
   const avatarSeed = rawPhone || conversationId || 'x';
   // Consistent initial: prefer first letter of name, else last digit of phone number (same as sidebar getInitial)
-  const initial = lead?.name
-    ? lead.name.charAt(0).toUpperCase()
-    : rawPhone
-      ? (() => { const d = rawPhone.replace(/\D/g, ''); const loc = d.startsWith('91') && d.length === 12 ? d.slice(2) : d; return loc.charAt(0) || '?'; })()
-      : '?';
+  const initial = cachedContact?.name
+    ? cachedContact.name.charAt(0).toUpperCase()
+    : lead?.name
+      ? lead.name.charAt(0).toUpperCase()
+      : rawPhone
+        ? (() => { const d = rawPhone.replace(/\D/g, ''); const loc = d.startsWith('91') && d.length === 12 ? d.slice(2) : d; return loc.charAt(0) || '?'; })()
+        : '?';
 
   // Search-filtered messages
   const filteredFeed = buildFeed(
@@ -858,10 +923,14 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           <div>
             {conversationMeta ? (
               <>
-                <p className="text-[13.5px] font-semibold text-foreground leading-none">{displayName}</p>
-                <p className="text-[11.5px] text-muted-foreground/70 mt-0.5">
-                  {(conversationMeta.bot_paused || conversationMeta.escalated) ? 'Human mode active' : 'AI responding'}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-[13.5px] font-semibold text-foreground leading-none">{displayName}</p>
+                </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <p className="text-[11.5px] text-muted-foreground/60 leading-none">
+                    {(conversationMeta.bot_paused || conversationMeta.escalated) ? 'Human mode active' : 'AI responding'}
+                  </p>
+                </div>
               </>
             ) : (
               <>
@@ -1666,6 +1735,113 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                   Cancel
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Save Contact Modal ── */}
+      <AnimatePresence>
+        {saveContactModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !savingContact && setSaveContactModalOpen(false)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-xs cursor-default"
+            />
+            
+            {/* Modal Body */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ type: 'spring', stiffness: 450, damping: 30 }}
+              className="relative w-full max-w-[380px] bg-white dark:bg-[#1C2333] border border-border rounded-2xl overflow-hidden shadow-2xl flex flex-col"
+            >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-background/50 backdrop-blur-md shrink-0">
+                <div>
+                  <h3 className="text-[15px] font-bold text-foreground">Save Contact</h3>
+                  <p className="text-[12px] text-muted-foreground mt-0.5">Link a permanent name to this conversation.</p>
+                </div>
+                <button
+                  type="button"
+                  disabled={savingContact}
+                  onClick={() => setSaveContactModalOpen(false)}
+                  className="p-1.5 hover:bg-secondary rounded-lg transition-colors cursor-pointer text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveContactSubmit} className="flex flex-col">
+                <div className="p-6 space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">Phone Number</label>
+                    <input
+                      type="tel"
+                      disabled
+                      value={formatPhoneDisplay(saveContactPhone || rawPhone)}
+                      className="w-full h-10 px-3 bg-secondary/60 border border-border rounded-lg text-[13px] text-muted-foreground cursor-not-allowed"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">Full Name *</label>
+                    <input
+                      type="text"
+                      required
+                      autoFocus
+                      placeholder="e.g. Rahul Sharma"
+                      value={saveName}
+                      onChange={(e) => setSaveName(e.target.value)}
+                      className="w-full h-10 px-3 bg-background border border-border rounded-lg text-[13px] focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">Email Address</label>
+                    <input
+                      type="email"
+                      placeholder="e.g. rahul@gmail.com"
+                      value={saveEmail}
+                      onChange={(e) => setSaveEmail(e.target.value)}
+                      className="w-full h-10 px-3 bg-background border border-border rounded-lg text-[13px] focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">Notes</label>
+                    <textarea
+                      rows={2}
+                      placeholder="Customer requirements, budget, etc."
+                      value={saveNotes}
+                      onChange={(e) => setSaveNotes(e.target.value)}
+                      className="w-full px-3 py-2 bg-background border border-border rounded-lg text-[13px] focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10 transition-all resize-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-4 border-t border-border bg-background/50 backdrop-blur-md flex justify-between items-center shrink-0">
+                  <button
+                    type="button"
+                    disabled={savingContact}
+                    onClick={() => setSaveContactModalOpen(false)}
+                    className="text-[13px] font-medium text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingContact}
+                    className="h-9 px-5 text-[13.5px] font-semibold text-primary-foreground bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-sm transition-colors cursor-pointer"
+                  >
+                    {savingContact ? 'Saving...' : 'Save Contact'}
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}

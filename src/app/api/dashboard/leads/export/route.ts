@@ -15,7 +15,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 
 const COLUMNS = [
   'Name', 'Phone', 'Email', 'Status', 'Score',
-  'Source', 'Enquiry Type', 'Tags', 'Created At', 'Last Message At',
+  'Source', 'Notes', 'Created At', 'Last Message At',
 ];
 
 function escapeCSV(val: unknown): string {
@@ -29,53 +29,81 @@ function escapeCSV(val: unknown): string {
 }
 
 function toRow(lead: Record<string, unknown>): string {
+  // Safe fallback mapping to protect against schema drift
+  const source = lead.source ?? lead.channel ?? 'manual';
   return [
-    lead.name,
-    lead.phone,
-    lead.email,
-    lead.lead_status,
-    lead.lead_score,
-    lead.source,
-    lead.enquiry_type,
-    Array.isArray(lead.tags) ? (lead.tags as string[]).join('; ') : (lead.tags ?? ''),
-    lead.created_at   ? new Date(lead.created_at as string).toISOString()   : '',
+    lead.name ?? '',
+    lead.phone ?? '',
+    lead.email ?? '',
+    lead.lead_status ?? '',
+    lead.lead_score ?? 0,
+    source,
+    lead.notes ?? '',
+    lead.created_at ? new Date(lead.created_at as string).toISOString() : '',
     lead.last_message_at ? new Date(lead.last_message_at as string).toISOString() : '',
   ].map(escapeCSV).join(',');
 }
 
 export async function GET(req: NextRequest) {
-  const tenantId = await getTenantId();
-  if (!tenantId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  try {
+    const tenantId = await getTenantId();
+    if (!tenantId) {
+      return NextResponse.json({ success: false, message: 'Unauthorized access.' }, { status: 401 });
+    }
 
-  const { searchParams } = req.nextUrl;
-  const status = searchParams.get('status');
-  const from   = searchParams.get('from');
-  const to     = searchParams.get('to');
+    const { searchParams } = new URL(req.url);
+    const status = searchParams.get('status');
+    const from   = searchParams.get('from');
+    const to     = searchParams.get('to');
 
-  let query = supabaseAdmin
-    .from('leads')
-    .select('name, phone, email, lead_status, lead_score, source, enquiry_type, tags, created_at, last_message_at')
-    .eq('tenant_id', tenantId)
-    .order('created_at', { ascending: false });
+    // Query only existing columns in Postgres to prevent SQL failure
+    let query = supabaseAdmin
+      .from('leads')
+      .select('name, phone, email, lead_status, lead_score, channel, notes, created_at, last_message_at')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false });
 
-  if (status)  query = query.eq('lead_status', status);
-  if (from)    query = query.gte('created_at', `${from}T00:00:00Z`);
-  if (to)      query = query.lte('created_at', `${to}T23:59:59Z`);
+    if (status)  query = query.eq('lead_status', status);
+    if (from)    query = query.gte('created_at', `${from}T00:00:00Z`);
+    if (to)      query = query.lte('created_at', `${to}T23:59:59Z`);
 
-  const { data: leads, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const { data: leads, error } = await query;
+    if (error) {
+      console.error('GET /api/dashboard/leads/export error:', error);
+      return NextResponse.json({ success: false, message: 'Failed to query contacts for export.' }, { status: 500 });
+    }
 
-  const rows   = [COLUMNS.join(','), ...(leads ?? []).map(toRow)];
-  const csv    = rows.join('\r\n');
-  const date   = new Date().toISOString().slice(0, 10);
-  const filename = `leads_${date}.csv`;
+    // Standardize empty states
+    if (!leads || leads.length === 0) {
+      // Return a UTF-8 CSV with headers only
+      const csv = '\uFEFF' + COLUMNS.join(',');
+      const date = new Date().toISOString().slice(0, 10);
+      return new NextResponse(csv, {
+        status: 200,
+        headers: {
+          'Content-Type':        'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="contacts_empty_${date}.csv"`,
+          'Cache-Control':       'no-store',
+        },
+      });
+    }
 
-  return new NextResponse(csv, {
-    status: 200,
-    headers: {
-      'Content-Type':        'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-      'Cache-Control':       'no-store',
-    },
-  });
+    // Construct CSV with UTF-8 BOM to prevent excel character breaking
+    const rows = [COLUMNS.join(','), ...(leads ?? []).map(toRow)];
+    const csv = '\uFEFF' + rows.join('\r\n');
+    const date = new Date().toISOString().slice(0, 10);
+    const filename = `contacts_export_${date}.csv`;
+
+    return new NextResponse(csv, {
+      status: 200,
+      headers: {
+        'Content-Type':        'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Cache-Control':       'no-store',
+      },
+    });
+  } catch (err: any) {
+    console.error('GET /api/dashboard/leads/export crash:', err);
+    return NextResponse.json({ success: false, message: 'An internal error occurred during contact export.' }, { status: 500 });
+  }
 }

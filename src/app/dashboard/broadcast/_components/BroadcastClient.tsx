@@ -1,44 +1,39 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Plus, Send, Play, Clock, FileText, Activity, Users, Zap, Search,
-  MoreHorizontal, X, BarChart3, Trash2, Network, CheckCircle2, AlertCircle
+  Plus, Search, X, Network, Play, Clock, FileText, CheckCircle2,
+  BarChart3, Trash2, Zap, MoreHorizontal, Users, Send,
+  TrendingUp, Eye, RefreshCw, ChevronRight, Calendar,
 } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
-import { BroadcastPanel } from './BroadcastPanel';
+import { BroadcastBuilder } from './BroadcastBuilder';
+import type { Campaign, CampaignStatus } from './BroadcastBuilder';
 
-// ── Types ────────────────────────────────────────────────────────────────────
-type CampaignStatus = 'draft' | 'scheduled' | 'sending' | 'completed' | 'failed';
-
-interface Campaign {
-  id: string;
-  name: string;
-  template_name: string;
-  status: CampaignStatus;
-  audience_count: number;
-  sent_count: number;
-  delivered_count: number;
-  read_count: number;
-  failed_count: number;
-  scheduled_at: string | null;
-  created_at: string;
-}
-
-// ── Filter config ─────────────────────────────────────────────────────────────
+// ── Filter config ──────────────────────────────────────────────────────────────
 const FILTERS = [
-  { id: 'all',       label: 'All Campaigns', icon: Network    },
-  { id: 'sending',   label: 'Sending',       icon: Play       },
-  { id: 'scheduled', label: 'Scheduled',     icon: Clock      },
-  { id: 'draft',     label: 'Drafts',        icon: FileText   },
-  { id: 'completed', label: 'Completed',     icon: CheckCircle2 },
+  { id: 'all',       label: 'All Campaigns',  icon: Network     },
+  { id: 'sending',   label: 'Sending',         icon: Play        },
+  { id: 'scheduled', label: 'Scheduled',       icon: Clock       },
+  { id: 'draft',     label: 'Drafts',          icon: FileText    },
+  { id: 'completed', label: 'Completed',       icon: CheckCircle2 },
 ] as const;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatScheduled(iso: string) {
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = d.getTime() - now.getTime();
+  const days = Math.round(diff / 86400000);
+  if (days === 0) return `Today ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  if (days === 1) return `Tomorrow ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
 }
 
 function cleanCampaignName(name: string): { display: string; isRetarget: boolean } {
@@ -49,18 +44,30 @@ function cleanCampaignName(name: string): { display: string; isRetarget: boolean
   return { display: name, isRetarget: false };
 }
 
+function deliveryRate(c: Campaign) {
+  return c.sent_count > 0 ? Math.round((c.delivered_count / c.sent_count) * 100) : 0;
+}
+
+function readRate(c: Campaign) {
+  return c.sent_count > 0 ? Math.round((c.read_count / c.sent_count) * 100) : 0;
+}
+
 // ── Status Badge ──────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: CampaignStatus }) {
-  const cfg = {
-    sending:   { label: 'Sending',   cls: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20', dot: true  },
-    scheduled: { label: 'Scheduled', cls: 'bg-blue-500/10 text-blue-600 border-blue-500/20',         dot: false },
-    draft:     { label: 'Draft',     cls: 'bg-secondary/60 text-muted-foreground border-border/60',  dot: false },
-    completed: { label: 'Completed', cls: 'bg-secondary/60 text-muted-foreground border-border/50',  dot: false },
-    failed:    { label: 'Failed',    cls: 'bg-red-500/10 text-red-600 border-red-500/20',             dot: false },
-  }[status] ?? { label: status, cls: 'bg-secondary text-muted-foreground border-border', dot: false };
-
+  const cfgMap: Record<string, { label: string; cls: string; dot: boolean }> = {
+    sending:   { label: 'Sending',   cls: 'bg-emerald-50 text-emerald-700 border-emerald-200',  dot: true  },
+    scheduled: { label: 'Scheduled', cls: 'bg-blue-50 text-blue-700 border-blue-200',            dot: false },
+    draft:     { label: 'Draft',     cls: 'bg-secondary text-muted-foreground border-border/60', dot: false },
+    completed: { label: 'Completed', cls: 'bg-secondary text-muted-foreground border-border/50', dot: false },
+    failed:    { label: 'Failed',    cls: 'bg-red-50 text-red-600 border-red-200',               dot: false },
+    paused:    { label: 'Paused',    cls: 'bg-amber-50 text-amber-700 border-amber-200',         dot: false },
+    retrying:  { label: 'Retrying',  cls: 'bg-orange-50 text-orange-700 border-orange-200',      dot: true  },
+    archived:  { label: 'Archived',  cls: 'bg-secondary text-muted-foreground/60 border-border', dot: false },
+    cancelled: { label: 'Cancelled', cls: 'bg-secondary text-muted-foreground/60 border-border', dot: false },
+  };
+  const cfg = cfgMap[status] ?? { label: status, cls: 'bg-secondary text-muted-foreground border-border', dot: false };
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[6px] text-[10px] font-bold uppercase tracking-wider border ${cfg.cls}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border ${cfg.cls}`}>
       {cfg.dot && (
         <span className="relative flex h-1.5 w-1.5">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75" />
@@ -72,13 +79,299 @@ function StatusBadge({ status }: { status: CampaignStatus }) {
   );
 }
 
-// ── Metric Cell ───────────────────────────────────────────────────────────────
-function MetricCell({ label, value }: { label: string; value: number }) {
+// ── Mini Delivery Bar ─────────────────────────────────────────────────────────
+function MiniDeliveryBar({ campaign }: { campaign: Campaign }) {
+  if (campaign.sent_count === 0) return null;
+  const del = deliveryRate(campaign);
+  const read = readRate(campaign);
   return (
-    <div className="flex flex-col items-center gap-0.5 min-w-[52px]">
-      <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/70">{label}</span>
-      <span className="text-[18px] font-semibold text-foreground/90 leading-none tabular-nums">{(value ?? 0).toLocaleString()}</span>
+    <div className="mt-2 space-y-1">
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-1 bg-border/40 rounded-full overflow-hidden">
+          <div className="h-full bg-emerald-400 rounded-full transition-all duration-700" style={{ width: `${del}%` }} />
+        </div>
+        <span className="text-[10px] text-muted-foreground/70 tabular-nums w-8 text-right">{del}%</span>
+        <span className="text-[10px] text-muted-foreground/50">delivered</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-1 bg-border/40 rounded-full overflow-hidden">
+          <div className="h-full bg-blue-400 rounded-full transition-all duration-700" style={{ width: `${read}%` }} />
+        </div>
+        <span className="text-[10px] text-muted-foreground/70 tabular-nums w-8 text-right">{read}%</span>
+        <span className="text-[10px] text-muted-foreground/50">read</span>
+      </div>
     </div>
+  );
+}
+
+// ── Campaign Row Card ─────────────────────────────────────────────────────────
+function CampaignCard({
+  campaign, index, onEdit, onAnalytics, onSend, onDelete, sending,
+}: {
+  campaign: Campaign;
+  index: number;
+  onEdit: (c: Campaign) => void;
+  onAnalytics: (c: Campaign) => void;
+  onSend: (id: string) => void;
+  onDelete: (id: string) => void;
+  sending: boolean;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { display: cleanName, isRetarget } = cleanCampaignName(campaign.name);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.22, delay: index * 0.04 }}
+      className={`group relative rounded-xl border transition-all duration-200 cursor-pointer ${
+        campaign.status === 'sending'
+          ? 'border-emerald-200 bg-emerald-50/30 hover:bg-emerald-50/60'
+          : campaign.status === 'draft'
+          ? 'border-dashed border-border/70 bg-transparent hover:bg-foreground/[0.015]'
+          : 'border-border/70 bg-transparent hover:bg-foreground/[0.015] hover:border-border'
+      }`}
+      onClick={() => onEdit(campaign)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => e.key === 'Enter' && onEdit(campaign)}
+    >
+      <div className="flex flex-col sm:flex-row items-start sm:items-stretch gap-0">
+        {/* Left content */}
+        <div className="flex-1 min-w-0 p-4 sm:p-5">
+          {/* Top row: badges */}
+          <div className="flex items-center gap-2 flex-wrap mb-2.5">
+            <StatusBadge status={campaign.status} />
+            {isRetarget && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-600 border border-indigo-200">
+                <Zap className="w-2.5 h-2.5" /> Retarget
+              </span>
+            )}
+            {campaign.scheduled_at && campaign.status === 'scheduled' && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-blue-600">
+                <Calendar className="w-3 h-3" />
+                {formatScheduled(campaign.scheduled_at)}
+              </span>
+            )}
+          </div>
+
+          {/* Campaign name */}
+          <h3 className="text-[14px] font-semibold text-foreground/90 truncate leading-snug mb-1.5">
+            {cleanName}
+          </h3>
+
+          {/* Template + date */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-secondary text-muted-foreground border border-border/50 truncate max-w-[180px]">
+              {campaign.template_name}
+            </span>
+            <span className="text-[11px] text-muted-foreground/50">
+              {formatDate(campaign.created_at)}
+            </span>
+          </div>
+
+          {/* Mini delivery bar */}
+          <MiniDeliveryBar campaign={campaign} />
+        </div>
+
+        {/* Metrics column */}
+        {(campaign.sent_count > 0 || campaign.audience_count > 0) && (
+          <div className="flex sm:flex-col items-center sm:items-end justify-start sm:justify-center gap-4 sm:gap-1.5 px-4 sm:px-5 pb-4 sm:py-5 sm:border-l sm:border-border/40 shrink-0">
+            <div className="flex sm:flex-col items-center sm:items-end gap-3 sm:gap-2.5">
+              <div className="flex items-center gap-1.5">
+                <Users className="w-3 h-3 text-muted-foreground/40" />
+                <span className="text-[13px] font-semibold text-foreground/80 tabular-nums">{campaign.audience_count.toLocaleString()}</span>
+              </div>
+              {campaign.sent_count > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <Send className="w-3 h-3 text-muted-foreground/40" />
+                  <span className="text-[13px] font-semibold text-foreground/80 tabular-nums">{campaign.sent_count.toLocaleString()}</span>
+                </div>
+              )}
+              {campaign.read_count > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <Eye className="w-3 h-3 text-muted-foreground/40" />
+                  <span className="text-[13px] font-semibold text-foreground/80 tabular-nums">{campaign.read_count.toLocaleString()}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Hover action bar */}
+      <div
+        className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-background/95 backdrop-blur-sm border border-border/80 rounded-lg px-1.5 py-1 shadow-sm z-10"
+        onClick={e => e.stopPropagation()}
+      >
+        {campaign.status === 'draft' && (
+          <button
+            onClick={() => onSend(campaign.id)}
+            disabled={sending}
+            className="flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 rounded-md transition-colors disabled:opacity-40"
+          >
+            <Send className="w-3 h-3" /> Send
+          </button>
+        )}
+        <button
+          onClick={() => onAnalytics(campaign)}
+          className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
+          title="Analytics"
+        >
+          <BarChart3 className="w-3.5 h-3.5" />
+        </button>
+        <div className="relative">
+          <button
+            onClick={() => setMenuOpen(o => !o)}
+            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
+          >
+            <MoreHorizontal className="w-3.5 h-3.5" />
+          </button>
+          <AnimatePresence>
+            {menuOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: 4, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 4, scale: 0.95 }}
+                transition={{ duration: 0.12 }}
+                className="absolute right-0 top-full mt-1.5 w-40 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-50 py-1"
+              >
+                <button
+                  onClick={() => { onDelete(campaign.id); setMenuOpen(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-[12px] font-medium text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Delete
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ── Skeleton loader ───────────────────────────────────────────────────────────
+function CampaignSkeleton({ i }: { i: number }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ delay: i * 0.05 }}
+      className="rounded-xl border border-border/60 p-5 space-y-3 animate-pulse"
+    >
+      <div className="flex items-center gap-2">
+        <div className="h-5 w-16 bg-secondary rounded-md" />
+        <div className="h-5 w-24 bg-secondary rounded-md" />
+      </div>
+      <div className="h-4 w-2/3 bg-secondary rounded" />
+      <div className="h-3 w-1/3 bg-secondary rounded" />
+    </motion.div>
+  );
+}
+
+// ── Analytics Panel ───────────────────────────────────────────────────────────
+function AnalyticsPanel({ campaign, onClose }: { campaign: Campaign; onClose: () => void }) {
+  const { display: name } = cleanCampaignName(campaign.name);
+  const del = deliveryRate(campaign);
+  const read = readRate(campaign);
+
+  const metrics = [
+    { label: 'Audience',  value: campaign.audience_count,  icon: Users,    color: 'text-foreground' },
+    { label: 'Sent',      value: campaign.sent_count,       icon: Send,     color: 'text-foreground' },
+    { label: 'Delivered', value: campaign.delivered_count,  icon: TrendingUp, color: 'text-emerald-600' },
+    { label: 'Read',      value: campaign.read_count,       icon: Eye,      color: 'text-blue-600' },
+  ];
+
+  return (
+    <motion.div
+      initial={{ x: '100%', opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      exit={{ x: '100%', opacity: 0 }}
+      transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+      className="fixed inset-y-0 right-0 w-full sm:w-[480px] bg-card border-l border-border shadow-2xl z-50 flex flex-col"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border/60 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center">
+            <BarChart3 className="w-4 h-4 text-foreground/70" />
+          </div>
+          <div>
+            <h2 className="text-[14px] font-semibold text-foreground tracking-tight">Analytics</h2>
+            <p className="text-[11px] text-muted-foreground truncate max-w-[260px]">{name}</p>
+          </div>
+        </div>
+        <button onClick={onClose} className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
+        {/* Status */}
+        <div className="flex items-center gap-2">
+          <StatusBadge status={campaign.status} />
+          {campaign.scheduled_at && (
+            <span className="text-[12px] text-muted-foreground">
+              {formatScheduled(campaign.scheduled_at)}
+            </span>
+          )}
+        </div>
+
+        {/* Metric cards */}
+        <div className="grid grid-cols-2 gap-3">
+          {metrics.map(({ label, value, icon: Icon, color }) => (
+            <div key={label} className="p-4 border border-border/60 rounded-xl bg-background">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Icon className={`w-3.5 h-3.5 ${color}`} />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70">{label}</span>
+              </div>
+              <p className={`text-[26px] font-semibold leading-none tabular-nums ${color}`}>{(value || 0).toLocaleString()}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Delivery funnel */}
+        {campaign.sent_count > 0 && (
+          <div className="space-y-4 p-4 border border-border/60 rounded-xl bg-background">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/70">Delivery Funnel</p>
+            {[
+              { label: 'Delivery rate', value: campaign.delivered_count, max: campaign.sent_count, color: 'bg-emerald-400', pct: del },
+              { label: 'Read rate',     value: campaign.read_count,      max: campaign.sent_count, color: 'bg-blue-400',    pct: read },
+              ...(campaign.failed_count > 0 ? [{ label: 'Failed', value: campaign.failed_count, max: campaign.sent_count, color: 'bg-red-400', pct: Math.round((campaign.failed_count / campaign.sent_count) * 100) }] : []),
+            ].map(({ label, color, pct }) => (
+              <div key={label} className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[12px] font-medium text-foreground/80">{label}</span>
+                  <span className="text-[12px] font-bold text-foreground tabular-nums">{pct}%</span>
+                </div>
+                <div className="h-2 bg-secondary/60 rounded-full overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${pct}%` }}
+                    transition={{ duration: 0.8, ease: 'easeOut' }}
+                    className={`h-full rounded-full ${color}`}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Retarget prompt */}
+        {campaign.status === 'completed' && (
+          <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-xl flex items-start gap-3">
+            <Zap className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-[13px] font-semibold text-foreground">Re-engage unread contacts</p>
+              <p className="text-[12px] text-muted-foreground mt-0.5">
+                {Math.max(0, (campaign.sent_count || 0) - (campaign.read_count || 0))} contacts didn't read this campaign.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </motion.div>
   );
 }
 
@@ -87,63 +380,34 @@ export function BroadcastClient() {
   const supabase = createBrowserSupabaseClient();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<string>('all');
+  const [activeFilter, setActiveFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sending, setSending] = useState(false);
 
   // Panel state
-  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
-  const [panelMode, setPanelMode] = useState<'edit' | 'analytics' | 'new' | null>(null);
+  const [builderCampaign, setBuilderCampaign] = useState<Campaign | null | 'new'>(null); // null=list, 'new'=new, Campaign=edit
+  const [analyticsCampaign, setAnalyticsCampaign] = useState<Campaign | null>(null);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-  const [saving, setSaving] = useState(false);
 
-  // Form state
-  const [editName, setEditName] = useState('');
-  const [editTemplate, setEditTemplate] = useState('');
-  const [audienceType, setAudienceType] = useState<'all' | 'retarget'>('all');
-  const [retargetParentId, setRetargetParentId] = useState<string | null>(null);
-  const [scheduledAt, setScheduledAt] = useState<string | null>(null);
-  const [approvedTemplates, setApprovedTemplates] = useState<{ name: string; body: string }[]>([]);
-
-  // ── Data fetching ───────────────────────────────────────────────────────────
-  const fetchCampaigns = async () => {
+  const fetchCampaigns = useCallback(async () => {
     setLoading(true);
     const { data, error } = await supabase
       .from('broadcast_campaigns')
       .select('*')
       .order('created_at', { ascending: false });
-    if (error) {
-      toast.error('Failed to load campaigns');
-    } else {
-      setCampaigns((data ?? []) as Campaign[]);
-    }
+    if (error) toast.error('Failed to load campaigns');
+    else setCampaigns((data ?? []) as Campaign[]);
     setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
     fetchCampaigns();
-    fetch('/api/dashboard/templates')
-      .then(r => r.json())
-      .then(j => {
-        if (j.success && Array.isArray(j.data)) {
-          setApprovedTemplates(
-            j.data
-              .filter((t: { status: string }) => t.status === 'APPROVED')
-              .map((t: { name: string; components?: { type: string; text?: string }[] }) => ({
-                name: t.name,
-                body: t.components?.find(c => c.type === 'BODY')?.text || '',
-              }))
-          );
-        }
-      })
-      .catch(() => {});
-
     const handleClick = () => setActiveDropdown(null);
     window.addEventListener('click', handleClick);
     return () => window.removeEventListener('click', handleClick);
-  }, []);
+  }, [fetchCampaigns]);
 
-  // ── Derived stats ───────────────────────────────────────────────────────────
+  // Aggregated stats
   const stats = useMemo(() => {
     const totalSent = campaigns.reduce((s, c) => s + (c.sent_count || 0), 0);
     const totalDelivered = campaigns.reduce((s, c) => s + (c.delivered_count || 0), 0);
@@ -164,126 +428,7 @@ export function BroadcastClient() {
     [campaigns, searchQuery, activeFilter]
   );
 
-  // ── Panel handlers ──────────────────────────────────────────────────────────
-  const openPanel = (campaign: Campaign | null, mode: 'edit' | 'analytics' | 'new', e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    setSelectedCampaign(campaign);
-    setPanelMode(mode);
-    setActiveDropdown(null);
-
-    if (campaign) {
-      const { display } = cleanCampaignName(campaign.name);
-      const isRetarget = campaign.name.startsWith('__retarget:');
-      setEditName(display);
-      setAudienceType(isRetarget ? 'retarget' : 'all');
-      if (isRetarget) {
-        const parentId = campaign.name.slice(11, campaign.name.indexOf('__:'));
-        setRetargetParentId(parentId);
-      } else {
-        setRetargetParentId(null);
-      }
-      setEditTemplate(campaign.template_name);
-      if (campaign.scheduled_at) {
-        const date = new Date(campaign.scheduled_at);
-        const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-        setScheduledAt(local.toISOString().slice(0, 16));
-      } else {
-        setScheduledAt(null);
-      }
-    } else {
-      setEditName('');
-      setEditTemplate('');
-      setAudienceType('all');
-      setRetargetParentId(null);
-      setScheduledAt(null);
-    }
-  };
-
-  const handleRetargetAction = (parentCampaign: Campaign) => {
-    const { display } = cleanCampaignName(parentCampaign.name);
-    setSelectedCampaign(null);
-    setPanelMode('new');
-    setEditName(`Retarget: ${display}`);
-    setEditTemplate(parentCampaign.template_name);
-    setAudienceType('retarget');
-    setRetargetParentId(parentCampaign.id);
-    setScheduledAt(null);
-    setActiveDropdown(null);
-  };
-
-  const closePanel = () => {
-    setSelectedCampaign(null);
-    setPanelMode(null);
-  };
-
-  const toggleDropdown = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setActiveDropdown(activeDropdown === id ? null : id);
-  };
-
-  // ── CRUD ────────────────────────────────────────────────────────────────────
-  const handleSave = async () => {
-    if (!editName.trim()) { toast.error('Campaign name is required'); return; }
-    setSaving(true);
-    try {
-      if (panelMode === 'new') {
-        const { data: tenantData } = await supabase.from('tenants').select('id').single();
-        if (!tenantData) throw new Error('No tenant found');
-
-        let finalName = editName;
-        let finalAudienceCount = 0;
-
-        if (audienceType === 'retarget' && retargetParentId) {
-          finalName = `__retarget:${retargetParentId}__:${editName}`;
-          const parent = campaigns.find(c => c.id === retargetParentId);
-          if (parent) finalAudienceCount = Math.max(0, (parent.sent_count || 0) - (parent.read_count || 0));
-        } else {
-          const { count } = await supabase.from('leads').select('id', { count: 'exact', head: true }).not('phone', 'is', null);
-          finalAudienceCount = count || 0;
-        }
-
-        const { error } = await supabase.from('broadcast_campaigns').insert({
-          tenant_id: tenantData.id,
-          name: finalName,
-          template_name: editTemplate,
-          audience_count: finalAudienceCount,
-          status: scheduledAt ? 'scheduled' : 'draft',
-          scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
-        });
-        if (error) throw error;
-        toast.success(scheduledAt ? 'Campaign scheduled' : 'Campaign saved as draft');
-
-      } else if (selectedCampaign) {
-        let finalName = editName;
-        let finalAudienceCount = selectedCampaign.audience_count;
-        if (audienceType === 'retarget' && retargetParentId) {
-          finalName = `__retarget:${retargetParentId}__:${editName}`;
-          const parent = campaigns.find(c => c.id === retargetParentId);
-          if (parent) finalAudienceCount = Math.max(0, (parent.sent_count || 0) - (parent.read_count || 0));
-        }
-        const { error } = await supabase.from('broadcast_campaigns').update({
-          name: finalName,
-          template_name: editTemplate,
-          audience_count: finalAudienceCount,
-          status: scheduledAt ? 'scheduled' : 'draft',
-          scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
-        }).eq('id', selectedCampaign.id);
-        if (error) throw error;
-        toast.success('Campaign updated');
-      }
-
-      closePanel();
-      fetchCampaigns();
-    } catch (err) {
-      console.error(err);
-      toast.error('Failed to save campaign');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSend = async (id: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
+  const handleSend = async (id: string) => {
     setSending(true);
     try {
       const res = await fetch('/api/broadcasts/send', {
@@ -295,7 +440,6 @@ export function BroadcastClient() {
       if (!data.success) throw new Error(data.error);
       toast.success('Campaign sending started');
       fetchCampaigns();
-      if (panelMode) closePanel();
     } catch (err) {
       toast.error((err as Error).message || 'Failed to send campaign');
     } finally {
@@ -303,27 +447,38 @@ export function BroadcastClient() {
     }
   };
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDelete = async (id: string) => {
     if (!confirm('Delete this campaign? This cannot be undone.')) return;
     try {
       await supabase.from('broadcast_campaigns').delete().eq('id', id);
       toast.success('Campaign deleted');
       fetchCampaigns();
-      if (selectedCampaign?.id === id) closePanel();
     } catch {
       toast.error('Failed to delete campaign');
     }
   };
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Builder mode ─────────────────────────────────────────────────────────────
+  if (builderCampaign !== null) {
+    return (
+      <div className="h-full overflow-hidden">
+        <BroadcastBuilder
+          campaign={builderCampaign === 'new' ? null : builderCampaign}
+          allCampaigns={campaigns}
+          onClose={() => setBuilderCampaign(null)}
+          onSaved={() => { setBuilderCampaign(null); fetchCampaigns(); }}
+        />
+      </div>
+    );
+  }
+
+  // ── List mode ────────────────────────────────────────────────────────────────
   return (
     <div className="flex h-full bg-background text-foreground overflow-hidden">
-
-      {/* ── Left Sidebar ─────────────────────────────────────────────────────── */}
-      <div className="w-60 border-r border-border/60 hidden md:flex flex-col bg-card/20 shrink-0">
-        <div className="flex-1 p-4 space-y-1">
-          <p className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground/60 px-2 pb-2">Campaigns</p>
+      {/* Left Sidebar */}
+      <div className="w-60 border-r border-border/60 hidden md:flex flex-col bg-card/30 shrink-0">
+        <div className="flex-1 p-4 space-y-0.5">
+          <p className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground/50 px-2 pb-2 pt-1">Campaigns</p>
           {FILTERS.map(f => {
             const count = f.id === 'all' ? campaigns.length : campaigns.filter(c => c.status === f.id).length;
             const isActive = activeFilter === f.id;
@@ -357,40 +512,33 @@ export function BroadcastClient() {
         {campaigns.length > 0 && (
           <div className="border-t border-border/50 p-4 space-y-3">
             <p className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground/50">All Time</p>
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[12px] text-muted-foreground">Messages sent</span>
-                <span className="text-[12px] font-semibold text-foreground/90 tabular-nums">{stats.totalSent.toLocaleString()}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[12px] text-muted-foreground">Delivery rate</span>
-                <span className={`text-[12px] font-semibold tabular-nums ${stats.deliveryRate >= 90 ? 'text-emerald-600' : stats.deliveryRate >= 70 ? 'text-amber-500' : 'text-red-500'}`}>
-                  {stats.deliveryRate}%
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[12px] text-muted-foreground">Read rate</span>
-                <span className={`text-[12px] font-semibold tabular-nums ${stats.readRate >= 60 ? 'text-emerald-600' : stats.readRate >= 35 ? 'text-amber-500' : 'text-muted-foreground'}`}>
-                  {stats.readRate}%
-                </span>
-              </div>
+            <div className="space-y-2">
+              {[
+                { label: 'Messages sent',  value: stats.totalSent.toLocaleString() },
+                { label: 'Delivery rate',  value: `${stats.deliveryRate}%`, color: stats.deliveryRate >= 90 ? 'text-emerald-600' : stats.deliveryRate >= 70 ? 'text-amber-500' : 'text-red-500' },
+                { label: 'Read rate',      value: `${stats.readRate}%`,     color: stats.readRate >= 60 ? 'text-emerald-600' : stats.readRate >= 35 ? 'text-amber-500' : 'text-muted-foreground' },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="flex items-center justify-between">
+                  <span className="text-[12px] text-muted-foreground">{label}</span>
+                  <span className={`text-[12px] font-semibold tabular-nums ${color ?? 'text-foreground/80'}`}>{value}</span>
+                </div>
+              ))}
             </div>
           </div>
         )}
       </div>
 
-      {/* ── Main Content ──────────────────────────────────────────────────────── */}
+      {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
-
         {/* Header */}
-        <header className="h-[60px] border-b border-border/60 flex items-center justify-between px-6 shrink-0 bg-background/90 backdrop-blur-md z-10">
+        <header className="h-[60px] border-b border-border/60 flex items-center justify-between px-6 shrink-0 bg-background/95 backdrop-blur-sm z-10">
           <div className="flex items-center gap-4 flex-1">
             <h1 className="text-[15px] font-semibold text-foreground/90 tracking-tight">Campaigns</h1>
             <div className="relative group hidden md:flex items-center max-w-xs w-full">
               <Search className="absolute left-3 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none group-focus-within:text-indigo-500/60 transition-colors" />
               <input
                 type="text"
-                placeholder="Search..."
+                placeholder="Search…"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="w-full h-8 pl-9 pr-3 bg-secondary/50 border border-transparent hover:border-border/60 focus:border-indigo-500/30 focus:bg-background rounded-lg text-[13px] outline-none transition-all"
@@ -402,23 +550,28 @@ export function BroadcastClient() {
               )}
             </div>
           </div>
-          <button
-            onClick={() => openPanel(null, 'new')}
-            className="h-8 px-4 text-[12px] font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            New Broadcast
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => fetchCampaigns()}
+              className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={() => setBuilderCampaign('new')}
+              className="h-8 px-4 text-[12px] font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              New Broadcast
+            </button>
+          </div>
         </header>
 
         {/* Campaign list */}
         <div className="flex-1 overflow-auto p-5 lg:p-6 custom-scrollbar">
           {loading ? (
-            <div className="flex items-center justify-center py-32 text-[13px] text-muted-foreground">
-              <div className="flex flex-col items-center gap-3">
-                <div className="w-5 h-5 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
-                Loading campaigns...
-              </div>
+            <div className="flex flex-col gap-3 max-w-[900px]">
+              {[0, 1, 2, 3].map(i => <CampaignSkeleton key={i} i={i} />)}
             </div>
           ) : filteredCampaigns.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-32 text-center">
@@ -431,12 +584,11 @@ export function BroadcastClient() {
               <p className="text-[13px] text-muted-foreground mb-6 max-w-[280px] leading-relaxed">
                 {searchQuery
                   ? 'Try a different search term or clear your filter.'
-                  : 'Send WhatsApp campaigns to your contacts and track delivery in real time.'
-                }
+                  : 'Send WhatsApp campaigns to your contacts and track delivery in real time.'}
               </p>
               {!searchQuery && (
                 <button
-                  onClick={() => openPanel(null, 'new')}
+                  onClick={() => setBuilderCampaign('new')}
                   className="h-9 px-5 text-[13px] font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center gap-1.5 transition-colors"
                 >
                   <Plus className="w-4 h-4" /> New Broadcast
@@ -444,148 +596,42 @@ export function BroadcastClient() {
               )}
             </div>
           ) : (
-            <div className="flex flex-col gap-2.5 max-w-[1200px]">
-              {filteredCampaigns.map((campaign, i) => {
-                const { display: cleanName, isRetarget } = cleanCampaignName(campaign.name);
-                return (
-                  <motion.div
-                    key={campaign.id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.25, delay: i * 0.04 }}
-                    onClick={() => openPanel(campaign, 'edit')}
-                    className={`group relative flex flex-col xl:flex-row items-start xl:items-center gap-4 xl:gap-6 px-5 py-4 border rounded-xl cursor-pointer transition-all duration-200 ${
-                      campaign.status === 'sending'
-                        ? 'border-emerald-500/25 bg-emerald-500/[0.02] hover:bg-emerald-500/[0.04]'
-                        : campaign.status === 'draft'
-                        ? 'border-dashed border-border/70 bg-transparent hover:bg-foreground/[0.02]'
-                        : 'border-border/70 bg-transparent hover:bg-foreground/[0.02]'
-                    }`}
-                  >
-                    {/* Left — name + meta */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        <StatusBadge status={campaign.status} />
-                        {isRetarget && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[6px] text-[10px] font-bold bg-indigo-500/8 text-indigo-500 border border-indigo-500/15">
-                            <Zap className="w-2.5 h-2.5" /> Retarget
-                          </span>
-                        )}
-                      </div>
-
-                      <h3 className="text-[15px] font-semibold text-foreground/90 truncate mb-1.5">{cleanName}</h3>
-
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-[5px] text-[11px] font-medium bg-secondary/60 text-muted-foreground border border-border/50 truncate max-w-[200px]">
-                          {campaign.template_name}
-                        </span>
-                        <span className="text-[11px] text-muted-foreground/60">
-                          {campaign.scheduled_at
-                            ? `Scheduled for ${formatDate(campaign.scheduled_at)}`
-                            : formatDate(campaign.created_at)
-                          }
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Right — metrics */}
-                    <div className="flex items-center gap-5 md:gap-6 xl:border-l xl:border-border/40 xl:pl-6 shrink-0">
-                      <MetricCell label="Audience" value={campaign.audience_count} />
-                      <MetricCell label="Sent" value={campaign.sent_count} />
-                      <MetricCell label="Delivered" value={campaign.delivered_count} />
-                      <MetricCell label="Read" value={campaign.read_count} />
-                      {campaign.failed_count > 0 && (
-                        <MetricCell label="Failed" value={campaign.failed_count} />
-                      )}
-                    </div>
-
-                    {/* Hover action bar */}
-                    <div
-                      className="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-card/95 backdrop-blur-sm border border-border/80 rounded-lg px-2 py-1.5 shadow-md z-10"
-                      onClick={e => e.stopPropagation()}
-                    >
-                      {campaign.status === 'draft' && (
-                        <button
-                          onClick={e => handleSend(campaign.id, e)}
-                          disabled={sending}
-                          className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors disabled:opacity-40"
-                        >
-                          <Send className="w-3 h-3" /> Send
-                        </button>
-                      )}
-                      <button
-                        onClick={e => openPanel(campaign, 'analytics', e)}
-                        className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
-                        title="View analytics"
-                      >
-                        <BarChart3 className="w-3.5 h-3.5" />
-                      </button>
-                      <div className="relative">
-                        <button
-                          onClick={e => toggleDropdown(campaign.id, e)}
-                          className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors"
-                        >
-                          <MoreHorizontal className="w-3.5 h-3.5" />
-                        </button>
-                        <AnimatePresence>
-                          {activeDropdown === campaign.id && (
-                            <motion.div
-                              initial={{ opacity: 0, y: 4, scale: 0.95 }}
-                              animate={{ opacity: 1, y: 0, scale: 1 }}
-                              exit={{ opacity: 0, y: 4, scale: 0.95 }}
-                              transition={{ duration: 0.12 }}
-                              className="absolute right-0 top-full mt-1.5 w-44 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-50 py-1"
-                            >
-                              {campaign.status === 'completed' && (
-                                <button
-                                  onClick={() => handleRetargetAction(campaign)}
-                                  className="w-full flex items-center gap-2 px-3 py-2 text-[12px] font-medium text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/20"
-                                >
-                                  <Zap className="w-3.5 h-3.5" /> Retarget Campaign
-                                </button>
-                              )}
-                              <button
-                                onClick={e => handleDelete(campaign.id, e)}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-[12px] font-medium text-red-600 hover:bg-red-50"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" /> Delete
-                              </button>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    </div>
-                  </motion.div>
-                );
-              })}
+            <div className="flex flex-col gap-2.5 max-w-[900px]">
+              {filteredCampaigns.map((campaign, i) => (
+                <CampaignCard
+                  key={campaign.id}
+                  campaign={campaign}
+                  index={i}
+                  onEdit={c => setBuilderCampaign(c)}
+                  onAnalytics={c => setAnalyticsCampaign(c)}
+                  onSend={handleSend}
+                  onDelete={handleDelete}
+                  sending={sending}
+                />
+              ))}
             </div>
           )}
         </div>
       </div>
 
-      {/* ── Slide-in Panel ────────────────────────────────────────────────────── */}
-      <BroadcastPanel
-        panelMode={panelMode}
-        selectedCampaign={selectedCampaign}
-        editName={editName}
-        editTemplate={editTemplate}
-        saving={saving}
-        sending={sending}
-        onClose={closePanel}
-        onSave={handleSave}
-        onSend={handleSend}
-        setEditName={setEditName}
-        setEditTemplate={setEditTemplate}
-        approvedTemplates={approvedTemplates}
-        audienceType={audienceType}
-        setAudienceType={setAudienceType}
-        retargetParentId={retargetParentId}
-        setRetargetParentId={setRetargetParentId}
-        scheduledAt={scheduledAt}
-        setScheduledAt={setScheduledAt}
-        completedCampaigns={campaigns.filter(c => c.status === 'completed')}
-        campaigns={campaigns}
-      />
+      {/* Analytics Panel Overlay */}
+      <AnimatePresence>
+        {analyticsCampaign && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setAnalyticsCampaign(null)}
+              className="fixed inset-0 bg-background/50 backdrop-blur-[2px] z-40"
+            />
+            <AnalyticsPanel
+              campaign={analyticsCampaign}
+              onClose={() => setAnalyticsCampaign(null)}
+            />
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

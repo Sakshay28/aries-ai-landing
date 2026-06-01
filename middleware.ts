@@ -8,6 +8,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { detectBrandFromHost } from '@/lib/brand';
+import { env, isSupabaseConfigured } from '@/lib/env';
 
 // Routes that require authentication
 const PROTECTED_ROUTES = ['/dashboard', '/admin', '/onboard'];
@@ -45,10 +46,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Check if Supabase is configured
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseAnonKey || supabaseUrl === 'https://your-project.supabase.co') {
+  if (!isSupabaseConfigured) {
     // Supabase not configured — allow access in development
     return NextResponse.next();
   }
@@ -60,7 +58,7 @@ export async function middleware(request: NextRequest) {
     request: { headers: forwardedHeaders },
   });
 
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+  const supabase = createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
     cookies: {
       getAll() {
         return request.cookies.getAll();

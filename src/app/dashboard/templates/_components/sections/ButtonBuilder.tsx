@@ -129,7 +129,7 @@ export default function ButtonBuilder({ state, onChange }: Props) {
                   <div className={`p-2 rounded-lg ${status.reached ? 'bg-muted text-muted-foreground/60' : 'bg-primary/5 text-primary'}`}>
                     <Icon className="w-4 h-4" />
                   </div>
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${status.reached ? 'bg-muted-foreground/10 text-muted-foreground' : status.count > 0 ? 'bg-primary/10 text-primary' : 'bg-border text-muted-foreground'}`}>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-[6px] ${status.reached ? 'bg-muted-foreground/10 text-muted-foreground' : status.count > 0 ? 'bg-primary/10 text-primary' : 'bg-border text-muted-foreground'}`}>
                     {status.count} / {bt.limit} used
                   </span>
                 </div>

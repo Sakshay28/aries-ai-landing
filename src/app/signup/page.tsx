@@ -3,7 +3,8 @@
 import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { createBrowserSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { isSupabaseConfigured, getEnvDiagnostics } from "@/lib/env";
 
 // ═══════════════════════════════════════════════════════════════
 // 🚀 Signup — single-page split-pane with Google OAuth + form
@@ -47,8 +48,26 @@ function SignupInner() {
     return () => clearInterval(timer);
   }, [countdown]);
 
+  useEffect(() => {
+    // Hidden developer diagnostics in the browser console
+    const diagnostics = getEnvDiagnostics();
+    if (!diagnostics.isValid) {
+      console.warn(
+        `%c⚠️ ARIES AI AUTHENTICATION DIAGNOSTICS:
+[ ] Supabase URL loaded: ${diagnostics.supabaseUrlLoaded ? '✅' : '❌'}
+[ ] Anon key loaded: ${diagnostics.anonKeyLoaded ? '✅' : '❌'}
+Please verify your production environment variables in your deployment dashboard.`,
+        'color: #e11d48; font-weight: bold; font-size: 13px;'
+      );
+    }
+  }, []);
+
   async function sendSignupOtp(e: React.FormEvent) {
     e.preventDefault();
+    if (!isSupabaseConfigured) {
+      setError("Authentication setup incomplete. Please contact support or try again shortly.");
+      return;
+    }
     if (fullName.trim().length < 2) {
       setError("Name must be at least 2 characters.");
       return;
@@ -126,7 +145,7 @@ function SignupInner() {
 
   async function handleGoogle() {
     if (!isSupabaseConfigured) {
-      setError("Authentication is not configured yet. Set Supabase env vars first.");
+      setError("Authentication setup incomplete. Please contact support or try again shortly.");
       return;
     }
     setGoogleLoading(true);

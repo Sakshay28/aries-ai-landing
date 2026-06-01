@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { SkeletonRow } from "@/components/ui/skeleton";
+import { useContactsStore, Contact } from "@/lib/store/contactsStore";
 
 interface ChatConversation {
   id: string;
@@ -45,22 +46,19 @@ function avatarGradient(seed: string) {
   return AVATAR_GRADIENTS[h % AVATAR_GRADIENTS.length];
 }
 
-function formatPhone(raw: string | null | undefined): string {
-  if (!raw) return '';
-  const digits = raw.replace(/\D/g, '');
-  const local = digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits;
-  if (local.length === 10) return `+91 ${local.slice(0, 5)} ${local.slice(5)}`;
-  return `+${digits}`;
+import { formatPhoneDisplay, normalizePhone } from "@/lib/utils/phone";
+
+function getDisplayName(conv: ChatConversation, getContactByPhone: (phone: string) => Contact | undefined): string {
+  const phone = conv.leads?.phone || '';
+  const contact = getContactByPhone(phone);
+  return contact?.name || conv.leads?.name || formatPhoneDisplay(phone) || "Unknown";
 }
 
-function getDisplayName(conv: ChatConversation): string {
-  return conv.leads?.name || formatPhone(conv.leads?.phone) || "Unknown";
-}
-
-function getInitial(conv: ChatConversation): string {
-  const name = conv.leads?.name;
+function getInitial(conv: ChatConversation, getContactByPhone: (phone: string) => Contact | undefined): string {
+  const phone = conv.leads?.phone || '';
+  const contact = getContactByPhone(phone);
+  const name = contact?.name || conv.leads?.name;
   if (name) return name.charAt(0).toUpperCase();
-  const phone = conv.leads?.phone;
   if (phone) {
     const digits = phone.replace(/\D/g, '');
     const local = digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits;
@@ -119,10 +117,15 @@ export default function ChatSidebar() {
     }
   }, []); // ← intentionally empty: uses refs for activeId and router
 
+  const queryTrigger = useContactsStore((state) => state.queryTrigger);
+  const getContactByPhone = useContactsStore((state) => state.getContactByPhone);
+  const fetchContactsList = useContactsStore((state) => state.fetchContactsList);
+
   // ─── Mount: initial load ──────────────────────────────────────────────────
   useEffect(() => {
     load();
-  }, [load]);
+    fetchContactsList();
+  }, [load, fetchContactsList, queryTrigger]);
 
   // ─── Realtime subscription — triggers when tenantId is loaded ─────────────
   useEffect(() => {
@@ -201,7 +204,13 @@ export default function ChatSidebar() {
 
     if (!search.trim()) return true;
     const q = search.toLowerCase();
-    return getDisplayName(c).toLowerCase().includes(q) ||
+    const phone = c.leads?.phone || '';
+    const contact = getContactByPhone(phone);
+    const resolvedName = contact?.name || c.leads?.name || '';
+    const searchablePhone = normalizePhone(phone);
+
+    return resolvedName.toLowerCase().includes(q) ||
+      searchablePhone.includes(q) ||
       (c.last_message_preview ?? '').toLowerCase().includes(q);
   });
 
@@ -281,9 +290,9 @@ export default function ChatSidebar() {
         ) : (
           filtered.map((conv) => {
             const isActive = conv.id === activeId;
-            const name = getDisplayName(conv);
-            const preview = conv.last_message_preview ?? "";
             const phone = conv.leads?.phone ?? '';
+            const name = getDisplayName(conv, getContactByPhone);
+            const preview = conv.last_message_preview ?? "";
             const isRecent = conv.last_message_at
               ? (Date.now() - new Date(conv.last_message_at).getTime()) < 5 * 60_000
               : false;
@@ -309,7 +318,7 @@ export default function ChatSidebar() {
                     style={{ background: avatarGradient(phone || conv.id) }}
                     className="w-10 h-10 rounded-full flex items-center justify-center text-[14px] font-bold text-white shadow-sm"
                   >
-                    {getInitial(conv)}
+                    {getInitial(conv, getContactByPhone)}
                   </div>
                   <span className="absolute bottom-0 right-0 w-2.5 h-2.5">
                     <span className={cn(

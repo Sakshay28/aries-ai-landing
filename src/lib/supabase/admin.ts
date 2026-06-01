@@ -9,17 +9,20 @@
 // Throws at runtime if env vars are missing when actually used.
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { env, getRequiredServerEnv } from '@/lib/env';
 
 let _supabaseAdmin: SupabaseClient | null = null;
 
 function getSupabaseAdmin(): SupabaseClient {
   if (_supabaseAdmin) return _supabaseAdmin;
 
-  const supabaseUrl = process.env.SUPABASE_POOLER_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  // Pooler URL is optional for direct DB calls, otherwise use standard project URL
+  const supabaseUrl = process.env.SUPABASE_POOLER_URL || env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = getRequiredServerEnv('SUPABASE_SERVICE_ROLE_KEY');
 
-  if (!supabaseUrl) throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL');
-  if (!supabaseServiceKey) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl) {
+    throw new Error('Configuration Error: Missing NEXT_PUBLIC_SUPABASE_URL in admin client setup.');
+  }
 
   _supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
     auth: { persistSession: false },
