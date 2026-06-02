@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
     const result = await sendWhatsAppMessage({
       to: phoneNumber,
       templateName: campaign.template_name,
-      languageCode: 'en',
+      languageCode: campaign.template_language || 'en',
       variables: resolvedVars,
       tenantId,
     });

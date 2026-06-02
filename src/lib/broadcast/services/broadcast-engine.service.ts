@@ -122,6 +122,14 @@ export class BroadcastEngineService {
   static async processQueue(limit = 100): Promise<number> {
     let processed = 0;
     try {
+      // 0. Unlock items stuck in 'processing' for more than 10 minutes (crashed runs)
+      const staleThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      await supabaseAdmin
+        .from('broadcast_queue')
+        .update({ status: 'pending', locked_at: null })
+        .eq('status', 'processing')
+        .lt('locked_at', staleThreshold);
+
       // 1. Fetch pending tasks that are scheduled to be executed now or in the past
       //    Use .or() to also pick up items with null next_attempt_at (legacy rows)
       const nowIso = new Date().toISOString();
@@ -236,9 +244,10 @@ export class BroadcastEngineService {
               };
             });
 
-            const bodyText = campaign.template_name || '';
-            const matches = [...bodyText.matchAll(/{{(\d+)}}/g)];
-            const detectedVarIndices = [...new Set(matches.map(m => m[1]))].sort();
+            // Derive variable indices from the saved mappings — template names are plain slugs
+            // and never contain {{N}} patterns, so scanning template_name always yielded [].
+            const detectedVarIndices = [...new Set((variableMappings || []).map(v => String(v.variable_key)))]
+              .sort((a, b) => Number(a) - Number(b));
 
             const leadRecord = {
               id: item.contact_id || '',
