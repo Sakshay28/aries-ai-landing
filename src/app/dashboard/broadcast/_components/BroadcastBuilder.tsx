@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useCallback, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Check, ChevronDown, Megaphone, RefreshCw, Clock, Save, Zap,
@@ -120,6 +121,7 @@ function Section({ id, children, scrollRef }: { id: SectionId; children: React.R
 
 export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: BroadcastBuilderProps) {
   const supabase = createBrowserSupabaseClient();
+  const router = useRouter();
 
   // ── Global Zustand Store ──────────────────────────────────────────────────
   const {
@@ -379,22 +381,65 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   };
 
   // ── Manual Draft Saving ──────────────────────────────────────────────────────
-  const handleSaveDraft = async () => {
-    if (!campaignName.trim()) {
-      toast.error('Campaign name is required');
-      return;
-    }
-    setIsSaving(true);
+  const handleSaveDraft = async (showToast: boolean = true) => {
     try {
-      const savedId = await saveCampaign();
-      if (savedId) {
-        toast.success('Draft saved successfully');
-        onSaved();
-      } else {
-        throw new Error('Transaction failed');
+      console.log('[save] starting');
+      setIsSaving(true);
+      const res = await fetch(
+        '/api/broadcast/campaign',
+        {
+          method:'POST',
+          headers:{
+            'Content-Type':'application/json'
+          },
+          body:JSON.stringify({
+            campaignId,
+            campaignName,
+            templateName:selectedTemplate?.name,
+            templateCategory:selectedTemplate?.category,
+            deliveryMode:delivery.mode,
+            scheduledAt:delivery.scheduledAt,
+            audience,
+            delivery,
+            variables,
+            automationRules,
+          }),
+        }
+      );
+
+      const data = await res.json();
+      console.log('[save] response', data);
+      if (!res.ok) {
+        throw new Error(
+          data.error || 'Save failed'
+        );
       }
-    } catch (e) {
-      toast.error((e as Error).message ?? 'Failed to save campaign draft');
+
+      if (!data.campaignId) {
+        throw new Error(
+          'campaignId missing from save response'
+        );
+      }
+
+      setCampaignId(data.campaignId);
+      console.log(
+        '[save] success',
+        data.campaignId
+      );
+      if (showToast) {
+        toast.success('Draft saved successfully');
+      }
+      return data.campaignId;
+
+    } catch (err:any) {
+      console.error(
+        '[save] FAILED',
+        err
+      );
+      toast.error(
+        err.message || 'Save failed'
+      );
+      throw err;
     } finally {
       setIsSaving(false);
     }
@@ -403,6 +448,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   // ── Immediate / Scheduled Launching ──────────────────────────────────────────
   const handleLaunch = async () => {
     if (!canLaunch) {
+      console.warn('[launch] blocked: canLaunch=false');
       const failing = validationChecks.filter(c => c.status === 'fail');
       if (failing.length > 0) {
         toast.error(`Cannot launch: ${failing[0].message || failing[0].label}`);
@@ -416,28 +462,51 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
 
   const confirmLaunch = async () => {
     setSafetyModalOpen(false);
-    setIsLaunching(true);
     try {
-      // Save campaign first to write all latest parameters
-      const campaignIdSaved = await saveCampaign();
-      if (!campaignIdSaved) throw new Error('Failed to save configuration before launch');
+      setIsLaunching(true);
+      console.log('[launch] starting');
 
+      // STEP 1: save latest campaign state
+      const savedCampaignId = await handleSaveDraft(false);
+      console.log('[launch] save result', savedCampaignId);
+
+      if (!savedCampaignId) {
+        throw new Error('Campaign save failed. No campaignId returned.');
+      }
+
+      console.log('[launch] calling API');
       const res = await fetch('/api/broadcast/launch', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaignId: campaignIdSaved }),
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          campaignId: savedCampaignId
+        }),
       });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
 
-      if (delivery.mode === 'scheduled') {
-        toast.success('Campaign scheduled successfully.');
-      } else {
-        toast.success('Campaign launched! Sending started.');
+      const data = await res.json();
+      console.log('[launch] API response', data);
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Launch failed');
       }
-      onSaved();
-    } catch (e) {
-      toast.error((e as Error).message ?? 'Failed to launch broadcast campaign');
+
+      console.log('[launch] success');
+      toast.success(
+        `Campaign launched to ${data.totalRecipients || 0} recipients`
+      );
+
+      console.log('[redirect] stats page');
+      router.push(
+        `/dashboard/broadcast/${savedCampaignId}/stats`
+      );
+
+    } catch (err: any) {
+      console.error('[launch] FAILED', err);
+      toast.error(
+        err.message || 'Failed to launch campaign'
+      );
     } finally {
       setIsLaunching(false);
     }
@@ -659,7 +728,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                   quietHoursEnabled={delivery.quietHoursEnabled}
                   throttleRate={delivery.throttleRate}
                   scheduledAt={delivery.scheduledAt}
-                  onSaveDraft={handleSaveDraft}
+                  onSaveDraft={() => handleSaveDraft(true)}
                   onLaunch={handleLaunch}
                   onTestSend={handleTestSend}
                   onDuplicate={() => toast("Duplicate functionality coming soon")}
@@ -786,7 +855,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
             {/* Save Draft */}
             <button
               type="button"
-              onClick={handleSaveDraft}
+              onClick={() => handleSaveDraft(true)}
               disabled={isSaving}
               className="save-draft-btn button-nowrap h-10 px-3.5 text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/40 rounded-xl transition-all duration-150 flex items-center justify-center gap-1.5"
             >

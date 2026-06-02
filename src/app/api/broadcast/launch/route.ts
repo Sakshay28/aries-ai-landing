@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { campaignId } = await req.json();
+    console.log('[launch api] body', { campaignId });
     if (!campaignId) {
       return NextResponse.json({ success: false, error: 'campaignId is required' }, { status: 400 });
     }
@@ -34,6 +35,8 @@ export async function POST(req: NextRequest) {
       .eq('id', campaignId)
       .eq('tenant_id', tenantId)
       .single();
+
+    console.log('[launch api] campaign fetch', { campaign, error: campErr });
 
     if (campErr || !campaign) {
       return NextResponse.json({ success: false, error: 'Campaign not found' }, { status: 404 });
@@ -57,6 +60,7 @@ export async function POST(req: NextRequest) {
       await AuditLogService.logChange(tenantId, campaignId, null, 'schedule', 'campaign', { status: 'draft' }, { status: 'scheduled' });
       await ExecutionEventService.logEvent(tenantId, campaignId, 'campaign_scheduled', 'Campaign scheduled', `Campaign scheduled to execute at ${new Date(scheduledAt!).toLocaleString()}`);
 
+      console.log('[launch api] success', { status: 'scheduled' });
       return NextResponse.json({ success: true, status: 'scheduled', scheduledAt });
     }
 
@@ -76,11 +80,14 @@ export async function POST(req: NextRequest) {
 
     // 4. Launch immediate dispatch via engine
     const res = await BroadcastEngineService.launchCampaign(tenantId, campaignId);
+    console.log('[launch api] audience resolved', { totalCount: res.queuedCount, error: res.error });
     if (!res.success) {
       return NextResponse.json({ success: false, error: res.error || 'Failed to queue campaign' }, { status: 500 });
     }
 
-    // Transition campaign status to running/sending
+    console.log('[launch api] recipient insert', { totalCount: res.queuedCount });
+
+    // Transition campaign status to sending/running
     await supabaseAdmin
       .from('broadcast_campaigns')
       .update({
@@ -90,6 +97,8 @@ export async function POST(req: NextRequest) {
       })
       .eq('id', campaignId)
       .eq('tenant_id', tenantId);
+
+    console.log('[launch api] enqueue', { campaignId });
 
     // Logging & Observability
     await AuditLogService.logChange(tenantId, campaignId, null, 'launch', 'campaign', { status: 'draft' }, { status: 'sending' });
@@ -103,7 +112,8 @@ export async function POST(req: NextRequest) {
       });
     });
 
-    return NextResponse.json({ success: true, status: 'sending', queuedCount: res.queuedCount });
+    console.log('[launch api] success', { status: 'sending', totalRecipients: res.queuedCount });
+    return NextResponse.json({ success: true, status: 'sending', totalRecipients: res.queuedCount, queuedCount: res.queuedCount });
   } catch (error) {
     console.error('API Launch POST Error:', error);
     return NextResponse.json({ success: false, error: (error as Error).message || 'Failed to launch campaign' }, { status: 500 });
