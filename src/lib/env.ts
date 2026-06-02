@@ -45,6 +45,7 @@ const rawSupabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const rawServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const rawAppUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL;
 const rawPlatformAdminEmail = process.env.PLATFORM_ADMIN_EMAIL;
+const rawGoogleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
 // 2. Export sanitized environment variable block
 export const env = {
@@ -54,6 +55,7 @@ export const env = {
   SUPABASE_SERVICE_ROLE_KEY: isServer ? cleanEnvValue(rawServiceRoleKey) : '',
   NEXT_PUBLIC_APP_URL: cleanEnvValue(rawAppUrl) || 'http://localhost:3000',
   PLATFORM_ADMIN_EMAIL: cleanEnvValue(rawPlatformAdminEmail) || 'admin@ariesai.in',
+  NEXT_PUBLIC_GOOGLE_CLIENT_ID: cleanEnvValue(rawGoogleClientId) || '1020449040321-4162fmon61egbdv2k0lci4gq8m9s03qg.apps.googleusercontent.com',
   NODE_ENV: process.env.NODE_ENV || 'development',
 };
 
