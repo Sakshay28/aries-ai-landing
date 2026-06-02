@@ -53,6 +53,7 @@ interface AudienceBuilderProps {
   totalContacts: number;
   completedCampaigns: Campaign[];
   availableTags?: string[];
+  onOpenRecipientsDrawer?: () => void;
 }
 
 type ChoiceId = AudienceState['type'];
@@ -394,14 +395,15 @@ function CSVUploadPanel({
 
 // ── Panel: All Contacts ───────────────────────────────────────────────────────
 
-function AllContactsPanel({ totalContacts }: { totalContacts: number }) {
-  const count = totalContacts > 0 ? totalContacts : 2261;
+function AllContactsPanel({ totalContacts, onClick }: { totalContacts: number; onClick?: () => void }) {
+  const count = totalContacts;
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-      className="flex items-start gap-4 p-4 rounded-xl bg-indigo-500/[0.04] border border-indigo-500/15"
+      onClick={onClick}
+      className="flex items-start gap-4 p-4 rounded-xl bg-indigo-500/[0.04] border border-indigo-500/15 cursor-pointer hover:bg-indigo-500/[0.07] hover:border-indigo-500/25 hover:shadow-sm transition-all duration-150 text-left select-none"
     >
       <div className="w-9 h-9 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0 mt-0.5">
         <Users className="w-4 h-4 text-indigo-500" />
@@ -414,7 +416,7 @@ function AllContactsPanel({ totalContacts }: { totalContacts: number }) {
           {count.toLocaleString()} eligible recipients in your database
         </p>
         <p className="text-[11px] text-muted-foreground/60 mt-1.5">
-          Broadcast will be delivered to all active opted-in contacts.
+          Broadcast will be delivered to all active opted-in contacts. Click to view list.
         </p>
       </div>
       <div className="flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md shrink-0">
@@ -437,7 +439,7 @@ const AUDIENCE_STATUS_COPY: Record<string, { title: string; subtitle: string }> 
   manual:   { title: 'Manual Contacts Active',      subtitle: 'Targeting specific recipients selected from CRM.' },
 };
 
-function AudienceActiveBanner({ type }: { type: string }) {
+function AudienceActiveBanner({ type, onClick }: { type: string; onClick?: () => void }) {
   const copy = AUDIENCE_STATUS_COPY[type];
   if (!copy) return null;
   return (
@@ -445,12 +447,13 @@ function AudienceActiveBanner({ type }: { type: string }) {
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
-      className="flex items-center gap-3 p-3 rounded-xl bg-indigo-500/[0.04] border border-indigo-500/[0.12] mb-4"
+      onClick={onClick}
+      className="flex items-center gap-3 p-3 rounded-xl bg-indigo-500/[0.04] border border-indigo-500/[0.12] mb-4 cursor-pointer hover:bg-indigo-500/[0.07] hover:border-indigo-500/20 hover:shadow-sm transition-all duration-150 text-left select-none"
     >
       <CheckCircle2 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
       <div className="flex-1 min-w-0">
         <span className="text-[12px] font-semibold text-foreground">{copy.title}</span>
-        <span className="text-[11.5px] text-muted-foreground/70 ml-2">{copy.subtitle}</span>
+        <span className="text-[11.5px] text-muted-foreground/70 ml-2">{copy.subtitle} (Click to view)</span>
       </div>
       <div className="flex items-center gap-1 bg-emerald-500/[0.08] border border-emerald-500/[0.15] px-2 py-0.5 rounded-md shrink-0">
         <span className="text-[10px] font-bold text-emerald-600">Active</span>
@@ -812,6 +815,7 @@ export function AudienceBuilder({
   totalContacts,
   completedCampaigns,
   availableTags = [],
+  onOpenRecipientsDrawer,
 }: AudienceBuilderProps) {
   const activeTab = audience.type as ChoiceId;
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -864,11 +868,11 @@ export function AudienceBuilder({
             className="border-t border-border/20 pt-4"
           >
             {activeTab === 'all' && (
-              <AllContactsPanel totalContacts={totalContacts} />
+              <AllContactsPanel totalContacts={totalContacts} onClick={onOpenRecipientsDrawer} />
             )}
             {activeTab === 'tags' && (
               <div>
-                <AudienceActiveBanner type="tags" />
+                <AudienceActiveBanner type="tags" onClick={onOpenRecipientsDrawer} />
                 <TagsPanel
                   selected={audience.tags}
                   available={availableTags}
@@ -878,7 +882,7 @@ export function AudienceBuilder({
             )}
             {activeTab === 'custom' && (
               <div>
-                <AudienceActiveBanner type="custom" />
+                <AudienceActiveBanner type="custom" onClick={onOpenRecipientsDrawer} />
                 <CustomFilterPanel
                   filters={audience.customFilters}
                   onAdd={addFilter}
@@ -889,7 +893,7 @@ export function AudienceBuilder({
             )}
             {activeTab === 'manual' && (
               <div>
-                <AudienceActiveBanner type="manual" />
+                <AudienceActiveBanner type="manual" onClick={onOpenRecipientsDrawer} />
                 <div className="flex items-start gap-4 p-4 rounded-xl bg-indigo-500/[0.04] border border-indigo-500/15">
                   <div className="w-9 h-9 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0 mt-0.5">
                     <Users className="w-4 h-4 text-indigo-500" />
@@ -914,7 +918,7 @@ export function AudienceBuilder({
             )}
             {activeTab === 'csv' && (
               <div>
-                <AudienceActiveBanner type="csv" />
+                <AudienceActiveBanner type="csv" onClick={onOpenRecipientsDrawer} />
                 <CSVUploadPanel 
                   csvFile={audience.csvFile}
                   onUpload={(result) => onChange({ ...audience, csvFile: result })}
@@ -923,7 +927,7 @@ export function AudienceBuilder({
             )}
             {activeTab === 'retarget' && (
               <div>
-                <AudienceActiveBanner type="retarget" />
+                <AudienceActiveBanner type="retarget" onClick={onOpenRecipientsDrawer} />
                 <RetargetingPanel
                   audience={audience}
                   completedCampaigns={completedCampaigns}

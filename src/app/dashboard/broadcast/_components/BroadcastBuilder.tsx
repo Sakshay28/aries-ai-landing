@@ -21,6 +21,10 @@ import { CampaignReview } from './CampaignReview';
 import { useBroadcastStore } from '../store/broadcast.store';
 import { useDebounceCallback } from '../hooks/useDebounce';
 import { validateCampaignPreflight } from '../validators/broadcast.validator';
+import { RecipientPreviewPanel } from './RecipientPreviewPanel';
+import { RecipientDrawer } from './RecipientDrawer';
+import { LaunchSafetyModal } from './LaunchSafetyModal';
+import { RecipientCacheResult } from '@/lib/broadcast/services/broadcast-recipient.service';
 import { 
   Campaign, 
   Template, 
@@ -138,6 +142,17 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   const [isSaving, setIsSaving] = useState(false);
   const [isLaunching, setIsLaunching] = useState(false);
   const [estimate, setEstimate] = useState<EstimateResult>({ total: 0, excluded: 0, duplicates: 0, invalid: 0, spamRisk: 'LOW' });
+  const [recipientsData, setRecipientsData] = useState<RecipientCacheResult>({
+    totalRecipients: 0,
+    excluded: 0,
+    duplicatesRemoved: 0,
+    invalidNumbers: 0,
+    normalizationCount: 0,
+    recipients: []
+  });
+  const [recipientsLoading, setRecipientsLoading] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [safetyModalOpen, setSafetyModalOpen] = useState(false);
 
   // Initialize and load campaign details
   useEffect(() => {
@@ -167,15 +182,25 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
 
     const fetchContactStats = async () => {
       try {
-        const { count } = await supabase.from('leads').select('id', { count: 'exact', head: true }).not('phone', 'is', null);
-        setTotalContacts(count ?? 0);
-        
-        // Fetch CRM distinct tags
-        const { data: tagData } = await supabase.from('leads').select('tags').not('tags', 'is', null);
-        const allTags = new Set<string>();
-        (tagData ?? []).forEach((row: { tags?: string[] }) => (row.tags ?? []).forEach(t => allTags.add(t)));
-        setAvailableTags([...allTags]);
-      } catch { /* non-critical */ }
+        const res = await fetch('/api/dashboard/leads');
+        const data = await res.json();
+        if (data.success && Array.isArray(data.leads)) {
+          const leads = data.leads;
+          const phoneLeads = leads.filter((l: any) => !!l.phone);
+          setTotalContacts(phoneLeads.length);
+          
+          // Fetch CRM distinct tags
+          const allTags = new Set<string>();
+          leads.forEach((l: any) => {
+            if (Array.isArray(l.tags)) {
+              l.tags.forEach((t: string) => allTags.add(t));
+            }
+          });
+          setAvailableTags([...allTags]);
+        }
+      } catch (err) {
+        console.error('Failed to fetch contact stats:', err);
+      }
     };
 
     fetchTemplates();
@@ -222,31 +247,44 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
     }
   });
 
-  // Fetch dynamic audience estimate from database-backed estimator API
+  // Fetch dynamic audience estimate and recipients list in real-time
   useEffect(() => {
-    const fetchEstimate = async () => {
+    const resolveRecipients = async () => {
+      setRecipientsLoading(true);
       try {
-        const res = await fetch('/api/broadcast/audience-estimate', {
+        const res = await fetch('/api/broadcast/recipients', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ audience })
+          body: JSON.stringify({ campaignId: campaign?.id || null, audience })
         });
         const data = await res.json();
-        if (data.success && data.estimate) {
+        if (data.success) {
+          setRecipientsData({
+            totalRecipients: data.totalRecipients,
+            excluded: data.excluded,
+            duplicatesRemoved: data.duplicatesRemoved,
+            invalidNumbers: data.invalidNumbers,
+            normalizationCount: data.normalizationCount,
+            recipients: data.recipients
+          });
+
+          // Maintain CampaignReview component estimates in sync
           setEstimate({
-            total: data.estimate.eligibleRecipients,
-            excluded: data.estimate.optOutsRemoved,
-            duplicates: data.estimate.duplicatesRemoved,
-            invalid: data.estimate.invalidRemoved,
-            spamRisk: data.estimate.spamRisk
+            total: data.totalRecipients,
+            excluded: data.excluded,
+            duplicates: data.duplicatesRemoved,
+            invalid: data.invalidNumbers,
+            spamRisk: data.totalRecipients > 5000 ? 'HIGH' : data.totalRecipients > 2000 ? 'MEDIUM' : 'LOW'
           });
         }
       } catch (err) {
-        console.error('Failed to fetch dynamic estimate:', err);
+        console.error('Failed to resolve broadcast recipients:', err);
+      } finally {
+        setRecipientsLoading(false);
       }
     };
-    fetchEstimate();
-  }, [audience, totalContacts]);
+    resolveRecipients();
+  }, [audience, totalContacts, campaign?.id]);
 
   const estimatedDuration = calcDuration(estimate.total, delivery.throttleRate);
 
@@ -318,9 +356,19 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   // ── Immediate / Scheduled Launching ──────────────────────────────────────────
   const handleLaunch = async () => {
     if (!canLaunch) {
-      toast.error('Please resolve validation issues before launching');
+      const failing = validationChecks.filter(c => c.status === 'fail');
+      if (failing.length > 0) {
+        toast.error(`Cannot launch: ${failing[0].message || failing[0].label}`);
+      } else {
+        toast.error('Please resolve validation issues before launching');
+      }
       return;
     }
+    setSafetyModalOpen(true);
+  };
+
+  const confirmLaunch = async () => {
+    setSafetyModalOpen(false);
     setIsLaunching(true);
     try {
       const { data: tenantData } = await supabase.from('tenants').select('id').single();
@@ -474,7 +522,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
               <div className="h-px bg-border/40" />
 
               {/* Section: Audience targeting Cohort options */}
-              <Section id="audience">
+              <Section id="audience" className="space-y-5">
                 <AudienceBuilder
                   audience={audience}
                   onChange={updateAudience}
@@ -482,6 +530,18 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                   totalContacts={totalContacts}
                   completedCampaigns={allCampaigns.filter(c => c.status === 'completed')}
                   availableTags={availableTags}
+                  onOpenRecipientsDrawer={() => setDrawerOpen(true)}
+                />
+                
+                <RecipientPreviewPanel
+                  recipients={recipientsData.recipients}
+                  totalRecipients={recipientsData.totalRecipients}
+                  excluded={recipientsData.excluded}
+                  duplicatesRemoved={recipientsData.duplicatesRemoved}
+                  invalidNumbers={recipientsData.invalidNumbers}
+                  normalizationCount={recipientsData.normalizationCount}
+                  onOpenDrawer={() => setDrawerOpen(true)}
+                  isLoading={recipientsLoading}
                 />
               </Section>
 
@@ -539,26 +599,53 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
               
               {/* Left Side: Dynamic Dispatch Summary */}
               <div className="flex flex-col text-left">
-                <span className="text-[8px] font-bold uppercase tracking-[0.1em] text-muted-foreground/55">
+                <span className="text-[8px] font-bold uppercase tracking-[0.1em] text-muted-foreground/55 select-none">
                   Dispatch Status
                 </span>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-[12px] font-semibold tabular-nums text-foreground">
-                    {audience.type === 'all' && `${estimate.total.toLocaleString()} contacts (All)`}
-                    {audience.type === 'tags' && `${audience.tags.length > 0 ? estimate.total.toLocaleString() : '0'} contacts (${audience.tags.length} tag${audience.tags.length !== 1 ? 's' : ''})`}
-                    {audience.type === 'custom' && `${audience.customFilters.length > 0 ? estimate.total.toLocaleString() : '0'} contacts (${audience.customFilters.length} filter${audience.customFilters.length !== 1 ? 's' : ''})`}
-                    {audience.type === 'csv' && `${estimate.total.toLocaleString()} contacts (CSV)`}
-                    {audience.type === 'retarget' && `${audience.retargetCampaignId ? estimate.total.toLocaleString() : '0'} contacts (Retarget)`}
-                  </span>
-                  <span className="w-[3px] h-[3px] rounded-full bg-border/80 shrink-0" />
-                  <span className="text-[11px] text-muted-foreground/70 font-medium">
-                    {delivery.mode === 'scheduled' ? 'Scheduled' : 'Immediate'}
-                  </span>
+                <div className="flex items-center gap-2.5 mt-0.5">
+                  {/* Avatars stack */}
+                  {estimate.total > 0 && (
+                    <div className="flex -space-x-1.5 overflow-hidden shrink-0 select-none">
+                      {recipientsData.recipients
+                        .filter(r => r.status === 'eligible')
+                        .slice(0, 3)
+                        .map((r, idx) => {
+                          const initials = (r.name || 'T')[0].toUpperCase();
+                          return (
+                            <div
+                              key={idx}
+                              className="inline-block h-5.5 w-5.5 rounded-full border border-background bg-indigo-500/10 text-[9.5px] font-bold text-indigo-600 flex items-center justify-center ring-1 ring-border/20"
+                            >
+                              {initials}
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => setDrawerOpen(true)}
+                      className="text-[12px] font-semibold tabular-nums text-foreground hover:text-indigo-600 hover:underline transition-all flex items-center gap-1 leading-none text-left"
+                    >
+                      {estimate.total.toLocaleString()} recipients ready
+                    </button>
+                    <span className="w-[3px] h-[3px] rounded-full bg-border/80 shrink-0" />
+                    <span className="text-[11px] text-muted-foreground/70 font-medium select-none">
+                      {delivery.mode === 'scheduled' ? 'Scheduled' : 'Immediate'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
               {/* Right Side: Quick Action buttons */}
               <div className="flex items-center gap-1.5 shrink-0">
+                {!canLaunch && (
+                  <span className="text-[10.5px] font-medium text-amber-600 flex items-center gap-1.5 mr-2 select-none animate-pulse">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    Validation pending
+                  </span>
+                )}
                 <button
                   onClick={handleSaveDraft}
                   disabled={isSaving}
@@ -577,10 +664,10 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                 </button>
                 <button
                   onClick={handleLaunch}
-                  disabled={isLaunching || !canLaunch}
+                  disabled={isLaunching}
                   className={`h-8 px-4 text-[11.5px] font-bold text-white rounded-lg transition-all duration-[130ms] ease-out flex items-center gap-1.5 ${
                     !canLaunch
-                      ? 'bg-indigo-600/30 text-white/40 cursor-not-allowed'
+                      ? 'bg-indigo-600/70 hover:bg-indigo-600/80 cursor-pointer shadow-sm active:scale-[0.98]'
                       : 'bg-indigo-600 hover:bg-indigo-700 shadow-sm shadow-indigo-500/20 active:scale-[0.98]'
                   }`}
                 >
@@ -619,6 +706,27 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
           )}
         </AnimatePresence>
       </div>
+
+      {/* Recipient sliding panel list */}
+      <RecipientDrawer
+        isOpen={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        recipients={recipientsData.recipients}
+        totalRecipients={recipientsData.totalRecipients}
+      />
+
+      {/* Safety modal check before dispatch */}
+      <LaunchSafetyModal
+        isOpen={safetyModalOpen}
+        onClose={() => setSafetyModalOpen(false)}
+        onConfirm={confirmLaunch}
+        templateName={selectedTemplate?.name || 'No Template Selected'}
+        recipients={recipientsData.recipients}
+        deliveryMode={delivery.mode}
+        scheduledAt={delivery.scheduledAt}
+        estimatedDuration={estimatedDuration}
+        isLaunching={isLaunching}
+      />
     </motion.div>
   );
 }
