@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { Users, FileSpreadsheet, Tag, Search, ArrowRight, Eye, Sparkles, CheckCircle2, Ban, Copy, AlertOctagon } from 'lucide-react';
+import React from 'react';
+import { Users, FileSpreadsheet, Eye, ArrowRight, ShieldCheck } from 'lucide-react';
 import { RecipientRecord } from '@/lib/broadcast/services/broadcast-recipient.service';
 import toast from 'react-hot-toast';
 
@@ -26,30 +26,6 @@ export function RecipientPreviewPanel({
   onOpenDrawer,
   isLoading
 }: RecipientPreviewPanelProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
-
-  // Debounce search query (300ms)
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedQuery(searchQuery);
-    }, 300);
-    return () => clearTimeout(handler);
-  }, [searchQuery]);
-
-  // Filter preview contacts in real-time
-  const filteredPreview = useMemo(() => {
-    const query = debouncedQuery.trim().toLowerCase();
-    if (!query) return recipients;
-
-    return recipients.filter(r => {
-      const nameMatch = (r.name || '').toLowerCase().includes(query);
-      const phoneMatch = (r.phone_number || '').includes(query);
-      const emailMatch = (r.email || '').toLowerCase().includes(query);
-      const labelMatch = (r.source_label || '').toLowerCase().includes(query);
-      return nameMatch || phoneMatch || emailMatch || labelMatch;
-    });
-  }, [recipients, debouncedQuery]);
 
   // Export to CSV helper
   const handleExportCSV = () => {
@@ -79,177 +55,183 @@ export function RecipientPreviewPanel({
     toast.success(`Exported ${recipients.length} recipients to CSV!`);
   };
 
-  // Limit preview list to 5 contacts
-  const visiblePreview = filteredPreview.slice(0, 5);
-  const remainingCount = Math.max(0, filteredPreview.length - 5);
+  // Limit preview list to first 3 eligible contacts as per premium requirement
+  const eligibleRecipients = recipients.filter(r => r.status === 'eligible');
+  const visiblePreview = eligibleRecipients.slice(0, 3);
+  const remainingCount = Math.max(0, eligibleRecipients.length - 3);
 
-  return (
-    <div className="space-y-5">
-      {/* ── Audience Breakdown Card ── */}
-      <div className="border border-border/30 bg-card rounded-2xl p-4.5 shadow-sm text-left">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 mb-3">
-          Audience Breakdown
-        </p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3.5">
-          {[
-            { label: 'Eligible recipients', val: totalRecipients, color: 'text-indigo-600' },
-            { label: 'Opted-out removed', val: excluded, color: 'text-rose-600' },
-            { label: 'Duplicates removed', val: duplicatesRemoved, color: 'text-amber-600' },
-            { label: 'Invalid numbers', val: invalidNumbers, color: 'text-red-500' },
-            { label: 'Normalized E.164', val: normalizationCount, color: 'text-emerald-600' }
-          ].map((stat, idx) => (
-            <div key={idx} className="p-3 bg-secondary/15 rounded-xl border border-border/20 flex flex-col justify-between">
-              <span className="text-[9.5px] font-semibold text-muted-foreground/75 leading-tight block">
-                {stat.label}
-              </span>
-              <span className={`text-[19px] font-extrabold tracking-tight mt-2.5 block tabular-nums ${stat.color}`}>
-                {isLoading ? '...' : stat.val.toLocaleString()}
-              </span>
+  // Loading skeleton state
+  if (isLoading) {
+    return (
+      <div className="border border-border/50 bg-[#fbfcfd] dark:bg-card/40 rounded-2xl p-6 space-y-4 animate-pulse">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8.5 h-8.5 rounded-lg bg-secondary" />
+            <div className="space-y-1.5">
+              <div className="h-4 w-32 bg-secondary rounded" />
+              <div className="h-3.5 w-24 bg-secondary rounded" />
+            </div>
+          </div>
+          <div className="h-8 w-24 bg-secondary rounded-lg" />
+        </div>
+        <div className="space-y-3 pt-2">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center justify-between py-2 border-t border-border/10">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-secondary" />
+                <div className="space-y-1.5">
+                  <div className="h-3.5 w-24 bg-secondary rounded" />
+                  <div className="h-3 w-32 bg-secondary rounded" />
+                </div>
+              </div>
+              <div className="h-5 w-16 bg-secondary rounded" />
             </div>
           ))}
         </div>
       </div>
+    );
+  }
 
-      {/* ── Recipients Preview Card ── */}
-      <div className="border border-border/30 bg-[#fbfcfd] dark:bg-card/40 rounded-2xl overflow-hidden shadow-sm pt-4.5 pb-2 text-left">
+  // Elegant empty state
+  if (totalRecipients === 0) {
+    return (
+      <div className="border border-dashed border-border/70 rounded-2xl p-8 text-center bg-secondary/5 select-none">
+        <Users className="w-8 h-8 text-muted-foreground/35 mx-auto mb-3" />
+        <p className="text-[14px] font-bold text-foreground/90">No recipients selected yet</p>
+        <p className="text-[12px] text-muted-foreground/60 mt-1 max-w-[280px] mx-auto">
+          Choose an option in the targeting grid above to begin selecting contacts.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Premium Recipients Selected Card */}
+      <div className="border border-border/50 bg-[#fbfcfd] dark:bg-card/40 rounded-2xl overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.015)] text-left flex flex-col">
         {/* Card Header */}
-        <div className="px-5 pb-3 border-b border-border/20 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
-              Recipients Preview
-            </p>
-            <p className="text-[12px] text-muted-foreground/85 mt-0.5 font-medium">
-              {totalRecipients.toLocaleString()} contact{totalRecipients !== 1 ? 's' : ''} selected
-            </p>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0 select-none">
-            <button
-              type="button"
-              onClick={onOpenDrawer}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/60 hover:bg-secondary/35 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-all"
-            >
-              <Eye className="w-3.5 h-3.5" />
-              View All
-            </button>
-            <button
-              type="button"
-              onClick={handleExportCSV}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/60 hover:bg-secondary/35 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-all"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              Export CSV
-            </button>
-          </div>
-        </div>
-
-        {/* Search Bar */}
-        <div className="px-5 py-3 border-b border-border/25">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/40 pointer-events-none" />
-            <input
-              type="text"
-              placeholder="Search recipients..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="w-full h-9 pl-9 pr-4 bg-background border border-border/60 focus:border-indigo-500/50 rounded-lg text-[12px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/35"
-            />
-          </div>
-        </div>
-
-        {/* Recipients Rows List */}
-        <div className="divide-y divide-border/20 px-5">
-          {isLoading ? (
-            <div className="py-8 text-center text-muted-foreground text-[12px] flex items-center justify-center gap-2">
-              <span className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-              Resolving recipients list...
+        <div className="px-5 py-4 border-b border-border/20 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-secondary/5">
+          <div className="flex items-center gap-3">
+            <div className="w-8.5 h-8.5 rounded-lg bg-indigo-500/10 border border-indigo-500/15 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+              <Users className="w-4.5 h-4.5" />
             </div>
-          ) : recipients.length === 0 ? (
-            <div className="py-8 text-center select-none">
-              <Users className="w-7 h-7 text-muted-foreground/30 mx-auto mb-2" />
-              <p className="text-[12.5px] font-semibold text-muted-foreground">No recipients selected yet</p>
-              <p className="text-[11px] text-muted-foreground/50 mt-0.5">Choose an option in the targeting grid above to begin.</p>
+            <div>
+              <h3 className="text-[14px] font-bold text-foreground/90">Recipients Selected</h3>
+              <p className="text-[12px] text-muted-foreground/80 mt-0.5 font-semibold">
+                {totalRecipients.toLocaleString()} Contact{totalRecipients !== 1 ? 's' : ''} Selected
+              </p>
             </div>
-          ) : visiblePreview.length === 0 ? (
-            <div className="py-8 text-center">
-              <p className="text-[12px] text-muted-foreground">No matching recipients found</p>
-            </div>
-          ) : (
-            visiblePreview.map((item, idx) => {
-              const initials = (item.name || 'T')
-                .split(' ')
-                .map(n => n[0])
-                .join('')
-                .slice(0, 2)
-                .toUpperCase();
-
-              let badgeIcon = <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />;
-              let badgeText = 'Opted-in';
-              let badgeStyle = 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20';
-
-              if (item.status === 'opted_out') {
-                badgeIcon = <Ban className="w-3 h-3 text-rose-500 shrink-0" />;
-                badgeText = 'Opted-out';
-                badgeStyle = 'bg-rose-500/10 text-rose-600 border-rose-500/20';
-              } else if (item.status === 'duplicate_removed') {
-                badgeIcon = <Copy className="w-3 h-3 text-amber-500 shrink-0" />;
-                badgeText = 'Duplicate';
-                badgeStyle = 'bg-amber-500/10 text-amber-600 border-amber-500/20';
-              } else if (item.status === 'invalid') {
-                badgeIcon = <AlertOctagon className="w-3 h-3 text-red-500 shrink-0" />;
-                badgeText = 'Invalid';
-                badgeStyle = 'bg-red-500/10 text-red-600 border-red-500/20';
-              }
-
-              return (
-                <div key={idx} className="py-3 flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8.5 h-8.5 rounded-full bg-indigo-500/10 border border-indigo-500/15 flex items-center justify-center text-[11px] font-bold text-indigo-600 shrink-0 select-none">
-                      {initials}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[12.5px] font-semibold text-foreground truncate">
-                          {item.name || 'there'}
-                        </span>
-                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold border ${badgeStyle}`}>
-                          {badgeIcon}
-                          {badgeText}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground/75 truncate mt-0.5">
-                        {item.phone_number || 'No number'} {item.email ? `· ${item.email}` : ''}
-                      </p>
-                    </div>
+          </div>
+          
+          <div className="flex items-center gap-3.5 self-end sm:self-auto select-none">
+            {/* Real initials avatar stack */}
+            <div className="flex -space-x-2 overflow-hidden shrink-0">
+              {eligibleRecipients.slice(0, 3).map((r, idx) => {
+                const initials = (r.name || 'T')
+                  .split(' ')
+                  .map(n => n[0])
+                  .join('')
+                  .slice(0, 2)
+                  .toUpperCase();
+                return (
+                  <div
+                    key={idx}
+                    className="inline-block h-7 w-7 rounded-full border-2 border-background bg-indigo-500/10 text-[9.5px] font-bold text-indigo-600 flex items-center justify-center ring-1 ring-border/10"
+                    title={r.name}
+                  >
+                    {initials}
                   </div>
+                );
+              })}
+            </div>
+            
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={onOpenDrawer}
+                className="h-8 px-3 rounded-lg border border-border/60 hover:bg-secondary/35 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 transition-all flex items-center gap-1.5 shadow-sm bg-background"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                View Recipients
+              </button>
+              <button
+                type="button"
+                onClick={handleExportCSV}
+                className="h-8 px-2.5 rounded-lg border border-border/60 hover:bg-secondary/35 text-[11px] font-bold text-muted-foreground hover:text-foreground transition-all flex items-center justify-center bg-background"
+                title="Export CSV"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
 
-                  <div className="text-right shrink-0">
-                    <span className="text-[11.5px] font-medium text-foreground block">
-                      {item.source_label}
-                    </span>
-                    <span className="text-[9.5px] text-muted-foreground/60 block mt-0.5">
-                      Source: {item.source_type.toUpperCase()}
-                    </span>
+        {/* Recipients Rows list */}
+        <div className="divide-y divide-border/15 bg-background/30 px-5">
+          {visiblePreview.map((item, idx) => {
+            const initials = (item.name || 'T')
+              .split(' ')
+              .map(n => n[0])
+              .join('')
+              .slice(0, 2)
+              .toUpperCase();
+
+            // Segment label resolver
+            const segment = item.source_label || (item.source_type === 'all' ? 'All Contacts' : item.source_type);
+
+            return (
+              <div key={idx} className="py-3.5 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-secondary/60 flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0 select-none">
+                    {initials}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-semibold text-foreground/90 truncate">
+                      {item.name || 'Unnamed Contact'}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground/70 truncate mt-0.5">
+                      {item.phone_number}
+                    </p>
                   </div>
                 </div>
-              );
-            })
-          )}
+
+                <div className="text-right shrink-0">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-secondary text-muted-foreground border border-border/50">
+                    {segment}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
-        {/* Footer remaining count link */}
-        {remainingCount > 0 && !isLoading && (
-          <div className="px-5 py-3.5 bg-secondary/5 border-t border-border/20 flex items-center justify-between text-[12px] font-medium select-none">
-            <span className="text-muted-foreground/75">
-              +{remainingCount.toLocaleString()} more recipient{remainingCount !== 1 ? 's' : ''}
+        {/* View all footer banner if remaining */}
+        {remainingCount > 0 && (
+          <div className="px-5 py-3 bg-secondary/5 border-t border-border/15 flex items-center justify-between text-[11.5px] font-bold select-none">
+            <span className="text-muted-foreground/75 font-semibold">
+              +{remainingCount.toLocaleString()} more contact{remainingCount !== 1 ? 's' : ''} in cohort
             </span>
             <button
               type="button"
               onClick={onOpenDrawer}
-              className="text-indigo-600 hover:text-indigo-700 flex items-center gap-1 font-bold group"
+              className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1.5 group"
             >
-              View All
+              View all recipients
               <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
             </button>
+          </div>
+        )}
+
+        {/* Validation exclusions info line */}
+        {(excluded > 0 || duplicatesRemoved > 0 || invalidNumbers > 0) && (
+          <div className="px-5 py-2.5 bg-secondary/15 border-t border-border/15 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[10.5px] text-muted-foreground/75 font-semibold select-none">
+            <span className="text-muted-foreground/80 flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+              Compliance filters active:
+            </span>
+            {excluded > 0 && <span>• {excluded} opted-out excluded</span>}
+            {duplicatesRemoved > 0 && <span>• {duplicatesRemoved} duplicates removed</span>}
+            {invalidNumbers > 0 && <span>• {invalidNumbers} invalid numbers filtered</span>}
           </div>
         )}
       </div>

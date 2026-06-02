@@ -446,8 +446,8 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
         {/* ── LEFT: Builder form controls (61% optimized grid) ────────────────── */}
         <div className={`min-w-0 relative flex flex-col transition-all duration-300 ${showPreview ? 'lg:w-[61%] shrink-0 border-r border-border/40' : 'w-full'}`}>
           {/* Scrollable Form Content */}
-          <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col">
-            <div className="max-w-2xl w-full mx-auto px-6 pt-6 pb-8 space-y-6 flex-1">
+          <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col relative">
+            <div className="max-w-2xl w-full mx-auto px-6 pt-6 pb-[180px] space-y-6 flex-1">
 
               {/* Premium Animated Broadcast Section Header */}
               <div className="flex items-center justify-between gap-4 mb-4 select-none">
@@ -594,89 +594,106 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
           </div>
 
           {/* DOCKED BOTTOM ACTIONS BAR */}
-          <div className="shrink-0 border-t border-border/40 bg-background/85 dark:bg-zinc-950/80 backdrop-blur-xl py-3.5 shadow-[0_-8px_32px_rgba(0,0,0,0.03)] select-none z-10">
-            <div className="max-w-2xl w-full mx-auto px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="absolute bottom-6 left-4 right-4 sm:left-6 sm:right-6 lg:left-8 lg:right-8 z-20 max-w-2xl mx-auto border border-border/60 bg-background/80 dark:bg-zinc-950/85 backdrop-blur-xl p-4 shadow-[0_12px_40px_rgba(0,0,0,0.12)] rounded-2xl select-none">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
               
-              {/* Left Side: Dynamic Dispatch Summary */}
-              <div className="flex flex-col text-left">
-                <span className="text-[8px] font-bold uppercase tracking-[0.1em] text-muted-foreground/55 select-none">
-                  Dispatch Status
-                </span>
-                <div className="flex items-center gap-2.5 mt-0.5">
-                  {/* Avatars stack */}
-                  {estimate.total > 0 && (
-                    <div className="flex -space-x-1.5 overflow-hidden shrink-0 select-none">
-                      {recipientsData.recipients
-                        .filter(r => r.status === 'eligible')
-                        .slice(0, 3)
-                        .map((r, idx) => {
-                          const initials = (r.name || 'T')[0].toUpperCase();
-                          return (
-                            <div
-                              key={idx}
-                              className="inline-block h-5.5 w-5.5 rounded-full border border-background bg-indigo-500/10 text-[9.5px] font-bold text-indigo-600 flex items-center justify-center ring-1 ring-border/20"
-                            >
-                              {initials}
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-1.5 min-w-0">
+              {/* Left Side: Dynamic Dispatch Summary & Real Avatars Stack */}
+              <div className="flex items-center gap-3 min-w-0">
+                {/* Avatars stack */}
+                {estimate.total > 0 && (
+                  <div className="flex -space-x-1.5 overflow-hidden shrink-0 select-none">
+                    {recipientsData.recipients
+                      .filter(r => r.status === 'eligible')
+                      .slice(0, 3)
+                      .map((r, idx) => {
+                        const initials = (r.name || 'T')[0].toUpperCase();
+                        return (
+                          <div
+                            key={idx}
+                            className="inline-block h-6 w-6 rounded-full border-2 border-background bg-indigo-500/10 text-[9.5px] font-bold text-indigo-600 flex items-center justify-center ring-1 ring-border/20"
+                          >
+                            {initials}
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+                
+                <div className="flex flex-col text-left min-w-0">
+                  <div className="flex items-center gap-1.5">
                     <button
                       type="button"
                       onClick={() => setDrawerOpen(true)}
-                      className="text-[12px] font-semibold tabular-nums text-foreground hover:text-indigo-600 hover:underline transition-all flex items-center gap-1 leading-none text-left"
+                      className="text-[12.5px] font-bold tracking-tight text-foreground hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-all flex items-center gap-1 leading-none text-left"
                     >
-                      {estimate.total.toLocaleString()} recipients ready
+                      {estimate.total.toLocaleString()} targets ready
                     </button>
-                    <span className="w-[3px] h-[3px] rounded-full bg-border/80 shrink-0" />
-                    <span className="text-[11px] text-muted-foreground/70 font-medium select-none">
+                    <span className="w-1 h-1 rounded-full bg-muted-foreground/35 shrink-0" />
+                    <span className="text-[11px] text-muted-foreground font-semibold">
                       {delivery.mode === 'scheduled' ? 'Scheduled' : 'Immediate'}
                     </span>
                   </div>
+                  <span className="text-[10px] text-muted-foreground/60 font-medium select-none mt-0.5">
+                    {delivery.mode === 'scheduled' ? 'Queued for delivery' : 'Ready for direct dispatch'}
+                  </span>
                 </div>
               </div>
 
-              {/* Right Side: Quick Action buttons */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                {!canLaunch && (
-                  <span className="text-[10.5px] font-medium text-amber-600 flex items-center gap-1.5 mr-2 select-none animate-pulse">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                    Validation pending
-                  </span>
-                )}
-                <button
-                  onClick={handleSaveDraft}
-                  disabled={isSaving}
-                  className="h-8 px-3 text-[11px] font-semibold border border-border/60 rounded-lg text-muted-foreground bg-background hover:bg-secondary/30 hover:text-foreground transition-all duration-[130ms] ease-out disabled:opacity-40 flex items-center gap-1.5"
-                >
-                  <Save className="w-3 h-3" />
-                  {isSaving ? 'Saving…' : 'Save'}
-                </button>
-                <button
-                  onClick={handleTestSend}
-                  disabled={!selectedTemplate}
-                  className="h-8 px-3 text-[11px] font-semibold border border-border/60 rounded-lg text-muted-foreground bg-background hover:bg-secondary/30 hover:text-foreground transition-all duration-[130ms] ease-out disabled:opacity-40 flex items-center gap-1.5"
-                >
-                  <FlaskConical className="w-3 h-3" />
-                  Test
-                </button>
-                <button
-                  onClick={handleLaunch}
-                  disabled={isLaunching}
-                  className={`h-8 px-4 text-[11.5px] font-bold text-white rounded-lg transition-all duration-[130ms] ease-out flex items-center gap-1.5 ${
-                    !canLaunch
-                      ? 'bg-indigo-600/70 hover:bg-indigo-600/80 cursor-pointer shadow-sm active:scale-[0.98]'
-                      : 'bg-indigo-600 hover:bg-indigo-700 shadow-sm shadow-indigo-500/20 active:scale-[0.98]'
-                  }`}
-                >
-                  {isLaunching ? (
-                    <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Launching…</>
+              {/* Middle/Right: Validation status and Quick Action buttons */}
+              <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+                {/* Validation Status Badge */}
+                <div className="flex items-center gap-1.5 bg-secondary/30 border border-border/50 px-2.5 py-1 rounded-xl shrink-0 select-none mr-1.5">
+                  {canLaunch ? (
+                    <>
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                      </span>
+                      <span className="text-[10.5px] font-extrabold text-emerald-600 dark:text-emerald-400">Ready</span>
+                    </>
                   ) : (
-                    <><Send className="w-3.5 h-3.5" /> {delivery.mode === 'scheduled' ? 'Schedule' : 'Launch'}</>
+                    <>
+                      <span className="relative flex h-2 w-2 animate-pulse">
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                      </span>
+                      <span className="text-[10.5px] font-extrabold text-amber-600 dark:text-amber-500">Validation required</span>
+                    </>
                   )}
-                </button>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={handleSaveDraft}
+                    disabled={isSaving}
+                    className="h-8.5 px-3 text-[11.5px] font-bold border border-border/80 rounded-xl text-muted-foreground bg-secondary/10 hover:bg-secondary/30 hover:text-foreground transition-all duration-[120ms] ease-out disabled:opacity-40 flex items-center gap-1.5"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Save
+                  </button>
+                  <button
+                    onClick={handleTestSend}
+                    disabled={!selectedTemplate}
+                    className="h-8.5 px-3 text-[11.5px] font-bold border border-border/80 rounded-xl text-muted-foreground bg-secondary/10 hover:bg-secondary/30 hover:text-foreground transition-all duration-[120ms] ease-out disabled:opacity-40 flex items-center gap-1.5"
+                  >
+                    <FlaskConical className="w-3.5 h-3.5" />
+                    Test
+                  </button>
+                  <button
+                    onClick={handleLaunch}
+                    disabled={isLaunching}
+                    className={`h-8.5 px-4 text-[11.5px] font-bold text-white rounded-xl transition-all duration-[120ms] ease-out flex items-center gap-1.5 ${
+                      !canLaunch
+                        ? 'bg-indigo-600/40 hover:bg-indigo-600/50 cursor-pointer shadow-sm active:scale-[0.98]'
+                        : 'bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-500/20 active:scale-[0.98]'
+                    }`}
+                  >
+                    {isLaunching ? (
+                      <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Launching…</>
+                    ) : (
+                      <><Send className="w-3.5 h-3.5" /> {delivery.mode === 'scheduled' ? 'Schedule' : 'Launch'}</>
+                    )}
+                  </button>
+                </div>
               </div>
 
             </div>

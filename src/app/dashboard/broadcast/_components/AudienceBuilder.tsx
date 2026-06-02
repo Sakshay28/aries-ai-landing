@@ -223,11 +223,11 @@ function OnboardingGrid({
   onSelect: (id: ChoiceId) => void;
 }) {
   return (
-    <div className="space-y-3">
-      <p className="text-[12px] text-muted-foreground/95 font-medium">
-        Choose how you’d like to target recipients:
+    <div className="space-y-4">
+      <p className="text-[12.5px] text-muted-foreground/80 font-bold uppercase tracking-widest select-none text-left">
+        Targeting Strategy
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         {AUDIENCE_CHOICES.map((choice) => {
           const isActive = choice.id === selected;
           const Icon = choice.icon;
@@ -235,34 +235,34 @@ function OnboardingGrid({
             <motion.div
               key={choice.id}
               onClick={() => onSelect(choice.id)}
-              whileHover={{ scale: 1.02, y: -1 }}
-              whileTap={{ scale: 0.985 }}
-              transition={{ duration: 0.15 }}
-              className={`flex flex-col text-left p-4 rounded-xl border cursor-pointer transition-all duration-200 select-none ${
+              whileHover={{ scale: 1.02, y: -2 }}
+              whileTap={{ scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 18 }}
+              className={`group flex flex-col text-left p-5 rounded-2xl border cursor-pointer transition-all duration-200 select-none ${
                 isActive
-                  ? 'border-indigo-500 bg-indigo-500/[0.05] shadow-[0_8px_30px_rgba(99,102,241,0.12)] ring-1 ring-indigo-500/20'
-                  : 'border-border/60 hover:border-border/80 hover:bg-secondary/15 hover:shadow-sm'
+                  ? 'border-indigo-500 bg-indigo-500/[0.03] dark:bg-indigo-500/[0.01] shadow-[0_8px_30px_rgba(99,102,241,0.08)] ring-2 ring-indigo-500/25'
+                  : 'border-border/60 hover:border-indigo-500/20 hover:bg-secondary/10 hover:shadow-sm'
               }`}
             >
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-3">
                 <div
-                  className={`w-7.5 h-7.5 rounded-lg flex items-center justify-center border transition-all duration-200 ${
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center border transition-all duration-350 ${
                     isActive
-                      ? 'bg-indigo-50 border-indigo-200 text-indigo-600 shadow-sm shadow-indigo-500/5 dark:bg-indigo-900/40 dark:border-indigo-800'
-                      : 'bg-secondary/40 border-border/45 text-muted-foreground'
+                      ? 'bg-indigo-50 border-indigo-200 text-indigo-600 shadow-sm shadow-indigo-500/5 dark:bg-indigo-900/30 dark:border-indigo-800'
+                      : 'bg-secondary/50 border-border/40 text-muted-foreground/60 group-hover:bg-indigo-500/5 group-hover:border-indigo-500/15 group-hover:text-indigo-600'
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5" />
+                  <Icon className="w-4 h-4 transition-transform duration-300 group-hover:scale-110" />
                 </div>
                 <span
-                  className={`text-[12.5px] font-semibold tracking-tight ${
-                    isActive ? 'text-indigo-600' : 'text-foreground'
+                  className={`text-[13.5px] font-bold tracking-tight transition-colors duration-200 ${
+                    isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-foreground/90 group-hover:text-foreground'
                   }`}
                 >
                   {choice.label}
                 </span>
               </div>
-              <p className="text-[11.5px] text-muted-foreground/75 leading-relaxed mt-2.5">
+              <p className="text-[11.5px] text-muted-foreground/70 leading-relaxed mt-4 transition-colors duration-200 group-hover:text-muted-foreground/80">
                 {choice.description}
               </p>
             </motion.div>
