@@ -812,41 +812,41 @@ async function handleStatusUpdate(msg: NonNullable<ReturnType<typeof parseMetaWe
   }
 
   if (!currentMsg) {
-    console.warn(`⚠️ Meta status update: No message matched wa_message_id="${msg.messageId}" in DB.`);
-    return;
-  }
-
-  const currentStatus = currentMsg.status;
-
-  let allowUpdate = true;
-  if (currentStatus === 'read') {
-    allowUpdate = false;
-  } else if (currentStatus === 'delivered') {
-    allowUpdate = (mappedStatus === 'read');
-  } else if (currentStatus === 'failed') {
-    allowUpdate = (mappedStatus === 'delivered' || mappedStatus === 'read');
-  }
-
-  if (!allowUpdate) {
-    console.log(`📬 Meta status update ignored: ${msg.messageId} is already "${currentStatus}", new is "${mappedStatus}"`);
-    return;
-  }
-
-  const { data: updated, error } = await supabaseAdmin
-    .from('messages')
-    .update({ status: mappedStatus })
-    .eq('wa_message_id', msg.messageId)
-    .select('id');
-
-  if (error) {
-    console.error(`❌ Meta status update DB error: ${error.message}`);
-  } else if (!updated || updated.length === 0) {
-    console.warn(`⚠️ Meta status update: No message matched wa_message_id="${msg.messageId}" in DB.`);
+    // Not a chat message — may be a broadcast. Fall through to the broadcast reconciliation pipeline.
+    console.log(`📬 Meta status update: "${msg.messageId}" not in messages table — checking broadcast_deliveries.`);
   } else {
-    console.log(`📬 Meta status update success: ${msg.messageId} → ${mappedStatus} (updated message ${updated[0].id})`);
+    const currentStatus = currentMsg.status;
+
+    let allowUpdate = true;
+    if (currentStatus === 'read') {
+      allowUpdate = false;
+    } else if (currentStatus === 'delivered') {
+      allowUpdate = (mappedStatus === 'read');
+    } else if (currentStatus === 'failed') {
+      allowUpdate = (mappedStatus === 'delivered' || mappedStatus === 'read');
+    }
+
+    if (!allowUpdate) {
+      console.log(`📬 Meta status update ignored: ${msg.messageId} is already "${currentStatus}", new is "${mappedStatus}"`);
+      return;
+    }
+
+    const { data: updated, error } = await supabaseAdmin
+      .from('messages')
+      .update({ status: mappedStatus })
+      .eq('wa_message_id', msg.messageId)
+      .select('id');
+
+    if (error) {
+      console.error(`❌ Meta status update DB error: ${error.message}`);
+    } else if (!updated || updated.length === 0) {
+      console.warn(`⚠️ Meta status update: No message matched wa_message_id="${msg.messageId}" in DB.`);
+    } else {
+      console.log(`📬 Meta status update success: ${msg.messageId} → ${mappedStatus} (updated message ${updated[0].id})`);
+    }
   }
 
-  // ── V4 Reconciliation Pipeline ──
+  // ── Broadcast Delivery Reconciliation Pipeline ──
   try {
     const { data: updatedDelivery } = await supabaseAdmin
       .from('broadcast_deliveries')

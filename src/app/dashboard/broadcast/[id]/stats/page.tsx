@@ -191,9 +191,10 @@ export default function CampaignStatsPage() {
         {activeTab === 'metrics' && (
           <div className="space-y-6">
             {/* KPI Cards Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               {[
                 { label: 'Audience size', value: stats.totalRecipients, icon: Users, desc: 'Target recipients' },
+                { label: 'Sent', value: stats.sent, icon: Send, desc: 'Accepted by Meta API' },
                 { label: 'Delivered', value: stats.delivered, icon: CheckCircle2, desc: `${stats.deliveryRate}% delivery rate` },
                 { label: 'Read', value: stats.read, icon: Eye, desc: `${stats.readRate}% read rate` },
                 { label: 'Failed', value: stats.failed, icon: AlertCircle, desc: 'Undelivered messages' },
