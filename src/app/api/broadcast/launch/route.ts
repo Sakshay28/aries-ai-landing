@@ -14,9 +14,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { campaignId } = await req.json();
-    // ts id="x9jgxa"
-    console.log('[launch api] body');
-    console.log('[launch api] body info', { campaignId });
+    console.log('[BROADCAST_LAUNCH] Received launch request for campaignId:', campaignId);
     if (!campaignId) {
       return NextResponse.json({ success: false, error: 'campaignId is required' }, { status: 400 });
     }
@@ -38,8 +36,7 @@ export async function POST(req: NextRequest) {
       .eq('tenant_id', tenantId)
       .single();
 
-    console.log('[launch api] campaign fetch');
-    console.log('[launch api] campaign fetch info', { campaign, error: campErr });
+    console.log('[BROADCAST_LAUNCH] Campaign fetch:', campaign?.id, 'error:', campErr?.message || 'none');
 
     if (campErr || !campaign) {
       return NextResponse.json({ success: false, error: 'Campaign not found' }, { status: 404 });
@@ -55,7 +52,7 @@ export async function POST(req: NextRequest) {
         .update({ 
           status: 'scheduled', 
           is_ready: true,
-          total_recipients: readiness.totalRecipients || 0,
+          total_recipients: readiness.audience.totalCount || 0,
           launched_at: new Date().toISOString(),
           updated_at: new Date().toISOString() 
         })
@@ -65,8 +62,7 @@ export async function POST(req: NextRequest) {
       await AuditLogService.logChange(tenantId, campaignId, null, 'schedule', 'campaign', { status: 'draft' }, { status: 'scheduled' });
       await ExecutionEventService.logEvent(tenantId, campaignId, 'campaign_scheduled', 'Campaign scheduled', `Campaign scheduled to execute at ${new Date(scheduledAt!).toLocaleString()}`);
 
-      console.log('[launch api] success');
-      console.log('[launch api] success info', { status: 'scheduled' });
+      console.log('[BROADCAST_LAUNCH] Campaign scheduled successfully');
       return NextResponse.json({ success: true, status: 'scheduled', scheduledAt });
     }
 
@@ -86,14 +82,12 @@ export async function POST(req: NextRequest) {
 
     // 4. Launch immediate dispatch via engine
     const res = await BroadcastEngineService.launchCampaign(tenantId, campaignId);
-    console.log('[launch api] audience resolved');
-    console.log('[launch api] audience resolved info', { totalCount: res.queuedCount, error: res.error });
+    console.log('[BROADCAST_LAUNCH] Audience resolved — queued:', res.queuedCount, 'error:', res.error || 'none');
     if (!res.success) {
       return NextResponse.json({ success: false, error: res.error || 'Failed to queue campaign' }, { status: 500 });
     }
 
-    console.log('[launch api] recipient insert');
-    console.log('[launch api] recipient insert info', { totalCount: res.queuedCount });
+    console.log('[BROADCAST_LAUNCH] Recipients inserted:', res.queuedCount);
 
     // Transition campaign status to sending/running
     await supabaseAdmin
@@ -108,8 +102,7 @@ export async function POST(req: NextRequest) {
       .eq('id', campaignId)
       .eq('tenant_id', tenantId);
 
-    console.log('[launch api] enqueue');
-    console.log('[launch api] enqueue info', { campaignId });
+    console.log('[BROADCAST_LAUNCH] Audit logged, starting async queue processing');
 
     // Logging & Observability
     await AuditLogService.logChange(tenantId, campaignId, null, 'launch', 'campaign', { status: 'draft' }, { status: 'sending' });
@@ -123,8 +116,7 @@ export async function POST(req: NextRequest) {
       });
     });
 
-    console.log('[launch api] success');
-    console.log('[launch api] success info', { status: 'sending', totalRecipients: res.queuedCount });
+    console.log('[BROADCAST_LAUNCH] Success — returning to client:', { status: 'sending', totalRecipients: res.queuedCount });
     return NextResponse.json({ success: true, status: 'sending', totalRecipients: res.queuedCount, queuedCount: res.queuedCount });
   } catch (error) {
     console.error('API Launch POST Error:', error);

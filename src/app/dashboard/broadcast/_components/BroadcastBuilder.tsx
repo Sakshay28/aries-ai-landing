@@ -438,6 +438,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   const handleLaunch = async () => {
     if (!canLaunch) {
       console.warn('[launch] blocked: canLaunch=false');
+      toast.error(getMissingValidationMessage());
       return;
     }
 
@@ -453,7 +454,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
         throw new Error('Campaign save failed. No campaignId returned.');
       }
 
-      console.log('[launch] calling API');
+      console.log('[BROADCAST_LAUNCH] calling API with campaignId:', savedCampaignId);
       const res = await fetch('/api/broadcast/launch', {
         method: 'POST',
         headers: {
@@ -465,18 +466,20 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
       });
 
       const data = await res.json();
-      console.log('[launch] API response', data);
+      console.log('[BROADCAST_LAUNCH] API response:', JSON.stringify(data));
 
       if (!res.ok) {
-        throw new Error(data.error || 'Launch failed');
+        const errorMsg = data.error || `Launch failed (HTTP ${res.status})`;
+        console.error('[BROADCAST_LAUNCH] API error:', errorMsg);
+        throw new Error(errorMsg);
       }
 
-      console.log('[launch] success');
+      console.log('[BROADCAST_LAUNCH] success — queued:', data.totalRecipients);
       toast.success(
-        `Campaign launched to ${data.totalRecipients} recipients`
+        `Campaign launched to ${data.totalRecipients || data.queuedCount || 0} recipients`
       );
 
-      console.log('[redirect] stats page');
+      console.log('[BROADCAST_LAUNCH] redirecting to stats page');
       router.push(
         `/dashboard/broadcast/${savedCampaignId}/stats`
       );
@@ -499,23 +502,35 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
     }
     setIsTesting(true);
     try {
+      console.log('[BROADCAST_TEST] Sending test message with template:', selectedTemplate.name);
       const res = await fetch('/api/broadcasts/test-send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           templateName: selectedTemplate.name,
-          languageCode: selectedTemplate.language,
+          languageCode: selectedTemplate.language || 'en',
           variables: previewValues
         }),
       });
       const data = await res.json();
+      console.log('[BROADCAST_TEST] Response:', data);
       if (data.success) {
-        toast.success('Test message dispatched successfully!');
+        toast.success(`Test message sent! ID: ${data.messageId?.slice(-8) || 'ok'}`);
       } else {
-        toast.error(data.error ?? 'Test dispatch failed');
+        const errorMsg = data.error || 'Test dispatch failed';
+        console.error('[BROADCAST_TEST] Failed:', errorMsg);
+        // Provide actionable error messages
+        if (errorMsg.includes('staff phone') || errorMsg.includes('staff_phone')) {
+          toast.error('No test phone number configured. Go to Settings → set your Staff Phone Number.');
+        } else if (errorMsg.includes('credentials') || errorMsg.includes('access_token')) {
+          toast.error('WhatsApp not connected. Go to Settings → link your Meta Business account.');
+        } else {
+          toast.error(errorMsg);
+        }
       }
-    } catch {
-      toast.error('Test dispatch failed');
+    } catch (err: any) {
+      console.error('[BROADCAST_TEST] Exception:', err);
+      toast.error(`Test send failed: ${err.message || 'Network error'}`);
     } finally {
       setIsTesting(false);
     }
@@ -708,11 +723,16 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                   throttleRate={delivery.throttleRate}
                   scheduledAt={delivery.scheduledAt}
                   onSaveDraft={async () => {
+                    if (!campaignName.trim()) {
+                      toast.error('Please enter a campaign name before saving');
+                      return;
+                    }
                     try {
                       setIsSaving(true);
                       await handleSaveDraft();
                       toast.success('Draft saved successfully');
-                    } catch (err) {
+                    } catch (err: any) {
+                      console.error('[BROADCAST_SAVE] Review save failed:', err);
                     } finally {
                       setIsSaving(false);
                     }
@@ -844,11 +864,17 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
             <button
               type="button"
               onClick={async () => {
+                if (!campaignName.trim()) {
+                  toast.error('Please enter a campaign name before saving');
+                  return;
+                }
                 try {
                   setIsSaving(true);
                   await handleSaveDraft();
                   toast.success('Draft saved successfully');
-                } catch (err) {
+                } catch (err: any) {
+                  // handleSaveDraft already toasts the error — don't double-toast
+                  console.error('[BROADCAST_SAVE] Footer save failed:', err);
                 } finally {
                   setIsSaving(false);
                 }

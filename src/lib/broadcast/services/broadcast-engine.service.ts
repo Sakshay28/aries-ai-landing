@@ -58,12 +58,15 @@ export class BroadcastEngineService {
       }
 
       // 4. Batch enqueuing leads into broadcast_queue
+      const now = new Date().toISOString();
       const queueEntries = resolved.contacts.map(contact => ({
         tenant_id: tenantId,
         campaign_id: campaignId,
         contact_id: contact.id,
         phone: contact.phone,
         status: 'pending',
+        attempt_count: 0,
+        next_attempt_at: now,
         payload: {
           name: contact.name
         }
@@ -118,16 +121,23 @@ export class BroadcastEngineService {
     let processed = 0;
     try {
       // 1. Fetch pending tasks that are scheduled to be executed now or in the past
+      //    Use .or() to also pick up items with null next_attempt_at (legacy rows)
+      const nowIso = new Date().toISOString();
       const { data: queueItems } = await supabaseAdmin
         .from('broadcast_queue')
         .select('*')
         .in('status', ['pending', 'retrying'])
-        .lte('next_attempt_at', new Date().toISOString())
         .is('locked_at', null)
+        .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
         .order('created_at', { ascending: true })
         .limit(limit);
 
-      if (!queueItems || queueItems.length === 0) return 0;
+      if (!queueItems || queueItems.length === 0) {
+        console.log('[QUEUE_JOB] No pending items found in broadcast_queue');
+        return 0;
+      }
+
+      console.log(`[QUEUE_JOB] Processing ${queueItems.length} queue items`);
 
       // 2. Lock items in transaction/batch to prevent duplicate cron processors firing
       const ids = queueItems.map(item => item.id);
@@ -250,6 +260,8 @@ export class BroadcastEngineService {
               'en' // Defaulting to English language
             );
 
+            console.log(`[WHATSAPP_SEND] Dispatched to ${item.phone}: messageId=${waResult.messageId || 'NONE'}`);
+
             if (waResult.messageId) {
               // Mark queue item as sent
               await supabaseAdmin
@@ -286,7 +298,7 @@ export class BroadcastEngineService {
             const errorMsg = (err as Error).message || 'Unknown network error';
             console.error(`❌ Meta dispatch failure to ${item.phone}:`, errorMsg);
 
-            const nextAttempt = item.attempt_count + 1;
+            const nextAttempt = (item.attempt_count || 0) + 1;
             
             if (nextAttempt <= RETRY_BACKOFF_MINUTES.length) {
               // Backoff delay

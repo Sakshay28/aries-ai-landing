@@ -55,7 +55,10 @@ export async function POST(req: NextRequest) {
       automationRules
     } = body;
 
+    console.log('[BROADCAST_SAVE] Saving campaign:', { campaignId, campaignName, templateName });
+
     if (!campaignName) {
+      console.warn('[BROADCAST_SAVE] Rejected: empty campaign name');
       return NextResponse.json({ success: false, error: 'Campaign name required' }, { status: 400 });
     }
 
@@ -184,9 +187,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    console.log('[BROADCAST_SAVE] Success — campaignId:', activeId);
     return NextResponse.json({ success: true, campaignId: activeId });
   } catch (error) {
-    console.error('API Campaign POST Error:', error);
+    console.error('[BROADCAST_SAVE] Error:', error);
     return NextResponse.json({ success: false, error: (error as Error).message || 'Failed to save campaign' }, { status: 500 });
   }
 }
