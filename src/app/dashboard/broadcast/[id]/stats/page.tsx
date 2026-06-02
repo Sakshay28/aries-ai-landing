@@ -30,7 +30,23 @@ export default function CampaignStatsPage() {
   const [stats, setStats] = useState<CampaignStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [activeTab, setActiveTab] = useState<'metrics' | 'timeline' | 'audit'>('metrics');
+
+  const handleRetryNow = async () => {
+    setRetrying(true);
+    try {
+      const res = await fetch(`/api/broadcast/campaign/${campaignId}/retry-now`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Retry failed');
+      toast.success('Processing started — refreshing in 10 seconds…');
+      setTimeout(() => fetchStats(true), 10000);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to retry campaign');
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   const fetchStats = useCallback(async (showIndicator = false) => {
     if (showIndicator) setRefreshing(true);
@@ -122,14 +138,30 @@ export default function CampaignStatsPage() {
           </div>
         </div>
 
-        <button
-          onClick={() => fetchStats(true)}
-          disabled={refreshing}
-          className="h-8 px-3 text-[12px] font-medium border border-border hover:bg-secondary/40 rounded-xl flex items-center gap-1.5 transition-all disabled:opacity-50"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {stats?.status === 'sending' && (
+            <button
+              onClick={handleRetryNow}
+              disabled={retrying}
+              className="h-8 px-3 text-[12px] font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl flex items-center gap-1.5 transition-all disabled:opacity-50"
+            >
+              {retrying ? (
+                <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Send className="w-3.5 h-3.5" />
+              )}
+              Retry Now
+            </button>
+          )}
+          <button
+            onClick={() => fetchStats(true)}
+            disabled={refreshing}
+            className="h-8 px-3 text-[12px] font-medium border border-border hover:bg-secondary/40 rounded-xl flex items-center gap-1.5 transition-all disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </header>
 
       {/* Tabs */}

@@ -119,7 +119,7 @@ export class BroadcastEngineService {
    * Core dispatcher loop. Processes enqueued pending/retrying messages,
    * enforces throttling rate limits, exponential backoffs, quiet hours, and updates statuses.
    */
-  static async processQueue(limit = 100): Promise<number> {
+  static async processQueue(limit = 100, forceNow = false): Promise<number> {
     let processed = 0;
     try {
       // 0. Unlock items stuck in 'processing' for more than 10 minutes (crashed runs)
@@ -129,6 +129,16 @@ export class BroadcastEngineService {
         .update({ status: 'pending', locked_at: null })
         .eq('status', 'processing')
         .lt('locked_at', staleThreshold);
+
+      // 0b. forceNow: reset next_attempt_at on deferred pending items so they're picked up immediately
+      if (forceNow) {
+        await supabaseAdmin
+          .from('broadcast_queue')
+          .update({ next_attempt_at: null })
+          .eq('status', 'pending')
+          .is('locked_at', null)
+          .gt('next_attempt_at', new Date().toISOString());
+      }
 
       // 1. Fetch pending tasks that are scheduled to be executed now or in the past
       //    Use .or() to also pick up items with null next_attempt_at (legacy rows)
@@ -186,27 +196,8 @@ export class BroadcastEngineService {
           continue;
         }
 
-        // B. Enforce Quiet hours protection (9 PM to 8 AM local time)
-        const timezone = tenant.timezone || 'Asia/Kolkata';
-        const localTime = new Date(new Date().toLocaleString('en-US', { timeZone: timezone }));
-        const hour = localTime.getHours();
-
-        if (hour >= 21 || hour < 8) {
-          // Defer enqueued messages to 8:15 AM local time tomorrow
-          const tomorrow = new Date(localTime);
-          tomorrow.setDate(tomorrow.getDate() + (hour >= 21 ? 1 : 0));
-          tomorrow.setHours(8, 15, 0, 0);
-          
-          await supabaseAdmin
-            .from('broadcast_queue')
-            .update({
-              status: 'pending',
-              next_attempt_at: tomorrow.toISOString(),
-              locked_at: null
-            })
-            .in('id', items.map(i => i.id));
-          continue;
-        }
+        // B. Quiet hours — disabled by default; will be per-campaign opt-in via delivery settings UI.
+        // Previously hardcoded to 9 PM–8 AM which silently deferred messages with no retry path on Hobby plan.
 
         const accessToken = decryptToken(tenant.wa_access_token) as string;
 
