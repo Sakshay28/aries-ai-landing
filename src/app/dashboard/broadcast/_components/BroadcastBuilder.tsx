@@ -24,7 +24,6 @@ import { useDebounceCallback } from '../hooks/useDebounce';
 import { validateCampaignPreflight } from '../validators/broadcast.validator';
 import { RecipientPreviewPanel } from './RecipientPreviewPanel';
 import { RecipientDrawer } from './RecipientDrawer';
-import { LaunchSafetyModal } from './LaunchSafetyModal';
 import { RecipientCacheResult } from '@/lib/broadcast/services/broadcast-recipient.service';
 import { 
   Campaign, 
@@ -168,7 +167,6 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   });
   const [recipientsLoading, setRecipientsLoading] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [safetyModalOpen, setSafetyModalOpen] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const variableMappingRef = React.useRef<HTMLDivElement>(null);
 
@@ -381,10 +379,10 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   };
 
   // ── Manual Draft Saving ──────────────────────────────────────────────────────
-  const handleSaveDraft = async (showToast: boolean = true) => {
+  // ts id="pf06ea"
+  const handleSaveDraft = async () => {
     try {
       console.log('[save] starting');
-      setIsSaving(true);
       const res = await fetch(
         '/api/broadcast/campaign',
         {
@@ -406,7 +404,6 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
           }),
         }
       );
-
       const data = await res.json();
       console.log('[save] response', data);
       if (!res.ok) {
@@ -414,23 +411,17 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
           data.error || 'Save failed'
         );
       }
-
       if (!data.campaignId) {
         throw new Error(
           'campaignId missing from save response'
         );
       }
-
       setCampaignId(data.campaignId);
       console.log(
         '[save] success',
         data.campaignId
       );
-      if (showToast) {
-        toast.success('Draft saved successfully');
-      }
       return data.campaignId;
-
     } catch (err:any) {
       console.error(
         '[save] FAILED',
@@ -440,34 +431,22 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
         err.message || 'Save failed'
       );
       throw err;
-    } finally {
-      setIsSaving(false);
     }
   };
 
-  // ── Immediate / Scheduled Launching ──────────────────────────────────────────
+  // ts id="y4kn0v"
   const handleLaunch = async () => {
     if (!canLaunch) {
       console.warn('[launch] blocked: canLaunch=false');
-      const failing = validationChecks.filter(c => c.status === 'fail');
-      if (failing.length > 0) {
-        toast.error(`Cannot launch: ${failing[0].message || failing[0].label}`);
-      } else {
-        toast.error('Please resolve validation issues before launching');
-      }
       return;
     }
-    setSafetyModalOpen(true);
-  };
 
-  const confirmLaunch = async () => {
-    setSafetyModalOpen(false);
     try {
       setIsLaunching(true);
       console.log('[launch] starting');
 
       // STEP 1: save latest campaign state
-      const savedCampaignId = await handleSaveDraft(false);
+      const savedCampaignId = await handleSaveDraft();
       console.log('[launch] save result', savedCampaignId);
 
       if (!savedCampaignId) {
@@ -494,7 +473,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
 
       console.log('[launch] success');
       toast.success(
-        `Campaign launched to ${data.totalRecipients || 0} recipients`
+        `Campaign launched to ${data.totalRecipients} recipients`
       );
 
       console.log('[redirect] stats page');
@@ -728,7 +707,16 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                   quietHoursEnabled={delivery.quietHoursEnabled}
                   throttleRate={delivery.throttleRate}
                   scheduledAt={delivery.scheduledAt}
-                  onSaveDraft={() => handleSaveDraft(true)}
+                  onSaveDraft={async () => {
+                    try {
+                      setIsSaving(true);
+                      await handleSaveDraft();
+                      toast.success('Draft saved successfully');
+                    } catch (err) {
+                    } finally {
+                      setIsSaving(false);
+                    }
+                  }}
                   onLaunch={handleLaunch}
                   onTestSend={handleTestSend}
                   onDuplicate={() => toast("Duplicate functionality coming soon")}
@@ -855,7 +843,16 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
             {/* Save Draft */}
             <button
               type="button"
-              onClick={() => handleSaveDraft(true)}
+              onClick={async () => {
+                try {
+                  setIsSaving(true);
+                  await handleSaveDraft();
+                  toast.success('Draft saved successfully');
+                } catch (err) {
+                } finally {
+                  setIsSaving(false);
+                }
+              }}
               disabled={isSaving}
               className="save-draft-btn button-nowrap h-10 px-3.5 text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/40 rounded-xl transition-all duration-150 flex items-center justify-center gap-1.5"
             >
@@ -901,18 +898,6 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
         totalRecipients={recipientsData.totalRecipients}
       />
 
-      {/* Safety modal check before dispatch */}
-      <LaunchSafetyModal
-        isOpen={safetyModalOpen}
-        onClose={() => setSafetyModalOpen(false)}
-        onConfirm={confirmLaunch}
-        templateName={selectedTemplate?.name || "No Template Selected"}
-        recipients={recipientsData.recipients}
-        deliveryMode={delivery.mode}
-        scheduledAt={delivery.scheduledAt}
-        estimatedDuration={estimatedDuration}
-        isLaunching={isLaunching}
-      />
     </motion.div>
   );
 }
