@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Check, ChevronDown, Megaphone, RefreshCw, Clock, Save, Zap,
   AlertCircle, AlertTriangle, CheckCircle2, Eye, Send, Target,
-  Settings2, Bot, Clipboard, ArrowLeft, FlaskConical,
+  Settings2, Bot, Clipboard, ArrowLeft, FlaskConical, Users,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
@@ -594,110 +594,180 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
           </div>
 
           {/* DOCKED BOTTOM ACTIONS BAR */}
-          <div className="absolute bottom-6 left-4 right-4 sm:left-6 sm:right-6 lg:left-8 lg:right-8 z-20 max-w-2xl mx-auto border border-border/60 bg-background/80 dark:bg-zinc-950/85 backdrop-blur-xl p-4 shadow-[0_12px_40px_rgba(0,0,0,0.12)] rounded-2xl select-none">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+          <motion.div
+            initial={{ y: 60, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ type: 'spring', damping: 26, stiffness: 220, delay: 0.15 }}
+            className="absolute bottom-6 left-4 right-4 sm:left-6 sm:right-6 lg:left-8 lg:right-8 z-20 max-w-2xl mx-auto border border-zinc-200/60 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-xl p-5 sm:p-6 shadow-[0_12px_40px_rgba(0,0,0,0.08)] rounded-3xl select-none"
+          >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
               
-              {/* Left Side: Dynamic Dispatch Summary & Real Avatars Stack */}
-              <div className="flex items-center gap-3 min-w-0">
-                {/* Avatars stack */}
-                {estimate.total > 0 && (
-                  <div className="flex -space-x-1.5 overflow-hidden shrink-0 select-none">
-                    {recipientsData.recipients
-                      .filter(r => r.status === 'eligible')
-                      .slice(0, 3)
-                      .map((r, idx) => {
-                        const initials = (r.name || 'T')[0].toUpperCase();
-                        return (
-                          <div
-                            key={idx}
-                            className="inline-block h-6 w-6 rounded-full border-2 border-background bg-indigo-500/10 text-[9.5px] font-bold text-indigo-600 flex items-center justify-center ring-1 ring-border/20"
-                          >
-                            {initials}
-                          </div>
-                        );
-                      })}
+              {/* Left Side: Recipient Summary & Overlapping Avatars Stack */}
+              <div className="flex items-center gap-3.5 min-w-0 justify-between lg:justify-start">
+                {estimate.total > 0 ? (
+                  <div className="flex items-center gap-3 min-w-0">
+                    {/* Overlapping Avatars */}
+                    <div className="flex -space-x-2.5 overflow-hidden shrink-0 select-none">
+                      {recipientsData.recipients
+                        .filter(r => r.status === 'eligible')
+                        .slice(0, 3)
+                        .map((r, idx) => {
+                          const initials = (r.name || 'T')
+                            .split(' ')
+                            .map(n => n[0])
+                            .join('')
+                            .slice(0, 2)
+                            .toUpperCase();
+                          const gradColors = [
+                            'from-violet-500 to-indigo-600',
+                            'from-purple-500 to-pink-500',
+                            'from-sky-400 to-indigo-600',
+                          ];
+                          const grad = gradColors[idx % gradColors.length];
+                          return (
+                            <motion.div
+                              key={idx}
+                              whileHover={{ y: -3, scale: 1.05, zIndex: 10 }}
+                              transition={{ type: 'spring', stiffness: 400, damping: 15 }}
+                              className={`relative group/avatar cursor-pointer w-11 h-11 rounded-full border-2 border-white dark:border-zinc-900 shadow-sm flex items-center justify-center text-[11.5px] font-extrabold text-white bg-gradient-to-br ${grad} ring-1 ring-black/5 shrink-0 ${idx > 0 ? '-ml-2.5' : ''}`}
+                              onClick={() => setDrawerOpen(true)}
+                            >
+                              {initials}
+                              
+                              {/* Hover Tooltip Card */}
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3.5 hidden group-hover/avatar:block z-30 bg-zinc-950 text-white text-[11px] rounded-lg px-2.5 py-1.5 shadow-lg border border-zinc-800 whitespace-nowrap text-center">
+                                <p className="font-bold leading-tight">{r.name || 'Anonymous'}</p>
+                                <p className="text-zinc-400 text-[10px] mt-0.5 leading-none">{r.phone_number}</p>
+                                {r.source_label && (
+                                  <p className="text-[9px] text-indigo-400 font-semibold mt-1 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-900/60 leading-none inline-block">
+                                    {r.source_label}
+                                  </p>
+                                )}
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 w-2 h-2 bg-zinc-950 rotate-45 border-r border-b border-zinc-800 -mt-1" />
+                              </div>
+                            </motion.div>
+                          );
+                        })}
+                    </div>
+
+                    <div className="flex flex-col text-left min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => setDrawerOpen(true)}
+                        className="text-[14px] font-bold text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-all flex items-center gap-1.5 leading-tight text-left whitespace-nowrap"
+                      >
+                        {estimate.total.toLocaleString()} targets ready
+                      </button>
+                      <span className="text-[12px] text-zinc-500 mt-0.5 font-medium leading-none select-none whitespace-nowrap">
+                        {delivery.mode === 'scheduled' ? 'Ready for scheduled delivery' : 'Ready for direct dispatch'}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 select-none">
+                    <div className="w-11 h-11 rounded-full border border-dashed border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 flex items-center justify-center text-zinc-400 shrink-0">
+                      <Users className="w-4.5 h-4.5" />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-[13.5px] font-bold text-zinc-400 leading-tight">No targets selected</p>
+                      <p className="text-[12px] text-zinc-400/80 mt-0.5 leading-none">Select recipients above</p>
+                    </div>
                   </div>
                 )}
-                
-                <div className="flex flex-col text-left min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setDrawerOpen(true)}
-                      className="text-[12.5px] font-bold tracking-tight text-foreground hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-all flex items-center gap-1 leading-none text-left"
-                    >
-                      {estimate.total.toLocaleString()} targets ready
-                    </button>
-                    <span className="w-1 h-1 rounded-full bg-muted-foreground/35 shrink-0" />
-                    <span className="text-[11px] text-muted-foreground font-semibold">
-                      {delivery.mode === 'scheduled' ? 'Scheduled' : 'Immediate'}
-                    </span>
+              </div>
+
+              {/* Center Column: Campaign Status & Validation info */}
+              <div className="flex items-center justify-between lg:justify-start gap-4 py-2.5 lg:py-0 border-t border-b lg:border-none border-zinc-100 dark:border-zinc-800/80 shrink-0">
+                {canLaunch ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20">
+                      <Check className="w-3 h-3 text-emerald-500" />
+                      <span>Ready to launch</span>
+                    </div>
+                    <div className="h-5 w-[1px] bg-zinc-200 dark:bg-zinc-800 hidden md:block" />
+                    <div className="text-left hidden md:block">
+                      <p className="text-[11px] text-zinc-500 font-bold leading-tight">Pre-flight checks passed</p>
+                      <p className="text-[10px] text-zinc-400 leading-tight">Everything validated successfully</p>
+                    </div>
                   </div>
-                  <span className="text-[10px] text-muted-foreground/60 font-medium select-none mt-0.5">
-                    {delivery.mode === 'scheduled' ? 'Queued for delivery' : 'Ready for direct dispatch'}
-                  </span>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-wide bg-amber-50 text-amber-700 border border-amber-200/80 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20 animate-pulse">
+                      <AlertTriangle className="w-3 h-3 text-amber-500" />
+                      <span>Validation required</span>
+                    </div>
+                    <div className="h-5 w-[1px] bg-zinc-200 dark:bg-zinc-800 hidden md:block" />
+                    <div className="text-left hidden md:block max-w-[180px]">
+                      <p className="text-[11px] text-amber-600 font-bold leading-tight">Action needed</p>
+                      <p className="text-[10px] text-zinc-400 leading-tight truncate">
+                        {validationChecks.find(c => c.status === 'fail')?.message || 'Resolve items before launch'}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Premium vertical divider */}
+                <div className="w-[1px] h-7 bg-zinc-200 dark:bg-zinc-800 shrink-0" />
+
+                {/* Timing Status Info block */}
+                <div className="flex items-center gap-2.5 text-left">
+                  <div className="w-9.5 h-9.5 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200/50 dark:border-zinc-800/80 flex items-center justify-center text-zinc-500 dark:text-zinc-400 shrink-0">
+                    {delivery.mode === 'scheduled' ? <Clock className="w-4.5 h-4.5" /> : <Send className="w-4.5 h-4.5" />}
+                  </div>
+                  <div className="hidden sm:block">
+                    <p className="text-[12px] font-bold text-zinc-800 dark:text-zinc-200 leading-tight">
+                      {delivery.mode === 'scheduled' ? 'Scheduled dispatch' : 'Immediate dispatch'}
+                    </p>
+                    <p className="text-[10px] text-zinc-500 leading-tight mt-0.5">
+                      {delivery.mode === 'scheduled' && delivery.scheduledAt
+                        ? new Date(delivery.scheduledAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                        : 'Sends instantly on launch'}
+                    </p>
+                  </div>
                 </div>
               </div>
 
-              {/* Middle/Right: Validation status and Quick Action buttons */}
-              <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
-                {/* Validation Status Badge */}
-                <div className="flex items-center gap-1.5 bg-secondary/30 border border-border/50 px-2.5 py-1 rounded-xl shrink-0 select-none mr-1.5">
-                  {canLaunch ? (
-                    <>
-                      <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                      </span>
-                      <span className="text-[10.5px] font-extrabold text-emerald-600 dark:text-emerald-400">Ready</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="relative flex h-2 w-2 animate-pulse">
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                      </span>
-                      <span className="text-[10.5px] font-extrabold text-amber-600 dark:text-amber-500">Validation required</span>
-                    </>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-1.5 shrink-0">
+              {/* Right Side: Quick Action buttons */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full lg:w-auto shrink-0 justify-end">
+                <div className="flex items-center gap-2 w-full sm:w-auto">
                   <button
                     onClick={handleSaveDraft}
                     disabled={isSaving}
-                    className="h-8.5 px-3 text-[11.5px] font-bold border border-border/80 rounded-xl text-muted-foreground bg-secondary/10 hover:bg-secondary/30 hover:text-foreground transition-all duration-[120ms] ease-out disabled:opacity-40 flex items-center gap-1.5"
+                    className="flex-1 sm:flex-none h-11 px-4 text-[12.5px] font-bold border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600 dark:text-zinc-300 bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-900 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-all duration-[120ms] ease-out disabled:opacity-40 flex items-center justify-center gap-1.5"
                   >
                     <Save className="w-3.5 h-3.5" />
-                    Save
+                    <span>Save</span>
                   </button>
                   <button
                     onClick={handleTestSend}
                     disabled={!selectedTemplate}
-                    className="h-8.5 px-3 text-[11.5px] font-bold border border-border/80 rounded-xl text-muted-foreground bg-secondary/10 hover:bg-secondary/30 hover:text-foreground transition-all duration-[120ms] ease-out disabled:opacity-40 flex items-center gap-1.5"
+                    className="flex-1 sm:flex-none h-11 px-4 text-[12.5px] font-bold border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600 dark:text-zinc-300 bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-900 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-all duration-[120ms] ease-out disabled:opacity-40 flex items-center justify-center gap-1.5"
                   >
                     <FlaskConical className="w-3.5 h-3.5" />
-                    Test
-                  </button>
-                  <button
-                    onClick={handleLaunch}
-                    disabled={isLaunching}
-                    className={`h-8.5 px-4 text-[11.5px] font-bold text-white rounded-xl transition-all duration-[120ms] ease-out flex items-center gap-1.5 ${
-                      !canLaunch
-                        ? 'bg-indigo-600/40 hover:bg-indigo-600/50 cursor-pointer shadow-sm active:scale-[0.98]'
-                        : 'bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-500/20 active:scale-[0.98]'
-                    }`}
-                  >
-                    {isLaunching ? (
-                      <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Launching…</>
-                    ) : (
-                      <><Send className="w-3.5 h-3.5" /> {delivery.mode === 'scheduled' ? 'Schedule' : 'Launch'}</>
-                    )}
+                    <span>Test</span>
                   </button>
                 </div>
+                <motion.button
+                  onClick={handleLaunch}
+                  disabled={isLaunching}
+                  whileHover={canLaunch ? { scale: 1.02, y: -1 } : undefined}
+                  whileTap={canLaunch ? { scale: 0.98 } : undefined}
+                  className={`w-full sm:w-auto h-12 px-7 text-[13.5px] font-extrabold rounded-2xl transition-all duration-[120ms] ease-out flex items-center justify-center gap-2 select-none shrink-0 ${
+                    !canLaunch
+                      ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 border border-zinc-200/50 dark:border-zinc-800/80 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 shadow-[0_4px_18px_rgba(99,102,241,0.25)] hover:shadow-[0_4px_22px_rgba(99,102,241,0.4)] text-white border border-indigo-500/10'
+                  }`}
+                >
+                  {isLaunching ? (
+                    <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Launching…</>
+                  ) : (
+                    <><Send className="w-3.5 h-3.5" /> {delivery.mode === 'scheduled' ? 'Schedule' : 'Launch'}</>
+                  )}
+                </motion.button>
               </div>
 
             </div>
-          </div>
+          </motion.div>
         </div>
 
         {/* ── RIGHT: Live WhatsApp Device Showcase (39% hero showcase) ───────── */}
