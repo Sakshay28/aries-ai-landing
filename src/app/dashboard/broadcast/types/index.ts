@@ -45,6 +45,7 @@ export interface AudienceState {
   retargetCondition: 'unread' | 'no_reply' | 'clicked_cta' | 'not_clicked';
   retargetDelayDays: number;
   manualContactIds?: string[];
+  excludedContactIds?: string[];
   csvFile?: {
     name: string;
     size: string;

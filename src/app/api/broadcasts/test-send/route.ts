@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { templateName, variables } = await req.json();
+    const { templateName, languageCode, variables } = await req.json();
     if (!templateName) {
       return NextResponse.json({ success: false, error: 'templateName required' }, { status: 400 });
     }
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
       tenant.staff_phone,
       templateName,
       orderedVars,
-      'en' // default to English for test messages
+      languageCode || 'en'
     );
 
     return NextResponse.json({ success: true, messageId: result.messageId });

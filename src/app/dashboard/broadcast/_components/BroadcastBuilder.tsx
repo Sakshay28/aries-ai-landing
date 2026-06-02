@@ -68,7 +68,11 @@ function calcDuration(count: number, rate: number) {
 }
 
 // ── Autosave indicator ────────────────────────────────────────────────────────
-function AutosaveIndicator({ status }: { status: 'idle' | 'saving' | 'saved' | 'error' }) {
+const Spinner = ({ size = "sm" }: { size?: "sm" | "md" }) => (
+  <RefreshCw className={`animate-spin ${size === "sm" ? "w-3 h-3" : "w-3.5 h-3.5"}`} />
+);
+
+function AutosaveIndicator({ status, onRetry }: { status: 'idle' | 'saving' | 'saved' | 'failed'; onRetry: () => void }) {
   return (
     <AnimatePresence mode="wait">
       {status !== 'idle' && (
@@ -84,10 +88,20 @@ function AutosaveIndicator({ status }: { status: 'idle' | 'saving' | 'saved' | '
             <><RefreshCw className="w-3 h-3 text-muted-foreground animate-spin" /><span className="text-[11px] text-muted-foreground">Saving…</span></>
           )}
           {status === 'saved' && (
-            <><Check className="w-3 h-3 text-emerald-500" /><span className="text-[11px] text-emerald-600">Saved</span></>
+            <><span className="text-[11px] text-emerald-600 font-medium">✓ Saved</span></>
           )}
-          {status === 'error' && (
-            <><AlertCircle className="w-3 h-3 text-red-500" /><span className="text-[11px] text-red-500">Save failed</span></>
+          {status === 'failed' && (
+            <>
+              <AlertCircle className="w-3 h-3 text-red-500" />
+              <span className="text-[11px] text-red-500 font-medium">⊙ Save failed</span>
+              <button
+                type="button"
+                onClick={onRetry}
+                className="text-[10px] text-red-600 hover:text-red-700 underline font-semibold ml-1 bg-transparent border-none cursor-pointer"
+              >
+                Retry
+              </button>
+            </>
           )}
         </motion.div>
       )}
@@ -116,7 +130,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
     audience,
     delivery,
     automationRules,
-    autosaveStatus,
+    saveStatus,
     previewRecipient,
     isLoading,
     setCampaignId,
@@ -127,7 +141,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
     updateDelivery,
     setAutomationRules,
     setPreviewRecipient,
-    setAutosaveStatus,
+    setSaveStatus,
     resetBuilder,
     loadCampaign,
     saveCampaign
@@ -153,6 +167,8 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   const [recipientsLoading, setRecipientsLoading] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [safetyModalOpen, setSafetyModalOpen] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const variableMappingRef = React.useRef<HTMLDivElement>(null);
 
   // Initialize and load campaign details
   useEffect(() => {
@@ -207,25 +223,25 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
     fetchContactStats();
   }, []);
 
+  // ── Helper to resolve tenant ID securely via users table ───────────────────
+  const resolveTenantId = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('No authenticated user session found');
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('tenant_id')
+      .eq('auth_id', user.id)
+      .single();
+    if (userError || !userData?.tenant_id) {
+      throw new Error('No active workspace tenant found for your user account');
+    }
+    return userData.tenant_id;
+  };
+
   // ── Debounced Draft Autosave ──────────────────────────────────────────────
   const performAutosave = useDebounceCallback(async () => {
     if (!campaignName.trim()) return;
-    setAutosaveStatus('saving');
-    try {
-      const { data: tenantData } = await supabase.from('tenants').select('id').single();
-      if (!tenantData) throw new Error('No tenant found');
-      
-      const savedId = await saveCampaign(supabase, tenantData.id);
-      if (savedId) {
-        setAutosaveStatus('saved');
-        setTimeout(() => setAutosaveStatus('idle'), 2500);
-      } else {
-        throw new Error('Save failed');
-      }
-    } catch {
-      setAutosaveStatus('error');
-      setTimeout(() => setAutosaveStatus('idle'), 3000);
-    }
+    await saveCampaign();
   }, 800);
 
   // Trigger autosave on form input changes
@@ -295,6 +311,19 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
     return [...new Set(matches.map(m => m[1]))].sort();
   }, [selectedTemplate?.body]);
 
+  const mappedCount = React.useMemo(() => {
+    return detectedVarIndices.filter(idx => {
+      const cfg = variables[idx];
+      if (!cfg) return false;
+      if (cfg.sourceType === 'static') return !!cfg.staticValue?.trim();
+      if (cfg.sourceType === 'crm_field') return !!cfg.crmField;
+      if (cfg.sourceType === 'custom') return !!cfg.staticValue?.trim();
+      return false;
+    }).length;
+  }, [detectedVarIndices, variables]);
+
+  const unmappedVariableCount = detectedVarIndices.length - mappedCount;
+
   const variablesValid = detectedVarIndices.every(idx => {
     const cfg = variables[idx];
     if (!cfg) return false;
@@ -328,6 +357,27 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
 
   const canLaunch = validationChecks.every(c => c.status !== 'fail');
 
+  const getValidationText = () => {
+    const firstFail = validationChecks.find(c => c.status === "fail");
+    if (!firstFail) return "Launch Ready";
+    const msg = firstFail.message || firstFail.label;
+    if (msg.toLowerCase().includes("name")) return "Campaign name required";
+    if (msg.toLowerCase().includes("template")) return "Template verification required";
+    if (msg.toLowerCase().includes("variable")) return "Variable mapping incomplete";
+    if (msg.toLowerCase().includes("recipient") || msg.toLowerCase().includes("audience")) return "Audience targets required";
+    return msg;
+  };
+
+  const getMissingValidationMessage = (): string => {
+    const issues: string[] = [];
+    if (!campaignName.trim()) issues.push('Campaign name required');
+    if (!selectedTemplate) issues.push('No template selected');
+    if (unmappedVariableCount > 0) issues.push(`${unmappedVariableCount} variable(s) unmapped`);
+    if (estimate.total === 0) issues.push('No audience selected');
+    if (selectedTemplate && selectedTemplate.status !== 'APPROVED') issues.push('Template not approved');
+    return `Cannot launch: ${issues.join(', ')}`;
+  };
+
   // ── Manual Draft Saving ──────────────────────────────────────────────────────
   const handleSaveDraft = async () => {
     if (!campaignName.trim()) {
@@ -336,10 +386,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
     }
     setIsSaving(true);
     try {
-      const { data: tenantData } = await supabase.from('tenants').select('id').single();
-      if (!tenantData) throw new Error('No active workspace tenant found');
-      
-      const savedId = await saveCampaign(supabase, tenantData.id, 'draft');
+      const savedId = await saveCampaign();
       if (savedId) {
         toast.success('Draft saved successfully');
         onSaved();
@@ -371,11 +418,8 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
     setSafetyModalOpen(false);
     setIsLaunching(true);
     try {
-      const { data: tenantData } = await supabase.from('tenants').select('id').single();
-      if (!tenantData) throw new Error('No active workspace tenant found');
-
       // Save campaign first to write all latest parameters
-      const campaignIdSaved = await saveCampaign(supabase, tenantData.id, 'draft');
+      const campaignIdSaved = await saveCampaign();
       if (!campaignIdSaved) throw new Error('Failed to save configuration before launch');
 
       const res = await fetch('/api/broadcast/launch', {
@@ -405,11 +449,16 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
       toast.error('Please select a message template first');
       return;
     }
+    setIsTesting(true);
     try {
       const res = await fetch('/api/broadcasts/test-send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateName: selectedTemplate.name, variables: previewValues }),
+        body: JSON.stringify({
+          templateName: selectedTemplate.name,
+          languageCode: selectedTemplate.language,
+          variables: previewValues
+        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -419,19 +468,10 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
       }
     } catch {
       toast.error('Test dispatch failed');
+    } finally {
+      setIsTesting(false);
     }
   };
-
-  if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-3">
-          <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin" />
-          <p className="text-[13px] font-semibold text-muted-foreground">Loading broadcast configurations…</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <motion.div
@@ -439,100 +479,131 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
-      className="absolute inset-0 flex flex-col bg-background overflow-hidden"
+      className="broadcast-page-shell"
     >
-      {/* Workspace Columns */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* ── LEFT: Builder form controls (61% optimized grid) ────────────────── */}
-        <div className={`min-w-0 relative flex flex-col transition-all duration-300 ${showPreview ? 'lg:w-[61%] shrink-0 border-r border-border/40' : 'w-full'}`}>
-          {/* Scrollable Form Content */}
-          <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col relative">
-            <div className="max-w-2xl w-full mx-auto px-6 pt-6 pb-[180px] space-y-6 flex-1">
+      {/* Header */}
+      <header className="broadcast-header">
+        <div className="broadcast-builder-container flex items-center justify-between h-full px-8">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onClose}
+              className="w-7 h-7 rounded-lg flex items-center justify-center border border-border/40 bg-secondary/10 hover:bg-secondary/35 text-muted-foreground hover:text-foreground transition-all duration-[120ms] shrink-0"
+              aria-label="Back to campaigns list"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+            </button>
 
-              {/* Premium Animated Broadcast Section Header */}
-              <div className="flex items-center justify-between gap-4 mb-4 select-none">
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={onClose}
-                    className="w-7 h-7 rounded-lg flex items-center justify-center border border-border/40 bg-secondary/10 hover:bg-secondary/35 text-muted-foreground hover:text-foreground transition-all duration-[120ms] shrink-0"
-                    aria-label="Back to campaigns list"
-                  >
-                    <ArrowLeft className="w-3.5 h-3.5" />
-                  </button>
-
-                  <motion.div
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.28, ease: "easeOut" }}
-                    className="flex items-center gap-2.5"
-                  >
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.96 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ duration: 0.2, ease: "easeOut" }}
-                      className="w-7 h-7 rounded-lg bg-indigo-500/10 border border-indigo-500/15 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0"
-                    >
-                      <Megaphone className="w-3.5 h-3.5" />
-                    </motion.div>
-                    <h1 className="text-[22px] md:text-[24px] font-semibold tracking-tight text-foreground leading-none">
-                      Broadcast
-                    </h1>
-                  </motion.div>
-                </div>
-
-                {/* Inline campaign name setting pill */}
-                <div className="flex items-center gap-2 border border-border/45 hover:border-border/60 bg-secondary/20 hover:bg-secondary/40 rounded-xl px-3 py-1.5 transition-all duration-150 shrink-0 select-none">
-                  <span className="text-[10px] font-bold text-muted-foreground/60 tracking-wider uppercase shrink-0">Campaign:</span>
-                  <input
-                    value={campaignName}
-                    onChange={e => setCampaignName(e.target.value)}
-                    placeholder="Untitled Campaign…"
-                    className="w-28 sm:w-36 bg-transparent border-none outline-none focus:ring-0 p-0 text-[11px] text-foreground placeholder:text-muted-foreground/45 font-semibold leading-none truncate"
-                  />
-                  <span className="w-[1px] h-3.5 bg-border/40 shrink-0 mx-0.5" />
-                  <AutosaveIndicator status={autosaveStatus} />
-                </div>
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.28, ease: "easeOut" }}
+              className="flex items-center gap-2.5"
+            >
+              <div className="w-7 h-7 rounded-lg bg-indigo-500/10 border border-indigo-500/15 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+                <Megaphone className="w-3.5 h-3.5" />
               </div>
+              <h1 className="text-[20px] font-semibold tracking-tight text-foreground leading-none">
+                Broadcast
+              </h1>
+            </motion.div>
+          </div>
 
-              {/* Section: Template Selection */}
-              <Section id="template">
+          {/* Inline campaign name setting pill */}
+          <div className="flex items-center gap-2 border border-border/45 hover:border-border/60 bg-secondary/20 hover:bg-secondary/40 rounded-xl px-3 py-1.5 transition-all duration-150 shrink-0 select-none">
+            <span className="text-[10px] font-bold text-muted-foreground/60 tracking-wider uppercase shrink-0">Campaign:</span>
+            <input
+              value={campaignName}
+              onChange={e => setCampaignName(e.target.value)}
+              placeholder="Untitled Campaign…"
+              className="w-28 sm:w-36 bg-transparent border-none outline-none focus:ring-0 p-0 text-[11px] text-foreground placeholder:text-muted-foreground/45 font-semibold leading-none truncate"
+            />
+            <span className="w-[1px] h-3.5 bg-border/40 shrink-0 mx-0.5" />
+            <AutosaveIndicator status={saveStatus} onRetry={saveCampaign} />
+          </div>
+        </div>
+      </header>
+
+      {/* MainContentWrapper */}
+      <main className="broadcast-main-content-wrapper">
+        <div className="broadcast-builder-container flex-1 flex flex-col overflow-hidden">
+          <div className="broadcast-main-grid" style={!showPreview ? { gridTemplateColumns: "1fr" } : undefined}>
+          <section className="broadcast-left-column space-y-8">
+            {/* Section: Template Selection */}
+            <div id="section-template" className="space-y-3 text-left">
+              <div className="space-y-1">
+                <h2 className="text-[16px] font-bold text-foreground tracking-tight">Template Selection</h2>
+                <p className="text-[12.5px] text-muted-foreground/80 leading-none">Choose and configure a WhatsApp message template to send.</p>
+              </div>
+              <div className="border border-border/45 bg-card rounded-[24px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)] transition-all duration-200 hover:-translate-y-[0.5px]">
                 <TemplateSelector
                   templates={templates}
                   selectedTemplate={selectedTemplate}
-                  onSelect={selectTemplate}
+                  onSelect={(tpl) => {
+                    selectTemplate(tpl);
+                    if (tpl) {
+                      setTimeout(() => {
+                        const el = variableMappingRef.current || document.getElementById('section-variables');
+                        if (el) {
+                          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          el.classList.add('highlight-ring');
+                          setTimeout(() => el.classList.remove('highlight-ring'), 1500);
+                        }
+                      }, 150);
+                    }
+                  }}
                   loading={templatesLoading}
                 />
-              </Section>
-
-              {/* Section: Variables mapping if required */}
-              {selectedTemplate && detectedVarIndices.length > 0 && (
-                <>
-                  <div className="h-px bg-border/40" />
-                  <Section id="variables">
-                    <VariableMapper
-                      bodyText={selectedTemplate.body ?? ''}
-                      variables={variables}
-                      onChange={setVariables}
-                      previewValues={previewValues}
-                    />
-                  </Section>
-                </>
+              </div>
+              {selectedTemplate && (
+                <div className="template-next-step-banner">
+                  <span>✅ Template selected</span>
+                  <span className="arrow">→</span>
+                  <button
+                    type="button"
+                    onClick={() => variableMappingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                  >
+                    Now configure your variables ↓
+                  </button>
+                </div>
               )}
+            </div>
 
-              <div className="h-px bg-border/40" />
+            {/* Section: Variables mapping if required */}
+            {selectedTemplate && detectedVarIndices.length > 0 && (
+              <div ref={variableMappingRef} id="variable-mapping-section" className="space-y-3 text-left pt-2">
+                <div className="space-y-1">
+                  <h2 className="text-[16px] font-bold text-foreground tracking-tight">Template Variables</h2>
+                  <p className="text-[12.5px] text-muted-foreground/80 leading-none">Map the placeholders in your template to static text or CRM data fields.</p>
+                </div>
+                <div className="border border-border/45 bg-card rounded-[24px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)] transition-all duration-200 hover:-translate-y-[0.5px]">
+                  <VariableMapper
+                    bodyText={selectedTemplate.body ?? ""}
+                    variables={variables}
+                    onChange={setVariables}
+                    previewValues={previewValues}
+                  />
+                </div>
+              </div>
+            )}
 
-              {/* Section: Audience targeting Cohort options */}
-              <Section id="audience" className="space-y-5">
+            {/* Section: Audience targeting Cohort options */}
+            <div id="section-audience" className="space-y-3 text-left pt-2">
+              <div className="space-y-1">
+                <h2 className="text-[16px] font-bold text-foreground tracking-tight">Audience</h2>
+                <p className="text-[12.5px] text-muted-foreground/80 leading-none">Choose who receives this broadcast.</p>
+              </div>
+              <div className="border border-border/45 bg-card rounded-[24px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)] transition-all duration-200 hover:-translate-y-[0.5px]">
                 <AudienceBuilder
                   audience={audience}
                   onChange={updateAudience}
                   estimate={estimate}
                   totalContacts={totalContacts}
-                  completedCampaigns={allCampaigns.filter(c => c.status === 'completed')}
+                  completedCampaigns={allCampaigns.filter(c => c.status === "completed")}
                   availableTags={availableTags}
                   onOpenRecipientsDrawer={() => setDrawerOpen(true)}
                 />
-                
+              </div>
+              <div className="pt-2">
                 <RecipientPreviewPanel
                   recipients={recipientsData.recipients}
                   totalRecipients={recipientsData.totalRecipients}
@@ -543,31 +614,43 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                   onOpenDrawer={() => setDrawerOpen(true)}
                   isLoading={recipientsLoading}
                 />
-              </Section>
+              </div>
+            </div>
 
-              <div className="h-px bg-border/40" />
-
-              {/* Section: Advanced Delivery and compliance limits */}
-              <Section id="delivery">
+            {/* Section: Advanced Delivery and compliance limits */}
+            <div id="section-delivery" className="space-y-3 text-left pt-2">
+              <div className="space-y-1">
+                <h2 className="text-[16px] font-bold text-foreground tracking-tight">Delivery</h2>
+                <p className="text-[12.5px] text-muted-foreground/80 leading-none">Control timing and sending behavior.</p>
+              </div>
+              <div className="border border-border/45 bg-card rounded-[24px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)] transition-all duration-200 hover:-translate-y-[0.5px]">
                 <DeliverySettings
                   config={delivery}
                   onChange={updateDelivery}
                   estimatedDuration={estimatedDuration}
                   audienceCount={estimate.total}
                 />
-              </Section>
+              </div>
+            </div>
 
-              <div className="h-px bg-border/40" />
-
-              {/* Section: Automation and conversational rules */}
-              <Section id="automation">
+            {/* Section: Automation and conversational rules */}
+            <div id="section-automation" className="space-y-3 text-left pt-2">
+              <div className="space-y-1">
+                <h2 className="text-[16px] font-bold text-foreground tracking-tight">Automation</h2>
+                <p className="text-[12.5px] text-muted-foreground/80 leading-none">Define conversational follow-up rules for responses.</p>
+              </div>
+              <div className="border border-border/45 bg-card rounded-[24px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)] transition-all duration-200 hover:-translate-y-[0.5px]">
                 <AutomationRules rules={automationRules} onChange={setAutomationRules} />
-              </Section>
+              </div>
+            </div>
 
-              <div className="h-px bg-border/40" />
-
-              {/* Section: Stripe style Launch Check Timeline */}
-              <Section id="review">
+            {/* Section: Stripe style Launch Check Timeline */}
+            <div id="section-review" className="space-y-3 text-left pt-2">
+              <div className="space-y-1">
+                <h2 className="text-[16px] font-bold text-foreground tracking-tight">Review</h2>
+                <p className="text-[12.5px] text-muted-foreground/80 leading-none">Verify campaign readiness before launch.</p>
+              </div>
+              <div className="border border-border/45 bg-card rounded-[24px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)] transition-all duration-200 hover:-translate-y-[0.5px]">
                 <CampaignReview
                   campaignName={campaignName}
                   templateName={selectedTemplate?.name ?? null}
@@ -579,7 +662,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                   onSaveDraft={handleSaveDraft}
                   onLaunch={handleLaunch}
                   onTestSend={handleTestSend}
-                  onDuplicate={() => toast('Duplicate functionality coming soon')}
+                  onDuplicate={() => toast("Duplicate functionality coming soon")}
                   isSaving={isSaving}
                   isLaunching={isLaunching}
                   validationChecks={validationChecks}
@@ -587,212 +670,159 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                   variables={variables}
                   detectedVarIndices={detectedVarIndices}
                 />
-              </Section>
-
-              <div className="h-4" />
+              </div>
             </div>
+          </section>
+
+          {showPreview && (
+            <aside className="broadcast-preview-column">
+              <div className="preview-panel">
+                <div className="preview-panel-header">
+                  <p className="preview-label">PREVIEW PANEL</p>
+                  <h3 className="preview-title">Live Preview</h3>
+                </div>
+
+                <div className="preview-phone-container">
+                  <WhatsAppPreview
+                    template={selectedTemplate}
+                    variableMapping={previewValues}
+                    previewProfile={previewRecipient}
+                    onProfileChange={setPreviewRecipient as any}
+                  />
+                </div>
+              </div>
+            </aside>
+          )}
+        </div>
+      </div>
+    </main>
+
+      {/* ActionFooter */}
+      <footer className="broadcast-action-footer">
+        <div className="broadcast-footer-grid">
+          {/* LEFT: recipient summary */}
+          <div className="min-w-0 flex flex-col justify-center text-left">
+            {estimate.total > 0 ? (
+              <div className="flex items-center gap-2.5">
+                <div className="w-8.5 h-8.5 rounded-full bg-indigo-500/10 dark:bg-indigo-950/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+                  <Users className="w-4 h-4" />
+                </div>
+                <div className="flex flex-col text-left min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setDrawerOpen(true)}
+                    className="text-[13px] font-bold text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-all leading-none text-left whitespace-nowrap"
+                  >
+                    {estimate.total.toLocaleString()} targets ready
+                  </button>
+                  <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1.5 font-medium flex items-center gap-1 leading-none select-none whitespace-nowrap">
+                    {delivery.mode === "scheduled" ? (
+                      <>
+                        <Clock className="w-3 h-3 shrink-0" />
+                        <span>Scheduled delivery</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3 h-3 shrink-0" />
+                        <span>Immediate delivery</span>
+                      </>
+                    )}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2.5">
+                <div className="w-8.5 h-8.5 rounded-full border border-dashed border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 flex items-center justify-center text-zinc-400 shrink-0">
+                  <Users className="w-4 h-4" />
+                </div>
+                <div className="text-left">
+                  <p className="text-[13px] font-bold text-zinc-400 leading-none">No targets selected</p>
+                  <p className="text-[11px] text-zinc-400/80 mt-1 leading-none">Select recipients above</p>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* DOCKED BOTTOM ACTIONS BAR */}
-          <motion.div
-            initial={{ y: 60, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ type: 'spring', damping: 26, stiffness: 220, delay: 0.15 }}
-            className="absolute bottom-6 left-4 right-4 sm:left-6 sm:right-6 lg:left-8 lg:right-8 z-20 max-w-2xl mx-auto border border-zinc-200/60 dark:border-zinc-800/80 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-xl p-5 sm:p-6 shadow-[0_12px_40px_rgba(0,0,0,0.08)] rounded-3xl select-none"
-          >
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
-              
-              {/* Left Side: Recipient Summary & Overlapping Avatars Stack */}
-              <div className="flex items-center gap-3.5 min-w-0 justify-between lg:justify-start">
-                {estimate.total > 0 ? (
-                  <div className="flex items-center gap-3 min-w-0">
-                    {/* Overlapping Avatars */}
-                    <div className="flex -space-x-2.5 overflow-hidden shrink-0 select-none">
-                      {recipientsData.recipients
-                        .filter(r => r.status === 'eligible')
-                        .slice(0, 3)
-                        .map((r, idx) => {
-                          const initials = (r.name || 'T')
-                            .split(' ')
-                            .map(n => n[0])
-                            .join('')
-                            .slice(0, 2)
-                            .toUpperCase();
-                          const gradColors = [
-                            'from-violet-500 to-indigo-600',
-                            'from-purple-500 to-pink-500',
-                            'from-sky-400 to-indigo-600',
-                          ];
-                          const grad = gradColors[idx % gradColors.length];
-                          return (
-                            <motion.div
-                              key={idx}
-                              whileHover={{ y: -3, scale: 1.05, zIndex: 10 }}
-                              transition={{ type: 'spring', stiffness: 400, damping: 15 }}
-                              className={`relative group/avatar cursor-pointer w-11 h-11 rounded-full border-2 border-white dark:border-zinc-900 shadow-sm flex items-center justify-center text-[11.5px] font-extrabold text-white bg-gradient-to-br ${grad} ring-1 ring-black/5 shrink-0 ${idx > 0 ? '-ml-2.5' : ''}`}
-                              onClick={() => setDrawerOpen(true)}
-                            >
-                              {initials}
-                              
-                              {/* Hover Tooltip Card */}
-                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3.5 hidden group-hover/avatar:block z-30 bg-zinc-950 text-white text-[11px] rounded-lg px-2.5 py-1.5 shadow-lg border border-zinc-800 whitespace-nowrap text-center">
-                                <p className="font-bold leading-tight">{r.name || 'Anonymous'}</p>
-                                <p className="text-zinc-400 text-[10px] mt-0.5 leading-none">{r.phone_number}</p>
-                                {r.source_label && (
-                                  <p className="text-[9px] text-indigo-400 font-semibold mt-1 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-900/60 leading-none inline-block">
-                                    {r.source_label}
-                                  </p>
-                                )}
-                                <div className="absolute top-full left-1/2 -translate-x-1/2 w-2 h-2 bg-zinc-950 rotate-45 border-r border-b border-zinc-800 -mt-1" />
-                              </div>
-                            </motion.div>
-                          );
-                        })}
-                    </div>
-
-                    <div className="flex flex-col text-left min-w-0">
-                      <button
-                        type="button"
-                        onClick={() => setDrawerOpen(true)}
-                        className="text-[14px] font-bold text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-all flex items-center gap-1.5 leading-tight text-left whitespace-nowrap"
-                      >
-                        {estimate.total.toLocaleString()} targets ready
-                      </button>
-                      <span className="text-[12px] text-zinc-500 mt-0.5 font-medium leading-none select-none whitespace-nowrap">
-                        {delivery.mode === 'scheduled' ? 'Ready for scheduled delivery' : 'Ready for direct dispatch'}
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-3 select-none">
-                    <div className="w-11 h-11 rounded-full border border-dashed border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 flex items-center justify-center text-zinc-400 shrink-0">
-                      <Users className="w-4.5 h-4.5" />
-                    </div>
-                    <div className="text-left">
-                      <p className="text-[13.5px] font-bold text-zinc-400 leading-tight">No targets selected</p>
-                      <p className="text-[12px] text-zinc-400/80 mt-0.5 leading-none">Select recipients above</p>
-                    </div>
-                  </div>
-                )}
+          {/* CENTER: validation */}
+          <div className="w-full flex justify-center shrink-0">
+            {canLaunch ? (
+              <div className="flex items-center justify-center gap-1.5 bg-emerald-500/10 dark:bg-emerald-500/5 border border-emerald-500/20 rounded-full px-3 h-9 max-w-[240px]">
+                <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 truncate">
+                  Launch Ready
+                </span>
               </div>
-
-              {/* Center Column: Campaign Status & Validation info */}
-              <div className="flex items-center justify-between lg:justify-start gap-4 py-2.5 lg:py-0 border-t border-b lg:border-none border-zinc-100 dark:border-zinc-800/80 shrink-0">
-                {canLaunch ? (
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20">
-                      <Check className="w-3 h-3 text-emerald-500" />
-                      <span>Ready to launch</span>
-                    </div>
-                    <div className="h-5 w-[1px] bg-zinc-200 dark:bg-zinc-800 hidden md:block" />
-                    <div className="text-left hidden md:block">
-                      <p className="text-[11px] text-zinc-500 font-bold leading-tight">Pre-flight checks passed</p>
-                      <p className="text-[10px] text-zinc-400 leading-tight">Everything validated successfully</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-wide bg-amber-50 text-amber-700 border border-amber-200/80 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20 animate-pulse">
-                      <AlertTriangle className="w-3 h-3 text-amber-500" />
-                      <span>Validation required</span>
-                    </div>
-                    <div className="h-5 w-[1px] bg-zinc-200 dark:bg-zinc-800 hidden md:block" />
-                    <div className="text-left hidden md:block max-w-[180px]">
-                      <p className="text-[11px] text-amber-600 font-bold leading-tight">Action needed</p>
-                      <p className="text-[10px] text-zinc-400 leading-tight truncate">
-                        {validationChecks.find(c => c.status === 'fail')?.message || 'Resolve items before launch'}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Premium vertical divider */}
-                <div className="w-[1px] h-7 bg-zinc-200 dark:bg-zinc-800 shrink-0" />
-
-                {/* Timing Status Info block */}
-                <div className="flex items-center gap-2.5 text-left">
-                  <div className="w-9.5 h-9.5 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200/50 dark:border-zinc-800/80 flex items-center justify-center text-zinc-500 dark:text-zinc-400 shrink-0">
-                    {delivery.mode === 'scheduled' ? <Clock className="w-4.5 h-4.5" /> : <Send className="w-4.5 h-4.5" />}
-                  </div>
-                  <div className="hidden sm:block">
-                    <p className="text-[12px] font-bold text-zinc-800 dark:text-zinc-200 leading-tight">
-                      {delivery.mode === 'scheduled' ? 'Scheduled dispatch' : 'Immediate dispatch'}
-                    </p>
-                    <p className="text-[10px] text-zinc-500 leading-tight mt-0.5">
-                      {delivery.mode === 'scheduled' && delivery.scheduledAt
-                        ? new Date(delivery.scheduledAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                        : 'Sends instantly on launch'}
-                    </p>
-                  </div>
-                </div>
+            ) : unmappedVariableCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  variableMappingRef.current?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center',
+                  });
+                  // Trigger a 1.5s highlight ring pulse
+                  variableMappingRef.current?.classList.add('highlight-ring');
+                  setTimeout(() => {
+                    variableMappingRef.current?.classList.remove('highlight-ring');
+                  }, 1500);
+                }}
+                className="variable-warning-chip flex items-center justify-center gap-1.5 bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 hover:border-amber-500/40 rounded-full px-3 h-9 max-w-[240px] text-amber-700 dark:text-amber-400 transition-all font-bold text-[11px] truncate"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0 animate-pulse" />
+                <span>⚠ Variable mapping incomplete — click to fix</span>
+              </button>
+            ) : (
+              <div className="flex items-center justify-center gap-1.5 bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 rounded-full px-3 h-9 max-w-[240px]">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0 animate-pulse" />
+                <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 truncate">
+                  {getValidationText()}
+                </span>
               </div>
+            )}
+          </div>
 
-              {/* Right Side: Quick Action buttons */}
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full lg:w-auto shrink-0 justify-end">
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <button
-                    onClick={handleSaveDraft}
-                    disabled={isSaving}
-                    className="flex-1 sm:flex-none h-11 px-4 text-[12.5px] font-bold border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600 dark:text-zinc-300 bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-900 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-all duration-[120ms] ease-out disabled:opacity-40 flex items-center justify-center gap-1.5"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Save</span>
-                  </button>
-                  <button
-                    onClick={handleTestSend}
-                    disabled={!selectedTemplate}
-                    className="flex-1 sm:flex-none h-11 px-4 text-[12.5px] font-bold border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600 dark:text-zinc-300 bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-900 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-all duration-[120ms] ease-out disabled:opacity-40 flex items-center justify-center gap-1.5"
-                  >
-                    <FlaskConical className="w-3.5 h-3.5" />
-                    <span>Test</span>
-                  </button>
-                </div>
-                <motion.button
-                  onClick={handleLaunch}
-                  disabled={isLaunching}
-                  whileHover={canLaunch ? { scale: 1.02, y: -1 } : undefined}
-                  whileTap={canLaunch ? { scale: 0.98 } : undefined}
-                  className={`w-full sm:w-auto h-12 px-7 text-[13.5px] font-extrabold rounded-2xl transition-all duration-[120ms] ease-out flex items-center justify-center gap-2 select-none shrink-0 ${
-                    !canLaunch
-                      ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 border border-zinc-200/50 dark:border-zinc-800/80 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 shadow-[0_4px_18px_rgba(99,102,241,0.25)] hover:shadow-[0_4px_22px_rgba(99,102,241,0.4)] text-white border border-indigo-500/10'
-                  }`}
-                >
-                  {isLaunching ? (
-                    <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Launching…</>
-                  ) : (
-                    <><Send className="w-3.5 h-3.5" /> {delivery.mode === 'scheduled' ? 'Schedule' : 'Launch'}</>
-                  )}
-                </motion.button>
-              </div>
-
-            </div>
-          </motion.div>
-        </div>
-
-        {/* ── RIGHT: Live WhatsApp Device Showcase (39% hero showcase) ───────── */}
-        <AnimatePresence>
-          {showPreview && (
-            <motion.aside
-              initial={{ opacity: 0, x: 24 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 24 }}
-              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-              className="hidden lg:flex w-[39%] shrink-0 bg-[#f6f7f9] dark:bg-secondary/10 flex-col overflow-hidden shadow-[-1px_0_0_rgba(148,163,184,0.02)]"
+          {/* RIGHT: actions */}
+          <div className="broadcast-actions-group">
+            {/* Save Draft */}
+            <button
+              type="button"
+              onClick={handleSaveDraft}
+              disabled={isSaving}
+              className="save-draft-btn button-nowrap h-10 px-3.5 text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/40 rounded-xl transition-all duration-150 flex items-center justify-center gap-1.5"
             >
-              {/* Centered device box with no vertical scrolling */}
-              <div className="flex-grow overflow-hidden px-6 xl:px-8 py-8 flex flex-col items-center justify-center">
-                <WhatsAppPreview
-                  template={selectedTemplate}
-                  variableMapping={previewValues}
-                  previewProfile={previewRecipient}
-                  onProfileChange={setPreviewRecipient as any}
-                />
-              </div>
-            </motion.aside>
-          )}
-        </AnimatePresence>
-      </div>
+              {isSaving ? <Spinner size="sm" /> : <Save className="w-4 h-4" />}
+              Save Draft
+            </button>
+
+            {/* Test Campaign */}
+            <button
+              type="button"
+              onClick={handleTestSend}
+              disabled={isTesting}
+              className="test-campaign-btn button-nowrap h-10 px-3.5 text-[12.5px] font-semibold border border-border bg-background hover:bg-secondary/35 rounded-xl text-foreground transition-all duration-150 flex items-center justify-center gap-1.5"
+            >
+              {isTesting ? <Spinner size="sm" /> : <FlaskConical className="w-4 h-4" />}
+              Test Campaign
+            </button>
+
+            {/* Launch — hard-disabled until all validations pass */}
+            <button
+              type="button"
+              onClick={handleLaunch}
+              disabled={!canLaunch}
+              title={!canLaunch ? getMissingValidationMessage() : undefined}
+              className={`launch-btn button-nowrap h-10 px-5 text-[12.5px] font-bold tracking-wide rounded-xl transition-all duration-150 flex items-center justify-center gap-1.5 select-none ${
+                !canLaunch
+                  ? "bg-zinc-150 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-650 border border-zinc-200/50 dark:border-zinc-800/85 cursor-not-allowed opacity-40"
+                  : "bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 shadow-[0_4px_16px_rgba(99,102,241,0.22)] hover:shadow-[0_4px_20px_rgba(99,102,241,0.35)] text-white border border-indigo-500/10"
+              }`}
+            >
+              <Send className="w-3 h-3" />
+              {delivery.mode === "scheduled" ? "Schedule" : "Launch"}
+            </button>
+          </div>
+        </div>
+      </footer>
 
       {/* Recipient sliding panel list */}
       <RecipientDrawer
@@ -807,7 +837,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
         isOpen={safetyModalOpen}
         onClose={() => setSafetyModalOpen(false)}
         onConfirm={confirmLaunch}
-        templateName={selectedTemplate?.name || 'No Template Selected'}
+        templateName={selectedTemplate?.name || "No Template Selected"}
         recipients={recipientsData.recipients}
         deliveryMode={delivery.mode}
         scheduledAt={delivery.scheduledAt}

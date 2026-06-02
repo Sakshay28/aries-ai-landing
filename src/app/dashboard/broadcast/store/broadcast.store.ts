@@ -17,7 +17,7 @@ interface BroadcastState {
   audience: AudienceState;
   delivery: DeliveryConfig;
   automationRules: AutomationRule[];
-  autosaveStatus: 'idle' | 'saving' | 'saved' | 'error';
+  saveStatus: 'idle' | 'saving' | 'saved' | 'failed';
   previewRecipient: 'Sakshay' | 'John' | 'Priya';
   isLoading: boolean;
 
@@ -32,12 +32,12 @@ interface BroadcastState {
   setAutomationRules: (rules: AutomationRule[]) => void;
   updateAutomationRule: (id: string, rule: Partial<AutomationRule>) => void;
   setPreviewRecipient: (recipient: 'Sakshay' | 'John' | 'Priya') => void;
-  setAutosaveStatus: (status: 'idle' | 'saving' | 'saved' | 'error') => void;
+  setSaveStatus: (status: 'idle' | 'saving' | 'saved' | 'failed') => void;
   
   // Actions
   resetBuilder: () => void;
   loadCampaign: (campaignId: string) => Promise<void>;
-  saveCampaign: (supabase: any, tenantId: string, statusOverride?: string) => Promise<string | null>;
+  saveCampaign: () => Promise<string | null>;
 }
 
 const DEFAULT_AUDIENCE: AudienceState = {
@@ -47,6 +47,8 @@ const DEFAULT_AUDIENCE: AudienceState = {
   retargetCampaignId: null,
   retargetCondition: 'unread',
   retargetDelayDays: 1,
+  manualContactIds: [],
+  excludedContactIds: [],
 };
 
 const DEFAULT_DELIVERY: DeliveryConfig = {
@@ -73,7 +75,7 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
   audience: DEFAULT_AUDIENCE,
   delivery: DEFAULT_DELIVERY,
   automationRules: DEFAULT_AUTOMATION_RULES,
-  autosaveStatus: 'idle',
+  saveStatus: 'idle',
   previewRecipient: 'Sakshay',
   isLoading: false,
 
@@ -101,7 +103,7 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
     automationRules: state.automationRules.map((r) => r.id === id ? { ...r, ...ruleUpdate } : r)
   })),
   setPreviewRecipient: (recipient) => set({ previewRecipient: recipient }),
-  setAutosaveStatus: (status) => set({ autosaveStatus: status }),
+  setSaveStatus: (status) => set({ saveStatus: status }),
 
   resetBuilder: () => set({
     campaignId: null,
@@ -111,7 +113,7 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
     audience: DEFAULT_AUDIENCE,
     delivery: DEFAULT_DELIVERY,
     automationRules: DEFAULT_AUTOMATION_RULES,
-    autosaveStatus: 'idle',
+    saveStatus: 'idle',
     previewRecipient: 'Sakshay',
     isLoading: false,
   }),
@@ -176,7 +178,7 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
         .eq('campaign_id', id)
         .maybeSingle();
 
-      const audienceState: AudienceState & { manualContactIds?: string[], csvFile?: any } = rawAudience ? {
+      const audienceState: AudienceState & { manualContactIds?: string[], excludedContactIds?: string[], csvFile?: any } = rawAudience ? {
         type: rawAudience.audience_type as any,
         tags: rawAudience.tag_ids || [],
         customFilters: (rawAudience.filters as any)?.customFilters || [],
@@ -184,6 +186,7 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
         retargetCondition: (rawAudience.filters as any)?.retargetCondition || 'unread',
         retargetDelayDays: (rawAudience.filters as any)?.retargetDelayDays || 1,
         manualContactIds: (rawAudience.filters as any)?.manualContactIds || [],
+        excludedContactIds: (rawAudience.filters as any)?.excludedContactIds || [],
         csvFile: (rawAudience.filters as any)?.csvFile || null,
       } : DEFAULT_AUDIENCE;
 
@@ -239,7 +242,7 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
     }
   },
 
-  saveCampaign: async (supabase, tenantId, statusOverride) => {
+  saveCampaign: async () => {
     const { 
       campaignId, 
       campaignName, 
@@ -252,140 +255,50 @@ export const useBroadcastStore = create<BroadcastState>((set, get) => ({
 
     if (!campaignName.trim()) return null;
 
+    set({ saveStatus: 'saving' });
+
     try {
-      // Determine campaign status
-      let dbStatus = 'draft';
-      if (statusOverride) {
-        dbStatus = statusOverride;
-      } else if (delivery.mode === 'scheduled' && delivery.scheduledAt) {
-        dbStatus = 'scheduled';
+      const response = await fetch('/api/broadcast/campaign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignId,
+          campaignName,
+          templateName: selectedTemplate?.name || '',
+          templateCategory: selectedTemplate?.category || 'MARKETING',
+          deliveryMode: delivery.mode,
+          scheduledAt: delivery.scheduledAt
+            ? new Date(delivery.scheduledAt).toISOString()
+            : null,
+          audience,
+          delivery,
+          variables,
+          automationRules,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP ${response.status}`);
       }
 
-      const campaignPayload = {
-        tenant_id: tenantId,
-        name: campaignName,
-        template_name: selectedTemplate?.name || '',
-        template_category: selectedTemplate?.category || 'MARKETING',
-        delivery_mode: delivery.mode,
-        scheduled_for: delivery.scheduledAt ? new Date(delivery.scheduledAt).toISOString() : null,
-        status: dbStatus,
-        updated_at: new Date().toISOString()
-      };
+      const data = await response.json();
+      set({ 
+        campaignId: data.campaignId,
+        saveStatus: 'saved' 
+      });
 
-      let activeId = campaignId;
-
-      // 1. Insert or Update core campaign
-      if (activeId) {
-        const { error } = await supabase
-          .from('broadcast_campaigns')
-          .update(campaignPayload)
-          .eq('id', activeId);
-        if (error) throw error;
-      } else {
-        const { data, error } = await supabase
-          .from('broadcast_campaigns')
-          .insert({
-            ...campaignPayload,
-            created_at: new Date().toISOString()
-          })
-          .select('id')
-          .single();
-        if (error) throw error;
-        activeId = data.id;
-        set({ campaignId: activeId });
-      }
-
-      if (!activeId) return null;
-
-      // 2. Save variables mapping in transaction/batch
-      // First delete existing variables for this campaign to avoid conflicts
-      await supabase
-        .from('broadcast_variable_mapping')
-        .delete()
-        .eq('campaign_id', activeId);
-
-      const variablesPayload = Object.values(variables).map(v => ({
-        tenant_id: tenantId,
-        campaign_id: activeId,
-        variable_key: v.index,
-        source_type: v.sourceType,
-        crm_field: v.crmField || null,
-        custom_value: v.staticValue || null
-      }));
-
-      if (variablesPayload.length > 0) {
-        const { error: varErr } = await supabase
-          .from('broadcast_variable_mapping')
-          .insert(variablesPayload);
-        if (varErr) throw varErr;
-      }
-
-      // 3. Save audience targeting option
-      const audiencePayload = {
-        tenant_id: tenantId,
-        campaign_id: activeId,
-        audience_type: audience.type,
-        contact_count: 0, // Calculated dynamically by background job
-        tag_ids: audience.tags,
-        csv_upload_id: audience.type === 'csv' || audience.type === 'retarget' ? audience.retargetCampaignId : null,
-        filters: {
-          customFilters: audience.customFilters,
-          retargetCondition: audience.retargetCondition,
-          retargetDelayDays: audience.retargetDelayDays,
-          manualContactIds: (audience as any).manualContactIds || [],
-          csvFile: (audience as any).csvFile || null,
+      // Auto-reset to idle after 2.5 seconds
+      setTimeout(() => {
+        if (get().saveStatus === 'saved') {
+          set({ saveStatus: 'idle' });
         }
-      };
+      }, 2500);
 
-      const { error: audErr } = await supabase
-        .from('broadcast_audiences')
-        .upsert(audiencePayload, { onConflict: 'campaign_id' });
-      if (audErr) throw audErr;
-
-      // 4. Save detailed delivery and compliance settings
-      const deliveryPayload = {
-        tenant_id: tenantId,
-        campaign_id: activeId,
-        send_mode: delivery.mode,
-        throttle_per_minute: delivery.throttleRate,
-        quiet_hours: delivery.quietHoursEnabled,
-        business_hours: false,
-        timezone: delivery.timezone,
-        retry_failed: true,
-        pause_on_failure: true
-      };
-
-      const { error: delErr } = await supabase
-        .from('broadcast_delivery_settings')
-        .upsert(deliveryPayload, { onConflict: 'campaign_id' });
-      if (delErr) throw delErr;
-
-      // 5. Save automation follow-up rules
-      await supabase
-        .from('broadcast_automation_rules')
-        .delete()
-        .eq('campaign_id', activeId);
-
-      const automationRulesPayload = automationRules.map(r => ({
-        tenant_id: tenantId,
-        campaign_id: activeId,
-        trigger_type: r.trigger,
-        action_type: r.action,
-        delay_minutes: r.delay || 0,
-        enabled: r.enabled
-      }));
-
-      if (automationRulesPayload.length > 0) {
-        const { error: autoErr } = await supabase
-          .from('broadcast_automation_rules')
-          .insert(automationRulesPayload);
-        if (autoErr) throw autoErr;
-      }
-
-      return activeId;
-
-    } catch (e) {
-      console.error('Failed to save campaign:', e);
+      return data.campaignId;
+    } catch (err) {
+      console.error('[saveCampaign] Failed:', err);
+      set({ saveStatus: 'failed' });
       return null;
     }
   }

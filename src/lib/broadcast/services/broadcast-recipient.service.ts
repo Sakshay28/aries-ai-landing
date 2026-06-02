@@ -135,9 +135,32 @@ export class BroadcastRecipientService {
         sourceLabel = 'CSV Upload';
       }
 
+      // Fetch manual overrides if they exist
+      let manualLeads: any[] = [];
+      const manualIds = audience.manualContactIds || [];
+      if (manualIds.length > 0) {
+        const { data } = await supabaseAdmin
+          .from('leads')
+          .select('id, name, phone, tags, email, last_message_at')
+          .eq('tenant_id', tenantId)
+          .in('id', manualIds)
+          .not('phone', 'is', null);
+        manualLeads = data || [];
+      }
+
+      // Merge targeted contacts and manual additions
+      const targetedIds = new Set(rawContacts.map(c => c.id));
+      const manualAdditions = manualLeads.filter(c => !targetedIds.has(c.id));
+      
+      const mergedContacts = [
+        ...rawContacts.map(c => ({ ...c, isManualAddition: false })),
+        ...manualAdditions.map(c => ({ ...c, isManualAddition: true }))
+      ];
+
       // 2. Perform deduplication, compliance filters, and phone validations
       const seenPhones = new Set<string>();
       const seenContactIds = new Set<string>();
+      const excludedIds = new Set((audience as any).excludedContactIds || []);
 
       const finalRecords: RecipientRecord[] = [];
       let totalRecipients = 0;
@@ -146,12 +169,35 @@ export class BroadcastRecipientService {
       let invalidNumbers = 0;
       let normalizationCount = 0;
 
-      for (const lead of rawContacts) {
+      for (const lead of mergedContacts) {
         const leadId = lead.id;
         const leadPhone = lead.phone;
         const leadName = lead.name || 'there';
         const leadEmail = lead.email || null;
         const lastMsgAt = lead.last_message_at || null;
+        const isManualAddition = (lead as any).isManualAddition || false;
+
+        const recordSourceLabel = isManualAddition ? 'Manual Override' : sourceLabel;
+        const recordSourceType = isManualAddition ? 'manual' : audience.type;
+
+        // Check manual exclusions first
+        if (excludedIds.has(leadId)) {
+          excluded++;
+          finalRecords.push({
+            campaign_id: campaignId,
+            tenant_id: tenantId,
+            contact_id: leadId.startsWith('csv-') ? null : leadId,
+            phone_number: leadPhone || '',
+            name: leadName,
+            email: leadEmail,
+            source_type: recordSourceType,
+            source_label: recordSourceLabel,
+            status: 'excluded',
+            last_interaction_at: lastMsgAt,
+            normalized_number: leadPhone ? cleanPhone(leadPhone) : null,
+          });
+          continue;
+        }
 
         // A. Phone number validity check
         if (!leadPhone) {
@@ -163,8 +209,8 @@ export class BroadcastRecipientService {
             phone_number: '',
             name: leadName,
             email: leadEmail,
-            source_type: audience.type,
-            source_label: sourceLabel,
+            source_type: recordSourceType,
+            source_label: recordSourceLabel,
             status: 'invalid',
             last_interaction_at: lastMsgAt,
             normalized_number: null,
@@ -182,8 +228,8 @@ export class BroadcastRecipientService {
             phone_number: leadPhone,
             name: leadName,
             email: leadEmail,
-            source_type: audience.type,
-            source_label: sourceLabel,
+            source_type: recordSourceType,
+            source_label: recordSourceLabel,
             status: 'invalid',
             last_interaction_at: lastMsgAt,
             normalized_number: null,
@@ -213,8 +259,8 @@ export class BroadcastRecipientService {
             phone_number: phoneCleaned,
             name: leadName,
             email: leadEmail,
-            source_type: audience.type,
-            source_label: sourceLabel,
+            source_type: recordSourceType,
+            source_label: recordSourceLabel,
             status: 'opted_out',
             last_interaction_at: lastMsgAt,
             normalized_number: phoneCleaned,
@@ -232,8 +278,8 @@ export class BroadcastRecipientService {
             phone_number: phoneCleaned,
             name: leadName,
             email: leadEmail,
-            source_type: audience.type,
-            source_label: sourceLabel,
+            source_type: recordSourceType,
+            source_label: recordSourceLabel,
             status: 'duplicate_removed',
             last_interaction_at: lastMsgAt,
             normalized_number: phoneCleaned,
@@ -253,8 +299,8 @@ export class BroadcastRecipientService {
           phone_number: phoneCleaned,
           name: leadName,
           email: leadEmail,
-          source_type: audience.type,
-          source_label: sourceLabel,
+          source_type: recordSourceType,
+          source_label: recordSourceLabel,
           status: 'eligible',
           last_interaction_at: lastMsgAt,
           normalized_number: phoneCleaned,
@@ -342,6 +388,7 @@ export class BroadcastRecipientService {
           retargetCondition: campaignAudience.filters?.retargetCondition || 'unread',
           retargetDelayDays: campaignAudience.filters?.retargetDelayDays || 1,
           manualContactIds: campaignAudience.filters?.manualContactIds || [],
+          excludedContactIds: campaignAudience.filters?.excludedContactIds || [],
           csvFile: campaignAudience.filters?.csvFile || null
         };
 
@@ -351,7 +398,7 @@ export class BroadcastRecipientService {
       // Convert cached rows back into result format
       const recipients = data as RecipientRecord[];
       const totalRecipients = recipients.filter(r => r.status === 'eligible').length;
-      const excluded = recipients.filter(r => r.status === 'opted_out').length;
+      const excluded = recipients.filter(r => r.status === 'opted_out' || r.status === 'excluded').length;
       const duplicatesRemoved = recipients.filter(r => r.status === 'duplicate_removed').length;
       const invalidNumbers = recipients.filter(r => r.status === 'invalid').length;
       const normalizationCount = recipients.filter(r => r.status === 'eligible' && r.phone_number !== r.normalized_number).length;
