@@ -6,7 +6,6 @@ import { X, Search, Check, FileText, RotateCcw, AlertTriangle, Users } from 'luc
 // @ts-ignore
 import { FixedSizeList as List } from 'react-window';
 import { RecipientRecord } from '@/lib/broadcast/services/broadcast-recipient.service';
-import { useBroadcastStore } from '../store/broadcast.store';
 import toast from 'react-hot-toast';
 
 interface RecipientDrawerProps {
@@ -14,13 +13,30 @@ interface RecipientDrawerProps {
   onClose: () => void;
   recipients: RecipientRecord[];
   totalRecipients: number;
+  manualContactIds?: string[];
+  excludedContactIds?: string[];
+  onAudienceChange?: (patch: { manualContactIds: string[]; excludedContactIds: string[] }) => void;
 }
 
 type FilterStatus = 'all' | 'selected' | 'excluded' | 'compliance';
 
-export function RecipientDrawer({ isOpen, onClose, recipients, totalRecipients }: RecipientDrawerProps) {
-  const audience = useBroadcastStore(state => state.audience);
-  const updateAudience = useBroadcastStore(state => state.updateAudience);
+export function RecipientDrawer({
+  isOpen,
+  onClose,
+  recipients,
+  totalRecipients,
+  manualContactIds = [],
+  excludedContactIds = [],
+  onAudienceChange,
+}: RecipientDrawerProps) {
+  // Use passed props instead of global store
+  const audience = { manualContactIds, excludedContactIds };
+  const updateAudience = (patch: { manualContactIds?: string[]; excludedContactIds?: string[] }) => {
+    onAudienceChange?.({
+      manualContactIds:  patch.manualContactIds  ?? manualContactIds,
+      excludedContactIds: patch.excludedContactIds ?? excludedContactIds,
+    });
+  };
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<FilterStatus>('all');

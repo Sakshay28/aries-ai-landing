@@ -37,41 +37,44 @@ export async function GET(
       return error ? 0 : (count || 0);
     };
 
-    const [pending, processing, retrying, sent, delivered, read, failed] = await Promise.all([
+    const [pending, processing, retrying, queueSent, queueFailed, delivered, read] = await Promise.all([
       getCount('broadcast_queue', 'pending'),
       getCount('broadcast_queue', 'processing'),
       getCount('broadcast_queue', 'retrying'),
-      getCount('broadcast_deliveries', 'sent'),
+      // Sent = queue items that reached Meta (authoritative before delivery receipts arrive)
+      getCount('broadcast_queue', 'sent'),
+      getCount('broadcast_queue', 'failed'),
+      // Delivered / read come from Meta webhook events via broadcast_deliveries
       getCount('broadcast_deliveries', 'delivered'),
       getCount('broadcast_deliveries', 'read'),
-      getCount('broadcast_deliveries', 'failed'),
     ]);
 
-    const totalRecipients = campaign.audience_count || campaign.recipient_count || 0;
+    const totalRecipients = campaign.total_recipients || campaign.audience_count || campaign.recipient_count || 0;
     const queued = processing + retrying;
 
-    // Calculate delivery and read rates based on total enqueued/sent
-    const deliveryRate = totalRecipients > 0
-      ? Math.round((delivered / totalRecipients) * 100)
-      : 0;
+    // Merge campaign counter values (updated by increment_campaign_counter) for accuracy
+    const sent     = Math.max(queueSent,   campaign.sent_count      || 0);
+    const failed   = Math.max(queueFailed, campaign.failed_count    || 0);
+    const deliv    = Math.max(delivered,   campaign.delivered_count || 0);
+    const readCnt  = Math.max(read,        campaign.read_count      || 0);
 
-    const readRate = totalRecipients > 0
-      ? Math.round((read / totalRecipients) * 100)
-      : 0;
+    const deliveryRate = sent > 0 ? Math.round((deliv   / sent) * 100) : 0;
+    const readRate     = sent > 0 ? Math.round((readCnt / sent) * 100) : 0;
 
     return NextResponse.json({
       success: true,
-      campaignId: campaign.id,
-      status: campaign.status,
+      campaignId:     campaign.id,
+      campaignName:   campaign.name,
+      status:         campaign.status,
       totalRecipients,
       pending,
       queued,
       sent,
-      delivered,
-      read,
+      delivered:      deliv,
+      read:           readCnt,
       failed,
       deliveryRate,
-      readRate
+      readRate,
     });
 
   } catch (error: any) {

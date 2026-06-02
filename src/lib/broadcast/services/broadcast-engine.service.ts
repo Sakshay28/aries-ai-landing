@@ -59,17 +59,19 @@ export class BroadcastEngineService {
 
       // 4. Batch enqueuing leads into broadcast_queue
       const now = new Date().toISOString();
+      const templateLanguage = campaign.template_language || 'en';
       const queueEntries = resolved.contacts.map(contact => ({
-        tenant_id: tenantId,
-        campaign_id: campaignId,
-        contact_id: contact.id,
-        phone: contact.phone,
-        status: 'pending',
-        attempt_count: 0,
+        tenant_id:       tenantId,
+        campaign_id:     campaignId,
+        contact_id:      contact.id,
+        phone:           contact.phone,
+        status:          'pending',
+        attempt_count:   0,
         next_attempt_at: now,
+        language_code:   templateLanguage,
         payload: {
-          name: contact.name
-        }
+          name: contact.name,
+        },
       }));
 
       // Ingest in chunks of 500 to keep within postgres parameters limits
@@ -250,6 +252,10 @@ export class BroadcastEngineService {
               leadRecord
             );
 
+            // Resolve language: use queue item's language_code, campaign's template_language,
+            // or fall back to 'en'. This fixes silent 400s for non-English templates.
+            const languageCode = item.language_code || campaign.template_language || 'en';
+
             // Dispatch to Meta
             const waResult = await sendTemplateMessage(
               accessToken,
@@ -257,7 +263,7 @@ export class BroadcastEngineService {
               item.phone,
               campaign.template_name,
               metaComponents,
-              'en' // Defaulting to English language
+              languageCode
             );
 
             console.log(`[WHATSAPP_SEND] Dispatched to ${item.phone}: messageId=${waResult.messageId || 'NONE'}`);
@@ -285,10 +291,16 @@ export class BroadcastEngineService {
                   status: 'sent'
                 });
 
-              // Increment analytics
+              // Increment analytics table
               await supabaseAdmin.rpc('increment_broadcast_analytics', {
                 target_campaign_id: item.campaign_id,
                 col_name: 'sent_count'
+              });
+
+              // Increment campaign row counters (this is what the stats page reads)
+              await supabaseAdmin.rpc('increment_campaign_counter', {
+                p_campaign_id: item.campaign_id,
+                p_status: 'sent'
               });
             } else {
               throw new Error('Missing outbound messageId');
@@ -333,6 +345,10 @@ export class BroadcastEngineService {
               await supabaseAdmin.rpc('increment_broadcast_analytics', {
                 target_campaign_id: item.campaign_id,
                 col_name: 'failed_count'
+              });
+              await supabaseAdmin.rpc('increment_campaign_counter', {
+                p_campaign_id: item.campaign_id,
+                p_status: 'failed'
               });
             }
           }

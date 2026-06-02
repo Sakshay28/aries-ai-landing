@@ -11,7 +11,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { templateName, languageCode, variables } = await req.json();
+    const body = await req.json();
+    const { templateName, languageCode, variables, phoneNumber } = body;
+
     if (!templateName) {
       return NextResponse.json({ success: false, error: 'templateName required' }, { status: 400 });
     }
@@ -26,18 +28,24 @@ export async function POST(req: NextRequest) {
     if (!tenant?.wa_access_token || !tenant?.wa_phone_number_id) {
       return NextResponse.json({
         success: false,
-        error: 'WhatsApp is not yet active for your account. Contact support.'
+        error: 'WhatsApp is not connected. Go to Settings → link your Meta Business account.',
       }, { status: 400 });
     }
 
-    if (!tenant.staff_phone) {
+    // Resolve destination phone:
+    // 1. explicit phoneNumber from request body (from test dialog)
+    // 2. fall back to staff_phone on tenant
+    const destination = (phoneNumber || '').toString().replace(/\D/g, '') ||
+                        (tenant.staff_phone || '').toString().replace(/\D/g, '');
+
+    if (!destination || destination.length < 10) {
       return NextResponse.json({
         success: false,
-        error: 'No staff phone number set in Settings. Please set one to receive test sends.'
+        error: 'No test phone number available. Enter a phone number in the test dialog or set Staff Phone in Settings.',
       }, { status: 400 });
     }
 
-    // Map variables object (e.g. { '1': 'Sakshay', '2': 'SKY-2045' }) to an ordered array of parameter strings
+    // Build ordered variable array from the variables object
     const orderedVars: string[] = [];
     if (variables && typeof variables === 'object') {
       const keys = Object.keys(variables).sort((a, b) => Number(a) - Number(b));
@@ -46,24 +54,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const decryptedApiKey = decryptToken(tenant.wa_access_token as string) as string;
+    const decryptedToken = decryptToken(tenant.wa_access_token as string) as string;
 
-    // Send the test template message using the Meta API
+    console.log(`[BROADCAST_TEST] Sending test → ${destination} template="${templateName}"`);
+
     const result = await sendTemplateMessage(
-      decryptedApiKey,
+      decryptedToken,
       tenant.wa_phone_number_id as string,
-      tenant.staff_phone,
+      destination,
       templateName,
       orderedVars,
-      languageCode || 'en'
+      languageCode || 'en',
     );
 
+    console.log(`[BROADCAST_TEST] Success — messageId=${result.messageId}`);
     return NextResponse.json({ success: true, messageId: result.messageId });
+
   } catch (error: any) {
-    console.error('Broadcast test send error:', error);
+    console.error('[BROADCAST_TEST] Error:', error.message);
     return NextResponse.json({
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to send test message'
+      error: error.message || 'Failed to send test message',
     }, { status: 500 });
   }
 }

@@ -42,12 +42,13 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { 
-      campaignId, 
-      campaignName, 
-      templateName, 
-      templateCategory, 
-      deliveryMode, 
+    const {
+      campaignId,
+      campaignName,
+      templateName,
+      templateCategory,
+      templateLanguage,
+      deliveryMode,
       scheduledAt,
       audience,
       delivery,
@@ -63,14 +64,15 @@ export async function POST(req: NextRequest) {
     }
 
     const campaignPayload = {
-      tenant_id: tenantId,
-      name: campaignName,
-      template_name: templateName || '',
+      tenant_id:         tenantId,
+      name:              campaignName,
+      template_name:     templateName || '',
       template_category: templateCategory || 'MARKETING',
-      delivery_mode: deliveryMode || 'now',
-      scheduled_for: scheduledAt || null,
-      status: 'draft',
-      updated_at: new Date().toISOString()
+      template_language: templateLanguage || 'en',
+      delivery_mode:     deliveryMode || 'now',
+      scheduled_for:     scheduledAt || null,
+      status:            'draft',
+      updated_at:        new Date().toISOString(),
     };
 
     let activeId = campaignId;

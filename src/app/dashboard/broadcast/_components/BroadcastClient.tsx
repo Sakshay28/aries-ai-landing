@@ -437,13 +437,19 @@ export function BroadcastClient() {
 
   const fetchCampaigns = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('broadcast_campaigns')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (error) toast.error('Failed to load campaigns');
-    else setCampaigns((data ?? []) as Campaign[]);
-    setLoading(false);
+    try {
+      const res  = await fetch('/api/broadcast/campaigns');
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to load campaigns');
+      }
+      setCampaigns((data.campaigns ?? []) as Campaign[]);
+    } catch (err: any) {
+      console.error('[BroadcastClient] fetchCampaigns failed:', err);
+      toast.error(err.message || 'Failed to load campaigns');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -496,11 +502,13 @@ export function BroadcastClient() {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this campaign? This cannot be undone.')) return;
     try {
-      await supabase.from('broadcast_campaigns').delete().eq('id', id);
+      const { error } = await supabase.from('broadcast_campaigns').delete().eq('id', id);
+      if (error) throw error;
       toast.success('Campaign deleted');
       fetchCampaigns();
-    } catch {
-      toast.error('Failed to delete campaign');
+    } catch (err: any) {
+      console.error('[BroadcastClient] handleDelete failed:', err);
+      toast.error(err.message || 'Failed to delete campaign');
     }
   };
 

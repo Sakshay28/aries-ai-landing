@@ -50,17 +50,22 @@ export default function CampaignStatsPage() {
     }
   }, [campaignId]);
 
+  // Initial load — run once on mount
   useEffect(() => {
     fetchStats();
-    // Poll stats every 5 seconds for real-time tracking while campaign is active
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignId]);
+
+  // Polling — separate effect, stable interval that does NOT recreate on stats changes
+  useEffect(() => {
     const interval = setInterval(() => {
-      if (stats?.status === 'sending' || stats?.status === 'running') {
-        fetchStats(false);
-      }
+      // Read status from the ref captured at callback time via fetchStats
+      fetchStats(false);
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [campaignId, stats?.status, fetchStats]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignId]); // only recreate if campaignId changes
 
   if (loading) {
     return (
