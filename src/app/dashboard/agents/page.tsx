@@ -1283,96 +1283,90 @@ export default function AISettingsPage() {
       </div>
 
         {/* Live Simulator Preview Panel (Right 35%) */}
-        <div className="w-full lg:w-[35%] bg-secondary/15 flex flex-col p-6 lg:p-8 shrink-0 overflow-y-auto max-h-screen">
-          <div className="w-full max-w-sm mx-auto flex flex-col h-full bg-[#080F1E] rounded-[36px] border-8 border-slate-900 shadow-2xl relative overflow-hidden min-h-[580px]">
-            
-            {/* Phone Speaker & Notch */}
-            <div className="absolute top-0 inset-x-0 h-6 bg-slate-900 flex items-center justify-center z-20">
-              <div className="w-16 h-4 rounded-full bg-black flex items-center justify-center">
-                <div className="w-8 h-1 rounded-full bg-slate-800" />
+        <div className="w-full lg:w-[35%] bg-gray-50/80 dark:bg-secondary/15 flex flex-col p-6 lg:p-8 shrink-0 overflow-y-auto max-h-screen border-l border-border/40">
+          <div className="w-full max-w-sm mx-auto flex flex-col bg-white rounded-[32px] border border-gray-200 shadow-[0_8px_40px_rgba(0,0,0,0.10)] relative overflow-hidden" style={{ height: 'clamp(600px, 80vh, 760px)' }}>
+
+            {/* Phone Notch */}
+            <div className="absolute top-0 inset-x-0 h-6 bg-gray-100 flex items-center justify-center z-20 rounded-t-[32px]">
+              <div className="w-16 h-4 rounded-full bg-gray-200 flex items-center justify-center">
+                <div className="w-8 h-1 rounded-full bg-gray-300" />
               </div>
             </div>
 
-            {/* Mock Chat Header with expanded top padding */}
-            <div className="px-5 pt-12 pb-4.5 bg-slate-900 flex items-center justify-between shrink-0 z-10 border-b border-white/5">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-bold text-sm shrink-0">
-                  <Bot className="w-4.5 h-4.5" />
-                </div>
-                <div className="space-y-1.5">
-                  <h4 className="font-bold text-xs text-white leading-tight">{draft.bot_name || 'Assistant'}</h4>
-                  <span className="inline-flex items-center gap-1.5 text-[9px] font-bold bg-white/10 px-2 py-0.5 rounded-full text-slate-300">
-                    👤 Customer Simulation
-                  </span>
-                </div>
+            {/* Chat Header */}
+            <div className="px-4 pt-10 pb-3 bg-white flex items-center gap-3 shrink-0 z-10 border-b border-gray-100 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+              <div className="w-9 h-9 rounded-full bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-600 shrink-0">
+                <Bot className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="font-semibold text-xs text-gray-900 leading-tight">{draft.bot_name || 'Assistant'}</h4>
+                <span className="inline-flex items-center gap-1 text-[9px] font-semibold bg-gray-100 px-2 py-0.5 rounded-full text-gray-500 mt-0.5">
+                  👤 Customer Simulation
+                </span>
               </div>
             </div>
 
-            {/* Unsaved Draft mode trust indicator banner */}
-            <div className="bg-[#121E31] px-4 py-2.5 border-b border-white/5 flex items-center justify-center shrink-0">
+            {/* Mode Banner */}
+            <div className={cn(
+              "px-4 py-1.5 flex items-center justify-center shrink-0 border-b",
+              dirty ? "bg-amber-50 border-amber-100" : "bg-emerald-50 border-emerald-100"
+            )}>
               {dirty ? (
-                <span className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-amber-400">
+                <span className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-amber-600">
                   <AlertTriangle className="w-3 h-3 animate-pulse" /> Draft Mode • Unsaved changes testing
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-emerald-400">
+                <span className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-emerald-600">
                   <Check className="w-3 h-3" /> Live Mode • Testing published config
                 </span>
               )}
             </div>
 
-            {/* Active Brain Knowledge Trust Banners */}
+            {/* Knowledge Banner */}
             {docs.length > 0 && (
-              <div className="border-b border-white/5 bg-slate-950/20 shrink-0 select-none">
-                {/* Slim Clickable Pill Bar */}
+              <div className="border-b border-gray-100 bg-white shrink-0 select-none">
                 <button
                   type="button"
                   onClick={() => setShowSimulatorTrainedFiles(prev => !prev)}
-                  className="w-full py-1.5 px-4 flex items-center justify-center gap-1 hover:bg-white/[0.02] transition-colors cursor-pointer"
+                  className="w-full py-1.5 px-4 flex items-center justify-center gap-1.5 hover:bg-gray-50 transition-colors cursor-pointer"
                 >
                   {docs.some(d => !d.embedding) ? (
-                    <span className="inline-flex items-center gap-1 text-[9px] font-bold tracking-wider uppercase text-amber-400 animate-pulse">
+                    <span className="inline-flex items-center gap-1 text-[9px] font-bold tracking-wider uppercase text-amber-500 animate-pulse">
                       ⏳ AI learning...
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 text-[9px] font-bold tracking-wider uppercase text-emerald-400">
+                    <span className="inline-flex items-center gap-1 text-[9px] font-bold tracking-wider uppercase text-emerald-600">
                       ✅ AI knowledge active
                     </span>
                   )}
-                  <span className="text-[8px] text-slate-500 font-extrabold uppercase ml-1">
+                  <span className="text-[8px] text-gray-400 font-bold uppercase ml-0.5">
                     ({docs.length} {docs.length === 1 ? 'source' : 'sources'} • {showSimulatorTrainedFiles ? 'Hide' : 'View'})
                   </span>
                 </button>
 
-                {/* Expanded details list */}
                 <AnimatePresence>
                   {showSimulatorTrainedFiles && (
                     <motion.div
                       initial={{ height: 0, opacity: 0 }}
                       animate={{ height: 'auto', opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden bg-slate-950/40 px-5 py-2.5 space-y-1.5 border-t border-white/[0.02]"
+                      className="overflow-hidden bg-gray-50 px-5 py-2.5 space-y-1.5 border-t border-gray-100"
                     >
-                      <div className="text-[8px] font-extrabold text-slate-500 uppercase tracking-widest">
+                      <div className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">
                         Trained Knowledge Sources:
                       </div>
-                      <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
-                        {docs.map(doc => {
-                          const isIndexed = !!doc.embedding;
-                          return (
-                            <div key={doc.id} className="flex items-center justify-between text-[9px] font-medium leading-relaxed">
-                              <span className="text-slate-300 truncate max-w-[200px]">
-                                📄 {doc.filename}
-                              </span>
-                              <span className={cn(
-                                "font-bold tracking-wide text-[8px] uppercase",
-                                isIndexed ? "text-emerald-400" : "text-amber-400 animate-pulse"
-                              )}>
-                                {isIndexed ? 'Indexed' : 'Learning...'}
-                              </span>
-                            </div>
-                          );
-                        })}
+                      <div className="space-y-1 max-h-20 overflow-y-auto">
+                        {docs.map(doc => (
+                          <div key={doc.id} className="flex items-center justify-between text-[9px]">
+                            <span className="text-gray-600 truncate max-w-[180px]">📄 {doc.filename}</span>
+                            <span className={cn(
+                              "font-bold text-[8px] uppercase",
+                              doc.embedding ? "text-emerald-600" : "text-amber-500 animate-pulse"
+                            )}>
+                              {doc.embedding ? 'Indexed' : 'Learning...'}
+                            </span>
+                          </div>
+                        ))}
                       </div>
                     </motion.div>
                   )}
@@ -1380,46 +1374,48 @@ export default function AISettingsPage() {
               </div>
             )}
 
-            {/* Mock messages container list with increased top padding */}
-            <div className="flex-1 overflow-y-auto p-4 pt-8 space-y-4 flex flex-col">
-              
-              {/* Bot standard welcome intro */}
-              <div className="max-w-[85%] self-start rounded-2xl px-3.5 py-2.5 text-xs bg-slate-800 text-slate-200 rounded-tl-none leading-relaxed border border-slate-700/30 shadow-sm">
-                {draft.welcome_message || `Hi! Welcome to our restaurant. How can I help you today?`}
+            {/* Messages — min-h-0 is required so flex-1 can shrink and overflow-y-auto actually scrolls */}
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3 flex flex-col bg-gray-50/50">
+              {/* Welcome bubble */}
+              <div className="max-w-[82%] self-start">
+                <div className="rounded-2xl rounded-tl-sm px-3.5 py-2.5 text-xs bg-white text-gray-800 leading-relaxed shadow-sm border border-gray-100">
+                  {draft.welcome_message || 'Hi! Welcome to our restaurant. How can I help you today?'}
+                </div>
               </div>
 
               {chatHistory.map((m, idx) => (
-                <div
-                  key={idx}
-                  className={cn(
-                    "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-sm",
+                <div key={idx} className={cn("max-w-[82%]", m.role === 'user' ? "self-end" : "self-start")}>
+                  <div className={cn(
+                    "rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-sm",
                     m.role === 'user'
-                      ? "self-end bg-emerald-600 text-white rounded-tr-none"
-                      : "self-start bg-slate-800 text-slate-200 rounded-tl-none border border-slate-700/30"
-                  )}
-                >
-                  {m.content}
+                      ? "bg-emerald-600 text-white rounded-tr-sm"
+                      : "bg-white text-gray-800 rounded-tl-sm border border-gray-100"
+                  )}>
+                    {m.content}
+                  </div>
                 </div>
               ))}
 
               {sendingMsg && (
-                <div className="self-start rounded-2xl px-3.5 py-2.5 bg-slate-800 border border-slate-700/30 text-slate-400 rounded-tl-none flex items-center gap-2">
-                  <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
-                  <span className="text-[10px] tracking-wide font-medium">Assistant is typing...</span>
+                <div className="max-w-[82%] self-start">
+                  <div className="rounded-2xl rounded-tl-sm px-3.5 py-2.5 bg-white border border-gray-100 shadow-sm flex items-center gap-2">
+                    <Loader2 className="w-3 h-3 animate-spin text-emerald-500 shrink-0" />
+                    <span className="text-[10px] text-gray-400 font-medium">Typing...</span>
+                  </div>
                 </div>
               )}
-              
+
               <div ref={chatEndRef} />
             </div>
 
-             {/* Dynamic Play Pill or Reset Pill Button */}
-            <div className="px-4 py-2.5 bg-slate-950/40 border-t border-white/5 flex justify-center shrink-0">
+            {/* Play / Reset Button */}
+            <div className="px-4 py-2.5 bg-white border-t border-gray-100 flex justify-center shrink-0">
               {chatHistory.length === 0 ? (
                 <button
                   type="button"
                   onClick={handleTrySampleConversation}
                   disabled={sendingMsg || demoQueue.length > 0}
-                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all cursor-pointer disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 border border-emerald-200 text-emerald-600 hover:bg-emerald-100 transition-all cursor-pointer disabled:opacity-50"
                 >
                   <Play className="w-3 h-3 fill-current animate-pulse animate-duration-1000" /> Try Sample Conversation
                 </button>
@@ -1428,27 +1424,27 @@ export default function AISettingsPage() {
                   type="button"
                   onClick={handleResetChat}
                   disabled={sendingMsg}
-                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-800 border border-slate-700/50 text-slate-300 hover:bg-slate-700 hover:text-white transition-all cursor-pointer"
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-gray-100 border border-gray-200 text-gray-600 hover:bg-gray-200 hover:text-gray-800 transition-all cursor-pointer disabled:opacity-50"
                 >
                   <RotateCcw className="w-3 h-3" /> Reset Conversation
                 </button>
               )}
             </div>
 
-            {/* Mock input text editor */}
-            <form onSubmit={handleSendMessage} className="p-3 bg-slate-900 border-t border-white/5 flex gap-2 shrink-0 z-10">
+            {/* Input */}
+            <form onSubmit={handleSendMessage} className="p-3 bg-white border-t border-gray-100 flex gap-2 shrink-0 z-10">
               <input
                 type="text"
                 value={inputValue}
                 onChange={e => setInputValue(e.target.value)}
                 disabled={sendingMsg}
                 placeholder="Type a mock message..."
-                className="flex-1 h-9 px-3 text-xs rounded-xl bg-slate-850 border border-slate-800 outline-none text-white placeholder:text-slate-500 focus:border-emerald-500/40"
+                className="flex-1 h-9 px-3 text-xs rounded-xl bg-gray-50 border border-gray-200 outline-none text-gray-900 placeholder:text-gray-400 focus:border-emerald-400 focus:bg-white transition-colors"
               />
               <button
                 type="submit"
                 disabled={sendingMsg || !inputValue.trim()}
-                className="h-9 w-9 flex items-center justify-center rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors"
+                className="h-9 w-9 flex items-center justify-center rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors shrink-0"
               >
                 <Send className="w-3.5 h-3.5" />
               </button>
