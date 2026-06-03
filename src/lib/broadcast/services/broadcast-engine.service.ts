@@ -6,7 +6,6 @@ import { MetaPayloadBuilderService } from './meta-payload-builder.service';
 import { TemplateParserService } from './template-parser.service';
 import { sleep } from '@/lib/utils/safety';
 import { ExecutionEventService } from './execution-event.service';
-import { TemplateParserService } from './template-parser.service';
 
 const RETRY_BACKOFF_MINUTES = [1, 5, 15, 30, 60];
 
