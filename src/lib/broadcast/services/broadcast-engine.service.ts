@@ -203,20 +203,59 @@ export class BroadcastEngineService {
 
         const accessToken = decryptToken(tenant.wa_access_token) as string;
 
-        // C. Process enqueued messages
+        // C. Pre-fetch campaign data, variable mappings, and template cache ONCE per
+        //    unique campaign in this tenant batch — avoids N identical DB round-trips.
+        const uniqueCampaignIds = [...new Set(items.map(i => i.campaign_id))];
+        const campaignCache    = new Map<string, any>();
+        const varIndicesCache  = new Map<string, string[]>();
+        const varMapCache      = new Map<string, Record<string, any>>();
+
+        // Step 1: fetch all campaigns in parallel
+        const campResults = await Promise.all(
+          uniqueCampaignIds.map(cid => supabaseAdmin.from('broadcast_campaigns').select('*').eq('id', cid).single())
+        );
+        campResults.forEach(({ data: camp }, i) => {
+          if (camp) campaignCache.set(uniqueCampaignIds[i], camp);
+        });
+
+        // Step 2: fetch variable mappings + template cache in parallel (now we know template names)
+        await Promise.all(uniqueCampaignIds.map(async (cid) => {
+          const camp = campaignCache.get(cid);
+          if (!camp) return;
+
+          const [{ data: mappings }, { data: tmpl }] = await Promise.all([
+            supabaseAdmin.from('broadcast_variable_mapping').select('*').eq('campaign_id', cid),
+            supabaseAdmin.from('broadcast_templates_cache').select('template_json')
+              .eq('tenant_id', tenantId).eq('name', camp.template_name).maybeSingle(),
+          ]);
+
+          const vMap: Record<string, any> = {};
+          (mappings || []).forEach((v: any) => {
+            vMap[v.variable_key] = { index: v.variable_key, sourceType: v.source_type, crmField: v.crm_field, staticValue: v.custom_value };
+          });
+
+          let indices = [...new Set((mappings || []).map((v: any) => String(v.variable_key)))].sort((a, b) => Number(a) - Number(b));
+
+          if (indices.length === 0 && tmpl?.template_json) {
+            const parsed = TemplateParserService.parse(tmpl.template_json);
+            if (parsed.detectedVariables.length > 0) {
+              indices = parsed.detectedVariables;
+              parsed.detectedVariables.forEach((idx, i) => {
+                vMap[idx] = { index: idx, sourceType: i === 0 ? 'crm_field' : 'static', crmField: i === 0 ? 'name' : undefined, staticValue: i === 0 ? undefined : ' ' };
+              });
+            }
+          }
+
+          varMapCache.set(cid, vMap);
+          varIndicesCache.set(cid, indices);
+        }));
+
+        // D. Process enqueued messages using cached campaign data
         for (const item of items) {
           try {
-            // Fetch campaign configuration details
-            const { data: campaign } = await supabaseAdmin
-              .from('broadcast_campaigns')
-              .select('*')
-              .eq('id', item.campaign_id)
-              .single();
-
-            const { data: variableMappings } = await supabaseAdmin
-              .from('broadcast_variable_mapping')
-              .select('*')
-              .eq('campaign_id', item.campaign_id);
+            const campaign          = campaignCache.get(item.campaign_id);
+            const variablesMap      = varMapCache.get(item.campaign_id) || {};
+            const detectedVarIndices = varIndicesCache.get(item.campaign_id) || [];
 
             if (!campaign) {
               await supabaseAdmin
@@ -224,53 +263,6 @@ export class BroadcastEngineService {
                 .update({ status: 'failed', failure_reason: 'Campaign configuration missing', locked_at: null })
                 .eq('id', item.id);
               continue;
-            }
-
-            // Map variables schema into payload builders
-            const variablesMap: Record<string, any> = {};
-            (variableMappings || []).forEach(v => {
-              variablesMap[v.variable_key] = {
-                index: v.variable_key,
-                sourceType: v.source_type,
-                crmField: v.crm_field,
-                staticValue: v.custom_value
-              };
-            });
-
-            // Derive variable indices from the saved mappings — template names are plain slugs
-            // and never contain {{N}} patterns, so scanning template_name always yielded [].
-            let detectedVarIndices = [...new Set((variableMappings || []).map(v => String(v.variable_key)))]
-              .sort((a, b) => Number(a) - Number(b));
-
-            // If no mappings were saved, check the template cache for required variables.
-            // Meta silently drops messages that have {{N}} placeholders but receive no body
-            // component — so we fall back to sending the contact's name for {{1}} and a
-            // space for any other indices, guaranteeing delivery over a blank placeholder.
-            if (detectedVarIndices.length === 0) {
-              const { data: cachedTemplate } = await supabaseAdmin
-                .from('broadcast_templates_cache')
-                .select('template_json')
-                .eq('tenant_id', tenantId)
-                .eq('name', campaign.template_name)
-                .maybeSingle();
-
-              if (cachedTemplate?.template_json) {
-                const parsed = TemplateParserService.parse(cachedTemplate.template_json);
-                if (parsed.detectedVariables.length > 0) {
-                  detectedVarIndices = parsed.detectedVariables;
-                  // Build fallback map: {{1}} → contact name, rest → space
-                  parsed.detectedVariables.forEach((idx, i) => {
-                    if (!variablesMap[idx]) {
-                      variablesMap[idx] = {
-                        index: idx,
-                        sourceType: i === 0 ? 'crm_field' : 'static',
-                        crmField: i === 0 ? 'name' : undefined,
-                        staticValue: i === 0 ? undefined : ' ',
-                      };
-                    }
-                  });
-                }
-              }
             }
 
             const leadRecord = {
@@ -285,8 +277,6 @@ export class BroadcastEngineService {
               leadRecord
             );
 
-            // Resolve language: use queue item's language_code, campaign's template_language,
-            // or fall back to 'en'. This fixes silent 400s for non-English templates.
             const languageCode = item.language_code || campaign.template_language || 'en';
 
             // Dispatch to Meta
@@ -388,11 +378,10 @@ export class BroadcastEngineService {
 
           processed++;
           
-          // Throttling safety pause: ~50ms per message (Meta limit is 80/sec, well within)
-          await sleep(50);
+          // No artificial sleep needed — Meta allows 80 msg/sec; our DB latency is the natural throttle
         }
 
-        // D. Check if queue is fully cleared for each campaign processed in this batch
+        // E. Check if queue is fully cleared for each campaign processed in this batch
         const campaignIdsInBatch = [...new Set(items.map(i => i.campaign_id))];
         for (const campaignId of campaignIdsInBatch) {
           const { count, error: countErr } = await supabaseAdmin
