@@ -22,6 +22,7 @@
     "@radix-ui/react-slot": "^1.2.4",
     "@react-jvectormap/core": "^1.0.4",
     "@react-jvectormap/world": "^1.1.2",
+    "@sentry/nextjs": "^10.56.0",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.3",
     "@tailwindcss/forms": "^0.5.11",
