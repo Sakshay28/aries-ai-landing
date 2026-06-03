@@ -28,8 +28,8 @@ let _redis: RedisClient | null = null;
 export function getRedisClient(): RedisClient | null {
   if (_redis) return _redis;
 
-  const url = process.env.UPSTASH_REDIS_URL;
-  const token = process.env.UPSTASH_REDIS_TOKEN;
+  const url = process.env.UPSTASH_REDIS_URL || process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) return null;
 
   // Upstash REST API wrapper — works in any Node.js / Edge environment
