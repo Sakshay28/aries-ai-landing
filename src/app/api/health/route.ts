@@ -37,9 +37,9 @@ async function checkWorkerHeartbeat(): Promise<ServiceStatus> {
     const redis = getRedisClient();
     if (!redis) return { status: 'degraded', detail: 'Redis unavailable — cannot verify worker' };
     const lastBeat = await redis.get('worker:heartbeat');
-    if (!lastBeat) return { status: 'down', detail: 'No heartbeat received — worker may be offline' };
+    if (!lastBeat) return { status: 'degraded', detail: 'Worker not running — using DB queue (expected on Hobby plan)' };
     const age = Date.now() - parseInt(lastBeat, 10);
-    if (age > 90_000) return { status: 'down', detail: `Last heartbeat ${Math.round(age / 1000)}s ago` };
+    if (age > 90_000) return { status: 'degraded', detail: `Last heartbeat ${Math.round(age / 1000)}s ago` };
     return { status: 'up', detail: `Last heartbeat ${Math.round(age / 1000)}s ago` };
   } catch (e) {
     return { status: 'degraded', detail: (e as Error).message };
