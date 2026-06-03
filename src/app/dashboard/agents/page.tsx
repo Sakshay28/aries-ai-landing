@@ -41,6 +41,7 @@ interface DraftConfig {
 }
 
 interface ChatMessage {
+  id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
@@ -303,10 +304,10 @@ export default function AISettingsPage() {
     return () => panel.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Auto-scroll chat simulator
+  // Auto-scroll chat simulator — trigger on message changes AND typing indicator
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatHistory]);
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [chatHistory, sendingMsg]);
 
   const loadAllData = async () => {
     setLoading(true);
@@ -361,7 +362,8 @@ export default function AISettingsPage() {
     }));
     if (tpl.sample_chat) {
       setChatHistory(
-        tpl.sample_chat.map(chat => ({
+        tpl.sample_chat.map((chat, i) => ({
+          id: `tpl-${tpl.id}-${i}-${Date.now()}`,
           role: chat.role,
           content: chat.content,
           timestamp: new Date()
@@ -541,7 +543,7 @@ export default function AISettingsPage() {
     }
 
     if (!customMsg) setInputValue('');
-    const newMsg: ChatMessage = { role: 'user', content: msg, timestamp: new Date() };
+    const newMsg: ChatMessage = { id: `u-${Date.now()}-${Math.random().toString(36).slice(2)}`, role: 'user', content: msg, timestamp: new Date() };
     setChatHistory(prev => [...prev, newMsg]);
     setSendingMsg(true);
 
@@ -570,6 +572,7 @@ export default function AISettingsPage() {
       setTimeout(() => {
         if (json.success && json.data) {
           const replyMsg: ChatMessage = {
+            id: `a-${Date.now()}-${Math.random().toString(36).slice(2)}`,
             role: 'assistant',
             content: json.data.reply,
             timestamp: new Date()
@@ -627,6 +630,13 @@ export default function AISettingsPage() {
   const handleResetChat = () => {
     setChatHistory([]);
     setDemoQueue([]);
+    // Scroll back to top of message list after state clears
+    requestAnimationFrame(() => {
+      if (chatEndRef.current) {
+        const scrollEl = chatEndRef.current.closest('[data-chat-scroll]');
+        if (scrollEl) scrollEl.scrollTop = 0;
+      }
+    });
     toast.success('Simulation chat reset');
   };
 
@@ -1283,18 +1293,24 @@ export default function AISettingsPage() {
       </div>
 
         {/* Live Simulator Preview Panel (Right 35%) */}
-        <div className="w-full lg:w-[35%] bg-gray-50/80 dark:bg-secondary/15 flex flex-col p-6 lg:p-8 shrink-0 overflow-y-auto max-h-screen border-l border-border/40">
-          <div className="w-full max-w-sm mx-auto flex flex-col bg-white rounded-[32px] border border-gray-200 shadow-[0_8px_40px_rgba(0,0,0,0.10)] relative overflow-hidden" style={{ height: 'clamp(600px, 80vh, 760px)' }}>
-
-            {/* Phone Notch */}
-            <div className="absolute top-0 inset-x-0 h-6 bg-gray-100 flex items-center justify-center z-20 rounded-t-[32px]">
+        <div className="w-full lg:w-[35%] bg-gray-50 flex flex-col p-6 lg:p-8 shrink-0 overflow-y-auto max-h-screen border-l border-border/40">
+          {/*
+            Phone frame: fixed clamp height so the flex-1 scroll area has a concrete
+            boundary. Without a concrete height, flex-1 + overflow-y-auto cannot scroll.
+          */}
+          <div
+            className="w-full max-w-sm mx-auto flex flex-col bg-white rounded-[32px] border border-gray-200 shadow-[0_8px_40px_rgba(0,0,0,0.10)] overflow-hidden"
+            style={{ height: 'clamp(600px, 78vh, 760px)' }}
+          >
+            {/* ── Phone Notch (absolute, does not participate in flex layout) ── */}
+            <div className="absolute top-0 left-0 right-0 h-6 bg-gray-100 flex items-center justify-center z-10 rounded-t-[32px] pointer-events-none">
               <div className="w-16 h-4 rounded-full bg-gray-200 flex items-center justify-center">
                 <div className="w-8 h-1 rounded-full bg-gray-300" />
               </div>
             </div>
 
-            {/* Chat Header */}
-            <div className="px-4 pt-10 pb-3 bg-white flex items-center gap-3 shrink-0 z-10 border-b border-gray-100 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            {/* ── Chat Header (shrink-0, never scrolls away) ── */}
+            <div className="pt-9 px-4 pb-3 bg-white flex items-center gap-3 shrink-0 border-b border-gray-100 shadow-[0_1px_4px_rgba(0,0,0,0.04)] relative z-[5]">
               <div className="w-9 h-9 rounded-full bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-600 shrink-0">
                 <Bot className="w-4 h-4" />
               </div>
@@ -1306,7 +1322,7 @@ export default function AISettingsPage() {
               </div>
             </div>
 
-            {/* Mode Banner */}
+            {/* ── Mode Banner (shrink-0) ── */}
             <div className={cn(
               "px-4 py-1.5 flex items-center justify-center shrink-0 border-b",
               dirty ? "bg-amber-50 border-amber-100" : "bg-emerald-50 border-emerald-100"
@@ -1322,7 +1338,7 @@ export default function AISettingsPage() {
               )}
             </div>
 
-            {/* Knowledge Banner */}
+            {/* ── Knowledge Banner (shrink-0, animated expand/collapse) ── */}
             {docs.length > 0 && (
               <div className="border-b border-gray-100 bg-white shrink-0 select-none">
                 <button
@@ -1343,24 +1359,24 @@ export default function AISettingsPage() {
                     ({docs.length} {docs.length === 1 ? 'source' : 'sources'} • {showSimulatorTrainedFiles ? 'Hide' : 'View'})
                   </span>
                 </button>
-
                 <AnimatePresence>
                   {showSimulatorTrainedFiles && (
                     <motion.div
                       initial={{ height: 0, opacity: 0 }}
                       animate={{ height: 'auto', opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden bg-gray-50 px-5 py-2.5 space-y-1.5 border-t border-gray-100"
+                      transition={{ duration: 0.2, ease: 'easeOut' }}
+                      className="overflow-hidden bg-gray-50 px-5 py-2.5 border-t border-gray-100"
                     >
-                      <div className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">
+                      <div className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">
                         Trained Knowledge Sources:
                       </div>
-                      <div className="space-y-1 max-h-20 overflow-y-auto">
+                      <div className="flex flex-col gap-1 max-h-20 overflow-y-auto">
                         {docs.map(doc => (
                           <div key={doc.id} className="flex items-center justify-between text-[9px]">
                             <span className="text-gray-600 truncate max-w-[180px]">📄 {doc.filename}</span>
                             <span className={cn(
-                              "font-bold text-[8px] uppercase",
+                              "font-bold text-[8px] uppercase shrink-0 ml-2",
                               doc.embedding ? "text-emerald-600" : "text-amber-500 animate-pulse"
                             )}>
                               {doc.embedding ? 'Indexed' : 'Learning...'}
@@ -1374,41 +1390,79 @@ export default function AISettingsPage() {
               </div>
             )}
 
-            {/* Messages — min-h-0 is required so flex-1 can shrink and overflow-y-auto actually scrolls */}
-            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3 flex flex-col bg-gray-50/50">
-              {/* Welcome bubble */}
-              <div className="max-w-[82%] self-start">
-                <div className="rounded-2xl rounded-tl-sm px-3.5 py-2.5 text-xs bg-white text-gray-800 leading-relaxed shadow-sm border border-gray-100">
-                  {draft.welcome_message || 'Hi! Welcome to our restaurant. How can I help you today?'}
+            {/*
+              ── Scroll Container (flex-1 + min-h-0) ──────────────────────────
+              ARCHITECTURE:
+                ScrollContainer  → overflow-y-auto, NO flex itself
+                └ MessagesColumn → flex flex-col, gap for spacing
+                  ├ MessageRow   → flex justify-start | justify-end
+                  │ └ Bubble     → max-w-[80%], width:fit-content, height:auto
+                  └ …
+
+              KEY RULES:
+              • min-h-0 is mandatory: without it flex items default to
+                min-height:auto and the container never shrinks → no scroll.
+              • The scroll container must NOT be the flex column. Keep those roles
+                separate so overflow math is predictable.
+              • Bubbles use `justify-start`/`justify-end` on a row wrapper — this
+                is more reliable than align-self on a column item.
+              • Never set explicit heights on bubbles; height:auto everywhere.
+            */}
+            <div
+              data-chat-scroll="true"
+              className="flex-1 min-h-0 overflow-y-auto bg-gray-50/60"
+              style={{ overscrollBehavior: 'contain' }}
+            >
+              {/* Inner column: natural vertical flow, no position tricks */}
+              <div className="flex flex-col gap-3 px-4 py-4">
+
+                {/* Welcome message — always assistant-side */}
+                <div className="flex justify-start">
+                  <div
+                    className="max-w-[80%] rounded-2xl rounded-tl-sm px-3.5 py-2.5 text-xs bg-white text-gray-800 leading-relaxed shadow-sm border border-gray-100"
+                    style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}
+                  >
+                    {draft.welcome_message || 'Hi! Welcome to our restaurant. How can I help you today?'}
+                  </div>
                 </div>
+
+                {/*
+                  Each message uses a ROW wrapper with justify-start|end.
+                  The bubble itself has max-w-[80%] and height:auto (default).
+                  Stable key via message.id — never use array index.
+                */}
+                {chatHistory.map((m) => (
+                  <div key={m.id} className={cn("flex", m.role === 'user' ? "justify-end" : "justify-start")}>
+                    <div
+                      className={cn(
+                        "max-w-[80%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-sm",
+                        m.role === 'user'
+                          ? "bg-emerald-600 text-white rounded-tr-sm"
+                          : "bg-white text-gray-800 rounded-tl-sm border border-gray-100"
+                      )}
+                      style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}
+                    >
+                      {m.content}
+                    </div>
+                  </div>
+                ))}
+
+                {/* Typing indicator — assistant side */}
+                {sendingMsg && (
+                  <div className="flex justify-start">
+                    <div className="rounded-2xl rounded-tl-sm px-3.5 py-2.5 bg-white border border-gray-100 shadow-sm flex items-center gap-2">
+                      <Loader2 className="w-3 h-3 animate-spin text-emerald-500 shrink-0" />
+                      <span className="text-[10px] text-gray-400 font-medium">Typing...</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Scroll anchor — 1px so scrollIntoView(block:'end') lands correctly */}
+                <div ref={chatEndRef} style={{ height: 1, flexShrink: 0 }} />
               </div>
-
-              {chatHistory.map((m, idx) => (
-                <div key={idx} className={cn("max-w-[82%]", m.role === 'user' ? "self-end" : "self-start")}>
-                  <div className={cn(
-                    "rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-sm",
-                    m.role === 'user'
-                      ? "bg-emerald-600 text-white rounded-tr-sm"
-                      : "bg-white text-gray-800 rounded-tl-sm border border-gray-100"
-                  )}>
-                    {m.content}
-                  </div>
-                </div>
-              ))}
-
-              {sendingMsg && (
-                <div className="max-w-[82%] self-start">
-                  <div className="rounded-2xl rounded-tl-sm px-3.5 py-2.5 bg-white border border-gray-100 shadow-sm flex items-center gap-2">
-                    <Loader2 className="w-3 h-3 animate-spin text-emerald-500 shrink-0" />
-                    <span className="text-[10px] text-gray-400 font-medium">Typing...</span>
-                  </div>
-                </div>
-              )}
-
-              <div ref={chatEndRef} />
             </div>
 
-            {/* Play / Reset Button */}
+            {/* ── Play / Reset pill (shrink-0) ── */}
             <div className="px-4 py-2.5 bg-white border-t border-gray-100 flex justify-center shrink-0">
               {chatHistory.length === 0 ? (
                 <button
@@ -1417,7 +1471,7 @@ export default function AISettingsPage() {
                   disabled={sendingMsg || demoQueue.length > 0}
                   className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 border border-emerald-200 text-emerald-600 hover:bg-emerald-100 transition-all cursor-pointer disabled:opacity-50"
                 >
-                  <Play className="w-3 h-3 fill-current animate-pulse animate-duration-1000" /> Try Sample Conversation
+                  <Play className="w-3 h-3 fill-current" /> Try Sample Conversation
                 </button>
               ) : (
                 <button
@@ -1431,8 +1485,11 @@ export default function AISettingsPage() {
               )}
             </div>
 
-            {/* Input */}
-            <form onSubmit={handleSendMessage} className="p-3 bg-white border-t border-gray-100 flex gap-2 shrink-0 z-10">
+            {/* ── Input (shrink-0) ── */}
+            <form
+              onSubmit={handleSendMessage}
+              className="px-3 py-3 bg-white border-t border-gray-100 flex gap-2 shrink-0"
+            >
               <input
                 type="text"
                 value={inputValue}
