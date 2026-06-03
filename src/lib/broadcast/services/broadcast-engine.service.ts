@@ -6,6 +6,7 @@ import { MetaPayloadBuilderService } from './meta-payload-builder.service';
 import { TemplateParserService } from './template-parser.service';
 import { sleep } from '@/lib/utils/safety';
 import { ExecutionEventService } from './execution-event.service';
+import { TemplateParserService } from './template-parser.service';
 
 const RETRY_BACKOFF_MINUTES = [1, 5, 15, 30, 60];
 
@@ -239,8 +240,39 @@ export class BroadcastEngineService {
 
             // Derive variable indices from the saved mappings — template names are plain slugs
             // and never contain {{N}} patterns, so scanning template_name always yielded [].
-            const detectedVarIndices = [...new Set((variableMappings || []).map(v => String(v.variable_key)))]
+            let detectedVarIndices = [...new Set((variableMappings || []).map(v => String(v.variable_key)))]
               .sort((a, b) => Number(a) - Number(b));
+
+            // If no mappings were saved, check the template cache for required variables.
+            // Meta silently drops messages that have {{N}} placeholders but receive no body
+            // component — so we fall back to sending the contact's name for {{1}} and a
+            // space for any other indices, guaranteeing delivery over a blank placeholder.
+            if (detectedVarIndices.length === 0) {
+              const { data: cachedTemplate } = await supabaseAdmin
+                .from('broadcast_templates_cache')
+                .select('template_json')
+                .eq('tenant_id', tenantId)
+                .eq('name', campaign.template_name)
+                .maybeSingle();
+
+              if (cachedTemplate?.template_json) {
+                const parsed = TemplateParserService.parse(cachedTemplate.template_json);
+                if (parsed.detectedVariables.length > 0) {
+                  detectedVarIndices = parsed.detectedVariables;
+                  // Build fallback map: {{1}} → contact name, rest → space
+                  parsed.detectedVariables.forEach((idx, i) => {
+                    if (!variablesMap[idx]) {
+                      variablesMap[idx] = {
+                        index: idx,
+                        sourceType: i === 0 ? 'crm_field' : 'static',
+                        crmField: i === 0 ? 'name' : undefined,
+                        staticValue: i === 0 ? undefined : ' ',
+                      };
+                    }
+                  });
+                }
+              }
+            }
 
             const leadRecord = {
               id: item.contact_id || '',
