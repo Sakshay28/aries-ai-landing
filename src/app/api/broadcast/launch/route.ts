@@ -105,23 +105,26 @@ export async function POST(req: NextRequest) {
     await ExecutionEventService.logEvent(tenantId, campaignId, 'launch_requested', 'Launch requested', 'Campaign launch initiated.');
     await ExecutionEventService.logEvent(tenantId, campaignId, 'queue_created', 'Queue initialized', `${result.queuedCount} messages queued for dispatch.`);
 
-    // 7. Process queue immediately in background (processes ALL pending, not just 50)
+    // 7. Kick off queue processing in a fresh serverless invocation so it gets
+    //    its own execution budget (not shared with this response's 10s window).
     after(async () => {
       try {
-        let remaining = result.queuedCount || 0;
-        let iterations = 0;
-        const maxIterations = Math.ceil(remaining / 50) + 1;
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || `https://${process.env.VERCEL_URL}`;
+        const cronSecret = process.env.CRON_SECRET;
 
-        while (remaining > 0 && iterations < maxIterations) {
+        if (appUrl && cronSecret) {
+          const res = await fetch(`${appUrl}/api/broadcast/process-queue`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${cronSecret}` },
+          });
+          console.log(`[BROADCAST_LAUNCH] process-queue triggered: ${res.status}`);
+        } else {
+          // Fallback: process inline when env vars missing (local dev)
           const processed = await BroadcastEngineService.processQueue(50);
-          remaining -= processed;
-          iterations++;
-          if (processed === 0) break; // nothing left to process
+          console.log(`[BROADCAST_LAUNCH] Inline fallback processed ${processed} items`);
         }
-
-        console.log('[BROADCAST_LAUNCH] Background queue processed all items');
       } catch (err) {
-        console.error('[BROADCAST_LAUNCH] Background queue failed:', err);
+        console.error('[BROADCAST_LAUNCH] Failed to trigger process-queue:', err);
       }
     });
 

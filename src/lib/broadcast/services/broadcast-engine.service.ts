@@ -46,6 +46,8 @@ export class BroadcastEngineService {
         retargetCampaignId: audienceConfig.csv_upload_id || null,
         retargetCondition: audienceConfig.filters?.retargetCondition || 'unread',
         retargetDelayDays: audienceConfig.filters?.retargetDelayDays || 1,
+        manualContactIds: audienceConfig.filters?.manualContactIds || [],
+        csvFile: audienceConfig.filters?.csvFile || null,
       });
 
       if (resolved.total === 0) {
@@ -355,8 +357,8 @@ export class BroadcastEngineService {
 
           processed++;
           
-          // Throttling safety pause: ~200ms per message (5 msgs/sec limit pacing)
-          await sleep(200);
+          // Throttling safety pause: ~50ms per message (Meta limit is 80/sec, well within)
+          await sleep(50);
         }
 
         // D. Check if queue is fully cleared for each campaign processed in this batch
