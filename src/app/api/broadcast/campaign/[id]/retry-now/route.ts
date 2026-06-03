@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { BroadcastEngineService } from '@/lib/broadcast/services/broadcast-engine.service';
-import { after } from 'next/server';
+
+export const maxDuration = 10;
 
 export async function POST(
   _req: NextRequest,
@@ -16,7 +16,6 @@ export async function POST(
 
     const { id: campaignId } = await params;
 
-    // Verify campaign belongs to this tenant
     const { data: campaign, error: campErr } = await supabaseAdmin
       .from('broadcast_campaigns')
       .select('id, status, total_recipients')
@@ -35,25 +34,32 @@ export async function POST(
       }, { status: 400 });
     }
 
-    // Count pending items for this campaign
     const { count } = await supabaseAdmin
       .from('broadcast_queue')
       .select('*', { count: 'exact', head: true })
       .eq('campaign_id', campaignId)
       .in('status', ['pending', 'retrying']);
 
+    // Delegate to the self-chaining process-queue endpoint so large retries
+    // don't blow the 10s function timeout.
     after(async () => {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+      const cronSecret = process.env.CRON_SECRET;
+      if (!appUrl || !cronSecret) return;
       try {
-        await BroadcastEngineService.processQueue(100, true);
+        await fetch(`${appUrl}/api/broadcast/process-queue`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${cronSecret}` },
+        });
       } catch (e) {
-        console.error('[RETRY_NOW] processQueue failed:', e);
+        console.error('[RETRY_NOW] Failed to trigger process-queue:', e);
       }
     });
 
     return NextResponse.json({
       success: true,
       pendingCount: count ?? 0,
-      message: 'Processing started — refresh the stats page in 10 seconds.',
+      message: 'Processing started — refresh stats in 30 seconds.',
     });
 
   } catch (error: any) {

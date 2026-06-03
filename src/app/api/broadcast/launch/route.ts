@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
     //    its own execution budget (not shared with this response's 10s window).
     after(async () => {
       try {
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || `https://${process.env.VERCEL_URL}`;
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
         const cronSecret = process.env.CRON_SECRET;
 
         if (appUrl && cronSecret) {

@@ -306,7 +306,7 @@ export async function processPendingFollowUps(): Promise<number> {
 // PROCESS: Stale conversations (Fix #14)
 // ═══════════════════════════════════════
 
-async function processStaleConversations(): Promise<void> {
+export async function processStaleConversations(): Promise<void> {
   const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
   const { data: staleConvs } = await supabaseAdmin

@@ -26,8 +26,8 @@ export async function GET(req: NextRequest) {
   const challenge = req.nextUrl.searchParams.get('hub.challenge');
 
   if (mode === 'subscribe' && token) {
-    // 1. Check global system verification token
-    const systemVerifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
+    // 1. Check global system verification token (accept both env var names)
+    const systemVerifyToken = process.env.META_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN;
     if (systemVerifyToken && token === systemVerifyToken) {
       console.log('✅ Meta Webhook: Verified via global system token.');
       return new Response(challenge, { status: 200 });

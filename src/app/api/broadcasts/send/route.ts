@@ -6,6 +6,8 @@ import { AuditLogService } from '@/lib/broadcast/services/audit-log.service';
 import { ExecutionEventService } from '@/lib/broadcast/services/execution-event.service';
 import { TelemetryService } from '@/lib/broadcast/services/telemetry.service';
 
+export const maxDuration = 10;
+
 export async function POST(req: NextRequest) {
   try {
     const tenantId = await getTenantId();
@@ -61,11 +63,20 @@ export async function POST(req: NextRequest) {
     await ExecutionEventService.logEvent(tenantId, campaignId, 'queue_created', 'Queue initialized', `${res.queuedCount} recipient messages enqueued for dispatch.`);
     await ExecutionEventService.logEvent(tenantId, campaignId, 'sending_started', 'Sending started', 'Rate: 300 messages per minute (5/sec).');
 
-    // Process the first enqueued batch in the background
-    after(() => {
-      BroadcastEngineService.processQueue(50).catch(err => {
-        console.error('❌ Async queue tick failed:', err);
-      });
+    // Kick off the self-chaining process-queue pipeline in the background
+    after(async () => {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+      const cronSecret = process.env.CRON_SECRET;
+      if (appUrl && cronSecret) {
+        try {
+          await fetch(`${appUrl}/api/broadcast/process-queue`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${cronSecret}` },
+          });
+        } catch (err) {
+          console.error('❌ [broadcasts/send] Failed to trigger process-queue:', err);
+        }
+      }
     });
 
     return NextResponse.json({ success: true, queuedCount: res.queuedCount });
