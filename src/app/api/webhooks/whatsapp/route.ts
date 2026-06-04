@@ -266,7 +266,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         },
       }).catch(e => console.error('Integration runner (new_lead):', e.message));
 
-      appendLeadRow(tenant.id, {
+      // Await Sheets sync so the row appears instantly (errors are non-fatal).
+      await appendLeadRow(tenant.id, {
         name: newLead.name || undefined,
         phone: cleanPhone,
         email: newLead.email || undefined,
@@ -275,7 +276,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         campaign: campaignName,
         lead_score: isFromAd ? 30 : 10,
         created_at: new Date().toISOString(),
-      }).catch(() => {});
+      }).catch(e => console.error('⚠️ Sheets append failed (non-fatal):', (e as Error).message));
 
       // Notify the assigned sales agent about high-intent ad leads (email).
       if (isFromAd && assignedMember?.email) {
