@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withTenantGuard } from '@/lib/auth/tenantGuard';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { expireStalePendingBookings } from '@/lib/restaurant/expiry';
 import type { RestaurantSlot } from '@/lib/types';
 
 // ── GET: List all active slots (with remaining_capacity for a date) ────────
@@ -14,6 +15,9 @@ export async function GET(req: NextRequest) {
   const guard = await withTenantGuard(req);
   if (guard.error) return guard.error;
   const { tenantId } = guard;
+
+  // Release any unpaid holds past their window so freed seats show as available.
+  await expireStalePendingBookings(tenantId);
 
   const dateStr = req.nextUrl.searchParams.get('date') || new Date().toISOString().split('T')[0];
 

@@ -15,6 +15,19 @@ export async function sendNewLeadEmail(to: string, leadName: string, businessNam
   }
 }
 
+export async function sendLeadAssignedEmail(to: string, leadName: string, businessName: string, source?: string) {
+  try {
+    await resend.emails.send({
+      from: 'Aries AI <notifications@ariesai.in>',
+      to,
+      subject: `New lead assigned to you: ${leadName}`,
+      html: `<p>A new lead (<strong>${leadName}</strong>)${source ? ` from <strong>${source}</strong>` : ''} has just been assigned to you at <strong>${businessName}</strong>.</p><p>Open your AriesAI dashboard to reply and manage this lead.</p>`,
+    });
+  } catch (error) {
+    console.error('Failed to send lead assigned email:', error);
+  }
+}
+
 export async function sendWeeklySummaryEmail(to: string, businessName: string, leadsCount: number, messagesCount: number) {
   try {
     await resend.emails.send({

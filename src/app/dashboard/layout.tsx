@@ -21,6 +21,7 @@ export default async function DashboardLayout({
   let userEmail = "";
   let userName = "";
   let modules: string[] = [];
+  let isPlatformAdmin = false;
 
   if (isSupabaseConfigured) {
     const supabase = createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
@@ -48,9 +49,11 @@ export default async function DashboardLayout({
       // Use supabaseAdmin to bypass RLS on users/tenants tables.
       const { data: userData } = await supabaseAdmin
         .from("users")
-        .select("tenant_id, full_name, tenants(onboarding_completed)")
+        .select("tenant_id, full_name, is_platform_admin, tenants(onboarding_completed)")
         .eq("auth_id", user.id)
         .maybeSingle();
+
+      isPlatformAdmin = Boolean((userData as { is_platform_admin?: boolean } | null)?.is_platform_admin);
 
       if (userData?.full_name) {
         userName = (userData.full_name as string).split(" ")[0];
@@ -61,6 +64,17 @@ export default async function DashboardLayout({
       }
 
       if (userData?.tenant_id) {
+        // Platform approval gate — new signups wait in /pending until approved.
+        // Separate query so a not-yet-migrated column can't break the layout.
+        const { data: approvalRow } = await supabaseAdmin
+          .from("tenants")
+          .select("is_approved")
+          .eq("id", userData.tenant_id)
+          .single();
+        if (approvalRow && approvalRow.is_approved === false) {
+          redirect("/pending");
+        }
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const tenantsVal = (userData as any).tenants as { onboarding_completed: boolean } | { onboarding_completed: boolean }[] | null;
         const onboardingCompleted = Array.isArray(tenantsVal)
@@ -86,5 +100,5 @@ export default async function DashboardLayout({
     }
   }
 
-  return <DashboardLayoutClient userEmail={userEmail} userName={userName} modules={modules}>{children}</DashboardLayoutClient>;
+  return <DashboardLayoutClient userEmail={userEmail} userName={userName} modules={modules} isPlatformAdmin={isPlatformAdmin}>{children}</DashboardLayoutClient>;
 }

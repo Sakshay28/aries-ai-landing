@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { verifyWebhookSignature, handleRazorpayWebhook } from '@/lib/billing/razorpay';
+import { fireIntegrations } from '@/lib/integrations/runner';
 
 export async function POST(req: NextRequest) {
   // Read raw body first — signature verification requires the unmodified bytes.
@@ -45,6 +46,39 @@ export async function POST(req: NextRequest) {
 
   const event = body.event as string;
   const payload = body.payload;
+
+  // ── Booking commitment fee: payment_link.paid → confirm the reservation ──
+  if (event === 'payment_link.paid') {
+    try {
+      const entity = (payload as any)?.payment_link?.entity;
+      const reservationId: string | undefined = entity?.reference_id || entity?.notes?.reservation_id;
+      const paymentId = (payload as any)?.payment?.entity?.id ?? null;
+      if (reservationId) {
+        const { data: booking } = await supabaseAdmin
+          .from('restaurant_bookings')
+          .update({ payment_status: 'paid', razorpay_payment_id: paymentId, booking_status: 'confirmed' })
+          .eq('reservation_id', reservationId)
+          .select('restaurant_id, customer_name, customer_phone, party_size, booking_date')
+          .single();
+        if (booking) {
+          fireIntegrations({
+            type: 'booking_confirmed',
+            tenantId: booking.restaurant_id as string,
+            lead: { name: (booking.customer_name as string) || '', phone: (booking.customer_phone as string) || '' },
+            details: {
+              reservation_id: reservationId,
+              party_size: String(booking.party_size ?? ''),
+              date: String(booking.booking_date ?? ''),
+            },
+          }).catch(() => {});
+          console.log(`✅ Booking ${reservationId} marked paid + confirmed`);
+        }
+      }
+    } catch (e) {
+      console.error('❌ Razorpay booking payment handling failed:', (e as Error).message);
+    }
+    return NextResponse.json({ status: 'ok' });
+  }
 
   // ── Idempotency: skip events we already processed within the last 24 h ──
   const subscriptionId =

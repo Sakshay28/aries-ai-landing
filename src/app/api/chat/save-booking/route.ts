@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
+import { createBookingPaymentLink, fireIntegrations } from '@/lib/integrations/runner';
+import { sendTextMessage } from '@/lib/meta/service';
+import { decryptToken } from '@/lib/utils/crypto';
 
 // ── Parse a free-form datetime string from an intake form ────────────────────
 // Handles inputs like:
@@ -106,7 +109,7 @@ export async function POST(req: NextRequest) {
     // 3. Fetch Tenant details for Short Code generating Reservation ID
     const { data: tenant, error: tenantErr } = await supabaseAdmin
       .from('tenants')
-      .select('short_code, business_name')
+      .select('short_code, business_name, booking_fee_per_person, wa_access_token, wa_phone_number_id')
       .eq('id', tenantId)
       .single();
 
@@ -128,6 +131,22 @@ export async function POST(req: NextRequest) {
     const { bookingDate, slotTime } = parseDatetime(datetime);
     console.log(`   ↳ datetime parsed: "${datetime}" → date=${bookingDate} time=${slotTime}`);
 
+    // 5a. Booking commitment fee (Clock Tower model): ₹ per guest → Razorpay link over WhatsApp.
+    const feePerPerson = Number((tenant as any).booking_fee_per_person) || 0;
+    const feeRupees = feePerPerson > 0 ? feePerPerson * guestCount : 0;
+    let paymentLink: { id: string; short_url: string } | null = null;
+    if (feeRupees > 0) {
+      paymentLink = await createBookingPaymentLink(
+        tenantId,
+        { name, phone: cleanPhoneStr },
+        feeRupees,
+        `Booking fee for ${guestCount} guest(s) at ${tenant.business_name} — ${reservationId}`,
+        reservationId
+      );
+    }
+    const isPrepaid = !!paymentLink;
+    const payStatus: 'pending' | 'paid' = isPrepaid ? 'pending' : 'paid';
+
     const bookingPayload = {
       reservation_id: reservationId,
       customer_name: name,
@@ -136,10 +155,10 @@ export async function POST(req: NextRequest) {
       slot_time: slotTime,
       booking_date: bookingDate,
       booking_status: 'confirmed',
-      payment_status: 'paid',
-      payment_amount: 0, // No payment required for standard flow bookings
+      payment_status: payStatus,
+      payment_amount: isPrepaid ? feeRupees : 0,
       created_at: new Date().toISOString(),
-      special_request, // store for logging / future use
+      special_request,
     };
 
     console.log(`🚀 [SAVE BOOKING] Saving reservation ${reservationId} for tenant ${tenant.business_name}...`);
@@ -183,10 +202,11 @@ export async function POST(req: NextRequest) {
           customer_name: name,
           customer_phone: cleanPhoneStr,
           party_size: guestCount,
-          payment_amount: 0,
-          payment_status: 'paid',
+          payment_amount: isPrepaid ? Math.round(feeRupees * 100) : 0, // paise
+          payment_status: payStatus,
           booking_status: 'confirmed',
-          reservation_id: reservationId
+          reservation_id: reservationId,
+          ...(paymentLink && { payment_link_url: paymentLink.short_url, payment_link_id: paymentLink.id }),
         });
         console.log(`   ✓ Saved successfully to restaurant_bookings table.`);
       }
@@ -194,10 +214,46 @@ export async function POST(req: NextRequest) {
       console.warn('⚠️ [SAVE BOOKING] Supabase insertion warning (non-blocking):', dbErr.message);
     }
 
+    // 8. Fee due → send the payment link to the guest on WhatsApp + fire integrations.
+    if (paymentLink) {
+      const accessToken = (tenant as any).wa_access_token ? (decryptToken((tenant as any).wa_access_token) as string) : '';
+      const phoneNumberId = (tenant as any).wa_phone_number_id as string;
+      if (accessToken && phoneNumberId) {
+        const payMsg = `Almost done! 🎉\nTo confirm your table for ${guestCount} on ${bookingDate}, please pay the ₹${feeRupees} booking fee here:\n${paymentLink.short_url}\n\nReservation: ${reservationId}`;
+        sendTextMessage(accessToken, phoneNumberId, cleanPhoneStr, payMsg).catch(e =>
+          console.error('Failed to send payment link:', (e as Error).message));
+      }
+      fireIntegrations({
+        type: 'payment_requested',
+        tenantId,
+        lead: { name, phone: cleanPhoneStr },
+        amount: feeRupees,
+        description: `Booking ${reservationId}`,
+      }).catch(() => {});
+    } else {
+      // Free booking → confirmed immediately. Propagate to Pabbly / Google Calendar / CRM.
+      fireIntegrations({
+        type: 'booking_confirmed',
+        tenantId,
+        lead: { name, phone: cleanPhoneStr },
+        details: {
+          reservation_id: reservationId,
+          party_size: String(guestCount),
+          date: bookingDate,
+          time: slotTime,
+        },
+      }).catch(() => {});
+    }
+
     return NextResponse.json({
       success: true,
       reservationId,
-      message: 'Booking successfully created and synced to Google Sheets!'
+      payment_required: isPrepaid,
+      payment_link: paymentLink?.short_url || null,
+      fee: feeRupees,
+      message: isPrepaid
+        ? `Booking created. ₹${feeRupees} payment link sent to the guest on WhatsApp.`
+        : 'Booking successfully created and synced to Google Sheets!'
     });
 
   } catch (err: any) {

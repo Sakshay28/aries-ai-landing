@@ -18,6 +18,7 @@ import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager'
 import { decryptToken } from '@/lib/utils/crypto';
 import { runFlowsForMessage } from '@/lib/flows/engine';
 import { fireIntegrations } from '@/lib/integrations/runner';
+import { sendLeadAssignedEmail } from '@/lib/email/service';
 
 // ── GET: Webhook Verification Handshake ──
 export async function GET(req: NextRequest) {
@@ -167,17 +168,24 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   } else {
     // Round-robin assignment
     let assignedTo: string | null = null;
+    let assignedMember: { id: string; email?: string; full_name?: string } | null = null;
     try {
       const { data: teamMembers } = await supabaseAdmin
         .from('users')
-        .select('id')
+        .select('id, is_sales_agent, email, full_name')
         .eq('tenant_id', tenant.id)
         .order('created_at', { ascending: true });
 
       if (teamMembers && teamMembers.length > 0) {
+        // Prefer the sales team for auto-assignment: Click-to-WhatsApp / Meta-ad
+        // leads must land with sales. Fall back to all members if nobody is
+        // flagged as a sales agent yet.
+        const salesPool = teamMembers.filter((m: { is_sales_agent?: boolean }) => m.is_sales_agent);
+        const pool = salesPool.length > 0 ? salesPool : teamMembers;
         const counter = (tenant.lead_assignment_counter as number) ?? 0;
-        const idx = counter % teamMembers.length;
-        assignedTo = teamMembers[idx].id;
+        const idx = counter % pool.length;
+        assignedMember = pool[idx];
+        assignedTo = pool[idx].id;
         void supabaseAdmin
           .from('tenants')
           .update({ lead_assignment_counter: counter + 1 })
@@ -185,6 +193,41 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       }
     } catch (e) {
       console.warn('⚠️ Assignment failed:', e);
+    }
+
+    // Tracking campaign: tag the lead from (1) a ref code in the first message
+    // (wa.me tracking links) or (2) the Meta ad it came from (Click-to-WhatsApp).
+    let campaignId: string | null = null;
+    let campaignName: string | undefined;
+    try {
+      const { data: campaigns } = await supabaseAdmin
+        .from('lead_campaigns')
+        .select('id, name, ref_code, meta_ad_id')
+        .eq('tenant_id', tenant.id)
+        .eq('is_active', true);
+
+      const text = (msg.text || '').toLowerCase();
+      let hit: { id: string; name: string } | undefined;
+
+      // (1) ref code embedded in the message (e.g. "[4june]")
+      if (text) {
+        hit = (campaigns || []).find((c: { ref_code?: string }) => {
+          if (!c.ref_code) return false;
+          const esc = c.ref_code.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          return new RegExp(`\\b${esc}\\b`).test(text);
+        });
+      }
+
+      // (2) Meta ad id, when the lead came from a Click-to-WhatsApp ad
+      const adId = isFromAd ? msg.referral?.source_id : undefined;
+      if (!hit && adId) {
+        hit = (campaigns || []).find((c: { meta_ad_id?: string }) =>
+          !!c.meta_ad_id && c.meta_ad_id === adId);
+      }
+
+      if (hit) { campaignId = hit.id; campaignName = hit.name; }
+    } catch {
+      // lead_campaigns table may not be migrated yet — skip tagging gracefully
     }
 
     const { data: newLead } = await supabaseAdmin
@@ -199,6 +242,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         first_message_at: new Date().toISOString(),
         last_message_at: new Date().toISOString(),
         ...(assignedTo && { assigned_to: assignedTo }),
+        ...(campaignId && { campaign_id: campaignId }),
         ...(isFromAd && msg.referral && {
           notes: `Meta Ad — "${msg.referral.headline || ''}" | Ad ID: ${msg.referral.source_id || ''} | CLID: ${msg.referral.ctwa_clid || ''}`,
         }),
@@ -228,9 +272,20 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         email: newLead.email || undefined,
         lead_status: 'new',
         source: leadSource,
+        campaign: campaignName,
         lead_score: isFromAd ? 30 : 10,
         created_at: new Date().toISOString(),
       }).catch(() => {});
+
+      // Notify the assigned sales agent about high-intent ad leads (email).
+      if (isFromAd && assignedMember?.email) {
+        sendLeadAssignedEmail(
+          assignedMember.email,
+          newLead.name || cleanPhone,
+          (tenant.business_name as string) || 'your business',
+          'Meta Ad'
+        ).catch(() => {});
+      }
     }
   }
 

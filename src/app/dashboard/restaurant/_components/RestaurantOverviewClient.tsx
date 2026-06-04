@@ -14,6 +14,7 @@ import {
   Cell,
 } from 'recharts';
 import type { RestaurantStats, RestaurantBooking } from '@/lib/types';
+import toast from 'react-hot-toast';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function formatSlotTime(timeStr: string): string {
@@ -80,6 +81,10 @@ export function RestaurantOverviewClient() {
   const [slotData, setSlotData] = useState<{ name: string; filled: number; available: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [feeInput, setFeeInput] = useState('0');
+  const [feeSaving, setFeeSaving] = useState(false);
+  const [canEditFee, setCanEditFee] = useState(false);
+  const [holdInput, setHoldInput] = useState('20');
 
   const todayIST = new Date(Date.now() + 5.5 * 3600 * 1000)
     .toISOString()
@@ -118,6 +123,15 @@ export function RestaurantOverviewClient() {
         };
       });
       setSlotData(chart);
+
+      // Booking commitment fee setting
+      const settingsRes = await fetch('/api/restaurant/settings');
+      if (settingsRes.ok) {
+        const s = await settingsRes.json();
+        setFeeInput(String(s.booking_fee_per_person ?? 0));
+        setHoldInput(String(s.booking_hold_minutes ?? 20));
+        setCanEditFee(!!s.can_edit);
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -126,6 +140,29 @@ export function RestaurantOverviewClient() {
   }, [todayIST]);
 
   useEffect(() => { load(); }, [load]);
+
+  const saveFee = async () => {
+    setFeeSaving(true);
+    try {
+      const res = await fetch('/api/restaurant/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ booking_fee_per_person: Number(feeInput) || 0, booking_hold_minutes: Number(holdInput) || 20 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (data.booking_fee_per_person !== undefined) setFeeInput(String(data.booking_fee_per_person));
+        if (data.booking_hold_minutes !== undefined) setHoldInput(String(data.booking_hold_minutes));
+        toast.success('Settings saved');
+      } else {
+        toast.error(data.error || 'Failed to update');
+      }
+    } catch {
+      toast.error('Failed to update');
+    } finally {
+      setFeeSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -169,6 +206,64 @@ export function RestaurantOverviewClient() {
           loading={loading}
         />
       </div>
+
+      {/* Booking & payment settings */}
+      <Card className="bg-card border-border shadow-none rounded-xl">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-semibold text-foreground">Booking &amp; Payment Settings</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div>
+            <p className="text-sm text-muted-foreground mb-2">
+              Charge guests a fee per person to confirm a booking — they get a WhatsApp payment link automatically. Set to 0 to turn off.
+            </p>
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">₹</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={feeInput}
+                  onChange={(e) => setFeeInput(e.target.value)}
+                  disabled={!canEditFee}
+                  className="w-32 h-10 pl-7 pr-3 bg-background border border-border rounded-lg text-sm focus:border-indigo-500 outline-none disabled:opacity-60"
+                />
+              </div>
+              <span className="text-sm text-muted-foreground">per guest</span>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-sm text-muted-foreground mb-2">
+              Hold an unpaid booking&apos;s seats for this long, then release them automatically so others can book.
+            </p>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={5}
+                max={240}
+                value={holdInput}
+                onChange={(e) => setHoldInput(e.target.value)}
+                disabled={!canEditFee}
+                className="w-24 h-10 px-3 bg-background border border-border rounded-lg text-sm focus:border-indigo-500 outline-none disabled:opacity-60"
+              />
+              <span className="text-sm text-muted-foreground">minutes</span>
+            </div>
+          </div>
+
+          {canEditFee ? (
+            <button
+              onClick={saveFee}
+              disabled={feeSaving}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+            >
+              {feeSaving ? 'Saving...' : 'Save settings'}
+            </button>
+          ) : (
+            <p className="text-xs text-muted-foreground">Only owners, admins and managers can change this.</p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Two-column section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

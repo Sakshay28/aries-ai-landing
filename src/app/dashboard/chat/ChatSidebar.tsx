@@ -15,6 +15,7 @@ interface ChatConversation {
   bot_paused: boolean;
   escalated?: boolean;
   leads?: { name: string | null; phone: string | null } | null;
+  assigned_to?: string | null;
   last_message_preview?: string | null;
 }
 
@@ -81,6 +82,8 @@ export default function ChatSidebar() {
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<'active' | 'requesting' | 'intervened'>('active');
   const [tenantId, setTenantId] = useState<string | null>(null);
+  const [me, setMe] = useState<string | null>(null);
+  const [mineOnly, setMineOnly] = useState(false);
 
   const supabaseRef = useRef(createBrowserSupabaseClient());
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -104,6 +107,9 @@ export default function ChatSidebar() {
       setConvos(data.conversations);
       if (data.tenantId) {
         setTenantId(data.tenantId);
+      }
+      if (data.me?.id) {
+        setMe(data.me.id);
       }
       setLoading(false);
 
@@ -194,6 +200,7 @@ export default function ChatSidebar() {
   }, []);
 
   const filtered = convos.filter(c => {
+    if (mineOnly && c.assigned_to !== me) return false;
     if (activeTab === 'requesting') {
       if (!c.escalated) return false;
     } else if (activeTab === 'intervened') {
@@ -260,6 +267,29 @@ export default function ChatSidebar() {
             );
           })}
         </div>
+
+        {me && (
+          <div className="flex items-center gap-1 mb-3">
+            <button
+              onClick={() => setMineOnly(false)}
+              className={cn(
+                "px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors",
+                !mineOnly ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              All chats
+            </button>
+            <button
+              onClick={() => setMineOnly(true)}
+              className={cn(
+                "px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors",
+                mineOnly ? "bg-indigo-500/15 text-indigo-500" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Assigned to me
+            </button>
+          </div>
+        )}
 
         {/* Search */}
         <div className="relative flex items-center">

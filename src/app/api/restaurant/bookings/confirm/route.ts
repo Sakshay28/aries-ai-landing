@@ -17,6 +17,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { sendTextMessage } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
+import { fireIntegrations } from '@/lib/integrations/runner';
 import crypto from 'crypto';
 import { format } from 'date-fns';
 
@@ -253,6 +254,19 @@ export async function POST(req: NextRequest) {
           console.error('❌ Google Sheets sync failed (non-critical):', (err as Error).message);
         }
       }
+
+      // ── 4. Integrations (Pabbly / Google Calendar / CRM) ───────────
+      fireIntegrations({
+        type: 'booking_confirmed',
+        tenantId: restaurant_id,
+        lead: { name: customer_name, phone: customer_phone },
+        details: {
+          reservation_id,
+          party_size: String(party_size ?? ''),
+          date: booking_date,
+          time: slot_time || '',
+        },
+      }).catch(() => {});
     })();
   }
 

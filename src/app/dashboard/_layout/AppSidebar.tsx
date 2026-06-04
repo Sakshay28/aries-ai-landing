@@ -26,6 +26,9 @@ import {
   UtensilsCrossed,
   CalendarX,
   Clock,
+  Radar,
+  Target,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -49,8 +52,10 @@ const navigationItems: NavItem[] = [
   { label: "AI Flows", icon: Network, href: "/dashboard/flows" },
   { label: "Broadcast", icon: Megaphone, href: "/dashboard/broadcast" },
   { label: "Contacts", icon: Users, href: "/dashboard/contacts" },
-  { 
-    label: "Smart Rules", 
+  { label: "Leads", icon: Target, href: "/dashboard/leads" },
+  { label: "Campaigns", icon: Radar, href: "/dashboard/campaigns" },
+  {
+    label: "Smart Rules",
     icon: Workflow, 
     href: "/dashboard/automations",
   },
@@ -67,7 +72,7 @@ const bottomItems: NavItem[] = [
 ];
 
 
-export default function AppSidebar({ userEmail, modules = [] }: { userEmail?: string; modules?: string[] }) {
+export default function AppSidebar({ userEmail, modules = [], isPlatformAdmin = false }: { userEmail?: string; modules?: string[]; isPlatformAdmin?: boolean }) {
   const { isOpen, isMobileOpen, toggle, setMobileOpen } = useSidebar();
   const pathname = usePathname();
 
@@ -91,6 +96,7 @@ export default function AppSidebar({ userEmail, modules = [] }: { userEmail?: st
         userEmail={userEmail}
         displayName={displayName}
         hasRestaurant={hasRestaurant}
+        isPlatformAdmin={isPlatformAdmin}
       />
 
       {/* Mobile — fixed drawer */}
@@ -109,6 +115,7 @@ export default function AppSidebar({ userEmail, modules = [] }: { userEmail?: st
           userEmail={userEmail}
           displayName={displayName}
           hasRestaurant={hasRestaurant}
+          isPlatformAdmin={isPlatformAdmin}
         />
       </aside>
     </>
@@ -124,6 +131,7 @@ function DesktopSidebar(props: {
   userEmail?: string;
   displayName: string;
   hasRestaurant: boolean;
+  isPlatformAdmin: boolean;
 }) {
   return (
     <aside
@@ -138,6 +146,7 @@ function DesktopSidebar(props: {
         userEmail={props.userEmail}
         displayName={props.displayName}
         hasRestaurant={props.hasRestaurant}
+        isPlatformAdmin={props.isPlatformAdmin}
       />
     </aside>
   );
@@ -151,6 +160,7 @@ function SidebarBody({
   userEmail,
   displayName,
   hasRestaurant,
+  isPlatformAdmin,
 }: {
   isOpen: boolean;
   onToggle: () => void;
@@ -159,6 +169,7 @@ function SidebarBody({
   userEmail?: string;
   displayName: string;
   hasRestaurant: boolean;
+  isPlatformAdmin: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -270,6 +281,14 @@ function SidebarBody({
 
       {/* Bottom nav */}
       <div className="space-y-1 border-t border-sidebar-border p-3">
+        {isPlatformAdmin && (
+          <NavButton
+            item={{ label: "Approvals", icon: ShieldCheck, href: "/dashboard/admin/approvals" }}
+            isOpen={isOpen}
+            isActive={isActive("/dashboard/admin/approvals")}
+            userPlan={plan}
+          />
+        )}
         {bottomItems.map((item) => (
           <NavButton key={item.label} item={item} isOpen={isOpen} isActive={isActive(item.href)} userPlan={plan} />
         ))}

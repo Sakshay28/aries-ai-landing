@@ -15,6 +15,10 @@
     {
       "path": "/api/broadcast/process-queue",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/expire-bookings",
+      "schedule": "0 0 * * *"
     }
   ]
 }

@@ -208,12 +208,17 @@ async function ensureSheetExists(token: string, spreadsheetId: string, sheetName
 }
 
 // ── Ensure header row exists (idempotent) ──────────────────
-const HEADERS = ['Name', 'Phone', 'Email'];
+const HEADERS = ['Date', 'Name', 'Phone', 'Email', 'Source', 'Campaign', 'Status', 'Score', 'Assigned To'];
+
+const SOURCE_LABELS: Record<string, string> = {
+  meta_ctwa: 'Meta Ad', whatsapp: 'WhatsApp', instagram: 'Instagram', manual: 'Manual',
+};
+const fmtDate = (iso?: string) => (iso ? iso.slice(0, 10) : new Date().toISOString().slice(0, 10));
 
 async function ensureHeaders(token: string, spreadsheetId: string, sheetName: string): Promise<void> {
   await ensureSheetExists(token, spreadsheetId, sheetName);
 
-  const range = `${sheetName}!A1:C1`;
+  const range = `${sheetName}!A1:I1`;
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`,
     { headers: { Authorization: `Bearer ${token}` } }
@@ -221,7 +226,8 @@ async function ensureHeaders(token: string, spreadsheetId: string, sheetName: st
   if (!res.ok) return; // silently ignore — sheet might not have rows yet
 
   const data = await res.json() as { values?: string[][] };
-  if (data.values && data.values[0]?.length > 0) return; // already has headers
+  // Already up to date (handles upgrading an old 3-column header to the new layout).
+  if (data.values && (data.values[0]?.length ?? 0) >= HEADERS.length) return;
 
   await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
@@ -235,24 +241,32 @@ async function ensureHeaders(token: string, spreadsheetId: string, sheetName: st
 
 // ── Append a single lead row ───────────────────────────────
 export interface LeadRow {
-  name?:       string;
-  phone?:      string;
-  email?:      string;
+  name?:        string;
+  phone?:       string;
+  email?:       string;
   lead_status?: string;
-  source?:     string;
-  lead_score?: number;
-  created_at?: string;
+  source?:      string;
+  campaign?:    string;
+  assigned_to?: string;
+  lead_score?:  number;
+  created_at?:  string;
 }
 
 export async function appendLeadRow(tenantId: string, lead: LeadRow): Promise<void> {
   const { token, config } = await getSheetsConfig(tenantId);
   await ensureHeaders(token, config.spreadsheet_id, config.sheet_name);
 
-  const range   = `${config.sheet_name}!A:C`;
+  const range   = `${config.sheet_name}!A:I`;
   const values  = [[
+    fmtDate(lead.created_at),
     lead.name  ?? '',
     lead.phone ?? '',
     lead.email ?? '',
+    SOURCE_LABELS[lead.source ?? ''] ?? lead.source ?? '',
+    lead.campaign ?? '',
+    lead.lead_status ?? '',
+    lead.lead_score ?? '',
+    lead.assigned_to ?? '',
   ]];
 
   const res = await fetch(
@@ -273,7 +287,7 @@ export async function syncAllLeads(tenantId: string): Promise<{ synced: number }
 
   const { data: leads, error } = await supabaseAdmin
     .from('leads')
-    .select('name, phone, email')
+    .select('name, phone, email, source, lead_status, lead_score, created_at, campaign:campaign_id(name), assigned_user:assigned_to(full_name, email)')
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: true });
 
@@ -281,7 +295,7 @@ export async function syncAllLeads(tenantId: string): Promise<{ synced: number }
   if (!leads || leads.length === 0) return { synced: 0 };
 
   // Clear existing data and rewrite (clean sync)
-  const clearRange = `${config.sheet_name}!A:C`;
+  const clearRange = `${config.sheet_name}!A:I`;
   await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheet_id}/values/${encodeURIComponent(clearRange)}:clear`,
     { method: 'POST', headers: { Authorization: `Bearer ${token}` } }
@@ -289,11 +303,20 @@ export async function syncAllLeads(tenantId: string): Promise<{ synced: number }
 
   const rows = [
     HEADERS,
-    ...leads.map(l => [
-      l.name  ?? '',
-      l.phone ?? '',
-      l.email ?? '',
-    ]),
+    ...leads.map(l => {
+      const a = l as Record<string, any>;
+      return [
+        fmtDate(a.created_at),
+        a.name  ?? '',
+        a.phone ?? '',
+        a.email ?? '',
+        SOURCE_LABELS[a.source ?? ''] ?? a.source ?? '',
+        a.campaign?.name ?? '',
+        a.lead_status ?? '',
+        a.lead_score ?? '',
+        a.assigned_user?.full_name ?? a.assigned_user?.email ?? '',
+      ];
+    }),
   ];
 
   const range = `${config.sheet_name}!A1`;

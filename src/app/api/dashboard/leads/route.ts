@@ -10,11 +10,20 @@ export async function GET() {
 
   const supabase = await createServerSupabaseClient();
 
-  const { data: leads, error } = await supabase
+  let { data: leads, error } = await supabase
     .from('leads')
-    .select('*, conversations(id), assigned_user:assigned_to(id, full_name, email)')
+    .select('*, conversations(id), assigned_user:assigned_to(id, full_name, email), campaign:campaign_id(id, name, ref_code, color)')
     .eq('tenant_id', tenantId)
     .order('updated_at', { ascending: false });
+
+  if (error) {
+    // The campaign relationship may not be migrated yet — retry without it.
+    ({ data: leads, error } = await supabase
+      .from('leads')
+      .select('*, conversations(id), assigned_user:assigned_to(id, full_name, email)')
+      .eq('tenant_id', tenantId)
+      .order('updated_at', { ascending: false }));
+  }
 
   if (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

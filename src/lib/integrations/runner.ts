@@ -145,6 +145,32 @@ async function runCustomWebhooks(cfg: IntegrationConfig, event: IntegrationEvent
   }
 }
 
+// ── Google Calendar: POST booking to the configured Zapier/Make webhook ──
+// The Integrations UI sets up a Zapier/Make scenario (Webhook → Calendar event)
+// and stores its trigger URL. We forward booking_confirmed events to it.
+async function runGoogleCalendar(cfg: IntegrationConfig, event: IntegrationEvent) {
+  if (event.type !== 'booking_confirmed') return;
+  const url = cfg.webhook_url;
+  if (!url) return;
+
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: event.type,
+        timestamp: new Date().toISOString(),
+        calendar_id: cfg.calendar_id || '',
+        timezone: cfg.timezone || 'Asia/Kolkata',
+        ...event,
+      }),
+    });
+    console.log(`📅 Google Calendar (webhook): booking sent → ${url}`);
+  } catch (e) {
+    console.error('Google Calendar integration error:', (e as Error).message);
+  }
+}
+
 // ── Main runner ──────────────────────────────────────────────
 const HANDLERS: Record<string, (cfg: IntegrationConfig, event: IntegrationEvent) => Promise<string | void | undefined>> = {
   razorpay: runRazorpay,
@@ -152,6 +178,7 @@ const HANDLERS: Record<string, (cfg: IntegrationConfig, event: IntegrationEvent)
   shiprocket: runShiprocket,
   pabbly: runPabbly,
   webhooks: runCustomWebhooks,
+  googlecalendar: runGoogleCalendar,
 };
 
 export async function fireIntegrations(event: IntegrationEvent): Promise<void> {
@@ -201,4 +228,58 @@ export async function generateRazorpayLink(
     description,
   });
   return result ?? null;
+}
+
+// ── Booking commitment fee: Razorpay payment link tied to a reservation ──
+// Returns { id, short_url } so the caller can send the link over WhatsApp and
+// the Razorpay webhook can match the `payment_link.paid` event back to the booking.
+export async function createBookingPaymentLink(
+  tenantId: string,
+  lead: { name: string; phone: string },
+  amountRupees: number,
+  description: string,
+  referenceId: string
+): Promise<{ id: string; short_url: string } | null> {
+  const { data } = await supabaseAdmin
+    .from('tenant_integrations')
+    .select('config')
+    .eq('tenant_id', tenantId)
+    .eq('integration_id', 'razorpay')
+    .eq('is_active', true)
+    .single();
+  if (!data?.config) return null;
+
+  const cfg = data.config as IntegrationConfig;
+  const keyId = decrypt(cfg.key_id);
+  const keySecret = decrypt(cfg.key_secret);
+  if (!keyId || !keySecret) return null;
+
+  try {
+    const res = await fetch('https://api.razorpay.com/v1/payment_links', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64'),
+      },
+      body: JSON.stringify({
+        amount: Math.round(amountRupees * 100),
+        currency: 'INR',
+        description,
+        reference_id: referenceId,
+        customer: { name: lead.name || 'Guest', contact: lead.phone },
+        notify: { sms: false, email: false },
+        reminder_enable: true,
+        notes: { tenant_id: tenantId, reservation_id: referenceId, type: 'booking' },
+      }),
+    });
+    const j = await res.json();
+    if (!res.ok) {
+      console.error('Razorpay booking link error:', JSON.stringify(j).slice(0, 300));
+      return null;
+    }
+    return { id: j.id as string, short_url: j.short_url as string };
+  } catch (e) {
+    console.error('Razorpay booking link exception:', (e as Error).message);
+    return null;
+  }
 }

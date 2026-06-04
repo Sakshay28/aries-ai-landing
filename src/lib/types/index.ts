@@ -101,13 +101,14 @@ export interface User {
   full_name: string | null;
   avatar_url: string | null;
   role: UserRole;
+  is_sales_agent: boolean;
   is_platform_admin: boolean;
   last_login_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export type UserRole = 'owner' | 'admin' | 'staff' | 'viewer';
+export type UserRole = 'owner' | 'admin' | 'manager' | 'staff' | 'viewer';
 
 // ── Lead (Customer contact) ──
 export interface Lead {

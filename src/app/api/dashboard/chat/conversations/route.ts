@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { getTenantId } from '@/lib/auth/getTenantId';
+import { getCurrentUser } from '@/lib/auth/getCurrentUser';
 
 export async function GET(req: NextRequest) {
   try {
-    const tenantId = await getTenantId();
-    if (!tenantId) {
+    const me = await getCurrentUser();
+    if (!me) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
+    const tenantId = me.tenant_id;
 
     const { data: convos, error: convErr } = await supabaseAdmin
       .from('conversations')
@@ -29,14 +30,14 @@ export async function GET(req: NextRequest) {
 
     // ── Batch-fetch leads (single query) ────────────────────────────────────
     const leadIds = convos.map((c: any) => c.lead_id).filter(Boolean);
-    const leadsMap: Record<string, { name: string | null; phone: string | null }> = {};
+    const leadsMap: Record<string, { name: string | null; phone: string | null; assigned_to: string | null }> = {};
     if (leadIds.length > 0) {
       const { data: leads } = await supabaseAdmin
         .from('leads')
-        .select('id, name, phone')
+        .select('id, name, phone, assigned_to')
         .in('id', leadIds);
       (leads ?? []).forEach((l: any) => {
-        leadsMap[l.id] = { name: l.name, phone: l.phone };
+        leadsMap[l.id] = { name: l.name, phone: l.phone, assigned_to: l.assigned_to ?? null };
       });
     }
 
@@ -60,15 +61,16 @@ export async function GET(req: NextRequest) {
 
     // ── Assemble final response ──────────────────────────────────────────────
     const enriched = convos.map((c: any) => {
-      const lead = leadsMap[c.lead_id] ?? { name: null, phone: c.sender_id ?? null };
+      const lead = leadsMap[c.lead_id] ?? { name: null, phone: c.sender_id ?? null, assigned_to: null };
       return {
         ...c,
         leads: lead,
+        assigned_to: lead.assigned_to ?? null,
         last_message_preview: lastMsgMap[c.id] ?? null,
       };
     });
 
-    return NextResponse.json({ success: true, conversations: enriched, tenantId });
+    return NextResponse.json({ success: true, conversations: enriched, tenantId, me: { id: me.id } });
   } catch (error: any) {
     console.error('Conversations error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
