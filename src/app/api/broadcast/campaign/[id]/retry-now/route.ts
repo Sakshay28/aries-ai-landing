@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { BroadcastEngineService } from '@/lib/broadcast/services/broadcast-engine.service';
 
 export const maxDuration = 10;
 
@@ -40,26 +41,42 @@ export async function POST(
       .eq('campaign_id', campaignId)
       .in('status', ['pending', 'retrying']);
 
-    // Delegate to the self-chaining process-queue endpoint so large retries
-    // don't blow the 10s function timeout.
+    // Reset any items stuck with a future next_attempt_at so they're picked up NOW.
+    await supabaseAdmin
+      .from('broadcast_queue')
+      .update({ next_attempt_at: null, status: 'pending', locked_at: null })
+      .eq('campaign_id', campaignId)
+      .in('status', ['pending', 'retrying', 'processing'])
+      .not('next_attempt_at', 'is', null)
+      .gt('next_attempt_at', new Date().toISOString());
+
+    // Process directly in after() — no HTTP round-trip, guaranteed to run
+    // even when CRON_SECRET is not configured in Vercel.
     after(async () => {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
-      const cronSecret = process.env.CRON_SECRET;
-      if (!appUrl || !cronSecret) return;
       try {
-        await fetch(`${appUrl}/api/broadcast/process-queue`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${cronSecret}` },
-        });
+        const processed = await BroadcastEngineService.processQueue(50);
+        console.log(`[RETRY_NOW] Processed ${processed} items`);
+
+        // Chain more if needed
+        if (processed >= 50) {
+          const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+          const cronSecret = process.env.CRON_SECRET;
+          if (appUrl && cronSecret) {
+            fetch(`${appUrl}/api/broadcast/process-queue`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${cronSecret}` },
+            }).catch(() => {});
+          }
+        }
       } catch (e) {
-        console.error('[RETRY_NOW] Failed to trigger process-queue:', e);
+        console.error('[RETRY_NOW] Failed to process queue:', e);
       }
     });
 
     return NextResponse.json({
       success: true,
       pendingCount: count ?? 0,
-      message: 'Processing started — refresh stats in 30 seconds.',
+      message: 'Processing started — refresh in 15 seconds.',
     });
 
   } catch (error: any) {

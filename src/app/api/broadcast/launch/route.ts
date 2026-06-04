@@ -105,26 +105,26 @@ export async function POST(req: NextRequest) {
     await ExecutionEventService.logEvent(tenantId, campaignId, 'launch_requested', 'Launch requested', 'Campaign launch initiated.');
     await ExecutionEventService.logEvent(tenantId, campaignId, 'queue_created', 'Queue initialized', `${result.queuedCount} messages queued for dispatch.`);
 
-    // 7. Kick off queue processing in a fresh serverless invocation so it gets
-    //    its own execution budget (not shared with this response's 10s window).
+    // 7. Process first batch immediately in after() — direct call, no HTTP round-trip.
+    //    This guarantees processing even when CRON_SECRET is not set in Vercel.
     after(async () => {
       try {
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
-        const cronSecret = process.env.CRON_SECRET;
+        const processed = await BroadcastEngineService.processQueue(50);
+        console.log(`[BROADCAST_LAUNCH] after() processed ${processed} items`);
 
-        if (appUrl && cronSecret) {
-          const res = await fetch(`${appUrl}/api/broadcast/process-queue`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${cronSecret}` },
-          });
-          console.log(`[BROADCAST_LAUNCH] process-queue triggered: ${res.status}`);
-        } else {
-          // Fallback: process inline when env vars missing (local dev)
-          const processed = await BroadcastEngineService.processQueue(50);
-          console.log(`[BROADCAST_LAUNCH] Inline fallback processed ${processed} items`);
+        // If there are more, chain via HTTP (belt-and-suspenders)
+        if (processed >= 50) {
+          const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+          const cronSecret = process.env.CRON_SECRET;
+          if (appUrl && cronSecret) {
+            fetch(`${appUrl}/api/broadcast/process-queue`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${cronSecret}` },
+            }).catch(() => {});
+          }
         }
       } catch (err) {
-        console.error('[BROADCAST_LAUNCH] Failed to trigger process-queue:', err);
+        console.error('[BROADCAST_LAUNCH] Failed to process queue:', err);
       }
     });
 
