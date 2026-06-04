@@ -16,6 +16,7 @@ import {
 import type { RestaurantStats, RestaurantBooking } from '@/lib/types';
 import toast from 'react-hot-toast';
 import { CheckCircle2, Circle } from 'lucide-react';
+import { WhatsAppFlowDemo } from './WhatsAppFlowDemo';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function formatSlotTime(timeStr: string): string {
@@ -207,6 +208,9 @@ export function RestaurantOverviewClient() {
           loading={loading}
         />
       </div>
+
+      {/* WhatsApp Booking Flow Demo */}
+      <WhatsAppFlowDemo />
 
       {/* Getting Started — only shown until the first real booking comes in */}
       {!loading && (stats?.bookings_today === 0 && stats?.bookings_this_week === 0) && (
