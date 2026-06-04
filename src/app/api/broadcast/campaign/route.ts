@@ -2,6 +2,35 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
+export async function DELETE(req: NextRequest) {
+  try {
+    const tenantId = await getTenantId();
+    if (!tenantId) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const campaignId = searchParams.get('id');
+
+    if (!campaignId) {
+      return NextResponse.json({ success: false, error: 'campaign id required' }, { status: 400 });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('broadcast_campaigns')
+      .delete()
+      .eq('id', campaignId)
+      .eq('tenant_id', tenantId);
+
+    if (error) throw error;
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('[BROADCAST_DELETE] Error:', error);
+    return NextResponse.json({ success: false, error: (error as Error).message || 'Failed to delete campaign' }, { status: 500 });
+  }
+}
+
 export async function GET(req: NextRequest) {
   try {
     const tenantId = await getTenantId();

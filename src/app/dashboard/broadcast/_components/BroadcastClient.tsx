@@ -7,7 +7,6 @@ import {
   BarChart3, Trash2, Zap, MoreHorizontal, Users, Send,
   TrendingUp, Eye, RefreshCw, ChevronRight, Calendar,
 } from 'lucide-react';
-import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import { BroadcastBuilder } from './BroadcastBuilder';
 import type { Campaign, CampaignStatus } from '../types';
@@ -423,7 +422,6 @@ function AnalyticsPanel({ campaign, onClose }: { campaign: Campaign; onClose: ()
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export function BroadcastClient() {
-  const supabase = createBrowserSupabaseClient();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState('all');
@@ -502,8 +500,9 @@ export function BroadcastClient() {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this campaign? This cannot be undone.')) return;
     try {
-      const { error } = await supabase.from('broadcast_campaigns').delete().eq('id', id);
-      if (error) throw error;
+      const res = await fetch(`/api/broadcast/campaign?id=${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
       toast.success('Campaign deleted');
       fetchCampaigns();
     } catch (err: any) {
