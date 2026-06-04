@@ -15,6 +15,7 @@ import {
 } from 'recharts';
 import type { RestaurantStats, RestaurantBooking } from '@/lib/types';
 import toast from 'react-hot-toast';
+import { CheckCircle2, Circle } from 'lucide-react';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function formatSlotTime(timeStr: string): string {
@@ -206,6 +207,42 @@ export function RestaurantOverviewClient() {
           loading={loading}
         />
       </div>
+
+      {/* Getting Started — only shown until the first real booking comes in */}
+      {!loading && (stats?.bookings_today === 0 && stats?.bookings_this_week === 0) && (
+        <Card className="bg-card border-border shadow-none rounded-xl">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
+              🚀 Getting Started — Clock Tower Setup
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground mb-4">Complete these steps to start receiving bookings on WhatsApp.</p>
+            <div className="space-y-3">
+              {[
+                { step: '1', done: true,  label: 'Restaurant dashboard activated', desc: 'You\'re here — the panel is live.' },
+                { step: '2', done: false, label: 'Add time slots', desc: 'Go to Slot Management and create your opening slots (e.g. 7 PM, 8 PM, 9 PM).' },
+                { step: '3', done: false, label: 'Connect WhatsApp', desc: 'Go to Settings and paste your WhatsApp Cloud API token so the bot can receive messages.' },
+                { step: '4', done: false, label: 'Connect Google Sheets (optional)', desc: 'Go to Integrations → Google Sheets. Every booking will auto-appear in your sheet.' },
+                { step: '5', done: false, label: 'Set booking fee (optional)', desc: 'Scroll down to set ₹ per guest to collect a commitment fee via WhatsApp payment link.' },
+                { step: '6', done: false, label: 'Test a booking', desc: 'Message your own WhatsApp number "I want to book a table" and see it appear in Bookings.' },
+              ].map((item) => (
+                <div key={item.step} className="flex items-start gap-3">
+                  {item.done
+                    ? <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
+                    : <Circle className="w-5 h-5 text-muted-foreground/40 shrink-0 mt-0.5" />}
+                  <div>
+                    <p className={`text-sm font-medium ${item.done ? 'text-emerald-600 dark:text-emerald-400' : 'text-foreground'}`}>
+                      {item.label}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{item.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Booking & payment settings */}
       <Card className="bg-card border-border shadow-none rounded-xl">
