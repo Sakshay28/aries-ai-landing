@@ -17,7 +17,7 @@ import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
 import { decryptToken } from '@/lib/utils/crypto';
 import { runFlowsForMessage } from '@/lib/flows/engine';
-import { fireIntegrations } from '@/lib/integrations/runner';
+import { fireIntegrations, createBookingPaymentLink } from '@/lib/integrations/runner';
 import { sendLeadAssignedEmail } from '@/lib/email/service';
 
 // ── GET: Webhook Verification Handshake ──
@@ -754,6 +754,28 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       console.log(`   ↳ Datetime raw: "${rawDateTime}" → date=${bookingDate} time=${slotTime}`);
       console.log(`   ↳ Customer: ${customerName} | Phone: ${customerPhone} | Guests: ${guestCount}`);
 
+      // ── Booking commitment fee: generate Razorpay link if configured ──────
+      const feePerPerson = Number((tenant as any).booking_fee_per_person) || 0;
+      const feeRupees    = feePerPerson > 0 ? feePerPerson * guestCount : 0;
+      let paymentLink: { id: string; short_url: string } | null = null;
+      if (feeRupees > 0) {
+        try {
+          paymentLink = await createBookingPaymentLink(
+            tenant.id,
+            { name: customerName, phone: customerPhone },
+            feeRupees,
+            `Booking fee for ${guestCount} guest(s) at ${(tenant as any).business_name || 'restaurant'} — ${reservationId}`,
+            reservationId
+          );
+          console.log(`   💳 Razorpay link created: ${paymentLink?.short_url}`);
+        } catch (rzErr: any) {
+          console.error('   ❌ Razorpay link creation failed:', rzErr.message);
+        }
+      }
+      const isPrepaid    = !!paymentLink;
+      const payStatus    = isPrepaid ? 'pending' : 'paid';
+      const payAmount    = isPrepaid ? Math.round(feeRupees * 100) : 0; // paise
+
       const bookingPayload = {
         reservation_id: reservationId,
         customer_name: customerName,
@@ -762,8 +784,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         slot_time: slotTime,
         booking_date: bookingDate,
         booking_status: 'confirmed',
-        payment_status: 'paid',
-        payment_amount: 0,
+        payment_status: payStatus,
+        payment_amount: isPrepaid ? feeRupees : 0, // rupees for Sheets
         created_at: new Date().toISOString(),
         special_request: contextObj.specialRequests || '',
       };
@@ -809,16 +831,46 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           customer_name: customerName,
           customer_phone: customerPhone,
           party_size: guestCount,
-          payment_amount: 0,
-          payment_status: 'paid',
+          payment_amount: payAmount,
+          payment_status: payStatus,
           booking_status: 'confirmed',
-          reservation_id: reservationId
+          reservation_id: reservationId,
+          ...(paymentLink && { payment_link_url: paymentLink.short_url, payment_link_id: paymentLink.id }),
         });
         if (dbInsertErr) {
           console.error('❌ AI Auto-Book DB save failed:', dbInsertErr.message);
         } else {
-          console.log(`   ✅ Saved to restaurant_bookings (ID: ${reservationId}).`);
+          console.log(`   ✅ Saved to restaurant_bookings (ID: ${reservationId}, payment: ${payStatus}).`);
         }
+      }
+
+      // 2b. If payment required — override the AI reply with the payment link message
+      //     so the customer gets the link right away in the same WhatsApp thread.
+      if (isPrepaid && paymentLink) {
+        const waToken    = decryptToken((tenant as any).wa_access_token) as string;
+        const waPhoneId  = (tenant as any).wa_phone_number_id as string;
+        if (waToken && waPhoneId) {
+          const payMsg = `🎉 Almost done, ${customerName}!\n\nTo confirm your table for ${guestCount} guest${guestCount !== 1 ? 's' : ''} on ${bookingDate}, please pay the ₹${feeRupees} booking fee:\n\n💳 ${paymentLink.short_url}\n\nReservation ID: ${reservationId}`;
+          sendTextMessage(waToken, waPhoneId, customerPhone, payMsg).catch(e =>
+            console.error('❌ Failed to send payment link WA message:', (e as Error).message)
+          );
+        }
+        // Also fire integrations (Pabbly / Calendar) for payment_requested
+        fireIntegrations({
+          type: 'payment_requested',
+          tenantId: tenant.id,
+          lead: { name: customerName, phone: customerPhone },
+          amount: feeRupees,
+          description: `Booking ${reservationId}`,
+        }).catch(() => {});
+      } else {
+        // Free booking confirmed — fire booking_confirmed integrations
+        fireIntegrations({
+          type: 'booking_confirmed',
+          tenantId: tenant.id,
+          lead: { name: customerName, phone: customerPhone },
+          details: { reservation_id: reservationId, party_size: String(guestCount), date: bookingDate, time: slotTime },
+        }).catch(() => {});
       }
 
       // 3. Mark booking as saved in conversation context to prevent duplicates
