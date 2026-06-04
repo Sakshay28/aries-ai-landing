@@ -7,6 +7,7 @@ import {
   Save, CheckCircle2, AlertCircle, Loader2, Mic, Briefcase,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { PhoneInput } from '@/components/ui/phone-input';
 
 // ────────────────────────────────────────────────────────────
 // Types & constants
@@ -372,13 +373,10 @@ export default function BusinessProfilePage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <Field label="Phone Number" icon={<Phone className="w-4 h-4" />} hint="Shown to customers when needed">
-                <input
+                <PhoneInput
                   id="contact-phone"
-                  type="tel"
                   value={profile.contact_phone}
-                  onChange={e => set('contact_phone', e.target.value)}
-                  placeholder="+91 98765 43210"
-                  className="w-full rounded-xl border border-border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-foreground/10 focus:border-foreground/30 transition-all"
+                  onChange={v => set('contact_phone', v)}
                 />
               </Field>
 

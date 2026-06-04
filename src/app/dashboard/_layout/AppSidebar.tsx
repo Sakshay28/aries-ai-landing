@@ -26,6 +26,8 @@ import {
   UtensilsCrossed,
   CalendarX,
   Clock,
+  ListOrdered,
+  ContactRound,
   Radar,
   Target,
   ShieldCheck,
@@ -267,6 +269,18 @@ function SidebarBody({
               item={{ label: "Slot Management", icon: Clock, href: "/dashboard/restaurant/slots" }}
               isOpen={isOpen}
               isActive={isActive("/dashboard/restaurant/slots")}
+              userPlan={plan}
+            />
+            <NavButton
+              item={{ label: "Guests", icon: ContactRound, href: "/dashboard/restaurant/guests" }}
+              isOpen={isOpen}
+              isActive={isActive("/dashboard/restaurant/guests")}
+              userPlan={plan}
+            />
+            <NavButton
+              item={{ label: "Waitlist", icon: ListOrdered, href: "/dashboard/restaurant/waitlist" }}
+              isOpen={isOpen}
+              isActive={isActive("/dashboard/restaurant/waitlist")}
               userPlan={plan}
             />
             <NavButton

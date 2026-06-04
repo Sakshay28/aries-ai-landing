@@ -13,6 +13,7 @@ import toast from 'react-hot-toast';
 import { TemplateSelector } from './TemplateSelector';
 import { WhatsAppPreview } from './WhatsAppPreview';
 import { VariableMapper } from './VariableMapper';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { AudienceBuilder } from './AudienceBuilder';
 import { DeliverySettings } from './DeliverySettings';
 import { AutomationRules } from './AutomationRules';
@@ -149,20 +150,7 @@ function TestSendModal({
             <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
               Send to phone number
             </label>
-            <div className="relative">
-              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none" />
-              <input
-                type="tel"
-                value={phone}
-                onChange={e => setPhone(e.target.value)}
-                placeholder="919876543210"
-                autoFocus
-                className="w-full h-10 pl-9 pr-3 bg-secondary/30 border border-border/60 focus:border-indigo-500/40 rounded-xl text-[13px] outline-none transition-colors"
-              />
-            </div>
-            <p className="text-[11px] text-muted-foreground/60">
-              Include country code. E.g. 91 for India → 919876543210
-            </p>
+            <PhoneInput value={phone} onChange={setPhone} autoFocus />
           </div>
 
           <div className="flex gap-2 pt-1">

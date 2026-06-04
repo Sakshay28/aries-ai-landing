@@ -396,10 +396,16 @@ export interface RestaurantBooking {
   razorpay_payment_id: string | null;
   booking_status: RestaurantBookingStatus;
   reservation_id: string;      // e.g. CT-20240528-0042
+  special_request?: string | null;
+  internal_notes?: string | null;
+  source?: string | null;
   created_at: string;
   updated_at: string;
   // Joined
   slot_time?: string;
+  // Guest enrichment (from bookings GET)
+  is_vip?: boolean;
+  visit_count?: number;
 }
 
 export interface RestaurantBlockedDate {
@@ -428,6 +434,43 @@ export interface RestaurantStats {
   total_deposit_collected_this_month: number;  // rupees (payment_amount / 100)
   most_popular_slot: string | null;   // slot_time string
   upcoming_bookings_today: RestaurantBooking[];
+}
+
+export interface RestaurantGuest {
+  id: string;
+  restaurant_id: string;
+  customer_phone: string;
+  customer_name?: string | null;
+  tags: string[];
+  notes?: string | null;
+  vip_status: boolean;
+  created_at: string;
+  updated_at: string;
+  // Aggregated from bookings
+  totalBookings?: number;
+  totalVisits?: number;
+  lastVisit?: string | null;
+  avgPartySize?: number;
+  bookings?: RestaurantBooking[];
+}
+
+export type WaitlistStatus = 'waiting' | 'notified' | 'converted' | 'removed';
+
+export interface WaitlistEntry {
+  id: string;
+  restaurant_id: string;
+  customer_name: string;
+  customer_phone: string;
+  party_size: number;
+  booking_date: string;
+  requested_slot_id?: string | null;
+  position: number;
+  status: WaitlistStatus;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined
+  slot_time?: string | null;
 }
 
 export interface SlotAvailabilityResult {

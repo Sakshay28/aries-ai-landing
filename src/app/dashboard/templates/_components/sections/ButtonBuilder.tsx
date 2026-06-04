@@ -12,6 +12,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import type { TemplateButton, ButtonType, TemplateFormState } from '../types';
+import { PhoneInput } from '@/components/ui/phone-input';
 
 interface Props {
   state: TemplateFormState;
@@ -270,12 +271,9 @@ export default function ButtonBuilder({ state, onChange }: Props) {
                           <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
                             Business Phone Number
                           </label>
-                          <input
-                            type="tel"
+                          <PhoneInput
                             value={btn.phoneNumber ?? ''}
-                            onChange={(e) => updateButton(btn.id, { phoneNumber: e.target.value })}
-                            placeholder="Enter phone with country code (e.g. +919876543210)"
-                            className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 transition-all font-mono"
+                            onChange={(v) => updateButton(btn.id, { phoneNumber: v })}
                           />
                         </div>
                       )}

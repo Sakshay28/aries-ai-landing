@@ -689,7 +689,7 @@ export default function AISettingsPage() {
 
   return (
     <FeaturePageGate feature="AI Agents" allowedPlans={["growth", "pro", "enterprise"]}>
-      <div className="flex flex-col lg:flex-row h-full bg-background text-foreground overflow-hidden font-sans relative">
+      <div className="absolute inset-0 flex flex-col lg:flex-row bg-background text-foreground overflow-hidden font-sans">
         
         {/* Workspace Panel (Left 65%) */}
         <div className="flex-1 flex flex-col h-full lg:max-w-[65%] border-r border-border/60 relative overflow-hidden bg-background">
@@ -771,7 +771,15 @@ export default function AISettingsPage() {
           </header>
 
           {/* Scrollable Content Area */}
-          <div ref={workspacePanelRef} className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-6 pb-24">
+          <div 
+            ref={workspacePanelRef} 
+            className={cn(
+              "flex-1 overflow-y-auto p-6 lg:p-8 pb-24",
+              showOnboarding 
+                ? "flex flex-col" 
+                : "space-y-6"
+            )}
+          >
 
           {/* ONBOARDING QUICK START WIZARD */}
           {showOnboarding ? (
@@ -779,10 +787,10 @@ export default function AISettingsPage() {
               initial={{ opacity: 0, scale: 0.98 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.98 }}
-              className="py-12 px-6 flex flex-col items-center justify-center text-center space-y-8 max-w-2xl mx-auto h-full my-auto"
+              className="flex flex-col items-center text-center max-w-4xl mx-auto w-full my-auto py-6 px-4 md:px-6 gap-8"
             >
-              <div className="space-y-3">
-                <div className="inline-flex p-3 rounded-2xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 mb-2">
+              <section className="flex flex-col items-center text-center pt-12 pb-12 gap-4 w-full">
+                <div className="inline-flex p-3 rounded-2xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
                   <Sparkles className="w-8 h-8 animate-pulse" />
                 </div>
                 <h2 className="text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl">
@@ -791,27 +799,27 @@ export default function AISettingsPage() {
                 <p className="text-muted-foreground text-sm max-w-md mx-auto leading-relaxed">
                   Aries AI operates 24/7 over WhatsApp to greet guests, handle reservations, and answer menu questions. Let's pre-fill its instructions in 15 seconds.
                 </p>
-              </div>
+              </section>
 
-              <div className="w-full">
-                <div className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground/60 mb-4 block">
+              <div className="w-full space-y-6">
+                <div className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground/60 text-center block">
                   Select your establishment type
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {STARTER_TEMPLATES.map(tpl => (
                     <motion.button
                       key={tpl.id}
                       whileHover={{ scale: 1.02, y: -2 }}
                       whileTap={{ scale: 0.98 }}
                       onClick={() => handleApplyTemplate(tpl)}
-                      className="p-6 rounded-2xl border border-border bg-card hover:border-emerald-500/40 hover:shadow-[0_0_20px_rgba(16,185,129,0.05)] text-left transition-all group duration-200 cursor-pointer flex flex-col justify-between h-40"
+                      className="p-6 rounded-2xl border border-border bg-card hover:border-emerald-500/40 hover:shadow-[0_0_20px_rgba(16,185,129,0.05)] text-left transition-all group duration-200 cursor-pointer flex flex-col justify-between min-h-[160px] h-full"
                     >
-                      <div>
+                      <div className="space-y-2">
                         <div className="font-extrabold text-base text-foreground flex items-center justify-between">
                           <span>{tpl.label}</span>
                           <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-all text-emerald-500 translate-x-[-4px] group-hover:translate-x-0" />
                         </div>
-                        <p className="text-xs text-muted-foreground/90 mt-2 leading-relaxed font-medium">
+                        <p className="text-xs text-muted-foreground/90 leading-relaxed font-medium">
                           {tpl.description}
                         </p>
                       </div>

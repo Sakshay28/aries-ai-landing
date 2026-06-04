@@ -14,6 +14,7 @@ import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import { SkeletonRow } from '@/components/ui/skeleton';
 import { useContactsStore, CSVPreviewRow } from '@/lib/store/contactsStore';
 import { normalizePhone, isValidPhone, formatPhoneDisplay } from '@/lib/utils/phone';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { toast } from 'sonner';
 
 // --- TYPES ---
@@ -277,8 +278,7 @@ export function ContactsClient() {
     }, 400);
   };
 
-  const handleAddPhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
+  const handleAddPhoneChange = (val: string) => {
     setAddForm({ ...addForm, phone: val });
     triggerDuplicateCheck(val);
   };
@@ -624,13 +624,10 @@ export function ContactsClient() {
 
                   <div className="space-y-1">
                     <label className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">Phone Number</label>
-                    <input
-                      type="tel"
-                      required
-                      placeholder="e.g. +919876543210"
+                    <PhoneInput
                       value={editForm.phone}
-                      onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                      className="w-full h-10 px-3 bg-background border border-border rounded-lg text-[13px] focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10"
+                      onChange={(v) => setEditForm({ ...editForm, phone: v })}
+                      required
                     />
                   </div>
 
@@ -1307,17 +1304,12 @@ export function ContactsClient() {
                       <label className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">Phone Number *</label>
                       {isDuplicateChecking && <span className="text-[11px] text-indigo-500 animate-pulse font-medium">Checking duplicates...</span>}
                     </div>
-                    <input
-                      type="tel"
-                      required
-                      placeholder="e.g. +91 98765 43210"
+                    <PhoneInput
                       value={addForm.phone}
                       onChange={handleAddPhoneChange}
-                      className={`w-full h-10 px-3 bg-background border rounded-lg text-[13px] focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all ${
-                        duplicateCheckedId ? 'border-red-400 focus:border-red-500' : 'border-border focus:border-indigo-500/40'
-                      }`}
+                      required
+                      className={duplicateCheckedId ? 'border-red-400 focus-within:border-red-500 focus-within:ring-red-500/20' : ''}
                     />
-                    <p className="text-[11px] text-muted-foreground leading-normal mt-0.5">Format normalizes dynamically to canonical E.164 (+919876543210).</p>
                   </div>
 
                   <div className="space-y-1">

@@ -8,6 +8,7 @@ import {
   MessageSquare, BrainCircuit, Bell, Copy, Eye, EyeOff, Key, HelpCircle, ExternalLink, RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { PhoneInput } from '@/components/ui/phone-input';
 
 interface SettingsData {
   business_name: string;
@@ -386,7 +387,7 @@ export default function SettingsPage() {
                 <Input value={settings.business_type} onChange={v => update('business_type', v)} placeholder="Restaurant, Salon, E-commerce…" />
               </Field>
               <Field label="Business Phone">
-                <Input value={settings.business_phone || ''} onChange={v => update('business_phone', v)} placeholder="+91 98765 43210" />
+                <PhoneInput value={settings.business_phone || ''} onChange={v => update('business_phone', v)} />
               </Field>
               <Field label="Business Email">
                 <Input value={settings.business_email || ''} onChange={v => update('business_email', v)} type="email" placeholder="hello@yourbusiness.com" />
@@ -708,10 +709,10 @@ export default function SettingsPage() {
                 <Input value={settings.staff_name || ''} onChange={v => update('staff_name', v)} placeholder="Rahul" />
               </Field>
               <Field label="Staff WhatsApp Phone">
-                <Input value={settings.staff_phone || ''} onChange={v => update('staff_phone', v)} placeholder="+91 98765 43210" />
+                <PhoneInput value={settings.staff_phone || ''} onChange={v => update('staff_phone', v)} />
               </Field>
               <Field label="Manager Phone (Escalations)">
-                <Input value={settings.manager_phone || ''} onChange={v => update('manager_phone', v)} placeholder="+91 98765 43211" />
+                <PhoneInput value={settings.manager_phone || ''} onChange={v => update('manager_phone', v)} />
               </Field>
               <Field label="Escalation Timeout (mins)">
                 <Input

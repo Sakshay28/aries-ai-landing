@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════
-// 🍽️  Restaurant Bookings — List by Date
+// 🍽️  Restaurant Bookings — List by Date + Guest Enrichment
 // GET /api/restaurant/bookings?date=YYYY-MM-DD&status=confirmed
+// POST /api/restaurant/bookings — create + auto-create guest
 // ═══════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -33,32 +34,66 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Failed to fetch bookings' }, { status: 500 });
   }
 
-  // Flatten the slot_time from the join for easy consumption
   const formattedBookings = (bookings || []).map(b => ({
     ...b,
-    slot_time: (b as any).restaurant_slots?.slot_time || ''
+    slot_time: (b as any).restaurant_slots?.slot_time || '',
   }));
 
-  // Sort bookings chronologically by slot_time
   formattedBookings.sort((a, b) => a.slot_time.localeCompare(b.slot_time));
 
-  return NextResponse.json({ success: true, data: formattedBookings });
+  // ── Guest enrichment: VIP status + visit count ──────────────────────────
+  const phones = [...new Set(formattedBookings.map(b => b.customer_phone))];
+
+  let vipSet = new Set<string>();
+  let visitCountMap: Record<string, number> = {};
+
+  if (phones.length > 0) {
+    // Fetch VIP guest records
+    const { data: guestRecs } = await supabaseAdmin
+      .from('restaurant_guests')
+      .select('customer_phone, vip_status, tags')
+      .eq('restaurant_id', tenantId)
+      .in('customer_phone', phones);
+
+    (guestRecs ?? []).forEach(g => {
+      if (g.vip_status || g.tags?.includes('VIP')) vipSet.add(g.customer_phone);
+    });
+
+    // Fetch completed visit counts for these phones (batched)
+    const { data: visits } = await supabaseAdmin
+      .from('restaurant_bookings')
+      .select('customer_phone')
+      .eq('restaurant_id', tenantId)
+      .in('customer_phone', phones)
+      .eq('booking_status', 'completed');
+
+    (visits ?? []).forEach(v => {
+      visitCountMap[v.customer_phone] = (visitCountMap[v.customer_phone] ?? 0) + 1;
+    });
+  }
+
+  const enriched = formattedBookings.map(b => ({
+    ...b,
+    is_vip: vipSet.has(b.customer_phone),
+    visit_count: visitCountMap[b.customer_phone] ?? 0,
+  }));
+
+  return NextResponse.json({ success: true, data: enriched, tenantId });
 }
 
-// ── POST: manually create a booking from the dashboard ────────────────────
+// ── POST: create booking + auto-create guest ──────────────────────────────
 export async function POST(req: NextRequest) {
   const guard = await withTenantGuard(req);
   if (guard.error) return guard.error;
   const { tenantId } = guard;
 
   const body = await req.json().catch(() => ({}));
-  const { customer_name, customer_phone, party_size, booking_date, slot_id, special_request } = body;
+  const { customer_name, customer_phone, party_size, booking_date, slot_id, special_request, source } = body;
 
   if (!customer_name || !customer_phone || !party_size || !booking_date || !slot_id) {
     return NextResponse.json({ success: false, error: 'Missing required fields' }, { status: 400 });
   }
 
-  // Verify slot belongs to this tenant
   const { data: slot } = await supabaseAdmin
     .from('restaurant_slots')
     .select('id, slot_time')
@@ -68,10 +103,9 @@ export async function POST(req: NextRequest) {
 
   if (!slot) return NextResponse.json({ success: false, error: 'Slot not found' }, { status: 404 });
 
-  // Fetch tenant short code for reservation ID
   const { data: tenant } = await supabaseAdmin
     .from('tenants')
-    .select('short_code, business_name')
+    .select('short_code')
     .eq('id', tenantId)
     .single();
 
@@ -95,6 +129,7 @@ export async function POST(req: NextRequest) {
       payment_status: 'paid',
       booking_status: 'confirmed',
       reservation_id,
+      source: source || 'staff_manual',
       ...(special_request?.trim() && { special_request: special_request.trim() }),
     })
     .select()
@@ -104,6 +139,26 @@ export async function POST(req: NextRequest) {
     console.error('❌ POST /api/restaurant/bookings error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
+
+  // ── Auto-create guest record (non-blocking) ──────────────────────────────
+  // Insert only if not exists — preserves manually-set tags/notes/vip
+  void (async () => {
+    try {
+      const { data: existing } = await supabaseAdmin
+        .from('restaurant_guests')
+        .select('id')
+        .eq('restaurant_id', tenantId)
+        .eq('customer_phone', cleanPhone)
+        .maybeSingle();
+      if (!existing) {
+        await supabaseAdmin.from('restaurant_guests').insert({
+          restaurant_id: tenantId,
+          customer_phone: cleanPhone,
+          customer_name: customer_name.trim(),
+        });
+      }
+    } catch { /* non-blocking, ignore errors */ }
+  })();
 
   // Sync to Google Sheets (non-blocking)
   appendBookingRow(tenantId, {

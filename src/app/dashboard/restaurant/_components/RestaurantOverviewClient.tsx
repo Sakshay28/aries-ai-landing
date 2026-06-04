@@ -1,398 +1,503 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import Link from 'next/link';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-} from 'recharts';
-import type { RestaurantStats, RestaurantBooking } from '@/lib/types';
-import toast from 'react-hot-toast';
-import { CheckCircle2, Circle } from 'lucide-react';
-import { WhatsAppFlowDemo } from './WhatsAppFlowDemo';
+import { toast } from 'sonner';
+import { Phone, MessageCircle, Wifi, Star, Clock, Users, CalendarClock, ArrowRight, RefreshCw } from 'lucide-react';
+import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 
-// ── Helpers ───────────────────────────────────────────────────────────────
-function formatSlotTime(timeStr: string): string {
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface EnrichedBooking {
+  id: string;
+  reservation_id: string;
+  customer_name: string;
+  customer_phone: string;
+  party_size: number;
+  booking_status: string;
+  booking_date: string;
+  special_request?: string | null;
+  source?: string | null;
+  slot_time?: string | null;
+  created_at: string;
+  updated_at: string;
+  is_vip: boolean;
+  vip_tags: string[];
+  visit_count: number;
+  last_visit: string | null;
+}
+
+interface WaitlistEntry {
+  id: string;
+  customer_name: string;
+  customer_phone: string;
+  party_size: number;
+  position: number;
+  status: string;
+  slot_time?: string | null;
+  notes?: string | null;
+}
+
+interface OverviewData {
+  todaySummary: { confirmed: number; expectedCovers: number; totalReservations: number; waitlistCount: number };
+  allBookings: EnrichedBooking[];
+  confirmedBookings: EnrichedBooking[];
+  vipGuestsToday: EnrichedBooking[];
+  waitlistToday: WaitlistEntry[];
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function getISTTimeStr(): string {
+  const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  return `${String(ist.getUTCHours()).padStart(2,'0')}:${String(ist.getUTCMinutes()).padStart(2,'0')}:00`;
+}
+function getISTDateStr(): string {
+  return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0];
+}
+function slotDiffMins(slot: string, now: string): number {
+  const [sh, sm] = slot.split(':').map(Number);
+  const [nh, nm] = now.split(':').map(Number);
+  return (sh * 60 + sm) - (nh * 60 + nm);
+}
+function fmt(t?: string | null): string {
+  if (!t) return '—';
   try {
-    const [h, m] = timeStr.split(':').map(Number);
-    const d = new Date();
-    d.setHours(h, m, 0, 0);
+    const [h, m] = t.split(':').map(Number);
+    const d = new Date(); d.setHours(h, m, 0, 0);
     return d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
-  } catch {
-    return timeStr;
+  } catch { return t; }
+}
+function lastVisitLabel(dateStr: string | null): string {
+  if (!dateStr) return '';
+  const days = Math.floor((Date.now() - new Date(dateStr + 'T00:00:00').getTime()) / 86400000);
+  if (days === 0) return 'visited today';
+  if (days === 1) return 'last visit yesterday';
+  if (days < 7)  return `last visit ${days} days ago`;
+  if (days < 14) return 'last visit 1 week ago';
+  return `last visit ${Math.floor(days / 7)} weeks ago`;
+}
+
+type ArrivalTag = 'now' | 'next' | 'soon';
+function classify(b: EnrichedBooking, now: string): ArrivalTag | null {
+  if (!b.slot_time) return null;
+  const d = slotDiffMins(b.slot_time, now);
+  if (d < -30) return null;
+  if (d <= 20)  return 'now';
+  if (d <= 90)  return 'next';
+  return 'soon';
+}
+
+// ─── Arriving Now Hero ────────────────────────────────────────────────────────
+const TAG_CFG = {
+  now:  { label: 'ARRIVING NOW', wrap: 'border-emerald-500/40 bg-emerald-500/5', head: 'bg-emerald-500/10', dot: 'bg-emerald-500 animate-pulse', txt: 'text-emerald-700 dark:text-emerald-400' },
+  next: { label: 'NEXT UP',      wrap: 'border-primary/30 bg-primary/[0.03]',    head: 'bg-primary/10',      dot: 'bg-primary',                  txt: 'text-primary' },
+  soon: { label: 'SOON',         wrap: 'border-border bg-muted/10',              head: 'bg-muted/50',        dot: 'bg-muted-foreground',         txt: 'text-muted-foreground' },
+};
+
+function ArrivingNowHero({ bookings, now }: { bookings: EnrichedBooking[]; now: string }) {
+  const cards = bookings
+    .map(b => ({ b, tag: classify(b, now) }))
+    .filter((x): x is { b: EnrichedBooking; tag: ArrivalTag } => x.tag !== null)
+    .sort((a, z) => slotDiffMins(a.b.slot_time!, now) - slotDiffMins(z.b.slot_time!, now))
+    .slice(0, 6);
+
+  if (cards.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground py-3 px-1">
+        No arrivals expected in the next 90 minutes.
+      </p>
+    );
   }
-}
 
-function formatCurrency(rupees: number): string {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(rupees);
-}
-
-// ── Stat Card ─────────────────────────────────────────────────────────────
-function StatCard({
-  label,
-  value,
-  sub,
-  loading,
-}: {
-  label: string;
-  value: string | number;
-  sub?: string;
-  loading?: boolean;
-}) {
   return (
-    <Card className="bg-card border-border shadow-none rounded-xl">
-      <CardContent className="p-5">
-        {loading ? (
-          <>
-            <Skeleton className="h-4 w-24 mb-2" />
-            <Skeleton className="h-8 w-16" />
-          </>
-        ) : (
-          <>
-            <p className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase mb-1">{label}</p>
-            <p className="text-3xl font-bold text-foreground">{value}</p>
-            {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
-          </>
-        )}
-      </CardContent>
-    </Card>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {cards.map(({ b, tag }) => {
+        const cfg = TAG_CFG[tag];
+        const diff = slotDiffMins(b.slot_time!, now);
+        const diffLabel = diff <= 0 ? `${Math.abs(diff)}m late` : diff < 60 ? `in ${diff}m` : `in ${Math.floor(diff/60)}h ${diff % 60}m`;
+
+        return (
+          <div key={b.id} className={`rounded-xl border p-4 space-y-3 ${cfg.wrap}`}>
+            {/* Status bar */}
+            <div className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 ${cfg.head}`}>
+              <div className="flex items-center gap-2">
+                <span className={`size-2 rounded-full shrink-0 ${cfg.dot}`} />
+                <span className={`text-[10px] font-bold tracking-wider ${cfg.txt}`}>{cfg.label}</span>
+                {b.is_vip && <Star className="size-3 text-amber-500 fill-amber-500" />}
+              </div>
+              <span className="text-[10px] font-medium text-muted-foreground">{diffLabel}</span>
+            </div>
+
+            {/* Guest */}
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm font-bold text-foreground leading-tight">{b.customer_name}</p>
+                {b.is_vip && (
+                  <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-300/40">
+                    VIP
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1"><Clock className="size-3" />{fmt(b.slot_time)}</span>
+                <span className="flex items-center gap-1"><Users className="size-3" />{b.party_size} cover{b.party_size !== 1 ? 's' : ''}</span>
+              </div>
+              {b.is_vip && b.visit_count > 0 && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-500 font-medium">
+                  {b.visit_count} visit{b.visit_count !== 1 ? 's' : ''}
+                  {b.last_visit ? ` · ${lastVisitLabel(b.last_visit)}` : ''}
+                </p>
+              )}
+              {b.special_request && (
+                <p className="text-[11px] text-muted-foreground italic truncate">"{b.special_request}"</p>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-1.5">
+              <a href={`tel:+${b.customer_phone}`} className="flex-1">
+                <Button size="sm" variant="outline" className="w-full h-8 text-xs">
+                  <Phone className="size-3 mr-1" /> Call
+                </Button>
+              </a>
+              <a href={`https://wa.me/${b.customer_phone}`} target="_blank" rel="noopener noreferrer" className="flex-1">
+                <Button size="sm" variant="outline" className="w-full h-8 text-xs">
+                  <MessageCircle className="size-3 mr-1" /> WA
+                </Button>
+              </a>
+              <Link href="/dashboard/restaurant/bookings">
+                <Button size="sm" variant="ghost" className="h-8 w-8 p-0 shrink-0">
+                  <ArrowRight className="size-3.5" />
+                </Button>
+              </Link>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
-// ── Status badge ──────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, 'success' | 'warning' | 'destructive' | 'secondary'> = {
-    confirmed: 'success',
-    completed: 'secondary',
-    no_show: 'warning',
-    cancelled: 'destructive',
-  };
-  return <Badge variant={map[status] ?? 'secondary'}>{status.replace('_', ' ')}</Badge>;
-}
+// ─── Timeline ─────────────────────────────────────────────────────────────────
+const STATUS_DOT: Record<string, string> = {
+  confirmed: 'bg-emerald-500',
+  completed: 'bg-muted-foreground',
+  no_show:   'bg-amber-500',
+  cancelled: 'bg-destructive/60',
+};
 
-// ── Main Component ────────────────────────────────────────────────────────
-export function RestaurantOverviewClient() {
-  const [stats, setStats] = useState<RestaurantStats | null>(null);
-  const [slotData, setSlotData] = useState<{ name: string; filled: number; available: number }[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [feeInput, setFeeInput] = useState('0');
-  const [feeSaving, setFeeSaving] = useState(false);
-  const [canEditFee, setCanEditFee] = useState(false);
-  const [holdInput, setHoldInput] = useState('20');
+function TodayTimeline({ bookings }: { bookings: EnrichedBooking[] }) {
+  if (bookings.length === 0) {
+    return <p className="text-sm text-muted-foreground py-2">No reservations scheduled today.</p>;
+  }
 
-  const todayIST = new Date(Date.now() + 5.5 * 3600 * 1000)
-    .toISOString()
-    .split('T')[0];
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [statsRes, slotsRes, bookingsRes] = await Promise.all([
-        fetch('/api/restaurant/stats'),
-        fetch(`/api/restaurant/slots?date=${todayIST}`),
-        fetch(`/api/restaurant/bookings?date=${todayIST}&status=confirmed`),
-      ]);
-
-      if (!statsRes.ok) throw new Error('Failed to load stats');
-
-      const { data: statsData } = await statsRes.json();
-      setStats(statsData);
-
-      // Build chart data from slots + today's bookings
-      const { data: slots } = await slotsRes.json();
-      const { data: bookings } = await bookingsRes.json();
-
-      const confirmedBySlot: Record<string, number> = {};
-      (bookings ?? []).forEach((b: RestaurantBooking) => {
-        confirmedBySlot[b.slot_id] = (confirmedBySlot[b.slot_id] ?? 0) + b.party_size;
-      });
-
-      const chart = (slots ?? []).map((s: { id: string; slot_time: string; total_capacity: number }) => {
-        const filled = confirmedBySlot[s.id] ?? 0;
-        return {
-          name: formatSlotTime(s.slot_time),
-          filled,
-          available: Math.max(s.total_capacity - filled, 0),
-        };
-      });
-      setSlotData(chart);
-
-      // Booking commitment fee setting
-      const settingsRes = await fetch('/api/restaurant/settings');
-      if (settingsRes.ok) {
-        const s = await settingsRes.json();
-        setFeeInput(String(s.booking_fee_per_person ?? 0));
-        setHoldInput(String(s.booking_hold_minutes ?? 20));
-        setCanEditFee(!!s.can_edit);
-      }
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [todayIST]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const saveFee = async () => {
-    setFeeSaving(true);
-    try {
-      const res = await fetch('/api/restaurant/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ booking_fee_per_person: Number(feeInput) || 0, booking_hold_minutes: Number(holdInput) || 20 }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        if (data.booking_fee_per_person !== undefined) setFeeInput(String(data.booking_fee_per_person));
-        if (data.booking_hold_minutes !== undefined) setHoldInput(String(data.booking_hold_minutes));
-        toast.success('Settings saved');
-      } else {
-        toast.error(data.error || 'Failed to update');
-      }
-    } catch {
-      toast.error('Failed to update');
-    } finally {
-      setFeeSaving(false);
-    }
-  };
+  const bySlot: Record<string, EnrichedBooking[]> = {};
+  bookings.forEach(b => {
+    const k = b.slot_time ?? '__none__';
+    (bySlot[k] = bySlot[k] ?? []).push(b);
+  });
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Restaurant Overview</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Today is {new Date(todayIST + 'T00:00:00').toLocaleDateString('en-IN', {
-            weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-          })}
-        </p>
-      </div>
+    <div className="space-y-4">
+      {Object.keys(bySlot).sort().map(key => {
+        const list = bySlot[key];
+        const covers = list.reduce((s, b) => s + b.party_size, 0);
+        const confirmed = list.filter(b => b.booking_status === 'confirmed').length;
 
-      {error && (
-        <div className="rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm px-4 py-3">
-          {error}
-        </div>
-      )}
+        return (
+          <div key={key}>
+            {/* Slot header */}
+            <div className="flex items-center gap-3 mb-1.5">
+              <span className="text-sm font-bold text-foreground whitespace-nowrap">
+                {key === '__none__' ? 'No time' : fmt(key)}
+              </span>
+              <div className="h-px flex-1 bg-border" />
+              <div className="flex items-center gap-2 text-xs text-muted-foreground whitespace-nowrap shrink-0">
+                <span>{list.length} reservation{list.length !== 1 ? 's' : ''}</span>
+                <span>·</span>
+                <span className="font-semibold text-foreground">{covers} covers</span>
+                {confirmed > 0 && <>
+                  <span>·</span>
+                  <span className="text-emerald-600 dark:text-emerald-400">{confirmed} confirmed</span>
+                </>}
+              </div>
+            </div>
 
-      {/* Stats cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          label="Bookings Today"
-          value={stats?.bookings_today ?? 0}
-          loading={loading}
-        />
-        <StatCard
-          label="This Week"
-          value={stats?.bookings_this_week ?? 0}
-          loading={loading}
-        />
-        <StatCard
-          label="Deposits This Month"
-          value={stats ? formatCurrency(stats.total_deposit_collected_this_month) : '—'}
-          loading={loading}
-        />
-        <StatCard
-          label="No-show Rate"
-          value={stats ? `${stats.no_show_rate}%` : '—'}
-          sub="Last 30 days"
-          loading={loading}
-        />
-      </div>
-
-      {/* WhatsApp Booking Flow Demo */}
-      <WhatsAppFlowDemo />
-
-      {/* Getting Started — only shown until the first real booking comes in */}
-      {!loading && (stats?.bookings_today === 0 && stats?.bookings_this_week === 0) && (
-        <Card className="bg-card border-border shadow-none rounded-xl">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-              🚀 Getting Started — Clock Tower Setup
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground mb-4">Complete these steps to start receiving bookings on WhatsApp.</p>
-            <div className="space-y-3">
-              {[
-                { step: '1', done: true,  label: 'Restaurant dashboard activated', desc: 'You\'re here — the panel is live.' },
-                { step: '2', done: false, label: 'Add time slots', desc: 'Go to Slot Management and create your opening slots (e.g. 7 PM, 8 PM, 9 PM).' },
-                { step: '3', done: false, label: 'Connect WhatsApp', desc: 'Go to Settings and paste your WhatsApp Cloud API token so the bot can receive messages.' },
-                { step: '4', done: false, label: 'Connect Google Sheets (optional)', desc: 'Go to Integrations → Google Sheets. Every booking will auto-appear in your sheet.' },
-                { step: '5', done: false, label: 'Set booking fee (optional)', desc: 'Scroll down to set ₹ per guest to collect a commitment fee via WhatsApp payment link.' },
-                { step: '6', done: false, label: 'Test a booking', desc: 'Message your own WhatsApp number "I want to book a table" and see it appear in Bookings.' },
-              ].map((item) => (
-                <div key={item.step} className="flex items-start gap-3">
-                  {item.done
-                    ? <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
-                    : <Circle className="w-5 h-5 text-muted-foreground/40 shrink-0 mt-0.5" />}
-                  <div>
-                    <p className={`text-sm font-medium ${item.done ? 'text-emerald-600 dark:text-emerald-400' : 'text-foreground'}`}>
-                      {item.label}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{item.desc}</p>
-                  </div>
+            {/* Guest rows */}
+            <div className="space-y-0.5 pl-1">
+              {list.map(b => (
+                <div key={b.id}
+                  className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-muted/40 transition-colors group"
+                >
+                  <span className={`size-1.5 rounded-full shrink-0 ${STATUS_DOT[b.booking_status] ?? 'bg-muted-foreground'}`} />
+                  <span className="text-sm font-medium text-foreground flex-1 truncate">
+                    {b.customer_name}
+                    {b.is_vip && <Star className="inline size-3 text-amber-500 fill-amber-500 ml-1.5 -translate-y-px" />}
+                  </span>
+                  <span className="text-xs text-muted-foreground shrink-0">{b.party_size} covers</span>
+                  <a href={`tel:+${b.customer_phone}`}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-muted-foreground hover:text-foreground"
+                    onClick={e => e.stopPropagation()}>
+                    <Phone className="size-3.5" />
+                  </a>
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Booking & payment settings */}
-      <Card className="bg-card border-border shadow-none rounded-xl">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold text-foreground">Booking &amp; Payment Settings</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div>
-            <p className="text-sm text-muted-foreground mb-2">
-              Charge guests a fee per person to confirm a booking — they get a WhatsApp payment link automatically. Set to 0 to turn off.
-            </p>
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">₹</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={feeInput}
-                  onChange={(e) => setFeeInput(e.target.value)}
-                  disabled={!canEditFee}
-                  className="w-32 h-10 pl-7 pr-3 bg-background border border-border rounded-lg text-sm focus:border-indigo-500 outline-none disabled:opacity-60"
-                />
-              </div>
-              <span className="text-sm text-muted-foreground">per guest</span>
-            </div>
           </div>
+        );
+      })}
+    </div>
+  );
+}
 
-          <div>
-            <p className="text-sm text-muted-foreground mb-2">
-              Hold an unpaid booking&apos;s seats for this long, then release them automatically so others can book.
-            </p>
-            <div className="flex items-center gap-3">
-              <input
-                type="number"
-                min={5}
-                max={240}
-                value={holdInput}
-                onChange={(e) => setHoldInput(e.target.value)}
-                disabled={!canEditFee}
-                className="w-24 h-10 px-3 bg-background border border-border rounded-lg text-sm focus:border-indigo-500 outline-none disabled:opacity-60"
-              />
-              <span className="text-sm text-muted-foreground">minutes</span>
-            </div>
+// ─── Section wrapper ──────────────────────────────────────────────────────────
+function Section({ title, icon, children, action }: {
+  title: string; icon: React.ReactNode; children: React.ReactNode; action?: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground">{icon}</span>
+          <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{title}</h2>
+        </div>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+export function RestaurantOverviewClient() {
+  const [data, setData]         = useState<OverviewData | null>(null);
+  const [loading, setLoading]   = useState(true);
+  const [now, setNow]           = useState(getISTTimeStr());
+  const [isLive, setIsLive]     = useState(false);
+  const [tenantId, setTenantId] = useState<string | null>(null);
+
+  const todayIST  = getISTDateStr();
+  const todayLabel = new Date(todayIST + 'T00:00:00').toLocaleDateString('en-IN', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
+
+  const load = useCallback(async () => {
+    try {
+      const res  = await fetch('/api/restaurant/overview');
+      if (!res.ok) throw new Error('Failed to load');
+      const json = await res.json();
+      setData(json);
+      if (json.tenantId && !tenantId) setTenantId(json.tenantId);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [tenantId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Clock + auto-refresh every 30s
+  useEffect(() => {
+    const t = setInterval(() => { setNow(getISTTimeStr()); load(); }, 30_000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  // Realtime
+  useEffect(() => {
+    if (!tenantId) return;
+    const sb = createBrowserSupabaseClient();
+    const ch = sb
+      .channel(`overview-${tenantId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_bookings' }, (p) => {
+        if ((p.new as any)?.restaurant_id === tenantId || (p.old as any)?.restaurant_id === tenantId) load();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_waitlist' }, (p) => {
+        if ((p.new as any)?.restaurant_id === tenantId || (p.old as any)?.restaurant_id === tenantId) load();
+      })
+      .subscribe(s => setIsLive(s === 'SUBSCRIBED'));
+    return () => { sb.removeChannel(ch); };
+  }, [tenantId, load]);
+
+  const summary   = data?.todaySummary;
+  const hasVIPs   = (data?.vipGuestsToday.length ?? 0) > 0;
+  const hasWailist = (data?.waitlistToday.length ?? 0) > 0;
+
+  // Current time display
+  const nowDisplay = (() => {
+    const [h, m] = now.split(':').map(Number);
+    const d = new Date(); d.setHours(h, m, 0, 0);
+    return d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
+  })();
+
+  return (
+    <div className="space-y-8 pb-10">
+
+      {/* ── Header ── */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-foreground">Today&apos;s Service</h1>
+            {isLive && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold tracking-wider">
+                <Wifi className="size-2.5" /> LIVE
+              </span>
+            )}
           </div>
+          <p className="text-sm text-muted-foreground mt-0.5">{todayLabel}</p>
+        </div>
+        <button onClick={() => load()}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-lg border border-border hover:bg-muted shrink-0">
+          <RefreshCw className="size-3.5" /> {nowDisplay}
+        </button>
+      </div>
 
-          {canEditFee ? (
-            <button
-              onClick={saveFee}
-              disabled={feeSaving}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-            >
-              {feeSaving ? 'Saving...' : 'Save settings'}
-            </button>
-          ) : (
-            <p className="text-xs text-muted-foreground">Only owners, admins and managers can change this.</p>
-          )}
-        </CardContent>
-      </Card>
+      {/* ── Section 1: KPIs ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {loading ? (
+          [0,1,2,3].map(i => <Skeleton key={i} className="h-[90px] rounded-xl" />)
+        ) : (
+          <>
+            {/* Confirmed — strongest emphasis */}
+            <Card className="bg-primary text-primary-foreground shadow-none rounded-xl border-0">
+              <CardContent className="p-5">
+                <p className="text-4xl font-bold tracking-tight">{summary?.confirmed ?? 0}</p>
+                <p className="text-xs font-bold tracking-widest uppercase mt-1 opacity-80">Confirmed</p>
+              </CardContent>
+            </Card>
 
-      {/* Two-column section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card className="bg-card border-border shadow-none rounded-xl">
+              <CardContent className="p-5">
+                <p className="text-4xl font-bold tracking-tight text-foreground">{summary?.expectedCovers ?? 0}</p>
+                <p className="text-xs font-semibold tracking-widest text-muted-foreground uppercase mt-1">Expected Covers</p>
+              </CardContent>
+            </Card>
 
-        {/* Today's Slot Utilisation Chart */}
+            <Card className="bg-card border-border shadow-none rounded-xl">
+              <CardContent className="p-5">
+                <p className="text-4xl font-bold tracking-tight text-foreground">{summary?.totalReservations ?? 0}</p>
+                <p className="text-xs font-semibold tracking-widest text-muted-foreground uppercase mt-1">Reservations</p>
+              </CardContent>
+            </Card>
+
+            <Link href="/dashboard/restaurant/waitlist">
+              <Card className={`shadow-none rounded-xl border cursor-pointer hover:border-primary/40 transition-colors ${(summary?.waitlistCount ?? 0) > 0 ? 'bg-amber-500/5 border-amber-300/40' : 'bg-card border-border'}`}>
+                <CardContent className="p-5">
+                  <p className={`text-4xl font-bold tracking-tight ${(summary?.waitlistCount ?? 0) > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                    {summary?.waitlistCount ?? 0}
+                  </p>
+                  <p className="text-xs font-semibold tracking-widest text-muted-foreground uppercase mt-1">Waitlist</p>
+                </CardContent>
+              </Card>
+            </Link>
+          </>
+        )}
+      </div>
+
+      {/* ── Section 2: Arriving Next ── */}
+      <Section
+        title="Arriving Next"
+        icon={<Clock className="size-3.5" />}
+        action={<span className="text-xs text-muted-foreground font-mono">{nowDisplay}</span>}
+      >
+        {loading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[0,1,2].map(i => <Skeleton key={i} className="h-44 rounded-xl" />)}
+          </div>
+        ) : (
+          <ArrivingNowHero bookings={data?.confirmedBookings ?? []} now={now} />
+        )}
+      </Section>
+
+      {/* ── Section 3: Today's Timeline ── */}
+      <Section
+        title="Today's Timeline"
+        icon={<CalendarClock className="size-3.5" />}
+        action={
+          <Link href="/dashboard/restaurant/bookings"
+            className="text-xs text-primary hover:underline flex items-center gap-1">
+            Manage all <ArrowRight className="size-3" />
+          </Link>
+        }
+      >
         <Card className="bg-card border-border shadow-none rounded-xl">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-foreground">Today's Slot Utilisation</CardTitle>
-          </CardHeader>
-          <CardContent>
+          <CardContent className="p-5">
             {loading ? (
-              <Skeleton className="h-48 w-full rounded-lg" />
-            ) : slotData.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-8 text-center">No active slots configured.</p>
+              <div className="space-y-3">{[0,1,2].map(i => <Skeleton key={i} className="h-8 rounded" />)}</div>
             ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={slotData} barSize={24}>
-                  <XAxis
-                    dataKey="name"
-                    tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      background: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: 8,
-                      fontSize: 12,
-                    }}
-                  />
-                  <Bar dataKey="filled" name="Booked" stackId="a" radius={[0, 0, 4, 4]}>
-                    {slotData.map((_, i) => (
-                      <Cell key={i} fill="hsl(var(--primary))" fillOpacity={0.9} />
-                    ))}
-                  </Bar>
-                  <Bar dataKey="available" name="Available" stackId="a" radius={[4, 4, 0, 0]}>
-                    {slotData.map((_, i) => (
-                      <Cell key={i} fill="hsl(var(--muted))" />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <TodayTimeline bookings={data?.allBookings ?? []} />
             )}
           </CardContent>
         </Card>
+      </Section>
 
-        {/* Upcoming Bookings Today */}
-        <Card className="bg-card border-border shadow-none rounded-xl">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-foreground">Upcoming Today</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="space-y-3">
-                {[0, 1, 2].map((i) => <Skeleton key={i} className="h-14 rounded-lg" />)}
-              </div>
-            ) : (stats?.upcoming_bookings_today ?? []).length === 0 ? (
-              <p className="text-sm text-muted-foreground py-8 text-center">No upcoming bookings for today.</p>
-            ) : (
-              <div className="space-y-3">
-                {(stats?.upcoming_bookings_today ?? []).map((b) => (
-                  <div
-                    key={b.id}
-                    className="flex items-center justify-between rounded-lg border border-border p-3"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{b.customer_name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {b.slot_time ? formatSlotTime(b.slot_time) : '—'} · {b.party_size} guests
-                      </p>
+      {/* ── Section 4: VIP Guests (only if any) ── */}
+      {!loading && hasVIPs && (
+        <Section title="VIP Guests Today" icon={<Star className="size-3.5" />}>
+          <div className="space-y-2">
+            {data!.vipGuestsToday.map(b => (
+              <Card key={b.id} className="bg-card border-amber-200/40 shadow-none rounded-xl">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="size-10 rounded-full bg-amber-500/10 border border-amber-300/30 flex items-center justify-center shrink-0">
+                      <Star className="size-4 text-amber-500 fill-amber-500" />
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs font-mono text-muted-foreground">{b.reservation_id}</p>
-                      <StatusBadge status={b.booking_status} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-foreground">{b.customer_name}</p>
+                        {b.vip_tags.filter(t => t !== 'VIP').map(t => (
+                          <span key={t} className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-muted text-muted-foreground">{t}</span>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {fmt(b.slot_time)} · {b.party_size} covers
+                        {b.special_request ? ` · "${b.special_request}"` : ''}
+                      </p>
+                      {b.visit_count > 0 && (
+                        <p className="text-xs text-amber-600 dark:text-amber-500 font-medium mt-0.5">
+                          {b.visit_count} visit{b.visit_count !== 1 ? 's' : ''}{b.last_visit ? ` · ${lastVisitLabel(b.last_visit)}` : ''}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <a href={`tel:+${b.customer_phone}`}>
+                        <Button size="sm" variant="outline" className="h-8 w-8 p-0">
+                          <Phone className="size-3.5" />
+                        </Button>
+                      </a>
+                      <a href={`https://wa.me/${b.customer_phone}`} target="_blank" rel="noopener noreferrer">
+                        <Button size="sm" variant="outline" className="h-8 w-8 p-0">
+                          <MessageCircle className="size-3.5" />
+                        </Button>
+                      </a>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Waitlist inline notice (compact, no giant card) */}
+      {!loading && hasWailist && (
+        <div className="flex items-center justify-between px-4 py-3 rounded-xl border border-amber-300/40 bg-amber-500/5">
+          <div className="flex items-center gap-2">
+            <CalendarClock className="size-4 text-amber-600 dark:text-amber-400" />
+            <span className="text-sm font-medium text-foreground">
+              {data!.waitlistToday.length} guest{data!.waitlistToday.length !== 1 ? 's' : ''} on the waitlist today
+            </span>
+          </div>
+          <Link href="/dashboard/restaurant/waitlist">
+            <Button size="sm" variant="outline" className="h-8 text-xs border-amber-300/40">
+              Manage waitlist <ArrowRight className="size-3 ml-1" />
+            </Button>
+          </Link>
+        </div>
+      )}
+
     </div>
   );
 }

@@ -209,6 +209,14 @@ export async function POST(req: NextRequest) {
           ...(paymentLink && { payment_link_url: paymentLink.short_url, payment_link_id: paymentLink.id }),
         });
         console.log(`   ✓ Saved successfully to restaurant_bookings table.`);
+
+        // Auto-create guest profile (so WhatsApp guests appear in the Guests CRM too)
+        await supabaseAdmin
+          .from('restaurant_guests')
+          .upsert(
+            { restaurant_id: tenantId, customer_phone: cleanPhoneStr, customer_name: name },
+            { onConflict: 'restaurant_id,customer_phone', ignoreDuplicates: true }
+          );
       }
     } catch (dbErr: any) {
       console.warn('⚠️ [SAVE BOOKING] Supabase insertion warning (non-blocking):', dbErr.message);

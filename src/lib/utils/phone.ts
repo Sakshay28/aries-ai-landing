@@ -70,6 +70,29 @@ export function comparePhones(a: string, b: string, defaultCountryCode: string =
 }
 
 /**
+ * Extracts the 10-digit subscriber number from any phone string.
+ * Used by PhoneInput to show only the local part inside the field.
+ */
+export function extract10Digit(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.startsWith('91') && digits.length === 12) return digits.slice(2);
+  if (digits.length === 10) return digits;
+  if (digits.length > 10) return digits.slice(digits.length - 10);
+  return digits;
+}
+
+/**
+ * Returns the canonical href value for a tel: link.
+ * Always produces +91XXXXXXXXXX regardless of storage format.
+ */
+export function telHref(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.startsWith('91') && digits.length === 12) return `+${digits}`;
+  if (digits.length === 10) return `+91${digits}`;
+  return `+${digits}`;
+}
+
+/**
  * Formats a phone number for premium, scannable UI display.
  * Separates country codes visually with spacing.
  * E.g., +918233451667 -> +91 82334 51667
