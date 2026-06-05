@@ -143,9 +143,17 @@ export class AudienceEngineService {
       }
 
       // 2. Strict Deduplication, Opt-out Filtering, and Phone Verification
+      // Pre-fetch all active optouts for this tenant in one query (O(1) per lead)
+      const { data: optoutRows } = await supabaseAdmin
+        .from('broadcast_optouts')
+        .select('phone')
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true);
+      const optoutPhones = new Set((optoutRows || []).map((r: { phone: string }) => r.phone));
+
       const seenPhones = new Set<string>();
       const seenContactIds = new Set<string>();
-      
+
       const filteredContacts: Array<{ id: string; name: string; phone: string }> = [];
       let duplicatesRemoved = 0;
       let optedOutRemoved = 0;
@@ -164,14 +172,16 @@ export class AudienceEngineService {
           continue;
         }
 
-        // Check tags array for opt-out labels (auto_optout tags)
+        // Check dedicated optouts table first (fast Set lookup)
+        // Fall back to tags array for backwards compatibility with old opt-out mechanism
         const tagsList = lead.tags || [];
-        const isOptedOut = tagsList.some((t: string) => 
-          t.toLowerCase() === 'opt-out' || 
-          t.toLowerCase() === 'optout' || 
+        const isOptedOutByTag = tagsList.some((t: string) =>
+          t.toLowerCase() === 'opt-out' ||
+          t.toLowerCase() === 'optout' ||
           t.toLowerCase() === 'unsubscribe' ||
           t.toLowerCase() === 'stop'
         );
+        const isOptedOut = optoutPhones.has(phoneCleaned) || isOptedOutByTag;
 
         if (isOptedOut) {
           optedOutRemoved++;

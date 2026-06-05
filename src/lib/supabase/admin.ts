@@ -16,8 +16,20 @@ let _supabaseAdmin: SupabaseClient | null = null;
 function getSupabaseAdmin(): SupabaseClient {
   if (_supabaseAdmin) return _supabaseAdmin;
 
-  // Pooler URL is optional for direct DB calls, otherwise use standard project URL
+  // IMPORTANT — CONNECTION POOLING:
+  // Set SUPABASE_POOLER_URL to your Supabase project's Pgbouncer connection string
+  // (Supabase Dashboard → Settings → Database → Connection Pooling → URI).
+  // Without this, each serverless invocation opens a direct Postgres connection.
+  // Under load (100+ concurrent webhooks), this exhausts the 60-connection limit
+  // on Supabase free tier and the 200-connection limit on Pro.
+  //
+  // Example pooler URL format:
+  //   postgresql://postgres.[ref]:[password]@aws-0-ap-south-1.pooler.supabase.com:6543/postgres
   const supabaseUrl = process.env.SUPABASE_POOLER_URL || env.NEXT_PUBLIC_SUPABASE_URL;
+
+  if (!process.env.SUPABASE_POOLER_URL) {
+    console.warn('⚠️ SUPABASE_POOLER_URL not set — using direct connections. May exhaust connection limit under load.');
+  }
   const supabaseServiceKey = getRequiredServerEnv('SUPABASE_SERVICE_ROLE_KEY');
 
   if (!supabaseUrl) {

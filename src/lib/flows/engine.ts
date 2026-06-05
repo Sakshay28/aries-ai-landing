@@ -289,13 +289,17 @@ async function executeFlowGraph(nodes: FlowNode[], edges: FlowEdge[], ctx: ExecC
   let messageSent = false;
   let currentId: string | null = startId;
   const visited = new Set<string>();
-  const MAX_STEPS = 20;
+  const MAX_STEPS = 100; // raised from 20 — enterprise flows can have 50+ nodes
   let steps = 0;
 
   while (currentId && steps < MAX_STEPS) {
     if (visited.has(currentId)) break;
     visited.add(currentId);
     steps++;
+
+    if (steps === 50) {
+      console.warn(`⚠️ Flow engine: 50 steps reached — check for unintended loops (flow will stop at ${MAX_STEPS})`);
+    }
 
     const node = nodes.find(n => n.id === currentId);
     if (!node) break;

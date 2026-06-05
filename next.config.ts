@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from '@sentry/nextjs';
 
 // ═══════════════════════════════════════════════════════════
 // 🔒 Build-Time & Startup Environment Validation Guard
@@ -94,4 +95,12 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Wrap with Sentry only when DSN is configured — no-ops without it
+export default process.env.NEXT_PUBLIC_SENTRY_DSN
+  ? withSentryConfig(nextConfig, {
+      silent: true,          // suppress build output
+      disableLogger: true,   // no Sentry SDK logs in prod
+      hideSourceMaps: true,  // don't expose source maps publicly
+      widenClientFileUpload: true,
+    })
+  : nextConfig;

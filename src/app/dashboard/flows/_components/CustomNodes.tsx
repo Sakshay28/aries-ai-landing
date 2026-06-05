@@ -486,11 +486,18 @@ export const WebhookNode = React.memo(function WebhookNode({ id, data, selected 
 });
 
 export const DelayNode = React.memo(function DelayNode({ id, data, selected }: any) {
+  const seconds = Number(data.duration || data.seconds || data.delay || 2);
+  const isCapped = seconds > 5;
   return (
-    <Root width={220}>
+    <Root width={240}>
       <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
-      <Card id={id} selected={selected} color="#6366F1" Icon={Clock} title="Time Delay">
-        <Badge label={`Wait ${data.duration || "2"}s`} color="#6366F1" />
+      <Card id={id} selected={selected} color={isCapped ? "#EF4444" : "#6366F1"} Icon={Clock} title="Time Delay">
+        <Badge label={`Wait ${seconds}s`} color={isCapped ? "#ef4444" : "#6366F1"} />
+        {isCapped && (
+          <div style={{ fontSize: 10, color: "#ef4444", marginTop: 4, fontWeight: 600 }}>
+            ⚠️ Capped at 5s on serverless
+          </div>
+        )}
       </Card>
     </Root>
   );

@@ -464,6 +464,56 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     }).catch(e => console.error('Outbound webhook error:', e.message));
   }
 
+  // 9.5. Opt-out / opt-in detection — check BEFORE AI runs
+  // Handles STOP (opt-out) and START (opt-in) keywords per WhatsApp policy.
+  const msgLower = msg.text?.toLowerCase().trim() || '';
+  const STOP_KEYWORDS  = ['stop', 'unsubscribe', 'opt out', 'optout', 'cancel', 'quit', 'end', 'remove me'];
+  const START_KEYWORDS = ['start', 'subscribe', 'opt in', 'optin', 'yes', 'join', 'resume'];
+
+  if (STOP_KEYWORDS.some(k => msgLower === k)) {
+    // Upsert into optouts table — sets is_active=true
+    await supabaseAdmin.from('broadcast_optouts').upsert(
+      { tenant_id: tenant.id, phone: cleanPhone, source: 'stop_keyword', opted_out_at: new Date().toISOString(), is_active: true },
+      { onConflict: 'tenant_id,phone' }
+    );
+    // Also tag the lead for backwards compat with audience engine tag filter
+    if (lead?.id) {
+      const currentTags = (lead.tags as string[]) || [];
+      if (!currentTags.includes('opt-out')) {
+        await supabaseAdmin.from('leads').update({ tags: [...currentTags, 'opt-out'] }).eq('id', lead.id);
+      }
+    }
+    // Send STOP confirmation (required by WhatsApp policy)
+    const decTok = decryptToken(tenant.wa_access_token as string);
+    if (decTok && tenant.wa_phone_number_id) {
+      const stopMsg = `You've been unsubscribed from ${tenant.business_name || 'our'} messages. Reply START to resubscribe.`;
+      await sendTextMessage(decTok, tenant.wa_phone_number_id as string, cleanPhone, stopMsg).catch(() => {});
+    }
+    console.log(`🚫 Opt-out recorded for ${cleanPhone} (tenant ${tenant.id})`);
+    return;
+  }
+
+  if (START_KEYWORDS.some(k => msgLower === k)) {
+    // Mark as opted back in
+    await supabaseAdmin.from('broadcast_optouts')
+      .update({ is_active: false, opted_back_in_at: new Date().toISOString() })
+      .eq('tenant_id', tenant.id).eq('phone', cleanPhone);
+    // Remove opt-out tag from lead
+    if (lead?.id) {
+      const currentTags = (lead.tags as string[]) || [];
+      await supabaseAdmin.from('leads')
+        .update({ tags: currentTags.filter(t => !['opt-out', 'optout', 'unsubscribe', 'stop'].includes(t.toLowerCase())) })
+        .eq('id', lead.id);
+    }
+    const decTok = decryptToken(tenant.wa_access_token as string);
+    if (decTok && tenant.wa_phone_number_id) {
+      const startMsg = `Welcome back! You're now subscribed to messages from ${tenant.business_name || 'us'}. 😊`;
+      await sendTextMessage(decTok, tenant.wa_phone_number_id as string, cleanPhone, startMsg).catch(() => {});
+    }
+    console.log(`✅ Opt-in restored for ${cleanPhone} (tenant ${tenant.id})`);
+    return;
+  }
+
   // 10. Pause / Escalated checks
   // bot_paused = hard stop (human agent has taken over — never override)
   if (conversation.bot_paused) {
