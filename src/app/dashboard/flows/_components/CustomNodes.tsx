@@ -9,6 +9,7 @@ import {
   PlayCircle, Code2, Paintbrush, Hourglass, FileText,
   ListChecks, Zap, MoreVertical, Pencil, Copy, Trash2,
   LayoutGrid, GitBranch, FileSignature, MousePointerClick,
+  CalendarCheck, Mail, Sliders, Tag,
 } from "lucide-react";
 import { useFlowStore } from "../store";
 import { validateNode, type ValidationSeverity } from "../utils";
@@ -775,6 +776,102 @@ export const IntakeFormNode = React.memo(function IntakeFormNode({ id, data, sel
           ))}
           {fields.length > 4 && <span style={{ fontSize: 10.5, color: "#94a3b8" }}>+{fields.length - 4} more</span>}
         </div>
+      </Card>
+    </Root>
+  );
+});
+
+export const BookAppointmentNode = React.memo(function BookAppointmentNode({ id, data, selected }: any) {
+  return (
+    <Root width={264}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="success" isConnectable className="flow-handle flow-handle--green" style={{ left: "28%" }} />
+      <Handle type="source" position={Position.Bottom} id="error" isConnectable className="flow-handle flow-handle--red" style={{ left: "72%" }} />
+      <Card id={id} selected={selected} color="#4285F4" Icon={CalendarCheck} title={data.label || "Book Appointment"}
+        footer={<OutLabels items={[{ label: "BOOKED", color: "#10b981", dir: "↙" }, { label: "FAILED", color: "#ef4444", dir: "↘" }]} />}
+      >
+        <KV k="Title" v={data.title || "{{name}}'s Appointment"} />
+        <KV k="Start" v={data.start || "{{slot_start}}"} />
+        <KV k="End" v={data.end || "{{slot_end}}"} />
+      </Card>
+    </Root>
+  );
+});
+
+export const AIReplyNode = React.memo(function AIReplyNode({ id, data, selected }: any) {
+  return (
+    <Root width={256}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
+      <Card id={id} selected={selected} color="#8B5CF6" Icon={Sparkles} title={data.label || "AI Reply"}>
+        <Badge label="Gemini 2.0 Flash" color="#8b5cf6" />
+        <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>Generates contextual response</div>
+      </Card>
+    </Root>
+  );
+});
+
+export const WaitForReplyNode = React.memo(function WaitForReplyNode({ id, data, selected }: any) {
+  const timeout = data.timeoutHours ? `${data.timeoutHours}h timeout` : "24h timeout";
+  return (
+    <Root width={256}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="next" isConnectable className="flow-handle flow-handle--green" style={{ left: "28%" }} />
+      <Handle type="source" position={Position.Bottom} id="timeout" isConnectable className="flow-handle flow-handle--gray" style={{ left: "72%" }} />
+      <Card id={id} selected={selected} color="#64748B" Icon={Hourglass} title={data.label || "Wait for Reply"}
+        footer={<OutLabels items={[{ label: "REPLIED", color: "#10b981", dir: "↙" }, { label: "TIMEOUT", color: "#94a3b8", dir: "↘" }]} />}
+      >
+        <Badge label={timeout} color="#64748b" />
+      </Card>
+    </Root>
+  );
+});
+
+export const SendEmailNode = React.memo(function SendEmailNode({ id, data, selected }: any) {
+  return (
+    <Root width={256}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="success" isConnectable className="flow-handle flow-handle--green" style={{ left: "28%" }} />
+      <Handle type="source" position={Position.Bottom} id="error" isConnectable className="flow-handle flow-handle--red" style={{ left: "72%" }} />
+      <Card id={id} selected={selected} color="#6366F1" Icon={Mail} title={data.label || "Send Email"}
+        footer={<OutLabels items={[{ label: "SENT", color: "#10b981", dir: "↙" }, { label: "FAILED", color: "#ef4444", dir: "↘" }]} />}
+      >
+        <KV k="To" v={data.to || "{{email}}"} />
+        <KV k="Subject" v={data.subject || "Message from {{tenant_name}}"} />
+      </Card>
+    </Root>
+  );
+});
+
+export const SetVariableNode = React.memo(function SetVariableNode({ id, data, selected }: any) {
+  const assignments: any[] = Array.isArray(data.assignments) ? data.assignments : [{ key: data.varName || "my_var", value: data.varValue || "" }];
+  return (
+    <Root width={256}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
+      <Card id={id} selected={selected} color="#F59E0B" Icon={Sliders} title={data.label || "Set Variable"}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {assignments.slice(0, 3).map((a: any, i: number) => (
+            <div key={i} style={{ fontSize: 11, color: "#475569", display: "flex", gap: 4, alignItems: "center" }}>
+              <span style={{ fontFamily: "monospace", background: "rgba(245,158,11,0.1)", color: "#b45309", borderRadius: 4, padding: "1px 5px" }}>{a.key || "var"}</span>
+              <span style={{ color: "#94a3b8" }}>=</span>
+              <span style={{ color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 100 }}>{a.value || '""'}</span>
+            </div>
+          ))}
+          {assignments.length > 3 && <span style={{ fontSize: 10, color: "#94a3b8" }}>+{assignments.length - 3} more</span>}
+        </div>
+      </Card>
+    </Root>
+  );
+});
+
+export const UpdateTagNode = React.memo(function UpdateTagNode({ id, data, selected }: any) {
+  return (
+    <Root width={240}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
+      <Card id={id} selected={selected} color="#10B981" Icon={Tag} title={data.label || "Update Tag"}>
+        <Badge label={data.tag || "Set tag..."} color="#10b981" />
       </Card>
     </Root>
   );

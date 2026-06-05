@@ -39,6 +39,12 @@ import {
   ButtonTriggerNode,
   IntentRoutingNode,
   IntakeFormNode,
+  BookAppointmentNode,
+  AIReplyNode,
+  WaitForReplyNode,
+  SendEmailNode,
+  SetVariableNode,
+  UpdateTagNode,
   NODE_CATEGORY,
 } from "./CustomNodes";
 import { useFlowStore } from "../store";
@@ -68,10 +74,16 @@ const NODE_TYPES: NodeTypes = {
   order_tracking: StandardNode as unknown as NodeTypes[string],
   returns_handler:StandardNode as unknown as NodeTypes[string],
   cart_abandonment:StandardNode as unknown as NodeTypes[string],
-  send_buttons:    InteractiveButtonsNode as unknown as NodeTypes[string],
-  button_trigger:  ButtonTriggerNode as unknown as NodeTypes[string],
-  intent_routing:  IntentRoutingNode as unknown as NodeTypes[string],
-  intake_form:     IntakeFormNode as unknown as NodeTypes[string],
+  send_buttons:       InteractiveButtonsNode as unknown as NodeTypes[string],
+  button_trigger:     ButtonTriggerNode as unknown as NodeTypes[string],
+  intent_routing:     IntentRoutingNode as unknown as NodeTypes[string],
+  intake_form:        IntakeFormNode as unknown as NodeTypes[string],
+  book_appointment:   BookAppointmentNode as unknown as NodeTypes[string],
+  ai_reply:           AIReplyNode as unknown as NodeTypes[string],
+  wait_for_reply:     WaitForReplyNode as unknown as NodeTypes[string],
+  send_email:         SendEmailNode as unknown as NodeTypes[string],
+  set_variable:       SetVariableNode as unknown as NodeTypes[string],
+  update_tag:         UpdateTagNode as unknown as NodeTypes[string],
 };
 
 // ─── EDGE TYPES (module-level — never recreated) ───────────────────────────

@@ -39,6 +39,8 @@ export const nodeCategories = [
     nodes: [
       { id: "condition", type: "condition", icon: SplitSquareVertical, label: "Logic Branch", desc: "True / False split" },
       { id: "interruption", type: "interruption", icon: Sparkles, label: "AI Intent Handling", desc: "Contextual AI reply" },
+      { id: "ai_reply", type: "ai_reply", icon: Sparkles, label: "AI Reply", desc: "Gemini generates reply" },
+      { id: "wait_for_reply", type: "wait_for_reply", icon: Hourglass, label: "Wait for Reply", desc: "Pause, resume on next msg" },
       { id: "extract", type: "extract", icon: Braces, label: "Extract Entities", desc: "NLP entity pull" },
       { id: "memory", type: "memory", icon: Database, label: "Context Memory", desc: "Store session data" },
       { id: "knowledge", type: "knowledge", icon: BookOpen, label: "AI Knowledge Base", desc: "RAG-powered" },
@@ -62,7 +64,7 @@ export const nodeCategories = [
     id: "APPOINTMENTS", title: "Appointments", color: "#F79009",
     nodes: [
       { id: "show_slots", type: "standard", icon: Calendar, label: "Show Slots", desc: "Available times" },
-      { id: "book_appt", type: "standard", icon: Calendar, label: "Book Appointment", desc: "Google Calendar" },
+      { id: "book_appointment", type: "book_appointment", icon: Calendar, label: "Book Appointment", desc: "Google Calendar" },
       { id: "reschedule", type: "standard", icon: RefreshCw, label: "Reschedule", desc: "Change slot" },
       { id: "intake_form", type: "intake_form", icon: FileSignature, label: "Intake Form", desc: "Patient / client" },
       { id: "appt_reminder", type: "standard", icon: Clock, label: "Reminder", desc: "Pre-event alert" },
@@ -84,10 +86,10 @@ export const nodeCategories = [
       { id: "webhook", type: "webhook", icon: Webhook, label: "API Call", desc: "External HTTP" },
       { id: "gsheets", type: "webhook", icon: Database, label: "Google Sheets", desc: "Sync leads" },
       { id: "gcal", type: "webhook", icon: Calendar, label: "Google Calendar", desc: "Booking sync" },
-      { id: "send_email", type: "standard", icon: Mail, label: "Send Email", desc: "Resend" },
+      { id: "send_email", type: "send_email", icon: Mail, label: "Send Email", desc: "Resend" },
       { id: "delay", type: "delay", icon: Clock, label: "Time Delay", desc: "Pause N seconds" },
-      { id: "set_var", type: "standard", icon: Code, label: "Set Variable", desc: "Data mutation" },
-      { id: "update_tag", type: "standard", icon: Tag, label: "Update Tag", desc: "Contact label" },
+      { id: "set_var", type: "set_variable", icon: Code, label: "Set Variable", desc: "Data mutation" },
+      { id: "update_tag", type: "update_tag", icon: Tag, label: "Update Tag", desc: "Contact label" },
     ]
   },
   {
@@ -119,6 +121,26 @@ export const getDefaultNodeData = (id: string) => {
     resume_parser: { label: "Parse Resume PDF", extracts: "Skills, Experience" },
     handoff: { label: "Human Handoff", team: "Support Team" },
     end: { label: "End Flow" },
+    book_appointment: {
+      label: "Book Appointment",
+      title: "{{name}}'s Appointment",
+      start: "{{slot_start}}",
+      end: "{{slot_end}}",
+      description: "Booked via AriesAI",
+    },
+    ai_reply: { label: "AI Reply" },
+    wait_for_reply: { label: "Wait for Reply", timeoutHours: 24 },
+    send_email: {
+      label: "Send Email",
+      to: "{{email}}",
+      subject: "Message from {{tenant_name}}",
+      body: "Hi {{name}},\n\n{{message}}",
+    },
+    set_variable: {
+      label: "Set Variable",
+      assignments: [{ key: "my_var", value: "" }],
+    },
+    update_tag: { label: "Update Tag", tag: "hot_lead" },
     send_buttons: {
       label: "Interactive Buttons",
       message: "Choose an option:",

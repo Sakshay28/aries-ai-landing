@@ -30,6 +30,7 @@ import { decryptToken } from '@/lib/utils/crypto';
 import { processMessageWithAI, TenantAIConfig } from '@/lib/ai/engine';
 import { getTenantConfig } from '@/lib/tenant/manager';
 import { createBookingEvent } from '@/lib/integrations/google-calendar';
+import { sendFlowEmail } from '@/lib/email/service';
 import type { Tenant } from '@/lib/types';
 import { getFlowVariables } from './variables';
 
@@ -350,8 +351,7 @@ async function executeNode(
     type === 'send_list' ||
     type === 'send_quick_replies' ||
     type === 'collect_input' ||
-    type === 'ask_question' ||
-    type === 'format'
+    type === 'ask_question'
   ) {
     const raw = (node.data?.content as string) || (node.data?.message as string) || '';
     const content = interpolate(raw, ctx);
@@ -967,6 +967,93 @@ async function executeNode(
       return { nextId: getNextNode(node.id, null, edges) };
     }
     return { nextId: getNextNode(node.id, null, edges) };
+  }
+
+  // ── Send Email — via Resend ──────────────────────────────
+  if (type === 'send_email') {
+    const to      = interpolate((node.data?.to      as string) || (ctx.variables.email as string) || '', ctx);
+    const subject = interpolate((node.data?.subject as string) || 'Message from AriesAI', ctx);
+    const body    = interpolate((node.data?.body    as string) || '', ctx);
+
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_email', payload: { to, subject }, variables: { ...ctx.variables }, nextId: getNextNode(node.id, 'success', edges) });
+      return { nextId: getNextNode(node.id, 'success', edges) };
+    }
+
+    if (!to || !to.includes('@')) {
+      console.warn(`Flow engine: send_email node ${node.id} — no valid email address (got "${to}")`);
+      return { nextId: getNextNode(node.id, 'error', edges) };
+    }
+
+    // Get sender name from tenant
+    const { data: tenantRow } = await supabaseAdmin
+      .from('tenants').select('business_name').eq('id', ctx.tenantId).single();
+    const fromName = (tenantRow?.business_name as string) || 'AriesAI';
+
+    const ok = await sendFlowEmail(to, subject, body || subject, fromName);
+    return { nextId: getNextNode(node.id, ok ? 'success' : 'error', edges) };
+  }
+
+  // ── Set Variable — assign one or more variables ──────────
+  if (type === 'set_variable') {
+    const assignments = Array.isArray(node.data?.assignments)
+      ? (node.data.assignments as Array<{ key: string; value: string }>)
+      : [{ key: node.data?.varName as string, value: node.data?.varValue as string }];
+
+    for (const a of assignments) {
+      const key = (a.key || '').trim();
+      if (key) ctx.variables[key] = interpolate(a.value || '', ctx);
+    }
+
+    if (ctx.dryRun) {
+      const summary = assignments.map(a => `${a.key}="${interpolate(a.value || '', ctx)}"`).join(', ');
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'set_variable', payload: summary, variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
+    }
+    return { nextId: getNextNode(node.id, null, edges) };
+  }
+
+  // ── Update Tag — update lead tag / status ────────────────
+  if (type === 'update_tag') {
+    const tag = interpolate((node.data?.tag as string) || '', ctx);
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'update_tag', payload: tag || '(no tag)', variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
+      return { nextId: getNextNode(node.id, null, edges) };
+    }
+    if (tag && ctx.leadId) {
+      try {
+        await supabaseAdmin.from('leads').update({ lead_status: tag.toLowerCase() }).eq('id', ctx.leadId);
+      } catch (e) {
+        console.error('Flow engine: update_tag failed:', e);
+      }
+    }
+    return { nextId: getNextNode(node.id, null, edges) };
+  }
+
+  // ── Intent Routing — route to branch matching intent ─────
+  if (type === 'intent_routing') {
+    const intents: Array<{ id: string; name: string; keywords: string[] }> =
+      Array.isArray(node.data?.intents) ? (node.data.intents as any[]) : [];
+
+    // Match the incoming message against each intent's keywords
+    const lowerMsg = ctx.messageText.toLowerCase();
+    const matched  = intents.find(intent =>
+      (intent.keywords || []).some(kw => keywordMatches(lowerMsg, kw))
+    );
+
+    const branchHandle = matched ? matched.id : 'fallback';
+
+    if (ctx.dryRun) {
+      ctx.trace?.push({
+        nodeId: node.id, nodeType: type,
+        action: matched ? `intent_matched:${matched.name}` : 'intent_fallback',
+        payload: matched ? `Matched intent "${matched.name}"` : 'No intent matched → fallback',
+        variables: { ...ctx.variables },
+        nextId: getNextNode(node.id, branchHandle, edges),
+      });
+    }
+
+    if (matched) ctx.variables.matched_intent = matched.name;
+    return { nextId: getNextNode(node.id, branchHandle, edges) };
   }
 
   // ── Unknown node type — just traverse ───────────────────

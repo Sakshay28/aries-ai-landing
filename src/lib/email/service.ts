@@ -54,6 +54,22 @@ export async function sendBillingReceipt(to: string, businessName: string, amoun
   }
 }
 
+export async function sendFlowEmail(to: string, subject: string, body: string, fromName = 'AriesAI') {
+  try {
+    await resend.emails.send({
+      from: `${fromName} <notifications@ariesai.in>`,
+      to,
+      subject,
+      html: body.replace(/\n/g, '<br/>'),
+      text: body,
+    });
+    return true;
+  } catch (error) {
+    console.error('Flow engine: sendFlowEmail failed:', error);
+    return false;
+  }
+}
+
 export async function sendBotOfflineAlert(to: string, businessName: string) {
   try {
     await resend.emails.send({
