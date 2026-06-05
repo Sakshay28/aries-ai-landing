@@ -18,7 +18,10 @@ import type { Tenant } from '@/lib/types';
 import { decryptToken } from '@/lib/utils/crypto';
 import * as Sentry from '@/lib/sentry-stub';
 
-// ── Fallback scheduler ──
+// ── Fallback scheduler — NOTE: setInterval is DEAD on Vercel serverless.
+// The nightly cron (/api/cron/timeout) is the real mechanism. This interval
+// only fires if the process happens to stay warm, which is unreliable.
+// It is kept here as a best-effort in-process safety net only.
 let fallbackInterval: ReturnType<typeof setInterval> | null = null;
 
 // ═══════════════════════════════════════
@@ -45,24 +48,18 @@ interface TimeoutJobData {
 // INITIALIZE — Start queues and workers
 // ═══════════════════════════════════════
 
+// initFollowUpEngine is kept for backward compat but is now a no-op.
+// Vercel serverless functions are stateless — setInterval never persists
+// between invocations. The real mechanism is /api/cron/timeout (nightly cron).
 export function initFollowUpEngine() {
-  initFallbackScheduler();
-  console.log('⏰ Follow-up engine started (database polling)');
+  console.log('⏰ Follow-up engine: cron-based scheduling active (setInterval disabled on serverless)');
 }
 
+// Dead code — kept to avoid import errors in callers. Safe to remove later.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function initFallbackScheduler() {
-  if (fallbackInterval) return;
-
-  // Poll database every 60 seconds for pending follow-ups
-  fallbackInterval = setInterval(async () => {
-    try {
-      const sent = await processPendingFollowUps();
-      if (sent > 0) console.log(`⏰ Processed ${sent} follow-ups`);
-      await processStaleConversations();
-    } catch (err) {
-      console.error('❌ Scheduler error:', err);
-    }
-  }, 60 * 1000);
+  // Intentionally empty — setInterval is unreliable on Vercel serverless.
+  // All follow-up processing is handled by /api/cron/timeout.
 }
 
 // ═══════════════════════════════════════
@@ -80,8 +77,32 @@ export async function scheduleFollowUp(data: {
   leadName: string;
   delayMs: number;
 }): Promise<void> {
-  // DB-based scheduling — the poller picks up pending follow-ups
-  console.log(`⏰ Follow-up ${data.followUpType} for ${data.leadName} saved (polling will handle)`);
+  // Ensure the follow_up row exists in the database.
+  // The nightly cron (/api/cron/timeout → processPendingFollowUps) will
+  // pick up any rows with status='pending' whose scheduled_at is in the past.
+  const scheduledAt = new Date(Date.now() + data.delayMs).toISOString();
+  const { error } = await supabaseAdmin
+    .from('follow_ups')
+    .upsert(
+      {
+        id:              data.followUpId,
+        tenant_id:       data.tenantId,
+        lead_id:         data.leadId,
+        conversation_id: data.conversationId,
+        follow_up_type:  data.followUpType,
+        scheduled_at:    scheduledAt,
+        message:         data.message,
+        ai_generated:    !data.message, // null message = AI will generate at send time
+        status:          'pending',
+      },
+      { onConflict: 'id', ignoreDuplicates: true }
+    );
+
+  if (error) {
+    console.error(`⏰ scheduleFollowUp: DB upsert failed for ${data.followUpId}:`, error.message);
+  } else {
+    console.log(`⏰ Follow-up "${data.followUpType}" for ${data.leadName} scheduled at ${scheduledAt}`);
+  }
 }
 
 // ═══════════════════════════════════════

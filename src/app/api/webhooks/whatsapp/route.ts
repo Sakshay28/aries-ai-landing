@@ -19,6 +19,8 @@ import { decryptToken } from '@/lib/utils/crypto';
 import { runFlowsForMessage } from '@/lib/flows/engine';
 import { fireIntegrations, createBookingPaymentLink } from '@/lib/integrations/runner';
 import { sendLeadAssignedEmail } from '@/lib/email/service';
+import { scheduleFollowUp } from '@/lib/followup/engine';
+import { randomUUID } from 'crypto';
 
 // ── GET: Webhook Verification Handshake ──
 export async function GET(req: NextRequest) {
@@ -698,7 +700,57 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     .eq('id', conversation.id);
 
 
-  // 18. Update Lead Score
+  // 18. Schedule follow-ups for new WhatsApp leads (first message only)
+  // Instagram has this logic; WhatsApp was completely missing it.
+  if (isFirstMessage && lead?.id) {
+    const now = Date.now();
+    const followUpConfigs = [
+      { enabled: tenant.followup_30min, type: '30min',  delayMs: 30 * 60 * 1000 },
+      { enabled: tenant.followup_3hr,   type: '3hr',    delayMs: 3 * 60 * 60 * 1000 },
+      { enabled: tenant.followup_24hr,  type: '24hr',   delayMs: 24 * 60 * 60 * 1000 },
+      { enabled: tenant.followup_7day,  type: '7day',   delayMs: 7 * 24 * 60 * 60 * 1000 },
+    ];
+
+    const followUpsToInsert = followUpConfigs
+      .filter(c => c.enabled)
+      .map(c => ({
+        id:              randomUUID(),
+        tenant_id:       tenant.id,
+        lead_id:         lead!.id,
+        conversation_id: conversation.id,
+        follow_up_type:  c.type,
+        scheduled_at:    new Date(now + c.delayMs).toISOString(),
+        message:         null,
+        ai_generated:    true,
+        status:          'pending',
+      }));
+
+    if (followUpsToInsert.length > 0) {
+      // Bulk insert — ON CONFLICT DO NOTHING prevents duplication on retry
+      await supabaseAdmin.from('follow_ups')
+        .upsert(followUpsToInsert, { onConflict: 'id', ignoreDuplicates: true })
+        .catch(e => console.error('⏰ Failed to schedule follow-ups:', e.message));
+      console.log(`⏰ Scheduled ${followUpsToInsert.length} follow-up(s) for lead ${lead.id}`);
+
+      // Register each with the engine (now actually writes to DB if not already there)
+      for (const fu of followUpsToInsert) {
+        const config = followUpConfigs.find(c => c.type === fu.follow_up_type)!;
+        scheduleFollowUp({
+          followUpId:      fu.id,
+          tenantId:        tenant.id,
+          leadId:          lead!.id,
+          conversationId:  conversation.id,
+          followUpType:    fu.follow_up_type,
+          message:         null,
+          leadPhone:       cleanPhone,
+          leadName:        lead?.name || 'Customer',
+          delayMs:         config.delayMs,
+        }).catch(() => {});
+      }
+    }
+  }
+
+  // 18b. Update Lead Score
   if (lead?.id && aiResponse.intent) {
     const scoreMap: Record<string, number> = {
       human_request: 60, complaint: 30, reserve_table: 80, private_event: 85,
