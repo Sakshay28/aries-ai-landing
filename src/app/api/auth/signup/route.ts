@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
-      email_confirm: true, // Auto-confirm for now
+      email_confirm: false, // Require email verification
       user_metadata: { full_name: fullName },
     });
 
@@ -126,17 +126,61 @@ export async function POST(req: NextRequest) {
       throw userError;
     }
 
-    // 4. Log event (fire-and-forget — never block signup on analytics)
+    // 4. Send email verification link via Resend
+    let verificationSent = false;
+    try {
+      const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
+        type: 'signup',
+        email,
+        options: {
+          redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback?next=/dashboard`,
+        },
+      });
+
+      if (linkData?.properties?.action_link) {
+        const { Resend } = await import('resend');
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        await resend.emails.send({
+          from: 'AriesAI <noreply@ariesai.in>',
+          to: email,
+          subject: 'Verify your AriesAI account',
+          html: `
+            <div style="font-family:Inter,sans-serif;max-width:560px;margin:0 auto;padding:32px;background:#fff">
+              <img src="https://ariesai.in/logo.png" alt="AriesAI" style="height:36px;margin-bottom:24px" />
+              <h2 style="font-size:22px;font-weight:700;color:#111;margin-bottom:8px">Welcome to AriesAI, ${fullName}!</h2>
+              <p style="color:#555;font-size:15px;line-height:1.6;margin-bottom:24px">
+                Your account for <strong>${businessName}</strong> is almost ready.
+                Click the button below to verify your email address and get started.
+              </p>
+              <a href="${linkData.properties.action_link}" style="display:inline-block;background:#25D366;color:#fff;font-weight:600;font-size:15px;padding:12px 28px;border-radius:8px;text-decoration:none;margin-bottom:24px">
+                Verify Email →
+              </a>
+              <p style="color:#888;font-size:13px;margin-top:16px">
+                This link expires in 24 hours. If you didn't sign up for AriesAI, ignore this email.
+              </p>
+            </div>
+          `,
+        });
+        verificationSent = true;
+      }
+    } catch (verifyErr) {
+      // Non-fatal — user can request resend
+      console.error('⚠️ Failed to send verification email:', verifyErr);
+    }
+
+    // 5. Log event (fire-and-forget)
     supabaseAdmin.from('analytics_events').insert({
       tenant_id: tenant.id,
       event_type: 'user_signup',
-      metadata: { email, plan: selectedPlan },
+      metadata: { email, plan: selectedPlan, verificationSent },
     }).then(({ error: e }) => { if (e) console.warn('analytics_events insert failed (non-fatal):', e.message); });
 
-    console.log(`🎉 New signup: ${businessName} (${email}) — ${selectedPlan} plan`);
+    console.log(`🎉 New signup: ${businessName} (${email}) — ${selectedPlan} plan — verification sent: ${verificationSent}`);
 
     return NextResponse.json({
       success: true,
+      requiresEmailVerification: true,
+      verificationSent,
       data: {
         userId: authUser.id,
         tenantId: tenant.id,

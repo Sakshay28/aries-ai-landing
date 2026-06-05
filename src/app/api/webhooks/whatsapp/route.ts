@@ -490,6 +490,65 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   }
 
 
+  // 10.5. Off-hours check — send off_hours_message and optionally capture lead
+  // Previously the bot confirmed bookings at 3am. Now we respect working_hours.
+  try {
+    const workingHours = tenant.working_hours as Record<string, string> | null;
+    if (workingHours) {
+      // Determine IST time (UTC+5:30)
+      const nowUTC  = new Date();
+      const nowIST  = new Date(nowUTC.getTime() + 5.5 * 60 * 60 * 1000);
+      const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+      const todayKey = dayKeys[nowIST.getUTCDay()];
+      const currentMins = nowIST.getUTCHours() * 60 + nowIST.getUTCMinutes();
+
+      // Find applicable hours — try specific day first, then ranges like "mon-fri"
+      let hoursStr: string | undefined;
+      for (const [key, val] of Object.entries(workingHours)) {
+        const keys = key.toLowerCase().split('-');
+        if (keys.includes(todayKey) ||
+            (keys.length === 2 &&
+              dayKeys.indexOf(keys[0]) <= dayKeys.indexOf(todayKey) &&
+              dayKeys.indexOf(todayKey) <= dayKeys.indexOf(keys[1]))) {
+          hoursStr = val as string;
+          break;
+        }
+      }
+
+      if (hoursStr) {
+        const [openStr, closeStr] = hoursStr.split('-');
+        const toMins = (t: string) => {
+          const [h, m] = t.trim().split(':').map(Number);
+          return h * 60 + (m || 0);
+        };
+        const openMins  = toMins(openStr);
+        const closeMins = toMins(closeStr);
+        const isOpen = currentMins >= openMins && currentMins < closeMins;
+
+        if (!isOpen) {
+          const offHoursMsg = (tenant.off_hours_message as string) ||
+            `We're currently closed. Our hours are ${hoursStr} (IST). We'll get back to you as soon as we open! 🙏`;
+
+          const decryptedTok = decryptToken(tenant.wa_access_token as string);
+          if (decryptedTok && tenant.wa_phone_number_id) {
+            await sendTextMessage(decryptedTok, tenant.wa_phone_number_id as string, cleanPhone, offHoursMsg);
+            await supabaseAdmin.from('messages').insert({
+              tenant_id: tenant.id, conversation_id: conversation.id,
+              direction: 'outbound', content: offHoursMsg,
+              message_type: 'text', channel: 'whatsapp',
+              status: 'sent', ai_generated: false,
+            });
+          }
+          console.log(`🌙 Off-hours: sent off-hours message to ${cleanPhone}`);
+          return; // Don't run AI or flows outside business hours
+        }
+      }
+    }
+  } catch (offHoursErr) {
+    // Non-fatal — don't block the message if hours check fails
+    console.warn('⚠️ Off-hours check failed (non-fatal):', offHoursErr);
+  }
+
   // 11. AI Cost Cap Checks
   const aiLimit = tenant.ai_conversation_limit ?? 1000;
   const aiUsed = tenant.ai_conversations_this_month ?? 0;
@@ -662,8 +721,44 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     console.error('❌ Meta: failed to save AI outbound message:', aiMsgErr.message);
   }
 
-  // 17. Update Conversation Context
-  const updatedContext = { ...context, ...aiResponse.extractedData };
+  // 17. Update Conversation Context — only keep booking-relevant fields.
+  // Merging ALL extractedData into context every message caused unbounded JSONB
+  // growth: after 50 messages, the blob contained every partial extraction attempt.
+  // We now keep a whitelist of meaningful fields and discard nulls.
+  const CONTEXT_FIELDS = [
+    'name', 'phone', 'email', 'guestCount', 'date', 'time', 'occasion',
+    'eventType', 'companyName', 'specialRequests',
+    'booking_saved', 'booking_reservation_id',
+    'booking_date', 'booking_time', 'party_size',
+    'pending_flow_node',        // used by flow engine for wait_for_reply
+    'inactivity_flow_fired_',   // prefix — matched by startsWith check below
+  ];
+
+  const prevContext = context as Record<string, any>;
+  const updatedContext: Record<string, any> = {};
+
+  // Preserve flow-engine fields (inactivity tracking keys, pending_flow_node)
+  for (const [k, v] of Object.entries(prevContext)) {
+    if (k.startsWith('inactivity_flow_fired_') || k === 'pending_flow_node') {
+      updatedContext[k] = v;
+    }
+  }
+
+  // Merge only whitelisted booking/contact fields
+  for (const field of CONTEXT_FIELDS) {
+    if (field.endsWith('_')) continue; // prefix pattern, skip
+    const newVal = (aiResponse.extractedData as Record<string, any>)?.[field];
+    const oldVal = prevContext[field];
+    // Keep new value if non-null, otherwise preserve existing
+    const val = (newVal !== null && newVal !== undefined && newVal !== 'null') ? newVal : oldVal;
+    if (val !== undefined && val !== null && val !== 'null') {
+      updatedContext[field] = val;
+    }
+  }
+
+  // Always carry booking_saved and reservation_id forward
+  if (prevContext.booking_saved) updatedContext.booking_saved = prevContext.booking_saved;
+  if (prevContext.booking_reservation_id) updatedContext.booking_reservation_id = prevContext.booking_reservation_id;
 
   // Reset booking_saved when a NEW booking flow starts (so repeat bookings work)
   // If AI is asking for guests/date/name = new booking, clear the old saved flag
