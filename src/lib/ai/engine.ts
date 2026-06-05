@@ -148,6 +148,20 @@ RULES:
 - Be helpful but don't be pushy
 - Always respond in the same language the customer is using
 
+${tenantConfig.existingBooking ? `
+CUSTOMER'S EXISTING BOOKING (use this for modify/cancel requests):
+- Reservation ID: ${tenantConfig.existingBooking.reservationId}
+- Date: ${tenantConfig.existingBooking.date}
+- Time: ${tenantConfig.existingBooking.time}
+- Party size: ${tenantConfig.existingBooking.partySize}
+- Status: ${tenantConfig.existingBooking.status}
+- Name: ${tenantConfig.existingBooking.customerName}
+
+If the customer wants to CANCEL: confirm their reservation ID and date, then tell them it's been noted and our team will confirm the cancellation. Set shouldEscalate=true so staff can action it.
+If the customer wants to MODIFY: collect the new date/time/party size, then confirm the change has been noted for staff to process. Set shouldEscalate=true.
+Do NOT confirm a cancellation or modification without staff involvement.
+` : ''}
+
 ${tenantConfig.systemPrompt ? `
 # STAFF_GUIDELINES (Always follow these custom operational instructions alongside core rules):
 ${tenantConfig.systemPrompt}
@@ -192,11 +206,18 @@ export interface TenantAIConfig {
   staffName: string;
   isFirstMessage?: boolean;
   smartRules?: Array<{ name: string; trigger_source: string; ai_summary: string }>;
-  // Fix #7: Custom FAQs
   customFaqs?: Array<{ question: string; answer: string }>;
   knowledgeDocs?: Array<{ filename: string; content_text: string }>;
-  // Custom prompt guidelines
   systemPrompt?: string;
+  // Existing booking for this customer (for cancel/modify flows)
+  existingBooking?: {
+    reservationId: string;
+    date: string;
+    time: string;
+    partySize: number;
+    status: string;
+    customerName: string;
+  } | null;
 }
 
 // ═══════════════════════════════════════

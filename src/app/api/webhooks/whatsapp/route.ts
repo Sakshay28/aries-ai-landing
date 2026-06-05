@@ -598,8 +598,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const storedMsgCount = conversation.message_count ?? 0;
   const isFirstMessageForAI = storedMsgCount === 0 && history.length === 0;
 
-  // Load Smart Rules + Agent configs + Knowledge docs in parallel
-  const [{ data: smartRulesRows }, { data: agentRows }, ragDocs] = await Promise.all([
+  // Load Smart Rules + Agent configs + Knowledge docs + existing booking in parallel
+  const [{ data: smartRulesRows }, { data: agentRows }, ragDocs, { data: existingBookingRow }] = await Promise.all([
     supabaseAdmin
       .from('smart_rules')
       .select('name, trigger_source, ai_summary')
@@ -611,6 +611,16 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       .eq('tenant_id', tenant.id)
       .eq('is_active', true),
     retrieveRelevantDocs(tenant.id, msg.text, 3).catch(() => []),
+    // Look up customer's most recent confirmed/pending booking so AI can handle cancel/modify
+    supabaseAdmin
+      .from('restaurant_bookings')
+      .select('reservation_id, booking_date, slot_time, party_size, booking_status, customer_name')
+      .eq('restaurant_id', tenant.id)
+      .eq('customer_phone', cleanPhone)
+      .in('booking_status', ['confirmed', 'pending'])
+      .order('booking_date', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   let knowledgeRows: Array<{ filename: string; content_text: string }> = ragDocs;
@@ -636,6 +646,15 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     isFirstMessage: isFirstMessageForAI,
     smartRules: (smartRulesRows || []) as Array<{ name: string; trigger_source: string; ai_summary: string }>,
     knowledgeDocs: knowledgeRows,
+    // Inject existing booking so AI can handle cancel/modify requests
+    existingBooking: existingBookingRow ? {
+      reservationId:  (existingBookingRow as any).reservation_id,
+      date:           (existingBookingRow as any).booking_date,
+      time:           (existingBookingRow as any).slot_time,
+      partySize:      (existingBookingRow as any).party_size,
+      status:         (existingBookingRow as any).booking_status,
+      customerName:   (existingBookingRow as any).customer_name,
+    } : null,
     ...(matchedAgent ? {
       botName: matchedAgent.bot_name || baseConfig.botName,
       botPersonality: matchedAgent.bot_personality || baseConfig.botPersonality,
