@@ -705,6 +705,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       status:         (existingBookingRow as any).booking_status,
       customerName:   (existingBookingRow as any).customer_name,
     } : null,
+    // Repeat-visitor recognition
+    visitCount:    (lead?.visit_count as number) ?? 0,
+    lastVisitDate: (lead?.last_visit_date as string) ?? null,
     ...(matchedAgent ? {
       botName: matchedAgent.bot_name || baseConfig.botName,
       botPersonality: matchedAgent.bot_personality || baseConfig.botPersonality,
@@ -1235,6 +1238,18 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           .update({ context: contextObj })
           .eq('id', conversation.id);
         console.log(`   ✅ Conversation context marked booking_saved=true.`);
+
+        // B2: increment visit count for repeat-visitor recognition
+        if (lead?.id) {
+          await supabaseAdmin
+            .from('leads')
+            .update({
+              visit_count: ((lead.visit_count as number) ?? 0) + 1,
+              last_visit_date: bookingDate,
+            })
+            .eq('id', lead.id)
+            .catch((e: any) => console.error('Failed to increment visit_count:', e?.message));
+        }
       }
 
     } catch (autoBookErr: any) {

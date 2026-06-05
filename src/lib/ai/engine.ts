@@ -148,6 +148,10 @@ RULES:
 - Be helpful but don't be pushy
 - Always respond in the same language the customer is using
 
+${(tenantConfig.visitCount ?? 0) >= 2 ? `
+RETURNING CUSTOMER: This guest has visited ${tenantConfig.visitCount} times before${tenantConfig.lastVisitDate ? ` (last visit ${tenantConfig.lastVisitDate})` : ''}. Acknowledge them warmly as a valued regular (e.g. "Great to have you back!"). Do NOT overdo it — one short warm line is enough.
+` : ''}
+
 ${tenantConfig.existingBooking ? `
 CUSTOMER'S EXISTING BOOKING (use this for modify/cancel requests):
 - Reservation ID: ${tenantConfig.existingBooking.reservationId}
@@ -218,6 +222,9 @@ export interface TenantAIConfig {
     status: string;
     customerName: string;
   } | null;
+  // Repeat-visitor recognition
+  visitCount?: number;
+  lastVisitDate?: string | null;
 }
 
 // ═══════════════════════════════════════

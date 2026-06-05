@@ -60,6 +60,24 @@ function formatChannel(channel: string): string {
   }
 }
 
+// Lead temperature badge derived from status/score
+function getScoreBadge(status: string, score: number): { label: string; emoji: string; cls: string } {
+  const s = (status || '').toLowerCase();
+  if (s === 'hot' || score >= 80) {
+    return { label: 'Hot', emoji: '🔥', cls: 'bg-red-500/10 text-red-600 border-red-500/25' };
+  }
+  if (s === 'warm' || score >= 50) {
+    return { label: 'Warm', emoji: '🌡️', cls: 'bg-amber-500/10 text-amber-600 border-amber-500/25' };
+  }
+  if (s === 'converted') {
+    return { label: 'Converted', emoji: '✅', cls: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/25' };
+  }
+  if (s === 'lost') {
+    return { label: 'Lost', emoji: '✖️', cls: 'bg-slate-500/10 text-slate-500 border-slate-500/25' };
+  }
+  return { label: 'Cold', emoji: '❄️', cls: 'bg-sky-500/10 text-sky-600 border-sky-500/25' };
+}
+
 function getAvatarInitials(name: string, phone: string): string {
   const cleanName = (name && name !== phone) ? name : 'Unnamed';
   const parts = cleanName.trim().split(' ');
@@ -605,6 +623,14 @@ export function ContactsClient() {
                   <span>•</span>
                   <span>Score {contact.lead_score}</span>
                 </div>
+                {(() => {
+                  const badge = getScoreBadge(contact.lead_status, contact.lead_score);
+                  return (
+                    <span className={`mt-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider border ${badge.cls}`}>
+                      <span aria-hidden>{badge.emoji}</span>{badge.label} Lead
+                    </span>
+                  );
+                })()}
               </div>
 
               {isEditing ? (
@@ -1220,11 +1246,19 @@ export function ContactsClient() {
                         </span>
                       </div>
 
-                      {/* Source */}
-                      <div className="hidden md:block">
+                      {/* Source + lead temperature badge */}
+                      <div className="hidden md:flex items-center gap-2">
                         <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10.5px] font-bold uppercase tracking-wider bg-secondary text-muted-foreground border border-border/60">
                           {formatChannel(contact.channel)}
                         </span>
+                        {(() => {
+                          const badge = getScoreBadge(contact.lead_status, contact.lead_score);
+                          return (
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10.5px] font-bold uppercase tracking-wider border ${badge.cls}`}>
+                              <span aria-hidden>{badge.emoji}</span>{badge.label}
+                            </span>
+                          );
+                        })()}
                       </div>
 
                       {/* Actions */}
