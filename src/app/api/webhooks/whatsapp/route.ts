@@ -509,7 +509,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       cleanPhone,
       conversation.id,
       lead?.id ?? null,
-      isFirstMessage
+      isFirstMessage,
+      msg.type,        // "text" | "interactive" | "button" — for button_trigger matching
+      msg.buttonId     // raw button reply id from Meta
     );
     if (flowHandled) {
       console.log(`✅ Flow engine handled message for conversation ${conversation.id}, skipping AI`);

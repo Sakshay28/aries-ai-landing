@@ -320,6 +320,7 @@ export interface ParsedMetaMessage {
   timestamp: number;
   isStatusUpdate: boolean;
   isReaction?: boolean;
+  buttonId?: string;  // Raw button reply id (for button_trigger flows)
   reactionEmoji?: string;
   reactedToMessageId?: string;
   status?: string;    // "sent" | "delivered" | "read" | "failed"
@@ -376,6 +377,7 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
       let mediaMimeType: string | undefined;
       let mediaFilename: string | undefined;
       let mediaCaption: string | undefined;
+      let buttonId: string | undefined;
 
       if (msgType === 'text') {
         text = msg.text?.body || '';
@@ -384,15 +386,18 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
         if (interactiveType === 'list_reply') {
           const listReply = msg.interactive?.list_reply;
           text = listReply?.title || listReply?.id || '';
+          buttonId = listReply?.id || undefined;
         } else if (interactiveType === 'button_reply') {
           const buttonReply = msg.interactive?.button_reply;
           text = buttonReply?.title || buttonReply?.id || '';
+          buttonId = buttonReply?.id || undefined;
         } else {
           text = '[Interactive Option Selected]';
         }
       } else if (msgType === 'button') {
         // Quick replies
         text = msg.button?.text || msg.button?.payload || '';
+        buttonId = msg.button?.payload || msg.button?.text || undefined;
       } else if (['image', 'video', 'audio', 'document', 'voice'].includes(msgType)) {
         const mediaObj = msg[msgType];
         mediaId = mediaObj?.id;
@@ -447,6 +452,7 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
         mediaFilename,
         mediaCaption,
         referral,
+        buttonId,
       };
     }
   } catch (err) {

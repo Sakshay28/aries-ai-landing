@@ -77,7 +77,9 @@ interface ExecContext {
   phoneNumberId: string;       // Meta phone number ID
   messageText: string;
   isFirstMessage: boolean;
-  pendingFlowNode?: string;  // node id to resume on next inbound message
+  messageType?: string;        // "text" | "interactive" | "button" — for button_trigger matching
+  buttonId?: string;           // raw button reply id from Meta (interactive/button messages)
+  pendingFlowNode?: string;    // node id to resume on next inbound message
   variables: Record<string, unknown>; // inter-node data bag — persisted across wait_for_reply
   dryRun?:  boolean;       // if true: skip all side-effects (no WhatsApp sends, no DB writes)
   trace?:   TraceStep[];   // populated during dry-run to describe what would happen
@@ -121,7 +123,9 @@ export async function runFlowsForMessage(
   phone: string,
   conversationId: string,
   leadId: string | null,
-  isFirstMessage = false
+  isFirstMessage = false,
+  messageType = 'text',
+  buttonId?: string
 ): Promise<boolean> {
   // Fetch active flows for this tenant
   const { data: flows, error } = await supabaseAdmin
@@ -164,6 +168,8 @@ export async function runFlowsForMessage(
     phoneNumberId: tenant.wa_phone_number_id as string,
     messageText,
     isFirstMessage,
+    messageType,
+    buttonId,
     variables: {
       wa_name: (lead as { name?: string } | null)?.name || 'there',
       wa_phone: phone,
@@ -210,7 +216,7 @@ export async function runFlowsForMessage(
   );
 
   for (const flow of sorted) {
-    if (triggerMatches(flow, lowerMsg, isFirstMessage)) {
+    if (triggerMatches(flow, lowerMsg, isFirstMessage, messageType, buttonId)) {
       const handled = await executeFlow(flow, ctx);
       if (handled) return true;
     }
@@ -220,7 +226,48 @@ export async function runFlowsForMessage(
 }
 
 // ── Trigger matching ─────────────────────────────────────────
-function triggerMatches(flow: FlowRecord, lowerMsg: string, isFirstMessage: boolean): boolean {
+function triggerMatches(
+  flow: FlowRecord,
+  lowerMsg: string,
+  isFirstMessage: boolean,
+  messageType = 'text',
+  buttonId?: string
+): boolean {
+  // Check if this flow has a button_trigger node — if so, only fire on button clicks
+  const hasButtonTriggerNode = flow.nodes?.some(n => n.type === 'button_trigger');
+  if (hasButtonTriggerNode) {
+    const isButtonMsg = messageType === 'interactive' || messageType === 'button';
+    if (!isButtonMsg) return false;
+    // Find the button_trigger node to get the expected button value
+    const btnNode = flow.nodes.find(n => n.type === 'button_trigger');
+    const mode = (btnNode?.data?.mode as string) || 'any';
+    if (mode === 'any') return true;
+    const expected = (btnNode?.data?.button as string || '').toLowerCase().trim();
+    if (!expected) return true;
+    // Match against buttonId or message text
+    const bid = (buttonId || '').toLowerCase();
+    const msg = lowerMsg;
+    return bid === expected || msg.includes(expected);
+  }
+
+  // Webhook trigger — fires only when called from the external webhook route
+  const hasWebhookTriggerNode = flow.nodes?.some(n => n.type === 'webhook_trigger');
+  if (hasWebhookTriggerNode) {
+    return messageType === 'webhook';
+  }
+
+  // Inactivity trigger — fires only from the cron job
+  const hasInactivityTriggerNode = flow.nodes?.some(n => n.type === 'inactivity_trigger');
+  if (hasInactivityTriggerNode) {
+    return messageType === 'inactivity';
+  }
+
+  // Scheduled trigger — fires only from the scheduled cron
+  const hasScheduleTriggerNode = flow.nodes?.some(n => n.type === 'schedule_trigger');
+  if (hasScheduleTriggerNode) {
+    return messageType === 'scheduled';
+  }
+
   switch (flow.trigger_type) {
     case 'all_messages':
       return true;
@@ -270,8 +317,21 @@ async function executeFlow(flow: FlowRecord, ctx: ExecContext): Promise<boolean>
   const nodes = flow.nodes as FlowNode[];
   const edges = flow.edges as FlowEdge[];
 
-  const triggerNode = nodes.find(n => n.type === 'trigger' || n.type === 'keyword_trigger');
+  const triggerNode = nodes.find(
+    n => n.type === 'trigger'
+      || n.type === 'keyword_trigger'
+      || n.type === 'button_trigger'
+      || n.type === 'webhook_trigger'
+      || n.type === 'inactivity_trigger'
+      || n.type === 'schedule_trigger'
+  );
   if (!triggerNode) return false;
+
+  // For button_trigger nodes, store the button value in variables for downstream use
+  if (triggerNode.type === 'button_trigger' && ctx.buttonId) {
+    ctx.variables.selected_button = ctx.buttonId;
+    ctx.variables.button_value    = ctx.buttonId;
+  }
 
   return executeFlowGraph(nodes, edges, ctx, triggerNode.id);
 }
@@ -1061,6 +1121,222 @@ async function executeNode(
     ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'node_executed', payload: String(node.data?.label || type), nextId: getNextNode(node.id, null, edges) });
   }
   return { nextId: getNextNode(node.id, null, edges) };
+}
+
+// ── Inactivity Trigger — called from cron ────────────────────
+/**
+ * Finds conversations that have been silent for N+ hours and fires
+ * any active flows whose canvas entry node is type 'inactivity_trigger'.
+ * Returns the number of flows executed.
+ */
+export async function runInactivityFlows(): Promise<number> {
+  let fired = 0;
+  try {
+    // Pull all active flows that contain an inactivity_trigger node
+    const { data: flows } = await supabaseAdmin
+      .from('automation_flows')
+      .select('id, tenant_id, name, nodes, edges')
+      .eq('is_active', true);
+
+    if (!flows || flows.length === 0) return 0;
+
+    for (const flow of flows as Array<FlowRecord & { tenant_id: string }>) {
+      const inactNode = (flow.nodes as FlowNode[]).find(n => n.type === 'inactivity_trigger');
+      if (!inactNode) continue;
+
+      // How many hours of silence before triggering (default 24)
+      const thresholdHours = Number(inactNode.data?.hours ?? inactNode.data?.timeoutHours ?? 24);
+      const cutoff = new Date(Date.now() - thresholdHours * 60 * 60 * 1000).toISOString();
+
+      // Find conversations for this tenant that haven't had a message since cutoff
+      const { data: staleConvs } = await supabaseAdmin
+        .from('conversations')
+        .select('id, sender_id, lead_id, context')
+        .eq('tenant_id', flow.tenant_id)
+        .eq('is_active', true)
+        .eq('bot_paused', false)
+        .lt('last_message_at', cutoff);
+
+      if (!staleConvs || staleConvs.length === 0) continue;
+
+      // Load tenant credentials once per flow
+      const { data: tenant } = await supabaseAdmin
+        .from('tenants')
+        .select('wa_access_token, wa_phone_number_id, business_name')
+        .eq('id', flow.tenant_id)
+        .single();
+      if (!tenant?.wa_access_token || !tenant?.wa_phone_number_id) continue;
+
+      const accessToken = decryptToken(tenant.wa_access_token as string);
+      if (!accessToken) continue;
+
+      for (const conv of staleConvs) {
+        // Don't fire the same inactivity flow twice for the same conversation
+        const ctxData = (conv.context as Record<string, unknown>) || {};
+        const lastFiredKey = `inactivity_flow_fired_${flow.id}`;
+        if (ctxData[lastFiredKey]) continue;
+
+        // Load lead name
+        let leadName = '';
+        if (conv.lead_id) {
+          const { data: lead } = await supabaseAdmin
+            .from('leads').select('name').eq('id', conv.lead_id).single();
+          leadName = (lead as { name?: string } | null)?.name || '';
+        }
+
+        const ctx: ExecContext = {
+          tenantId: flow.tenant_id,
+          leadId: conv.lead_id || null,
+          leadName,
+          conversationId: conv.id,
+          phone: conv.sender_id,
+          accessToken,
+          phoneNumberId: tenant.wa_phone_number_id as string,
+          messageText: '',
+          isFirstMessage: false,
+          messageType: 'inactivity',
+          variables: {
+            wa_name: leadName || 'there',
+            wa_phone: conv.sender_id,
+            tenant_name: (tenant.business_name as string) || 'Business',
+            current_date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+            current_time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }),
+            ...ctxData,
+          },
+        };
+
+        try {
+          const sent = await executeFlowGraph(
+            flow.nodes as FlowNode[], flow.edges as FlowEdge[], ctx, inactNode.id
+          );
+          if (sent) {
+            // Mark this inactivity flow as fired so it doesn't repeat
+            await supabaseAdmin
+              .from('conversations')
+              .update({ context: { ...ctxData, [lastFiredKey]: new Date().toISOString() } })
+              .eq('id', conv.id);
+            fired++;
+          }
+        } catch (e) {
+          console.error(`Inactivity flow: error running flow ${flow.id} for conv ${conv.id}:`, e);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('runInactivityFlows error:', e);
+  }
+  return fired;
+}
+
+// ── Scheduled Trigger — called from cron ─────────────────────
+/**
+ * Fires flows whose canvas entry node is 'schedule_trigger' and whose
+ * cron expression matches the current time window.
+ * Returns the number of flows executed.
+ */
+export async function runScheduledFlows(): Promise<number> {
+  let fired = 0;
+  try {
+    const { data: flows } = await supabaseAdmin
+      .from('automation_flows')
+      .select('id, tenant_id, name, nodes, edges')
+      .eq('is_active', true);
+
+    if (!flows || flows.length === 0) return 0;
+
+    const now   = new Date();
+    const hhmm  = `${String(now.getUTCHours()).padStart(2,'0')}:${String(now.getUTCMinutes()).padStart(2,'0')}`;
+    const dow   = now.getUTCDay(); // 0=Sun … 6=Sat
+    const dom   = now.getUTCDate();
+
+    for (const flow of flows as Array<FlowRecord & { tenant_id: string }>) {
+      const schedNode = (flow.nodes as FlowNode[]).find(n => n.type === 'schedule_trigger');
+      if (!schedNode) continue;
+
+      // Schedule is configured as frequency: daily | weekly | monthly
+      // and time: "HH:MM" (UTC)
+      const freq      = (schedNode.data?.frequency as string || 'daily').toLowerCase();
+      const schedTime = (schedNode.data?.time as string || '09:00');
+      const schedDow  = Number(schedNode.data?.dayOfWeek ?? 1);   // 1=Mon for weekly
+      const schedDom  = Number(schedNode.data?.dayOfMonth ?? 1);  // 1 for monthly
+
+      const timeMatch = hhmm === schedTime;
+      if (!timeMatch) continue;
+
+      const freqMatch =
+        freq === 'daily' ? true :
+        freq === 'weekly' ? dow === schedDow :
+        freq === 'monthly' ? dom === schedDom :
+        false;
+      if (!freqMatch) continue;
+
+      // Load tenant credentials
+      const { data: tenant } = await supabaseAdmin
+        .from('tenants')
+        .select('wa_access_token, wa_phone_number_id, business_name')
+        .eq('id', flow.tenant_id)
+        .single();
+      if (!tenant?.wa_access_token || !tenant?.wa_phone_number_id) continue;
+
+      const accessToken = decryptToken(tenant.wa_access_token as string);
+      if (!accessToken) continue;
+
+      // Get all active leads for this tenant to broadcast the scheduled message
+      const { data: leads } = await supabaseAdmin
+        .from('leads')
+        .select('id, phone, name')
+        .eq('tenant_id', flow.tenant_id)
+        .not('phone', 'is', null)
+        .limit(500);
+
+      if (!leads || leads.length === 0) continue;
+
+      for (const lead of leads as Array<{ id: string; phone: string; name?: string }>) {
+        // Find or use a placeholder conversation id
+        const { data: conv } = await supabaseAdmin
+          .from('conversations')
+          .select('id')
+          .eq('tenant_id', flow.tenant_id)
+          .eq('sender_id', lead.phone)
+          .eq('is_active', true)
+          .maybeSingle();
+
+        const conversationId = conv?.id || `sched-${flow.id}-${lead.id}`;
+
+        const ctx: ExecContext = {
+          tenantId:       flow.tenant_id,
+          leadId:         lead.id,
+          leadName:       lead.name || '',
+          conversationId,
+          phone:          lead.phone,
+          accessToken,
+          phoneNumberId:  tenant.wa_phone_number_id as string,
+          messageText:    '',
+          isFirstMessage: false,
+          messageType:    'scheduled',
+          variables: {
+            wa_name:      lead.name || 'there',
+            wa_phone:     lead.phone,
+            tenant_name:  (tenant.business_name as string) || 'Business',
+            current_date: now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+            current_time: now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          },
+        };
+
+        try {
+          await executeFlowGraph(
+            flow.nodes as FlowNode[], flow.edges as FlowEdge[], ctx, schedNode.id
+          );
+          fired++;
+        } catch (e) {
+          console.error(`Scheduled flow: error running flow ${flow.id} for lead ${lead.id}:`, e);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('runScheduledFlows error:', e);
+  }
+  return fired;
 }
 
 // ── Flow Simulator ───────────────────────────────────────────

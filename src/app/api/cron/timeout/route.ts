@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { processPendingFollowUps, processStaleConversations } from '@/lib/followup/engine';
+import { runInactivityFlows } from '@/lib/flows/engine';
 
 export const maxDuration = 10;
 
@@ -28,6 +29,9 @@ async function handler(req: NextRequest) {
   // 2. Fire any pending follow-ups that are due
   const followUpsSent = await processPendingFollowUps();
 
-  console.log(`[cron/timeout] followUpsSent=${followUpsSent}`);
-  return NextResponse.json({ success: true, followUpsSent });
+  // 3. Fire inactivity_trigger flows for conversations with no reply
+  const inactivityFired = await runInactivityFlows();
+
+  console.log(`[cron/timeout] followUpsSent=${followUpsSent} inactivityFired=${inactivityFired}`);
+  return NextResponse.json({ success: true, followUpsSent, inactivityFired });
 }
