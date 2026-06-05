@@ -2334,6 +2334,33 @@ export function Integrations() {
           </svg>
         </div>
 
+        {/* Google OAuth note — required for Google verification */}
+        <div style={{
+          marginTop: 56,
+          display: "flex",
+          justifyContent: "center",
+        }}>
+          <div style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 10,
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 999,
+            padding: "10px 22px",
+          }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+              <rect x="5" y="11" width="14" height="10" rx="2" stroke="#9ca3af" strokeWidth="1.8"/>
+              <path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="#9ca3af" strokeWidth="1.8" strokeLinecap="round"/>
+            </svg>
+            <span style={{ fontSize: 13.5, color: "#9ca3af", lineHeight: 1.5 }}>
+              Google integrations use secure OAuth — AriesAI connects to{" "}
+              <span style={{ color: "#d1d5db" }}>Google Calendar</span> and{" "}
+              <span style={{ color: "#d1d5db" }}>Google Sheets</span>{" "}
+              to automate bookings and sync leads. We request only the minimum permissions needed.
+            </span>
+          </div>
+        </div>
 
       </div>
     </section>
@@ -2341,7 +2368,7 @@ export function Integrations() {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   HOW IT WORKS — 3 steps (acceptable because steps aren't cards)           
+   HOW IT WORKS — 3 steps (acceptable because steps aren't cards)
 ───────────────────────────────────────────────────────────────────────── */
 export function HowItWorks() {
   const ref = useRef<HTMLDivElement>(null);
