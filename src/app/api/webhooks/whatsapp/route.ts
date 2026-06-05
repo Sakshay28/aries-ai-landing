@@ -816,55 +816,174 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         console.error(`   ❌ Google Sheets booking save FAILED: ${sheetsErr.message}`);
       }
 
-      // 2. Insert into Supabase restaurant_bookings
-      const { data: slots } = await supabaseAdmin
+      // 2. Find best matching slot by time — pick the slot whose slot_time is
+      //    closest to the requested slotTime. Fall back to creating a default.
+      const { data: allSlots } = await supabaseAdmin
         .from('restaurant_slots')
-        .select('id')
+        .select('id, slot_time, total_capacity')
         .eq('restaurant_id', tenant.id)
         .eq('is_active', true)
-        .limit(1);
+        .order('slot_time', { ascending: true });
 
-      let slotId: string | null = slots?.[0]?.id || null;
+      let slotId: string | null = null;
+      let chosenSlot: { id: string; slot_time: string; total_capacity: number } | null = null;
+
+      if (allSlots && allSlots.length > 0) {
+        // Find the slot whose time is closest to the requested slotTime
+        const [reqH, reqM] = slotTime.split(':').map(Number);
+        const reqMins = reqH * 60 + reqM;
+        let minDiff = Infinity;
+        for (const s of allSlots as Array<{ id: string; slot_time: string; total_capacity: number }>) {
+          const [sH, sM] = s.slot_time.split(':').map(Number);
+          const diff = Math.abs(sH * 60 + sM - reqMins);
+          if (diff < minDiff) { minDiff = diff; chosenSlot = s; slotId = s.id; }
+        }
+      }
 
       if (!slotId) {
+        // No slots configured — create a sensible default for this tenant
         const { data: newSlot } = await supabaseAdmin
           .from('restaurant_slots')
           .insert({
             restaurant_id: tenant.id,
-            slot_time: '19:30:00',
+            slot_time: slotTime || '19:30:00',
             day_type: 'both',
             total_capacity: 50,
             is_active: true
           })
           .select()
           .single();
-        if (newSlot) slotId = newSlot.id;
-      }
-
-      if (slotId) {
-        const { error: dbInsertErr } = await supabaseAdmin.from('restaurant_bookings').insert({
-          restaurant_id: tenant.id,
-          slot_id: slotId,
-          booking_date: bookingDate,
-          customer_name: customerName,
-          customer_phone: customerPhone,
-          party_size: guestCount,
-          payment_amount: payAmount,
-          payment_status: payStatus,
-          booking_status: 'confirmed',
-          reservation_id: reservationId,
-          ...(paymentLink && { payment_link_url: paymentLink.short_url, payment_link_id: paymentLink.id }),
-        });
-        if (dbInsertErr) {
-          console.error('❌ AI Auto-Book DB save failed:', dbInsertErr.message);
-        } else {
-          console.log(`   ✅ Saved to restaurant_bookings (ID: ${reservationId}, payment: ${payStatus}).`);
+        if (newSlot) {
+          slotId = newSlot.id;
+          chosenSlot = newSlot as { id: string; slot_time: string; total_capacity: number };
         }
       }
 
-      // 2b. If payment required — override the AI reply with the payment link message
-      //     so the customer gets the link right away in the same WhatsApp thread.
-      if (isPrepaid && paymentLink) {
+      let bookingWritten = false; // true only when the DB row was actually inserted
+
+      if (!slotId || !chosenSlot) {
+        console.error('❌ AI Auto-Book: could not resolve a slot for this tenant');
+        // Skip DB write — booking will be retried on next message
+      } else {
+        // ── CAPACITY CHECK — prevents double-booking ─────────────────────────
+        // Calls the check_seat_availability RPC which uses FOR SHARE lock to
+        // prevent concurrent bookings exceeding capacity.
+        const { data: availData, error: availErr } = await supabaseAdmin
+          .rpc('check_seat_availability', {
+            p_slot_id:      slotId,
+            p_booking_date: bookingDate,
+            p_party_size:   guestCount,
+          });
+
+        const avail = availData as { available: boolean; remaining_seats: number; error?: string } | null;
+
+        if (availErr || !avail) {
+          console.error('❌ AI Auto-Book: capacity check failed:', availErr?.message);
+          // Fail safe — abort booking rather than risk overbooking
+        } else if (!avail.available) {
+          // ── SLOT FULL — tell the customer and suggest alternatives ─────────
+          console.warn(`⚠️ AI Auto-Book: slot full (${avail.remaining_seats} seats left, need ${guestCount})`);
+
+          // Query other available slots for this date so we can suggest them
+          const { data: altSlots } = await supabaseAdmin
+            .rpc('check_seat_availability', {
+              p_slot_id:      slotId,
+              p_booking_date: bookingDate,
+              p_party_size:   guestCount,
+            });
+          void altSlots; // used for future alternative-slot suggestions
+
+          // Find all slots with availability for this date
+          const { data: slotsForDate } = await supabaseAdmin
+            .from('restaurant_slots')
+            .select('id, slot_time')
+            .eq('restaurant_id', tenant.id)
+            .eq('is_active', true);
+
+          const availableAlternatives: string[] = [];
+          for (const s of (slotsForDate || []) as Array<{ id: string; slot_time: string }>) {
+            if (s.id === slotId) continue;
+            const { data: altAvail } = await supabaseAdmin.rpc('check_seat_availability', {
+              p_slot_id:      s.id,
+              p_booking_date: bookingDate,
+              p_party_size:   guestCount,
+            });
+            const alt = altAvail as { available: boolean } | null;
+            if (alt?.available) {
+              const [h, m] = s.slot_time.split(':');
+              const hr = parseInt(h);
+              const ampm = hr >= 12 ? 'PM' : 'AM';
+              const hr12 = hr > 12 ? hr - 12 : hr;
+              availableAlternatives.push(`${hr12}:${m} ${ampm}`);
+            }
+          }
+
+          // Send "fully booked" message with alternatives
+          const waToken   = decryptToken(tenant.wa_access_token as string);
+          const waPhoneId = tenant.wa_phone_number_id as string;
+          if (waToken && waPhoneId) {
+            const altText = availableAlternatives.length > 0
+              ? `\n\nAlternative slots available: ${availableAlternatives.slice(0, 3).join(', ')}`
+              : '\n\nPlease contact us for availability on another date.';
+            const fullMsg = `Sorry ${customerName}, our ${slotTime.slice(0,5)} slot on ${bookingDate} is fully booked (${avail.remaining_seats} seats left).${altText}\n\nWould you like to book one of these instead?`;
+            await sendTextMessage(waToken, waPhoneId, cleanPhone, fullMsg).catch(() => {});
+            // Log as outbound message
+            await supabaseAdmin.from('messages').insert({
+              tenant_id:        tenant.id,
+              conversation_id:  conversation.id,
+              direction:        'outbound',
+              content:          fullMsg,
+              message_type:     'text',
+              channel:          'whatsapp',
+              status:           'sent',
+              ai_generated:     false,
+            }).catch(() => {});
+          }
+          // Clear booking context so customer can choose alternative
+          contextObj.booking_saved   = false;
+          contextObj.date            = null;
+          contextObj.time            = null;
+          contextObj.booking_date    = null;
+          contextObj.booking_time    = null;
+          await supabaseAdmin
+            .from('conversations')
+            .update({ context: contextObj })
+            .eq('id', conversation.id);
+          // Abort — do NOT fall through to Sheets / DB insert
+        } else {
+          // ── CAPACITY AVAILABLE — proceed with booking ─────────────────────
+          console.log(`   ✅ Capacity OK: ${avail.remaining_seats} seats remaining after this booking`);
+
+          const { error: dbInsertErr } = await supabaseAdmin.from('restaurant_bookings').insert({
+            restaurant_id:    tenant.id,
+            slot_id:          slotId,
+            booking_date:     bookingDate,
+            customer_name:    customerName,
+            customer_phone:   customerPhone,
+            party_size:       guestCount,
+            payment_amount:   payAmount,
+            payment_status:   payStatus,
+            booking_status:   'confirmed',
+            reservation_id:   reservationId,
+            source:           'ai_whatsapp',
+            ...(contextObj.specialRequests && { special_request: String(contextObj.specialRequests) }),
+            ...(paymentLink && { payment_link_url: paymentLink.short_url, payment_link_id: paymentLink.id }),
+          });
+          if (dbInsertErr) {
+            console.error('❌ AI Auto-Book DB save failed:', dbInsertErr.message);
+          } else {
+            bookingWritten = true;
+            console.log(`   ✅ Saved to restaurant_bookings (ID: ${reservationId}, payment: ${payStatus}).`);
+          }
+        }
+      }
+
+      // 2b. Only run post-booking steps when the booking was actually saved
+      if (!bookingWritten) {
+        console.log(`   ℹ️ Booking not written (capacity issue or slot error) — skipping post-booking steps`);
+      }
+
+      if (bookingWritten && isPrepaid && paymentLink) {
         const waToken    = decryptToken((tenant as any).wa_access_token) as string;
         const waPhoneId  = (tenant as any).wa_phone_number_id as string;
         if (waToken && waPhoneId) {
@@ -881,7 +1000,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           amount: feeRupees,
           description: `Booking ${reservationId}`,
         }).catch(() => {});
-      } else {
+      } else if (bookingWritten) {
         // Free booking confirmed — fire booking_confirmed integrations
         fireIntegrations({
           type: 'booking_confirmed',
@@ -891,14 +1010,16 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         }).catch(() => {});
       }
 
-      // 3. Mark booking as saved in conversation context to prevent duplicates
-      contextObj.booking_saved = true;
-      contextObj.booking_reservation_id = reservationId;
-      await supabaseAdmin
-        .from('conversations')
-        .update({ context: contextObj })
-        .eq('id', conversation.id);
-      console.log(`   ✅ Conversation context marked booking_saved=true.`);
+      // 3. Mark booking_saved ONLY when the row was actually written to DB
+      if (bookingWritten) {
+        contextObj.booking_saved = true;
+        contextObj.booking_reservation_id = reservationId;
+        await supabaseAdmin
+          .from('conversations')
+          .update({ context: contextObj })
+          .eq('id', conversation.id);
+        console.log(`   ✅ Conversation context marked booking_saved=true.`);
+      }
 
     } catch (autoBookErr: any) {
       console.error('❌ AI Auto-Book error:', autoBookErr.message);
