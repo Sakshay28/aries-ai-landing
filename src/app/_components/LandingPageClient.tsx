@@ -2839,7 +2839,7 @@ export function Pricing() {
     if (p === "Custom") return "Custom";
     const n = parseInt(p.replace(",", ""));
     if (isNaN(n)) return p;
-    return billing === "annual" ? Math.round(n * 0.8).toLocaleString("en-IN") : p;
+    return billing === "annual" ? Math.round(n * 0.9).toLocaleString("en-IN") : p;
   };
 
   return (
@@ -2867,7 +2867,7 @@ export function Pricing() {
             </button>
             <span style={{ fontSize: 14, fontWeight: 600, color: billing === "annual" ? "#111" : "#999", cursor: "pointer" }}
               onClick={() => setBilling("annual")}>
-              Annual <span style={{ background: "#dcfce7", color: GD, fontSize: 11, fontWeight: 700, borderRadius: 100, padding: "2px 8px", marginLeft: 4 }}>Save 20%</span>
+              Annual <span style={{ background: "#dcfce7", color: GD, fontSize: 11, fontWeight: 700, borderRadius: 100, padding: "2px 8px", marginLeft: 4 }}>Save 10%</span>
             </span>
           </div>
         </Reveal>
