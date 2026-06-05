@@ -30,6 +30,7 @@ interface Contact {
   lastActive: string;
   created_at: string;
   notes: string;
+  birthday: string | null;
 }
 
 interface TimelineEvent {
@@ -137,7 +138,7 @@ export function ContactsClient() {
 
   // Edit Form State (Inside Drawer)
   const [isEditing, setIsEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', phone: '', email: '', notes: '' });
+  const [editForm, setEditForm] = useState({ name: '', phone: '', email: '', notes: '', birthday: '' });
   const [editSubmitting, setEditSubmitting] = useState(false);
 
   // Deletion State
@@ -183,6 +184,7 @@ export function ContactsClient() {
             lastActive: timeAgo(lead.last_message_at || lead.created_at),
             created_at: lead.created_at,
             notes: lead.notes || '',
+            birthday: lead.birthday || null,
           };
         }));
         
@@ -354,6 +356,7 @@ export function ContactsClient() {
       phone: contact.phone,
       email: contact.email !== '—' ? contact.email : '',
       notes: contact.notes,
+      birthday: contact.birthday || '',
     });
     setIsEditing(true);
   };
@@ -372,6 +375,7 @@ export function ContactsClient() {
           phone: editForm.phone.trim(),
           email: editForm.email.trim() || null,
           notes: editForm.notes.trim() || null,
+          birthday: editForm.birthday || null,
           defaultCountryCode: workspaceDefaultCountryCode
         }),
       });
@@ -666,6 +670,17 @@ export function ContactsClient() {
                       onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
                       className="w-full h-10 px-3 bg-background border border-border rounded-lg text-[13px] focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10"
                     />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">🎂 Birthday</label>
+                    <input
+                      type="date"
+                      value={editForm.birthday}
+                      onChange={(e) => setEditForm({ ...editForm, birthday: e.target.value })}
+                      className="w-full h-10 px-3 bg-background border border-border rounded-lg text-[13px] focus:outline-none focus:border-indigo-500/40 focus:ring-4 focus:ring-indigo-500/10"
+                    />
+                    <p className="text-[10.5px] text-muted-foreground/70">Used for automated birthday greetings.</p>
                   </div>
 
                   <div className="space-y-1">

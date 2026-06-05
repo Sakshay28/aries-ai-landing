@@ -128,6 +128,7 @@ export async function POST(req: NextRequest) {
       email: header.findIndex((h) => ['email', 'email address', 'email_address'].includes(h)),
       notes: header.findIndex((h) => ['notes', 'note', 'comment', 'description'].includes(h)),
       source: header.findIndex((h) => ['source', 'source_detail', 'origin', 'channel'].includes(h)),
+      birthday: header.findIndex((h) => ['birthday', 'birth date', 'birth_date', 'dob', 'date of birth'].includes(h)),
     };
 
     if (idx.phone === -1) {
@@ -140,7 +141,24 @@ export async function POST(req: NextRequest) {
     // ── 3. Validate Rows ────────────────────────────────
     const dataRows = rows.slice(1);
     const report: ImportRow[] = [];
-    const candidateMap = new Map<string, { name: string | null; email: string | null; notes: string | null; source: string | null; index: number }>();
+    const candidateMap = new Map<string, { name: string | null; email: string | null; notes: string | null; source: string | null; birthday: string | null; index: number }>();
+
+    // Parse a birthday cell into YYYY-MM-DD. Accepts ISO, DD/MM/YYYY, DD-MM-YYYY.
+    const parseBirthday = (raw: string): string | null => {
+      const s = (raw || '').trim();
+      if (!s) return null;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; // already ISO
+      const m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
+      if (m) {
+        let [, d, mo, y] = m;
+        if (y.length === 2) y = `20${y}`;
+        const dd = d.padStart(2, '0');
+        const mm = mo.padStart(2, '0');
+        // Sanity: month 1-12, day 1-31
+        if (+mm >= 1 && +mm <= 12 && +dd >= 1 && +dd <= 31) return `${y}-${mm}-${dd}`;
+      }
+      return null;
+    };
 
     dataRows.forEach((cells, i) => {
       const rawPhone = cells[idx.phone] ?? '';
@@ -167,6 +185,7 @@ export async function POST(req: NextRequest) {
         email: email || null,
         notes: idx.notes !== -1 ? sanitizeInput(cells[idx.notes] ?? '', 2000) || null : null,
         source: idx.source !== -1 ? sanitizeInput(cells[idx.source] ?? '', 200) || null : 'csv_import',
+        birthday: idx.birthday !== -1 ? parseBirthday(cells[idx.birthday] ?? '') : null,
         index: i + 2,
       });
     });
@@ -214,6 +233,9 @@ export async function POST(req: NextRequest) {
               ? `${existing.notes}\n\n[CSV Merge]: ${c.notes}`
               : c.notes;
           }
+          if (c.birthday) {
+            updatePayload.birthday = c.birthday;
+          }
 
           if (Object.keys(updatePayload).length > 0) {
             const { error: updateErr } = await supabaseAdmin
@@ -244,9 +266,10 @@ export async function POST(req: NextRequest) {
           name: c.name ?? phone,
           phone,
           email: c.email,
-          channel: 'manual', 
+          channel: 'manual',
           source_detail: 'csv_import',
           notes: c.notes,
+          ...(c.birthday && { birthday: c.birthday }),
           lead_status: 'new',
           lead_score: 0,
         });

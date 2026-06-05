@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
 
     let query = supabaseAdmin
       .from('leads')
-      .select('id, name, phone, email, channel, source_detail, lead_status, lead_score, notes, last_message_at, created_at', { count: 'exact' })
+      .select('id, name, phone, email, channel, source_detail, lead_status, lead_score, notes, birthday, last_message_at, created_at', { count: 'exact' })
       .eq('tenant_id', tenantId);
 
     // Apply Filters (Self-healing mapping to resolve leads_channel_check constraint failures)

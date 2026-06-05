@@ -10,6 +10,7 @@ const updateContactSchema = z.object({
   phone: z.string().trim().min(7).max(20).optional(),
   email: z.string().trim().max(160).optional().nullable(),
   notes: z.string().trim().max(2000).optional().nullable(),
+  birthday: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'Birthday must be YYYY-MM-DD').optional().nullable(),
   defaultCountryCode: z.string().trim().max(5).optional(),
 });
 
@@ -82,6 +83,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     if (body.notes !== undefined) {
       updatePayload.notes = body.notes ? sanitizeInput(body.notes, 2000) : null;
+    }
+
+    if (body.birthday !== undefined) {
+      updatePayload.birthday = body.birthday || null;
     }
 
     if (Object.keys(updatePayload).length === 0) {

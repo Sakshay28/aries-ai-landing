@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import {
   Building2, Bot, Clock, Phone, Mail, Globe, MapPin,
   Users, Zap, Save, CheckCircle2, AlertCircle, Plus, X,
-  MessageSquare, BrainCircuit, Bell, Copy, Eye, EyeOff, Key, HelpCircle, ExternalLink, RefreshCw
+  MessageSquare, BrainCircuit, Bell, Copy, Eye, EyeOff, Key, HelpCircle, ExternalLink, RefreshCw, Star
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PhoneInput } from '@/components/ui/phone-input';
@@ -36,6 +36,9 @@ interface SettingsData {
   warm_keywords: string[];
   off_hours_message: string;
   off_hours_capture_lead: boolean;
+  // Revenue features
+  google_review_url: string;
+  review_automation_enabled: boolean;
   // Direct Meta Settings
   wa_phone_number_id: string;
   wa_business_account_id: string;
@@ -53,6 +56,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   followup_30min: true, followup_3hr: true, followup_24hr: true, followup_7day: false,
   escalation_timeout_mins: 5, hot_keywords: [], warm_keywords: [],
   off_hours_message: '', off_hours_capture_lead: true,
+  google_review_url: '', review_automation_enabled: true,
   wa_phone_number_id: '',
   wa_business_account_id: '',
   wa_access_token: '',
@@ -801,6 +805,32 @@ export default function SettingsPage() {
                 <span className="font-semibold" style={{ color: 'var(--foreground)' }}>Working hours are set in your profile</span>
               </div>
               Configure working hours in the Business tab. Off-hours messages are sent automatically outside those times.
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Review Automation" icon={Star}>
+            <Toggle
+              checked={settings.review_automation_enabled}
+              onChange={v => update('review_automation_enabled', v)}
+              label="Send post-visit review requests"
+              description="Automatically message guests the day after their booking to ask for feedback"
+            />
+            <Field label="Google Review URL">
+              <Input
+                value={settings.google_review_url || ''}
+                onChange={v => update('google_review_url', v)}
+                placeholder="https://g.page/r/your-business/review"
+              />
+            </Field>
+            <div
+              className="rounded-xl p-4 text-xs"
+              style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.2)', color: 'var(--muted-foreground)' }}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <Star className="w-3.5 h-3.5 text-emerald-500" />
+                <span className="font-semibold" style={{ color: 'var(--foreground)' }}>Where to find your review link</span>
+              </div>
+              Google Business Profile → Ask for reviews → copy the short link. Happy guests get directed here to leave a 5-star review.
             </div>
           </SectionCard>
         </motion.div>
