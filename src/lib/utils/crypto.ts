@@ -47,7 +47,10 @@ export function decryptToken(encryptedText: string | null): string | null {
 
   const rest = encryptedText.slice(ENC_PREFIX.length);
   const parts = rest.split(':');
-  if (parts.length !== 3) return encryptedText; // malformed — treat as plaintext
+  if (parts.length !== 3) {
+    console.error('❌ decryptToken: malformed encrypted value (expected 3 parts, got', parts.length, ')');
+    return null; // malformed — do not use raw encrypted string
+  }
 
   try {
     const [ivHex, authTagHex, encryptedHex] = parts;
@@ -63,6 +66,8 @@ export function decryptToken(encryptedText: string | null): string | null {
     return decrypted;
   } catch (err) {
     console.error('❌ Failed to decrypt token (check ENCRYPTION_KEY):', err);
-    return encryptedText; // Fallback so we don't completely break if key rotates
+    // Return null — NOT the raw encrypted string. Callers null-check this value.
+    // Returning the encrypted blob would silently send garbage to Meta's API.
+    return null;
   }
 }

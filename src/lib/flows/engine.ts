@@ -1370,21 +1370,26 @@ export async function simulateFlow(
   const nodes = (flow as FlowRecord).nodes as FlowNode[];
   const edges = (flow as FlowRecord).edges as FlowEdge[];
 
+  // Load tenant name for realistic simulation context
+  const { data: tenantRow } = await supabaseAdmin
+    .from('tenants').select('business_name').eq('id', tenantId).single();
+  const simTenantName = (tenantRow?.business_name as string) || 'Your Business';
+
   const trace: TraceStep[] = [];
   const ctx: ExecContext = {
     tenantId,
     leadId:          null,
-    leadName:        'Sakshay',
+    leadName:        'Test User',
     conversationId:  'sim-' + flowId,
-    phone:           '+919875152290',
+    phone:           '+910000000000',
     accessToken:     'sim',
     phoneNumberId:   'sim',
     messageText:     testMessage,
     isFirstMessage:  false,
     variables:       {
-      wa_name: 'Sakshay',
-      wa_phone: '+919875152290',
-      tenant_name: 'Clock Tower Restaurant',
+      wa_name: 'Test User',
+      wa_phone: '+910000000000',
+      tenant_name: simTenantName,
       current_date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
       current_time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }),
       language: 'en',
@@ -1397,19 +1402,20 @@ export async function simulateFlow(
 
   // Pre-populate mock values for flow-registered variables in dry-run mode
   const flowVars = getFlowVariables(nodes as any);
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   const mockValues: Record<string, unknown> = {
-    booking_id: 'CT-20260529-8130',
-    guest_name: 'Sakshay',
-    booking_datetime: '2026-06-01 8:00 PM',
+    booking_id: `SIM-${tomorrow.replace(/-/g, '')}-0001`,
+    guest_name: 'Test User',
+    booking_datetime: `${tomorrow} 7:00 PM`,
     party_size: '4',
     special_request: 'Window seat please',
-    reservation_id: 'CT-20260529-8130',
+    reservation_id: `SIM-${tomorrow.replace(/-/g, '')}-0001`,
     selected_button: 'book_table',
     button_value: 'book_table',
-    host_name: 'Sakshay',
-    event_date: '2026-06-15',
+    host_name: 'Test User',
+    event_date: new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10),
     guest_count: '25',
-    budget: '₹800',
+    budget: '₹1000',
     requirements: 'Decor and AV setup',
   };
 

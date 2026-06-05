@@ -388,20 +388,24 @@ function parseAIResponse(text: string): AIResponse {
 // FALLBACK: When AI fails, use templates
 // ═══════════════════════════════════════
 // This ensures the bot NEVER crashes or goes silent.
+// IMPORTANT: No hardcoded pricing, menu items, or business-type-specific content here.
+// This fallback fires for ALL tenants — restaurants, hotels, trekking companies, etc.
 function getFallbackResponse(
   message: string,
-  context: ConversationContext,
+  _context: ConversationContext,
   config: TenantAIConfig
 ): AIResponse {
   const lower = message.toLowerCase();
 
-  // Detect angry/escalation keywords
-  const angryWords = ['angry', 'upset', 'terrible', 'worst', 'complaint', 'manager', 'refund', 'fuck', 'shit'];
-  const humanWords = ['human', 'real person', 'agent', 'staff', 'speak to'];
+  // Detect angry/escalation keywords (language-agnostic approach)
+  const angryWords = ['angry', 'upset', 'terrible', 'worst', 'complaint', 'manager', 'refund', 'fuck', 'shit', 'bakwaas', 'bekar'];
+  const humanWords = ['human', 'real person', 'agent', 'staff', 'speak to', 'insaan', 'banda'];
 
   if (angryWords.some((w) => lower.includes(w)) || humanWords.some((w) => lower.includes(w))) {
     return {
-      reply: `I'm connecting you with ${config.staffName} right away 🙏 They'll be with you in a few minutes.`,
+      reply: config.staffName
+        ? `I'm connecting you with ${config.staffName} right away 🙏 They'll be with you shortly.`
+        : `I'm connecting you with our team right away 🙏 They'll be with you shortly.`,
       extractedData: {},
       intent: angryWords.some((w) => lower.includes(w)) ? 'complaint' : 'human_request',
       sentiment: 'angry',
@@ -412,10 +416,11 @@ function getFallbackResponse(
     };
   }
 
-  // Detect booking intent
-  if (lower.includes('book') || lower.includes('table') || lower.includes('reserv') || lower.includes('dinner') || lower.includes('dine')) {
+  // Detect booking/reservation intent — generic across all business types
+  const bookingWords = ['book', 'reserv', 'appoint', 'slot', 'schedule', 'availab', 'room', 'table', 'trek', 'checkin', 'check in'];
+  if (bookingWords.some((w) => lower.includes(w))) {
     return {
-      reply: `I'd love to help you book! 🍽️\n\nHow many guests are you expecting?\n→ 1-2 | 3-5 | 6-10 | 10+`,
+      reply: `I'd love to help! How many people, and when are you thinking? 😊`,
       extractedData: {},
       intent: 'reserve_table',
       sentiment: 'positive',
@@ -425,23 +430,13 @@ function getFallbackResponse(
     };
   }
 
-  // Detect event intent
-  if (lower.includes('event') || lower.includes('party') || lower.includes('celebration') || lower.includes('wedding')) {
+  // Detect pricing questions — redirect to team, never invent prices
+  const priceWords = ['price', 'cost', 'rate', 'charge', 'fee', 'kitna', 'how much', 'budget'];
+  if (priceWords.some((w) => lower.includes(w))) {
     return {
-      reply: `We'd love to host your event! 🎉\n\nWhat type of event are you planning?\n→ Birthday | Wedding | Corporate | Social`,
-      extractedData: {},
-      intent: 'private_event',
-      sentiment: 'positive',
-      shouldEscalate: false,
-      nextStep: 'ask_intent',
-      confidence: 0.8,
-    };
-  }
-
-  // Detect pricing questions
-  if (lower.includes('price') || lower.includes('cost') || lower.includes('rate') || lower.includes('kitna')) {
-    return {
-      reply: `Our pricing varies:\n\n🍽️ Dining: ₹1,500-₹3,500/person\n🎉 Events: From ₹50,000\n💼 Corporate: Custom packages\n\nWant me to connect you with our team for a detailed quote? 📞`,
+      reply: config.business_phone
+        ? `For pricing details, please contact us at ${config.phone} — we'll give you a personalised quote! 😊`
+        : `Our team will be happy to share pricing details. Can I connect you with them?`,
       extractedData: {},
       intent: 'pricing',
       sentiment: 'neutral',
@@ -451,9 +446,23 @@ function getFallbackResponse(
     };
   }
 
-  // Default: show menu
+  // Detect event/group intent
+  const eventWords = ['event', 'party', 'celebration', 'wedding', 'corporate', 'group', 'birthday', 'anniversary'];
+  if (eventWords.some((w) => lower.includes(w))) {
+    return {
+      reply: `We'd love to help with that! What's the occasion, and roughly how many people? 🎉`,
+      extractedData: {},
+      intent: 'private_event',
+      sentiment: 'positive',
+      shouldEscalate: false,
+      nextStep: 'ask_intent',
+      confidence: 0.8,
+    };
+  }
+
+  // Default: generic welcome — works for any business type
   return {
-    reply: `Hey! 👋 Welcome to ${config.businessName}!\n\nHow can I help you today?\n\n🍽️ Reserve a Table\n🎉 Plan an Event\n💼 Corporate Booking\n📋 General Enquiry`,
+    reply: `Hi! 👋 Welcome to ${config.businessName}. How can I help you today?`,
     extractedData: {},
     intent: 'greeting',
     sentiment: 'neutral',
@@ -461,6 +470,13 @@ function getFallbackResponse(
     nextStep: 'ask_intent',
     confidence: 0.5,
   };
+}
+
+// keep TS happy — config may expose phone via either field name
+declare module './engine' {
+  interface TenantAIConfig {
+    business_phone?: string;
+  }
 }
 
 // ═══════════════════════════════════════

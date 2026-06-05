@@ -59,7 +59,14 @@ export async function POST(req: NextRequest) {
   const signature = req.headers.get('x-hub-signature-256') ?? '';
   const rawBody = await req.text();
 
-  if (appSecret && !verifySignature(rawBody, signature, appSecret)) {
+  // SECURITY: Fail-closed — if appSecret is not configured, reject ALL requests.
+  // Previously this allowed any POST to be processed when the env var was missing.
+  if (!appSecret) {
+    console.error('❌ META_APP_SECRET is not set — rejecting webhook to prevent spoofing');
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  if (!verifySignature(rawBody, signature, appSecret)) {
     console.warn('❌ Meta Webhook: signature verification failed');
     return new Response('Unauthorized', { status: 401 });
   }
@@ -141,32 +148,30 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     }
   }
 
-  // 4. Resolve/Create Lead
+  // 4. Resolve/Create Lead — ATOMIC upsert prevents duplicate-lead race condition.
+  // The UNIQUE(tenant_id, phone) DB constraint + ON CONFLICT ensures only one row
+  // per phone number per tenant, even with 3 concurrent webhook deliveries.
   const cleanPhone = msg.fromPhone.replace(/\D/g, '');
   let lead: Record<string, any> | null = null;
 
+  const isFromAd = !!msg.referral && msg.referral.source_type === 'ad';
+  const leadSource = isFromAd ? 'meta_ctwa' : 'whatsapp';
+
+  // Try to fetch existing lead first
   const { data: existingLead } = await supabaseAdmin
     .from('leads')
     .select('*')
     .eq('tenant_id', tenant.id)
     .eq('phone', cleanPhone)
-    .single();
-
-  const isFromAd = !!msg.referral && msg.referral.source_type === 'ad';
-  const leadSource = isFromAd ? 'meta_ctwa' : 'whatsapp';
+    .maybeSingle();
 
   if (existingLead) {
     lead = existingLead;
     const updateData: Record<string, any> = { last_message_at: new Date().toISOString() };
-    if (isFromAd && !existingLead.source) {
-      updateData.source = leadSource;
-    }
-    await supabaseAdmin
-      .from('leads')
-      .update(updateData)
-      .eq('id', existingLead.id);
+    if (isFromAd && !existingLead.source) updateData.source = leadSource;
+    await supabaseAdmin.from('leads').update(updateData).eq('id', existingLead.id);
   } else {
-    // Round-robin assignment
+    // New lead — round-robin assignment
     let assignedTo: string | null = null;
     let assignedMember: { id: string; email?: string; full_name?: string } | null = null;
     try {
@@ -177,9 +182,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         .order('created_at', { ascending: true });
 
       if (teamMembers && teamMembers.length > 0) {
-        // Prefer the sales team for auto-assignment: Click-to-WhatsApp / Meta-ad
-        // leads must land with sales. Fall back to all members if nobody is
-        // flagged as a sales agent yet.
         const salesPool = teamMembers.filter((m: { is_sales_agent?: boolean }) => m.is_sales_agent);
         const pool = salesPool.length > 0 ? salesPool : teamMembers;
         const counter = (tenant.lead_assignment_counter as number) ?? 0;
@@ -195,8 +197,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       console.warn('⚠️ Assignment failed:', e);
     }
 
-    // Tracking campaign: tag the lead from (1) a ref code in the first message
-    // (wa.me tracking links) or (2) the Meta ad it came from (Click-to-WhatsApp).
+    // Campaign tracking
     let campaignId: string | null = null;
     let campaignName: string | undefined;
     try {
@@ -208,8 +209,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
       const text = (msg.text || '').toLowerCase();
       let hit: { id: string; name: string } | undefined;
-
-      // (1) ref code embedded in the message (e.g. "[4june]")
       if (text) {
         hit = (campaigns || []).find((c: { ref_code?: string }) => {
           if (!c.ref_code) return false;
@@ -217,43 +216,43 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           return new RegExp(`\\b${esc}\\b`).test(text);
         });
       }
-
-      // (2) Meta ad id, when the lead came from a Click-to-WhatsApp ad
       const adId = isFromAd ? msg.referral?.source_id : undefined;
       if (!hit && adId) {
         hit = (campaigns || []).find((c: { meta_ad_id?: string }) =>
           !!c.meta_ad_id && c.meta_ad_id === adId);
       }
-
       if (hit) { campaignId = hit.id; campaignName = hit.name; }
     } catch {
       // lead_campaigns table may not be migrated yet — skip tagging gracefully
     }
 
+    // INSERT with ON CONFLICT DO NOTHING so a concurrent race still resolves safely
     const { data: newLead } = await supabaseAdmin
       .from('leads')
-      .insert({
-        tenant_id: tenant.id,
-        phone: cleanPhone,
-        channel: 'whatsapp',
-        lead_status: 'new',
-        lead_score: isFromAd ? 30 : 10,
-        source: leadSource,
-        first_message_at: new Date().toISOString(),
-        last_message_at: new Date().toISOString(),
-        ...(assignedTo && { assigned_to: assignedTo }),
-        ...(campaignId && { campaign_id: campaignId }),
-        ...(isFromAd && msg.referral && {
-          notes: `Meta Ad — "${msg.referral.headline || ''}" | Ad ID: ${msg.referral.source_id || ''} | CLID: ${msg.referral.ctwa_clid || ''}`,
-        }),
-      })
+      .upsert(
+        {
+          tenant_id: tenant.id,
+          phone: cleanPhone,
+          channel: 'whatsapp',
+          lead_status: 'new',
+          lead_score: isFromAd ? 30 : 10,
+          source: leadSource,
+          first_message_at: new Date().toISOString(),
+          last_message_at: new Date().toISOString(),
+          ...(assignedTo && { assigned_to: assignedTo }),
+          ...(campaignId && { campaign_id: campaignId }),
+          ...(isFromAd && msg.referral && {
+            notes: `Meta Ad — "${msg.referral.headline || ''}" | Ad ID: ${msg.referral.source_id || ''} | CLID: ${msg.referral.ctwa_clid || ''}`,
+          }),
+        },
+        { onConflict: 'tenant_id,phone', ignoreDuplicates: true }
+      )
       .select()
       .single();
 
     lead = newLead;
 
     if (newLead) {
-      // Fire lead integration events
       fireIntegrations({
         type: 'new_lead',
         tenantId: tenant.id,
@@ -266,7 +265,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         },
       }).catch(e => console.error('Integration runner (new_lead):', e.message));
 
-      // Await Sheets sync so the row appears instantly (errors are non-fatal).
       await appendLeadRow(tenant.id, {
         name: newLead.name || undefined,
         phone: cleanPhone,
@@ -278,7 +276,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         created_at: new Date().toISOString(),
       }).catch(e => console.error('⚠️ Sheets append failed (non-fatal):', (e as Error).message));
 
-      // Notify the assigned sales agent about high-intent ad leads (email).
       if (isFromAd && assignedMember?.email) {
         sendLeadAssignedEmail(
           assignedMember.email,
@@ -602,6 +599,13 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   if (!aiResponse?.reply) return;
 
+  // 13b. Increment AI conversation counter (gates the cost cap check)
+  try {
+    await supabaseAdmin.rpc('increment_ai_conversations', { p_tenant_id: tenant.id });
+  } catch (e) {
+    console.error('Failed to increment ai_conversations counter:', e);
+  }
+
   // 14. Payment Links Injection
   if (aiResponse.extractedData?.requestPayment === 'true') {
     const amount = parseFloat(aiResponse.extractedData?.paymentAmount || '0');
@@ -717,20 +721,13 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const bookingGuestsRaw = contextObj.guestCount || contextObj.party_size;
   const customerPhone = contextObj.phone || cleanPhone; // use context phone if captured, else WhatsApp number
 
-  const replyLower = aiResponse.reply.toLowerCase();
-  
-  // Detect booking confirmation signals from AI reply
+  // Detect booking confirmation using structured AI fields ONLY.
+  // Previously this also matched reply text (fragile — "table for" in any message
+  // would trigger a DB write). Now we rely solely on the AI's structured output.
   const hasConfirmSignal =
     aiResponse.intent === 'confirm' ||
     aiResponse.nextStep === 'completed' ||
-    aiResponse.nextStep === 'confirmation' ||
-    replyLower.includes('confirmed') ||
-    replyLower.includes('booking is confirmed') ||
-    replyLower.includes('table is confirmed') ||
-    replyLower.includes('reservation is confirmed') ||
-    replyLower.includes('booked for') ||
-    replyLower.includes('table for') ||
-    replyLower.includes('reservation for');
+    aiResponse.nextStep === 'confirmation';
 
   const hasBookingData = !!(bookingDateRaw && bookingTimeRaw && bookingGuestsRaw);
   const alreadySaved = !!contextObj.booking_saved;
@@ -751,10 +748,28 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       const guestCount = parseInt(String(bookingGuestsRaw)) || 2;
       const customerName = contextObj.name || lead?.name || 'Customer';
       
-      // Parse the freeform datetime from context
-      const rawDateTime = `${bookingDateRaw} ${bookingTimeRaw}`;
-      const { bookingDate, slotTime } = parseDatetime(rawDateTime);
-      console.log(`   ↳ Datetime raw: "${rawDateTime}" → date=${bookingDate} time=${slotTime}`);
+      // Use AI extractedData fields directly — the AI already handled language,
+      // Hindi dates, ambiguous formats, "kal", "tonight", etc. far better than
+      // the custom regex parseDatetime() which only understood English.
+      // Fall back to parseDatetime only if AI gave us raw unparsed strings.
+      let bookingDate: string;
+      let slotTime: string;
+      const aiDate = aiResponse.extractedData?.date || '';
+      const aiTime = aiResponse.extractedData?.time || '';
+      if (aiDate && /^\d{4}-\d{2}-\d{2}$/.test(aiDate)) {
+        // AI gave us ISO date directly
+        bookingDate = aiDate;
+      } else {
+        const parsed = parseDatetime(`${bookingDateRaw} ${bookingTimeRaw}`);
+        bookingDate = parsed.bookingDate;
+      }
+      if (aiTime && /^\d{2}:\d{2}/.test(aiTime)) {
+        slotTime = aiTime.slice(0, 8).padEnd(8, ':00');
+      } else {
+        const parsed = parseDatetime(`${bookingDateRaw} ${bookingTimeRaw}`);
+        slotTime = parsed.slotTime;
+      }
+      console.log(`   ↳ Date/time: date=${bookingDate} time=${slotTime} (ai_date="${aiDate}" ai_time="${aiTime}")`);
       console.log(`   ↳ Customer: ${customerName} | Phone: ${customerPhone} | Guests: ${guestCount}`);
 
       // ── Booking commitment fee: generate Razorpay link if configured ──────
