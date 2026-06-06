@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { Clock, LogOut, Mail, RefreshCw, CheckCircle2 } from 'lucide-react';
-import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 
 export default function PendingPage() {
   const [checking, setChecking] = useState(true);
@@ -10,27 +9,10 @@ export default function PendingPage() {
 
   const checkStatus = async () => {
     try {
-      const supabase = createBrowserSupabaseClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setChecking(false);
-        return;
-      }
-      
-      const { data: userData } = await supabase
-        .from('users')
-        .select('tenant_id')
-        .eq('auth_id', user.id)
-        .maybeSingle();
-        
-      if (userData?.tenant_id) {
-        const { data: tenantData } = await supabase
-          .from('tenants')
-          .select('is_approved')
-          .eq('id', userData.tenant_id)
-          .maybeSingle();
-          
-        if (tenantData?.is_approved) {
+      const res = await fetch('/api/auth/approval-status');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.approved) {
           setApproved(true);
           window.location.href = '/dashboard';
           return;
