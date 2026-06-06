@@ -35,6 +35,10 @@
     {
       "path": "/api/cron/birthday-greetings",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/meta-ads/cron",
+      "schedule": "0 5 * * *"
     }
   ]
 }

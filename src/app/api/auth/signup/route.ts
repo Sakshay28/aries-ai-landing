@@ -38,7 +38,6 @@ export async function POST(req: NextRequest) {
     let parsedBody;
     try {
       const rawBody = await req.json();
-      console.log('📝 Signup attempt:', JSON.stringify(rawBody));
       parsedBody = signupSchema.parse(rawBody);
     } catch (e: unknown) {
       // Zod v4 uses e.issues; v3 used e.errors — handle both

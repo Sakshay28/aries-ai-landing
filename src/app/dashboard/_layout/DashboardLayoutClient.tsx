@@ -17,12 +17,14 @@ export default function DashboardLayoutClient({
   userEmail,
   userName,
   modules = [],
+  businessType = "",
   isPlatformAdmin = false,
 }: {
   children: ReactNode;
   userEmail?: string;
   userName?: string;
   modules?: string[];
+  businessType?: string;
   isPlatformAdmin?: boolean;
 }) {
   return (
@@ -30,7 +32,7 @@ export default function DashboardLayoutClient({
     <SidebarProvider>
       {/* Root: full-screen flex row */}
       <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
-        <AppSidebar userEmail={userEmail} modules={modules} isPlatformAdmin={isPlatformAdmin} />
+        <AppSidebar userEmail={userEmail} modules={modules} businessType={businessType} isPlatformAdmin={isPlatformAdmin} />
         <Backdrop />
 
         {/* Content column */}

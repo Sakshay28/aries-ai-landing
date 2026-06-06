@@ -26,32 +26,24 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-  const month = nowIST.getUTCMonth() + 1; // 1-12
-  const day = nowIST.getUTCDate();
-  const year = nowIST.getUTCFullYear();
+  const now = new Date();
+  const month = now.getUTCMonth() + 1; // 1-12
+  const day = now.getUTCDate();
+  const year = now.getUTCFullYear();
 
-  // Find leads with a birthday matching today's month+day, not yet greeted this year.
-  // Use raw SQL via rpc-free filter: fetch candidates then filter in JS (birthday is DATE).
-  const { data: candidates } = await supabaseAdmin
+  // Filter at DB level: birthday column is DATE (YYYY-MM-DD).
+  // Use a LIKE pattern matching the MM-DD suffix — efficient and avoids loading all PII.
+  const mmdd = `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+  const { data: todays } = await supabaseAdmin
     .from('leads')
     .select('id, tenant_id, name, phone, birthday, last_birthday_greeted_year')
-    .not('birthday', 'is', null)
-    .not('phone', 'is', null);
+    .not('phone', 'is', null)
+    .like('birthday', `%-${mmdd}`)           // matches any YYYY-MM-DD ending in today's MM-DD
+    .neq('last_birthday_greeted_year', year)  // not already greeted this year
+    .limit(500);                              // hard cap — safety valve
 
-  if (!candidates || candidates.length === 0) {
-    return NextResponse.json({ ok: true, sent: 0 });
-  }
-
-  const todays = candidates.filter(l => {
-    if (!l.birthday) return false;
-    const d = new Date(l.birthday as string);
-    const isBirthday = (d.getUTCMonth() + 1) === month && d.getUTCDate() === day;
-    const alreadyGreeted = l.last_birthday_greeted_year === year;
-    return isBirthday && !alreadyGreeted;
-  });
-
-  if (todays.length === 0) {
+  if (!todays || todays.length === 0) {
     return NextResponse.json({ ok: true, sent: 0 });
   }
 

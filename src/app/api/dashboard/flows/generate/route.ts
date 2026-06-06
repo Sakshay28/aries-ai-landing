@@ -110,21 +110,21 @@ const BLUEPRINTS: Record<string, FlowBlueprint> = {
     ],
   },
   clocktower: {
-    name: 'Clock Tower Restaurant',
+    name: 'Restaurant',
     nodes: [
       { id: 'ct1',  type: 'trigger',      label: 'Inbound Message',          x: 400,  y: 50,   extra: { triggerType: 'keyword', keywords: ['hi','hello','book','table','reserve','menu','dine','lunch','dinner','hours','location','help'] } },
-      { id: 'ct2',  type: 'standard',     label: 'Welcome',                  x: 400,  y: 210,  extra: { content: "Welcome to Clock Tower Restaurant! 🏰\n\nWe're so glad you reached out. What can we help you with today?" } },
+      { id: 'ct2',  type: 'standard',     label: 'Welcome',                  x: 400,  y: 210,  extra: { content: "Welcome to our restaurant! 👋\n\nWe're so glad you reached out. What can we help you with today?" } },
       { id: 'ct3',  type: 'send_buttons', label: 'Main Menu',                x: 400,  y: 390,  extra: { message: 'Choose an option below:', buttons: [{ id: 'b1', label: '📅 Book a Table', value: 'book_table' },{ id: 'b2', label: '🍽️ View Menu', value: 'view_menu' },{ id: 'b3', label: '⏰ Hours & Location', value: 'hours_info' }] } },
       { id: 'ct4',  type: 'condition',    label: 'Booking?',                 x: 400,  y: 570,  extra: { field: 'button_value', operator: '==', value: 'book_table' } },
       { id: 'ct5',  type: 'intake_form',  label: 'Collect Booking Details',  x: 80,   y: 750,  extra: { fields: [{ id: 'f1', name: 'Your Name', type: 'text', required: true, saveAs: 'guest_name', placeholder: 'Full name' },{ id: 'f2', name: 'Date & Time', type: 'text', required: true, saveAs: 'booking_datetime', placeholder: 'e.g. 30 May, 8:00 PM' },{ id: 'f3', name: 'Number of Guests', type: 'text', required: true, saveAs: 'party_size', placeholder: 'e.g. 4' },{ id: 'f4', name: 'Special Request', type: 'text', required: false, saveAs: 'special_request', placeholder: 'Birthday, anniversary, dietary needs…' }] } },
-      { id: 'ct6',  type: 'standard',     label: 'Reservation Confirmed ✅', x: 80,   y: 970,  extra: { content: "✅ Your table is confirmed!\n\n👤 Name: {{guest_name}}\n📅 When: {{booking_datetime}}\n👥 Guests: {{party_size}}\n\nWe look forward to welcoming you at Clock Tower! 🏰 A reminder will be sent before your booking." } },
+      { id: 'ct6',  type: 'standard',     label: 'Reservation Confirmed ✅', x: 80,   y: 970,  extra: { content: "✅ Your table is confirmed!\n\n👤 Name: {{guest_name}}\n📅 When: {{booking_datetime}}\n👥 Guests: {{party_size}}\n\nWe look forward to welcoming you! A reminder will be sent before your booking." } },
       { id: 'ct7',  type: 'handoff',      label: 'Notify Restaurant Team',   x: 80,   y: 1140, extra: { message: '🔔 New Reservation\nGuest: {{guest_name}}\nDate/Time: {{booking_datetime}}\nParty Size: {{party_size}} guests\nSpecial: {{special_request}}' } },
       { id: 'ct8',  type: 'end',          label: 'End',                      x: 80,   y: 1290 },
       { id: 'ct9',  type: 'condition',    label: 'View Menu?',               x: 780,  y: 570,  extra: { field: 'button_value', operator: '==', value: 'view_menu' } },
       { id: 'ct10', type: 'standard',     label: 'Our Menu 🍽️',             x: 580,  y: 750,  extra: { content: "Our Signature Dishes 🍽️\n\n🥗 *Starters*\nGarden Mezze Platter ₹320 | Crispy Calamari ₹280\n\n🍖 *Mains*\nSlow-Roasted Lamb Chops ₹780\nMushroom Risotto ₹520\nGrilled Sea Bass ₹680\n\n🍰 *Desserts*\nSticky Toffee Pudding ₹220\nChocolate Lava Cake ₹240\n\n🍷 Bar open till midnight. To book your table, just reply *Book*!" } },
       { id: 'ct11', type: 'end',          label: 'End',                      x: 580,  y: 960 },
       { id: 'ct12', type: 'condition',    label: 'Hours & Location?',        x: 1100, y: 570,  extra: { field: 'button_value', operator: '==', value: 'hours_info' } },
-      { id: 'ct13', type: 'standard',     label: 'Hours & Location',         x: 940,  y: 750,  extra: { content: "Clock Tower Restaurant 🏰\n\n📍 Near the Clock Tower landmark\n\n⏰ *Opening Hours*\nMon–Thu: 12 PM – 11 PM\nFri–Sat: 12 PM – 1 AM\nSun: 11 AM – 10 PM\n\nWalk-ins welcome! We recommend booking ahead for Friday & Saturday evenings. 😊" } },
+      { id: 'ct13', type: 'standard',     label: 'Hours & Location',         x: 940,  y: 750,  extra: { content: "{{business_name}}\n\n📍 {{business_address}}\n\n⏰ *Opening Hours*\nMon–Thu: 12 PM – 11 PM\nFri–Sat: 12 PM – 1 AM\nSun: 11 AM – 10 PM\n\nWalk-ins welcome! We recommend booking ahead for Friday & Saturday evenings. 😊" } },
       { id: 'ct14', type: 'end',          label: 'End',                      x: 940,  y: 970 },
       { id: 'ct15', type: 'handoff',      label: 'Connect to Staff',         x: 1260, y: 750,  extra: { message: 'A customer needs assistance. Please connect them with a team member.' } },
       { id: 'ct16', type: 'end',          label: 'End',                      x: 1260, y: 940 },
@@ -152,7 +152,6 @@ const BLUEPRINTS: Record<string, FlowBlueprint> = {
 // ── Keyword → blueprint mapping ───────────────────────────────────────────────
 function detectIntent(prompt: string): string {
   const p = prompt.toLowerCase();
-  if (/clock.?tower|clocktower/.test(p)) return 'clocktower';
   if (/reserv|restaurant|table|dine|dining/.test(p)) return 'reservation';
   if (/lead|capture|prospect|contact|inquir/.test(p)) return 'lead';
   if (/support|help|complaint|issue|problem|ticket/.test(p)) return 'support';

@@ -327,15 +327,24 @@ export async function processPendingFollowUps(): Promise<number> {
 // PROCESS: Stale conversations (Fix #14)
 // ═══════════════════════════════════════
 
-export async function processStaleConversations(): Promise<void> {
+export async function processStaleConversations(tenantId?: string): Promise<void> {
   const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-  const { data: staleConvs } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('conversations')
     .select('id')
     .eq('is_active', true)
     .lt('last_message_at', twentyFourHoursAgo)
-    .limit(100);
+    .limit(200); // hard cap per call
+
+  // If called for a specific tenant (e.g. from a tenant-scoped cron), filter accordingly.
+  // If called platform-wide (e.g. by a global cleanup cron), process all tenants safely
+  // because each row update is ID-scoped — no cross-tenant data is modified.
+  if (tenantId) {
+    query = query.eq('tenant_id', tenantId);
+  }
+
+  const { data: staleConvs } = await query;
 
   if (!staleConvs || staleConvs.length === 0) return;
 
@@ -346,7 +355,7 @@ export async function processStaleConversations(): Promise<void> {
     .update({ is_active: false, current_step: 'timed_out' })
     .in('id', ids);
 
-  console.log(`⏰ Timed out ${ids.length} stale conversations`);
+  console.log(`⏰ Timed out ${ids.length} stale conversations${tenantId ? ` for tenant ${tenantId}` : ' (global)'}`);
 }
 
 // ═══════════════════════════════════════

@@ -23,6 +23,7 @@ import { RecipientDrawer } from './RecipientDrawer';
 import { validateCampaignPreflight } from '../validators/broadcast.validator';
 import { RecipientCacheResult } from '@/lib/broadcast/services/broadcast-recipient.service';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
+import { useUserContext } from '@/app/dashboard/_layout/DashboardLayoutClient';
 import {
   Campaign, Template, VariableConfig,
   AudienceState, DeliveryConfig, AutomationRule, EstimateResult,
@@ -179,6 +180,7 @@ function TestSendModal({
 export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: BroadcastBuilderProps) {
   const router   = useRouter();
   const supabase = createBrowserSupabaseClient();
+  const { userName } = useUserContext();
 
   // ── ALL STATE IS LOCAL — no Zustand store ─────────────────────────────────
   const [campaignId,      setCampaignId]      = useState<string | null>(campaign?.id ?? null);
@@ -905,6 +907,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                     variableMapping={previewValues}
                     previewProfile={previewRecipient}
                     onProfileChange={setPreviewRecipient as any}
+                    businessName={userName}
                   />
                 </div>
               </div>

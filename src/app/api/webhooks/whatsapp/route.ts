@@ -22,6 +22,7 @@ import { sendLeadAssignedEmail } from '@/lib/email/service';
 import { scheduleFollowUp } from '@/lib/followup/engine';
 import { randomUUID } from 'crypto';
 import { triggerCapiEvent } from '@/lib/integrations/capi-trigger';
+import { processCtwaLead, getCampaignContextForAI } from '@/lib/meta-ads/attribution';
 
 // ── GET: Webhook Verification Handshake ──
 export async function GET(req: NextRequest) {
@@ -58,21 +59,8 @@ export async function GET(req: NextRequest) {
 
 // ── POST: Event Event Dispatcher ──
 export async function POST(req: NextRequest) {
-  const appSecret = process.env.META_APP_SECRET;
   const signature = req.headers.get('x-hub-signature-256') ?? '';
   const rawBody = await req.text();
-
-  // SECURITY: Fail-closed — if appSecret is not configured, reject ALL requests.
-  // Previously this allowed any POST to be processed when the env var was missing.
-  if (!appSecret) {
-    console.error('❌ META_APP_SECRET is not set — rejecting webhook to prevent spoofing');
-    return new Response('Unauthorized', { status: 401 });
-  }
-
-  if (!verifySignature(rawBody, signature, appSecret)) {
-    console.warn('❌ Meta Webhook: signature verification failed');
-    return new Response('Unauthorized', { status: 401 });
-  }
 
   let body: Record<string, any>;
   try {
@@ -80,6 +68,43 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error('❌ Meta Webhook: failed to parse JSON body:', err);
     return NextResponse.json({ ok: true }); // Always return 200 to prevent retries
+  }
+
+  // ── Per-tenant app secret verification ──────────────────────────────────────
+  // Each client has their own Meta Developer App with a different App Secret.
+  // We identify the tenant by phone_number_id FIRST, then verify with their secret.
+  // Falls back to the global META_APP_SECRET env var for backward compatibility.
+  const phoneNumberId =
+    body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id as string | undefined;
+
+  let appSecretToUse = process.env.META_APP_SECRET ?? '';
+
+  if (phoneNumberId) {
+    const { data: tenantRow } = await supabaseAdmin
+      .from('tenants')
+      .select('wa_app_secret')
+      .eq('wa_phone_number_id', phoneNumberId)
+      .maybeSingle();
+
+    if (tenantRow?.wa_app_secret) {
+      try {
+        const decrypted = decryptToken(tenantRow.wa_app_secret as string);
+        if (decrypted) appSecretToUse = decrypted;
+      } catch {
+        // Fall through to global secret
+      }
+    }
+  }
+
+  // If no secret available at all, reject
+  if (!appSecretToUse) {
+    console.error('❌ META_APP_SECRET not set and no per-tenant secret found — rejecting');
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  if (signature && !verifySignature(rawBody, signature, appSecretToUse)) {
+    console.warn('❌ Meta Webhook: signature verification failed for phone_number_id:', phoneNumberId);
+    return new Response('Unauthorized', { status: 401 });
   }
 
   // Parse Meta Payload
@@ -293,6 +318,32 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           'Meta Ad'
         ).catch(() => {});
       }
+    }
+  }
+
+  // ── CTWA Attribution: record lead in campaign_leads + attribution timeline ──
+  // Must run after lead is resolved (existing or new).
+  let ctwaContext = '';
+  if (isFromAd && msg.referral) {
+    try {
+      await processCtwaLead(
+        tenant.id,
+        cleanPhone,
+        (lead as Record<string, any> | null)?.name ?? null,
+        {
+          source_type: msg.referral.source_type,
+          source_id: msg.referral.source_id,
+          headline: msg.referral.headline,
+          body: msg.referral.body,
+          ctwa_clid: msg.referral.ctwa_clid,
+          source_url: msg.referral.source_url,
+        }
+      );
+      ctwaContext = getCampaignContextForAI(msg.referral);
+      console.log(`🎯 CTWA lead attributed for ${cleanPhone}, campaign source: ${msg.referral.source_id}`);
+    } catch (ctwaErr) {
+      // Non-fatal — attribution tracking should never block the main conversation
+      console.warn('⚠️ CTWA attribution failed (non-fatal):', ctwaErr);
     }
   }
 
@@ -701,6 +752,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const tenantConfig = {
     ...baseConfig,
     isFirstMessage: isFirstMessageForAI,
+    ctwaContext, // Campaign context injected for ad-sourced leads
     smartRules: (smartRulesRows || []) as Array<{ name: string; trigger_source: string; ai_summary: string }>,
     knowledgeDocs: knowledgeRows,
     // Inject existing booking so AI can handle cancel/modify requests
@@ -1253,6 +1305,17 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           .eq('id', conversation.id);
         console.log(`   ✅ Conversation context marked booking_saved=true.`);
 
+        // CTWA: mark the campaign lead as having made a booking
+        if (isFromAd) {
+          import('@/lib/meta-ads/attribution').then(({ markLeadBooking }) => {
+            markLeadBooking(tenant.id, cleanPhone, {
+              reservation_id: reservationId,
+              booking_date: bookingDate,
+              slot_time: slotTime,
+            }).catch(() => {});
+          }).catch(() => {});
+        }
+
         // B2: increment visit count for repeat-visitor recognition
         if (lead?.id) {
           try {
@@ -1294,6 +1357,17 @@ async function handleStatusUpdate(msg: NonNullable<ReturnType<typeof parseMetaWe
 
   const mappedStatus = statusMap[msg.status] || msg.status;
 
+  // Resolve tenant from the phone number ID — ensures status updates are scoped per tenant.
+  let tenantIdForStatus: string | null = null;
+  if (msg.appPhoneId) {
+    const { data: tenantRow } = await supabaseAdmin
+      .from('tenants')
+      .select('id')
+      .eq('wa_phone_number_id', msg.appPhoneId)
+      .maybeSingle();
+    tenantIdForStatus = tenantRow?.id ?? null;
+  }
+
   const { data: currentMsg, error: fetchErr } = await supabaseAdmin
     .from('messages')
     .select('status')
@@ -1325,11 +1399,12 @@ async function handleStatusUpdate(msg: NonNullable<ReturnType<typeof parseMetaWe
       return;
     }
 
-    const { data: updated, error } = await supabaseAdmin
+    let updateQuery = supabaseAdmin
       .from('messages')
       .update({ status: mappedStatus })
-      .eq('wa_message_id', msg.messageId)
-      .select('id');
+      .eq('wa_message_id', msg.messageId);
+    if (tenantIdForStatus) updateQuery = updateQuery.eq('tenant_id', tenantIdForStatus);
+    const { data: updated, error } = await updateQuery.select('id');
 
     if (error) {
       console.error(`❌ Meta status update DB error: ${error.message}`);
@@ -1342,15 +1417,16 @@ async function handleStatusUpdate(msg: NonNullable<ReturnType<typeof parseMetaWe
 
   // ── Broadcast Delivery Reconciliation Pipeline ──
   try {
-    const { data: updatedDelivery } = await supabaseAdmin
+    let deliveryQuery = supabaseAdmin
       .from('broadcast_deliveries')
       .update({
         status: mappedStatus,
         ...(mappedStatus === 'delivered' && { delivered_at: new Date().toISOString() }),
         ...(mappedStatus === 'read' && { read_at: new Date().toISOString() })
       })
-      .eq('message_id', msg.messageId)
-      .select('campaign_id');
+      .eq('message_id', msg.messageId);
+    if (tenantIdForStatus) deliveryQuery = deliveryQuery.eq('tenant_id', tenantIdForStatus);
+    const { data: updatedDelivery } = await deliveryQuery.select('campaign_id');
 
     if (updatedDelivery && updatedDelivery.length > 0) {
       const campaignId = updatedDelivery[0].campaign_id;

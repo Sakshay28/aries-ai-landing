@@ -189,7 +189,7 @@ export async function createTenant(input: {
     .from('tenants')
     .insert({
       business_name: input.business_name,
-      business_type: input.business_type || 'Restaurant',
+      business_type: input.business_type || 'Business',
       business_email: input.business_email,
       business_phone: input.business_phone,
       bot_name: input.bot_name || 'Assistant',

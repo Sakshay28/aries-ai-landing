@@ -11,8 +11,9 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { triggerCapiEvent } from '@/lib/integrations/capi-trigger';
 import { verifySignature } from '@/lib/meta/service';
 
-// The Verification Token you enter inside the Facebook Developer Console Webhooks configuration
-const VERIFY_TOKEN = process.env.META_WEBHOOK_VERIFY_TOKEN || 'aries_ai_leads_token_2026';
+// The Verification Token you set in your Meta Developer Console → Webhooks configuration.
+// Must be set as META_WEBHOOK_VERIFY_TOKEN in environment variables — no fallback (fail-closed).
+const VERIFY_TOKEN = process.env.META_WEBHOOK_VERIFY_TOKEN;
 
 /**
  * 1. Webhook Handshake Verification (GET)
@@ -24,12 +25,16 @@ export async function GET(req: NextRequest) {
   const token = searchParams.get('hub.verify_token');
   const challenge = searchParams.get('hub.challenge');
 
+  if (!VERIFY_TOKEN) {
+    console.error('❌ META_WEBHOOK_VERIFY_TOKEN is not set in environment variables.');
+    return new Response('Server misconfiguration', { status: 500 });
+  }
+
   if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-    console.log('✅ Meta Webhook Verification successful!');
     return new Response(challenge, { status: 200, headers: { 'Content-Type': 'text/plain' } });
   }
 
-  console.warn('❌ Meta Webhook Verification failed: invalid verify token.');
+  console.warn('❌ Meta Webhook Verification failed: token mismatch.');
   return new Response('Verification Token mismatch', { status: 403 });
 }
 

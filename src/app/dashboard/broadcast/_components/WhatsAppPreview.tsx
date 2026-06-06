@@ -63,6 +63,7 @@ export interface WhatsAppPreviewProps {
   variableMapping: VariableMapping;
   previewProfile: string;
   onProfileChange: (name: string) => void;
+  businessName?: string;
 }
 
 // ── Profile configs (Rich Personalized Data for Clock Tower Jaipur) ───────────
@@ -376,6 +377,7 @@ export function WhatsAppPreview({
   variableMapping,
   previewProfile,
   onProfileChange,
+  businessName: businessNameProp,
 }: WhatsAppPreviewProps) {
   const activeProfileVars = useMemo(() => {
     const profile = PROFILES.find((p) => p.name === previewProfile) ?? PROFILES[0];
@@ -396,7 +398,7 @@ export function WhatsAppPreview({
   );
   const bodyText = template?.body ?? "";
 
-  const businessName = "sakshay";
+  const businessName = businessNameProp || "Your Business";
 
   return (
     <div className="flex flex-col gap-2 w-full items-center">

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useSidebar } from "./SidebarContext";
 import Image from "next/image";
 import Link from "next/link";
+import { MetaAdsNotificationBell } from "./MetaAdsNotificationBell";
 
 export default function AppHeader() {
   const { toggleMobile } = useSidebar();
@@ -26,6 +27,7 @@ export default function AppHeader() {
         </div>
         <span className="text-sm font-bold tracking-tight text-foreground">Aries AI</span>
       </Link>
+      <MetaAdsNotificationBell />
     </header>
   );
 }

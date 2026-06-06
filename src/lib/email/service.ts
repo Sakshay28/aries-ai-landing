@@ -1,6 +1,9 @@
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY || 're_dummy_key');
+if (!process.env.RESEND_API_KEY) {
+  console.warn('⚠️ RESEND_API_KEY is not set — email notifications will be disabled.');
+}
+const resend = new Resend(process.env.RESEND_API_KEY ?? '');
 
 export async function sendNewLeadEmail(to: string, leadName: string, businessName: string) {
   try {

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createServerClient } from "@supabase/ssr";
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import DashboardLayoutClient from "./_layout/DashboardLayoutClient";
 import { env, isSupabaseConfigured } from "@/lib/env";
@@ -11,16 +11,10 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const cookieStore = await cookies();
-  const headersList = await headers();
-  const pathname = headersList.get("x-pathname") || "";
-  const isRestaurant = true; // Temporarily force true for visual review and screenshot capture
-  headersList.forEach((value, name) => {
-    console.log(`  HEADER ${name}: ${value}`);
-  });
-  console.log("DEBUG LAYOUT PATHNAME:", pathname, "isRestaurant:", isRestaurant);
   let userEmail = "";
   let userName = "";
   let modules: string[] = [];
+  let businessType = "";
   let isPlatformAdmin = false;
 
   if (isSupabaseConfigured) {
@@ -42,7 +36,7 @@ export default async function DashboardLayout({
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user && !isRestaurant) redirect("/login");
+    if (!user) redirect("/login");
     if (user) {
       userEmail = user.email || "";
 
@@ -85,20 +79,17 @@ export default async function DashboardLayout({
           redirect("/onboard");
         }
 
-        // Fetch tenant modules for conditional sidebar sections
+        // Fetch tenant modules + business type for conditional sidebar sections
         const { data: tenantData } = await supabaseAdmin
           .from("tenants")
-          .select("modules")
+          .select("modules, business_type")
           .eq("id", userData.tenant_id)
           .single();
         modules = (tenantData?.modules as string[] | null) ?? [];
+        businessType = (tenantData?.business_type as string | null) ?? "";
       }
-    } else {
-      userName = "Guest Manager";
-      userEmail = "restaurant_manager@ariesai.in";
-      modules = ["restaurant_reservations"];
     }
   }
 
-  return <DashboardLayoutClient userEmail={userEmail} userName={userName} modules={modules} isPlatformAdmin={isPlatformAdmin}>{children}</DashboardLayoutClient>;
+  return <DashboardLayoutClient userEmail={userEmail} userName={userName} modules={modules} businessType={businessType} isPlatformAdmin={isPlatformAdmin}>{children}</DashboardLayoutClient>;
 }

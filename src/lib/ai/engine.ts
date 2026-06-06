@@ -166,6 +166,10 @@ If the customer wants to MODIFY: collect the new date/time/party size, then conf
 Do NOT confirm a cancellation or modification without staff involvement.
 ` : ''}
 
+${tenantConfig.ctwaContext ? `
+# META ADS CAMPAIGN CONTEXT (Important — read carefully):
+${tenantConfig.ctwaContext}
+` : ''}
 ${tenantConfig.systemPrompt ? `
 # STAFF_GUIDELINES (Always follow these custom operational instructions alongside core rules):
 ${tenantConfig.systemPrompt}
@@ -225,6 +229,8 @@ export interface TenantAIConfig {
   // Repeat-visitor recognition
   visitCount?: number;
   lastVisitDate?: string | null;
+  // Click-to-WhatsApp campaign context — injected when lead came from a Meta ad
+  ctwaContext?: string;
 }
 
 // ═══════════════════════════════════════

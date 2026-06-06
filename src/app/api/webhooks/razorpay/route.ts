@@ -54,10 +54,24 @@ export async function POST(req: NextRequest) {
       const reservationId: string | undefined = entity?.reference_id || entity?.notes?.reservation_id;
       const paymentId = (payload as any)?.payment?.entity?.id ?? null;
       if (reservationId) {
+        // First fetch the booking to get the tenant (restaurant_id) — never update blindly.
+        const { data: existingBooking } = await supabaseAdmin
+          .from('restaurant_bookings')
+          .select('id, restaurant_id, customer_name, customer_phone, party_size, booking_date, payment_status')
+          .eq('reservation_id', reservationId)
+          .single();
+
+        // Guard: only update if booking exists and hasn't already been marked paid (idempotency).
+        if (!existingBooking || existingBooking.payment_status === 'paid') {
+          console.log(`⏩ Razorpay: booking ${reservationId} not found or already paid — skipping.`);
+          return NextResponse.json({ status: 'ok' });
+        }
+
         const { data: booking } = await supabaseAdmin
           .from('restaurant_bookings')
           .update({ payment_status: 'paid', razorpay_payment_id: paymentId, booking_status: 'confirmed' })
           .eq('reservation_id', reservationId)
+          .eq('restaurant_id', existingBooking.restaurant_id) // ← explicit tenant scope
           .select('restaurant_id, customer_name, customer_phone, party_size, booking_date')
           .single();
         if (booking) {
