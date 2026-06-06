@@ -75,26 +75,75 @@ export async function POST(req: NextRequest) {
 
     const { Resend } = await import('resend');
     const resend = new Resend(apiKey);
-    const greeting = fullName ? `Hi ${fullName.split(' ')[0]},` : 'Hi,';
+    const firstName = fullName ? fullName.split(' ')[0] : '';
+    const greeting = firstName ? `Hi ${firstName},` : 'Hi there,';
+    // Space the digits for readability in the box (keeps raw OTP in the subject/text)
+    const spacedOtp = String(otp).split('').join('&nbsp;');
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>Your AriesAI verification code</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f8;-webkit-font-smoothing:antialiased;">
+  <!-- preheader (hidden) -->
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Your AriesAI verification code is ${otp}. It expires in 1 hour.</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6f8;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #eaecef;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#0c0e14;padding:28px 32px;text-align:center;">
+              <img src="https://ariesai.in/logo.png" width="120" alt="AriesAI" style="height:auto;max-height:34px;display:inline-block;">
+            </td>
+          </tr>
+          <!-- Body -->
+          <tr>
+            <td style="padding:36px 32px 8px 32px;">
+              <h1 style="margin:0 0 6px 0;font-size:20px;font-weight:700;color:#111827;">${greeting}</h1>
+              <p style="margin:0 0 28px 0;font-size:15px;line-height:1.6;color:#4b5563;">
+                Use the verification code below to continue setting up your AriesAI account. It's valid for the next hour.
+              </p>
+              <!-- OTP box -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" style="background-color:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:22px 0;">
+                    <div style="font-size:34px;font-weight:800;letter-spacing:6px;color:#128C7E;font-family:'SF Mono',Menlo,Consolas,monospace;">${spacedOtp}</div>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:24px 0 0 0;font-size:13px;line-height:1.6;color:#9ca3af;">
+                If you didn't request this code, you can safely ignore this email — no changes will be made to your account.
+              </p>
+            </td>
+          </tr>
+          <!-- Divider -->
+          <tr><td style="padding:0 32px;"><hr style="border:none;border-top:1px solid #eef0f2;margin:28px 0 0 0;"></td></tr>
+          <!-- Footer -->
+          <tr>
+            <td style="padding:20px 32px 32px 32px;text-align:center;">
+              <p style="margin:0 0 4px 0;font-size:13px;font-weight:600;color:#111827;">AriesAI</p>
+              <p style="margin:0 0 12px 0;font-size:12px;line-height:1.6;color:#9ca3af;">AI-powered WhatsApp automation for growing businesses.</p>
+              <p style="margin:0;font-size:11px;color:#c0c4cb;">© ${new Date().getFullYear()} AriesAI · This is an automated message, please don't reply.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
     const { error: sendErr } = await resend.emails.send({
       from: 'AriesAI <noreply@ariesai.in>',
       to: email,
       subject: `${otp} is your AriesAI verification code`,
-      html: `
-        <div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#fff">
-          <h2 style="font-size:20px;font-weight:700;color:#111;margin:0 0 8px">${greeting}</h2>
-          <p style="color:#555;font-size:15px;line-height:1.6;margin:0 0 24px">
-            Your verification code for <strong>AriesAI</strong> is:
-          </p>
-          <div style="font-size:34px;font-weight:800;letter-spacing:8px;color:#128C7E;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:18px;text-align:center;margin-bottom:24px">
-            ${otp}
-          </div>
-          <p style="color:#888;font-size:13px;line-height:1.6">
-            This code expires in 1 hour. If you didn't request it, you can ignore this email.
-          </p>
-        </div>
-      `,
-      text: `Your AriesAI verification code is ${otp}. It expires in 1 hour.`,
+      html,
+      text: `${greeting}\n\nYour AriesAI verification code is: ${otp}\n\nThis code expires in 1 hour. If you didn't request it, you can ignore this email.\n\n— AriesAI`,
     });
 
     if (sendErr) {
