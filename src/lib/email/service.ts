@@ -1,12 +1,17 @@
 import { Resend } from 'resend';
 
-if (!process.env.RESEND_API_KEY) {
-  console.warn('⚠️ RESEND_API_KEY is not set — email notifications will be disabled.');
+let _resend: Resend | null = null;
+function getResend(): Resend | null {
+  if (_resend) return _resend;
+  if (!process.env.RESEND_API_KEY) return null;
+  _resend = new Resend(process.env.RESEND_API_KEY);
+  return _resend;
 }
-const resend = new Resend(process.env.RESEND_API_KEY ?? '');
 
 export async function sendNewLeadEmail(to: string, leadName: string, businessName: string) {
   try {
+    const resend = getResend();
+    if (!resend) return;
     await resend.emails.send({
       from: 'Aries AI <notifications@ariesai.in>',
       to,
@@ -20,6 +25,8 @@ export async function sendNewLeadEmail(to: string, leadName: string, businessNam
 
 export async function sendLeadAssignedEmail(to: string, leadName: string, businessName: string, source?: string) {
   try {
+    const resend = getResend();
+    if (!resend) return;
     await resend.emails.send({
       from: 'Aries AI <notifications@ariesai.in>',
       to,
@@ -33,6 +40,8 @@ export async function sendLeadAssignedEmail(to: string, leadName: string, busine
 
 export async function sendWeeklySummaryEmail(to: string, businessName: string, leadsCount: number, messagesCount: number) {
   try {
+    const resend = getResend();
+    if (!resend) return;
     await resend.emails.send({
       from: 'Aries AI <analytics@ariesai.in>',
       to,
@@ -46,6 +55,8 @@ export async function sendWeeklySummaryEmail(to: string, businessName: string, l
 
 export async function sendBillingReceipt(to: string, businessName: string, amount: string, planName: string) {
   try {
+    const resend = getResend();
+    if (!resend) return;
     await resend.emails.send({
       from: 'Aries AI Billing <billing@ariesai.in>',
       to,
@@ -59,6 +70,8 @@ export async function sendBillingReceipt(to: string, businessName: string, amoun
 
 export async function sendFlowEmail(to: string, subject: string, body: string, fromName = 'AriesAI') {
   try {
+    const resend = getResend();
+    if (!resend) return false;
     await resend.emails.send({
       from: `${fromName} <notifications@ariesai.in>`,
       to,
@@ -75,6 +88,8 @@ export async function sendFlowEmail(to: string, subject: string, body: string, f
 
 export async function sendBotOfflineAlert(to: string, businessName: string) {
   try {
+    const resend = getResend();
+    if (!resend) return;
     await resend.emails.send({
       from: 'Aries AI Alerts <alerts@ariesai.in>',
       to,
