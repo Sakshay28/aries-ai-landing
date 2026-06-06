@@ -434,7 +434,7 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
           source_id: msg.referral.source_id,
           headline: msg.referral.headline,
           body: msg.referral.body,
-          ctwa_clid: msg.referral.ctwa_clid || msg.referral.video_url || msg.referral.image_url, // fallback logic
+          ctwa_clid: msg.referral.ctwa_clid,
           source_url: msg.referral.source_url,
         };
       }

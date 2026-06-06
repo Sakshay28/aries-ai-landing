@@ -39,8 +39,8 @@ describe('crypto: encryptToken / decryptToken', () => {
     expect(decryptToken(a)).toBe(decryptToken(b));
   });
 
-  it('returns input unchanged when encrypted blob is malformed', () => {
+  it('returns null when encrypted blob is malformed', () => {
     const malformed = 'enc:v1:notenoughparts';
-    expect(decryptToken(malformed)).toBe(malformed);
+    expect(decryptToken(malformed)).toBeNull();
   });
 });

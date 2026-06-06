@@ -16,8 +16,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'No file uploaded' }, { status: 400 });
     }
 
+    const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+    const MAX_ROW_LIMIT = 50_000;
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return NextResponse.json({
+        success: false,
+        error: `CSV file exceeds the 10 MB limit (received ${Math.round(file.size / 1024 / 1024)} MB). Split the file and re-upload.`,
+      }, { status: 413 });
+    }
+
     const csvContent = await file.text();
     const result = CSVProcessorService.processCSV(csvContent);
+
+    if (result.totalRows > MAX_ROW_LIMIT) {
+      return NextResponse.json({
+        success: false,
+        error: `CSV contains ${result.totalRows.toLocaleString()} rows which exceeds the 50,000 row limit. Split the file and upload in batches.`,
+      }, { status: 413 });
+    }
 
     return NextResponse.json({ 
       success: true, 

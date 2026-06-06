@@ -98,8 +98,15 @@ export class BroadcastRecipientService {
             if (m.contact_id && !readIds.has(m.contact_id)) targetContactIds.push(m.contact_id);
           });
         } else if (audience.retargetCondition === 'no_reply') {
+          // Only target contacts who did NOT send an inbound reply to the parent campaign
+          const { data: inboundReplies } = await supabaseAdmin
+            .from('messages')
+            .select('contact_id')
+            .eq('campaign_id', audience.retargetCampaignId)
+            .eq('direction', 'inbound');
+          const repliedContactIds = new Set((inboundReplies || []).map((r: any) => r.contact_id).filter(Boolean));
           const sentIds = (parentMsgs || []).map(m => m.contact_id).filter(Boolean) as string[];
-          targetContactIds.push(...sentIds);
+          sentIds.filter(id => !repliedContactIds.has(id)).forEach(id => targetContactIds.push(id));
         }
 
         if (targetContactIds.length > 0) {
@@ -158,6 +165,14 @@ export class BroadcastRecipientService {
       ];
 
       // 2. Perform deduplication, compliance filters, and phone validations
+      // Pre-fetch opt-out list from DB (the broadcast_optouts table is the authoritative source)
+      const { data: optoutRows } = await supabaseAdmin
+        .from('broadcast_optouts')
+        .select('phone')
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true);
+      const optoutPhones = new Set((optoutRows || []).map((r: { phone: string }) => r.phone));
+
       const seenPhones = new Set<string>();
       const seenContactIds = new Set<string>();
       const excludedIds = new Set((audience as any).excludedContactIds || []);
@@ -241,14 +256,15 @@ export class BroadcastRecipientService {
           normalizationCount++;
         }
 
-        // B. Opt-out tag checks
+        // B. Opt-out check: DB optouts table (authoritative) + legacy tag-based opt-out
         const tagsList = lead.tags || [];
-        const isOptedOut = tagsList.some((t: string) =>
+        const isOptedOutByTag = tagsList.some((t: string) =>
           t.toLowerCase() === 'opt-out' ||
           t.toLowerCase() === 'optout' ||
           t.toLowerCase() === 'unsubscribe' ||
           t.toLowerCase() === 'stop'
         );
+        const isOptedOut = optoutPhones.has(phoneCleaned) || isOptedOutByTag;
 
         if (isOptedOut) {
           excluded++;

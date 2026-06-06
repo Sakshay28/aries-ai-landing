@@ -28,8 +28,12 @@ export async function POST(req: NextRequest) {
     const signature = req.headers.get('x-hub-signature-256') || '';
     const appSecret = process.env.WHATSAPP_WEBHOOK_SECRET || process.env.META_APP_SECRET;
 
-    if (appSecret && !verifySignature(rawBody, signature, appSecret)) {
-      console.warn('[webhook] Meta signature validation failed.');
+    if (!appSecret) {
+      console.error('[webhook] WHATSAPP_WEBHOOK_SECRET not configured — rejecting unverified webhook');
+      return new Response('Forbidden', { status: 403 });
+    }
+    if (!verifySignature(rawBody, signature, appSecret)) {
+      console.warn('[webhook] Meta signature validation failed — possible spoofed delivery status.');
       return new Response('Forbidden', { status: 403 });
     }
 
@@ -38,6 +42,29 @@ export async function POST(req: NextRequest) {
     const entries = payload?.entry || [];
     for (const entry of entries) {
       for (const change of entry.changes || []) {
+        // Track inbound replies to link them back to the originating broadcast campaign
+        const inboundMessages = change.value?.messages || [];
+        for (const msg of inboundMessages) {
+          if (!msg.from || !msg.id) continue;
+          // Look up if this sender has a recent broadcast delivery from this tenant
+          const { data: delivery } = await supabaseAdmin
+            .from('broadcast_deliveries')
+            .select('campaign_id, tenant_id')
+            .eq('phone', msg.from)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (delivery) {
+            try {
+              await supabaseAdmin.rpc('increment_broadcast_analytics', {
+                target_campaign_id: delivery.campaign_id,
+                col_name: 'reply_count'
+              });
+            } catch { /* non-critical */ }
+          }
+        }
+
         const statuses = change.value?.statuses || [];
         for (const status of statuses) {
           const { id: waMessageId, status: waStatus, timestamp } = status;
@@ -63,6 +90,17 @@ export async function POST(req: NextRequest) {
             updateFields.failed_reason = status.errors?.[0]?.title || 'Failed';
           }
 
+          // Fetch existing status BEFORE update for idempotency check.
+          // Meta delivers webhooks at-least-once — the same event can arrive multiple times.
+          // We only increment analytics counters if the status actually changes.
+          const { data: existing } = await supabaseAdmin
+            .from('broadcast_deliveries')
+            .select('status, campaign_id, tenant_id')
+            .eq('message_id', waMessageId)
+            .maybeSingle();
+
+          const statusActuallyChanged = existing && existing.status !== ourStatus;
+
           // Update individual delivery status
           const { data: recipient, error: updateErr } = await supabaseAdmin
             .from('broadcast_deliveries')
@@ -76,52 +114,17 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
-          if (recipient) {
-            // Update campaign aggregate counters (Try atomic RPC first, fallback if unavailable)
+          if (recipient && statusActuallyChanged) {
+            // Increment analytics ONLY when status changed — prevents double-count from webhook retries
             try {
-              const { error: rpcErr } = await supabaseAdmin.rpc('increment_campaign_counter', {
+              await supabaseAdmin.rpc('increment_campaign_counter', {
                 p_campaign_id: recipient.campaign_id,
                 p_status: ourStatus,
               });
-
-              if (rpcErr) {
-                // Fallback 1: Call existing increment_broadcast_analytics RPC
-                const metricColMap: Record<string, string> = {
-                  sent: 'sent_count',
-                  delivered: 'delivered_count',
-                  read: 'read_count',
-                  failed: 'failed_count'
-                };
-                const colToIncrement = metricColMap[ourStatus];
-                if (colToIncrement) {
-                  await supabaseAdmin.rpc('increment_broadcast_analytics', {
-                    target_campaign_id: recipient.campaign_id,
-                    col_name: colToIncrement
-                  });
-
-                  // Fallback 2: Increment column on campaign record directly
-                  const { data: camp } = await supabaseAdmin
-                    .from('broadcast_campaigns')
-                    .select(colToIncrement)
-                    .eq('id', recipient.campaign_id)
-                    .single();
-                  
-                  if (camp) {
-                    await supabaseAdmin
-                      .from('broadcast_campaigns')
-                      .update({
-                        [colToIncrement]: ((camp as any)[colToIncrement] || 0) + 1,
-                        updated_at: new Date().toISOString()
-                      })
-                      .eq('id', recipient.campaign_id);
-                  }
-                }
-              }
             } catch (rpcEx) {
               console.error('[webhook] Counter increment exception:', rpcEx);
             }
 
-            // Ingest audit log event
             await supabaseAdmin.from('broadcast_events').insert({
               campaign_id: recipient.campaign_id,
               tenant_id: recipient.tenant_id,

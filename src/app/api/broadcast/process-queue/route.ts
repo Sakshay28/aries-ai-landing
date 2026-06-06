@@ -12,13 +12,8 @@ function isAuthorized(req: NextRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) return false;
   const authHeader = req.headers.get('Authorization');
-  const xCronSecret = req.headers.get('x-cron-secret');
-  const paramSecret = new URL(req.url).searchParams.get('secret');
-  return (
-    authHeader === `Bearer ${cronSecret}` ||
-    xCronSecret === cronSecret ||
-    paramSecret === cronSecret
-  );
+  // Only accept Authorization header — never accept secrets in URLs (they appear in logs)
+  return authHeader === `Bearer ${cronSecret}`;
 }
 
 export async function POST(req: NextRequest) {

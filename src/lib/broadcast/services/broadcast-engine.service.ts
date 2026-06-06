@@ -16,15 +16,21 @@ export class BroadcastEngineService {
    */
   static async launchCampaign(tenantId: string, campaignId: string): Promise<{ success: boolean; queuedCount?: number; error?: string }> {
     try {
-      // 1. Fetch Campaign Core & configuration details
+      // 1. Fetch Campaign Core — always filter by tenant_id to prevent cross-tenant access
       const { data: campaign } = await supabaseAdmin
         .from('broadcast_campaigns')
         .select('*')
         .eq('id', campaignId)
+        .eq('tenant_id', tenantId)
         .single();
 
       if (!campaign) {
         return { success: false, error: 'Campaign not found' };
+      }
+
+      // Guard against re-launch: only draft/scheduled campaigns can be queued
+      if (!['draft', 'scheduled'].includes(campaign.status)) {
+        return { success: false, error: `Campaign is already "${campaign.status}". Cannot re-launch — duplicate sends prevented.` };
       }
 
       // 2. Fetch audience targeting parameters
@@ -76,13 +82,15 @@ export class BroadcastEngineService {
         },
       }));
 
-      // Ingest in chunks of 500 to keep within postgres parameters limits
+      // Ingest in chunks of 500. Use upsert with onConflict to be idempotent:
+      // if the unique constraint (campaign_id, contact_id) already exists (double-click/retry),
+      // DO NOTHING rather than inserting a duplicate row.
       const chunkSize = 500;
       for (let i = 0; i < queueEntries.length; i += chunkSize) {
         const chunk = queueEntries.slice(i, i + chunkSize);
         const { error: insertErr } = await supabaseAdmin
           .from('broadcast_queue')
-          .insert(chunk);
+          .upsert(chunk, { onConflict: 'campaign_id,contact_id', ignoreDuplicates: true });
         if (insertErr) throw insertErr;
       }
 
@@ -142,17 +150,38 @@ export class BroadcastEngineService {
           .gt('next_attempt_at', new Date().toISOString());
       }
 
-      // 1. Fetch pending tasks that are scheduled to be executed now or in the past
-      //    Use .or() to also pick up items with null next_attempt_at (legacy rows)
-      const nowIso = new Date().toISOString();
-      const { data: queueItems } = await supabaseAdmin
-        .from('broadcast_queue')
-        .select('*')
-        .in('status', ['pending', 'retrying'])
-        .is('locked_at', null)
-        .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
-        .order('created_at', { ascending: true })
-        .limit(limit);
+      // 1. Atomically fetch and lock items using FOR UPDATE SKIP LOCKED.
+      //    This eliminates the race window between SELECT and UPDATE that caused
+      //    duplicate sends when two cron invocations overlapped.
+      //    Requires the lock_broadcast_queue_batch() RPC from migrations/broadcast_production_hardening.sql.
+      let queueItems: any[] | null = null;
+      const { data: atomicItems, error: lockErr } = await supabaseAdmin
+        .rpc('lock_broadcast_queue_batch', { batch_limit: limit });
+
+      if (!lockErr) {
+        queueItems = atomicItems;
+      } else {
+        // Fallback to two-step SELECT → UPDATE while RPC migration is pending
+        console.warn('[QUEUE_JOB] Atomic lock RPC unavailable, using two-step fallback:', lockErr.message);
+        const nowIso = new Date().toISOString();
+        const { data: fallbackItems } = await supabaseAdmin
+          .from('broadcast_queue')
+          .select('*')
+          .in('status', ['pending', 'retrying'])
+          .is('locked_at', null)
+          .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
+          .order('created_at', { ascending: true })
+          .limit(limit);
+
+        if (fallbackItems && fallbackItems.length > 0) {
+          const ids = fallbackItems.map((item: any) => item.id);
+          await supabaseAdmin
+            .from('broadcast_queue')
+            .update({ locked_at: new Date().toISOString(), status: 'processing' })
+            .in('id', ids);
+          queueItems = fallbackItems;
+        }
+      }
 
       if (!queueItems || queueItems.length === 0) {
         console.log('[QUEUE_JOB] No pending items found in broadcast_queue');
@@ -160,13 +189,6 @@ export class BroadcastEngineService {
       }
 
       console.log(`[QUEUE_JOB] Processing ${queueItems.length} queue items`);
-
-      // 2. Lock items in transaction/batch to prevent duplicate cron processors firing
-      const ids = queueItems.map(item => item.id);
-      await supabaseAdmin
-        .from('broadcast_queue')
-        .update({ locked_at: new Date().toISOString(), status: 'processing' })
-        .in('id', ids);
 
       // 3. Group by tenant to process credentials and handle quiet hours efficiently
       const tenantGroupMap = new Map<string, any[]>();
@@ -302,29 +324,19 @@ export class BroadcastEngineService {
                 })
                 .eq('id', item.id);
 
-              // Ingest in broadcast_deliveries
+              // Ingest in broadcast_deliveries — this is the source of truth for status tracking.
+              // sent_count analytics are incremented ONLY via webhook status updates to prevent
+              // double-counting (engine + webhook both incrementing = 200% false analytics).
               await supabaseAdmin
                 .from('broadcast_deliveries')
-                .insert({
+                .upsert({
                   tenant_id: tenantId,
                   campaign_id: item.campaign_id,
                   contact_id: item.contact_id,
                   phone: item.phone,
                   message_id: waResult.messageId,
                   status: 'sent'
-                });
-
-              // Increment analytics table
-              await supabaseAdmin.rpc('increment_broadcast_analytics', {
-                target_campaign_id: item.campaign_id,
-                col_name: 'sent_count'
-              });
-
-              // Increment campaign row counters (this is what the stats page reads)
-              await supabaseAdmin.rpc('increment_campaign_counter', {
-                p_campaign_id: item.campaign_id,
-                p_status: 'sent'
-              });
+                }, { onConflict: 'message_id', ignoreDuplicates: false });
             } else {
               throw new Error('Missing outbound messageId');
             }

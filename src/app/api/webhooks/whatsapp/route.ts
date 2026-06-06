@@ -21,6 +21,7 @@ import { fireIntegrations, createBookingPaymentLink } from '@/lib/integrations/r
 import { sendLeadAssignedEmail } from '@/lib/email/service';
 import { scheduleFollowUp } from '@/lib/followup/engine';
 import { randomUUID } from 'crypto';
+import { triggerCapiEvent } from '@/lib/integrations/capi-trigger';
 
 // ── GET: Webhook Verification Handshake ──
 export async function GET(req: NextRequest) {
@@ -244,7 +245,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           ...(assignedTo && { assigned_to: assignedTo }),
           ...(campaignId && { campaign_id: campaignId }),
           ...(isFromAd && msg.referral && {
-            notes: `Meta Ad — "${msg.referral.headline || ''}" | Ad ID: ${msg.referral.source_id || ''} | CLID: ${msg.referral.ctwa_clid || ''}`,
+            notes: `Meta Ad — "${msg.referral.headline || ''}" | Ad ID: ${msg.referral.source_id || ''}`,
+            ...(msg.referral.ctwa_clid && { ctwa_clid: msg.referral.ctwa_clid }),
           }),
         },
         { onConflict: 'tenant_id,phone', ignoreDuplicates: true }
@@ -277,6 +279,11 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         lead_score: isFromAd ? 30 : 10,
         created_at: new Date().toISOString(),
       }).catch(e => console.error('⚠️ Sheets append failed (non-fatal):', (e as Error).message));
+
+      if (isFromAd) {
+        triggerCapiEvent('Lead', { tenantId: tenant.id, leadId: newLead.id })
+          .catch(e => console.error('⚠️ CAPI trigger failed (CTWA lead):', e.message));
+      }
 
       if (isFromAd && assignedMember?.email) {
         sendLeadAssignedEmail(
@@ -894,9 +901,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
     if (followUpsToInsert.length > 0) {
       // Bulk insert — ON CONFLICT DO NOTHING prevents duplication on retry
-      await supabaseAdmin.from('follow_ups')
-        .upsert(followUpsToInsert, { onConflict: 'id', ignoreDuplicates: true })
-        .catch(e => console.error('⏰ Failed to schedule follow-ups:', e.message));
+      try {
+        await supabaseAdmin.from('follow_ups')
+          .upsert(followUpsToInsert, { onConflict: 'id', ignoreDuplicates: true });
+      } catch (e: any) {
+        console.error('⏰ Failed to schedule follow-ups:', e?.message || e);
+      }
       console.log(`⏰ Scheduled ${followUpsToInsert.length} follow-up(s) for lead ${lead.id}`);
 
       // Register each with the engine (now actually writes to DB if not already there)
@@ -1147,16 +1157,20 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
             const fullMsg = `Sorry ${customerName}, our ${slotTime.slice(0,5)} slot on ${bookingDate} is fully booked (${avail.remaining_seats} seats left).${altText}\n\nWould you like to book one of these instead?`;
             await sendTextMessage(waToken, waPhoneId, cleanPhone, fullMsg).catch(() => {});
             // Log as outbound message
-            await supabaseAdmin.from('messages').insert({
-              tenant_id:        tenant.id,
-              conversation_id:  conversation.id,
-              direction:        'outbound',
-              content:          fullMsg,
-              message_type:     'text',
-              channel:          'whatsapp',
-              status:           'sent',
-              ai_generated:     false,
-            }).catch(() => {});
+            try {
+              await supabaseAdmin.from('messages').insert({
+                tenant_id:        tenant.id,
+                conversation_id:  conversation.id,
+                direction:        'outbound',
+                content:          fullMsg,
+                message_type:     'text',
+                channel:          'whatsapp',
+                status:           'sent',
+                ai_generated:     false,
+              });
+            } catch (err) {
+              // Ignore insert error
+            }
           }
           // Clear booking context so customer can choose alternative
           contextObj.booking_saved   = false;
@@ -1241,14 +1255,17 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
         // B2: increment visit count for repeat-visitor recognition
         if (lead?.id) {
-          await supabaseAdmin
-            .from('leads')
-            .update({
-              visit_count: ((lead.visit_count as number) ?? 0) + 1,
-              last_visit_date: bookingDate,
-            })
-            .eq('id', lead.id)
-            .catch((e: any) => console.error('Failed to increment visit_count:', e?.message));
+          try {
+            await supabaseAdmin
+              .from('leads')
+              .update({
+                visit_count: ((lead.visit_count as number) ?? 0) + 1,
+                last_visit_date: bookingDate,
+              })
+              .eq('id', lead.id);
+          } catch (e: any) {
+            console.error('Failed to increment visit_count:', e?.message || e);
+          }
         }
       }
 

@@ -157,19 +157,21 @@ describe('AudienceEngineService — Segmentation Filter & Opt-out Deduplication'
       { id: 'l4', name: 'Stop User', phone: '915566778899', tags: ['stop'] }
     ];
 
-    // Mock supabaseAdmin implementation
-    const selectMock = vi.fn().mockResolvedValue({ data: mockLeads, error: null });
-    const eqMock = vi.fn().mockReturnValue({ not: vi.fn().mockImplementation(() => ({
-      then: (resolve: any) => resolve({ data: mockLeads, error: null })
-    })) });
+    const makeChain = (data: any) => {
+      const chain: any = {};
+      chain.select = vi.fn().mockReturnValue(chain);
+      chain.eq = vi.fn().mockReturnValue(chain);
+      chain.not = vi.fn().mockReturnValue(chain);
+      chain.overlaps = vi.fn().mockReturnValue(chain);
+      chain.then = (resolve: any) => resolve({ data, error: null });
+      return chain;
+    };
     
-    vi.spyOn(supabaseAdmin, 'from').mockReturnValue({
-      select: vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          not: vi.fn().mockResolvedValue({ data: mockLeads, error: null })
-        })
-      })
-    } as any);
+    vi.spyOn(supabaseAdmin, 'from').mockImplementation((table: string) => {
+      if (table === 'leads') return makeChain(mockLeads);
+      if (table === 'broadcast_optouts') return makeChain([]);
+      return makeChain(null);
+    });
 
     const res = await AudienceEngineService.resolveAudience('tenant-1', {
       type: 'all',
@@ -191,13 +193,21 @@ describe('AudienceEngineService — Segmentation Filter & Opt-out Deduplication'
       { id: 'l2', name: 'Duplicate Sakshay', phone: '919876543210' }
     ];
 
-    vi.spyOn(supabaseAdmin, 'from').mockReturnValue({
-      select: vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          not: vi.fn().mockResolvedValue({ data: duplicateLeads, error: null })
-        })
-      })
-    } as any);
+    const makeChain = (data: any) => {
+      const chain: any = {};
+      chain.select = vi.fn().mockReturnValue(chain);
+      chain.eq = vi.fn().mockReturnValue(chain);
+      chain.not = vi.fn().mockReturnValue(chain);
+      chain.overlaps = vi.fn().mockReturnValue(chain);
+      chain.then = (resolve: any) => resolve({ data, error: null });
+      return chain;
+    };
+
+    vi.spyOn(supabaseAdmin, 'from').mockImplementation((table: string) => {
+      if (table === 'leads') return makeChain(duplicateLeads);
+      if (table === 'broadcast_optouts') return makeChain([]);
+      return makeChain(null);
+    });
 
     const res = await AudienceEngineService.resolveAudience('tenant-1', {
       type: 'all',

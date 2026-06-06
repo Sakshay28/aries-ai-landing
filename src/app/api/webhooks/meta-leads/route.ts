@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { triggerCapiEvent } from '@/lib/integrations/capi-trigger';
+import { verifySignature } from '@/lib/meta/service';
 
 // The Verification Token you enter inside the Facebook Developer Console Webhooks configuration
 const VERIFY_TOKEN = process.env.META_WEBHOOK_VERIFY_TOKEN || 'aries_ai_leads_token_2026';
@@ -37,7 +38,20 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const appSecret = process.env.META_APP_SECRET;
+    const signature = req.headers.get('x-hub-signature-256') ?? '';
+    const rawBody = await req.text();
+
+    if (!appSecret) {
+      console.error('❌ META_APP_SECRET not set — rejecting meta-leads webhook');
+      return new Response('Unauthorized', { status: 401 });
+    }
+    if (!verifySignature(rawBody, signature, appSecret)) {
+      console.warn('❌ Meta Leads Webhook: signature verification failed');
+      return new Response('Unauthorized', { status: 401 });
+    }
+
+    const body = JSON.parse(rawBody);
 
     // Check if the change is a leadgen event
     if (body.object !== 'page') {

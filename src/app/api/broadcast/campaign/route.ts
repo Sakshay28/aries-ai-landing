@@ -16,6 +16,25 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'campaign id required' }, { status: 400 });
     }
 
+    // Fetch status before deleting — cannot delete an active campaign mid-send
+    const { data: campaign } = await supabaseAdmin
+      .from('broadcast_campaigns')
+      .select('status')
+      .eq('id', campaignId)
+      .eq('tenant_id', tenantId)
+      .single();
+
+    if (!campaign) {
+      return NextResponse.json({ success: false, error: 'Campaign not found' }, { status: 404 });
+    }
+
+    if (campaign.status === 'sending' || campaign.status === 'scheduled') {
+      return NextResponse.json({
+        success: false,
+        error: `Cannot delete a campaign in "${campaign.status}" state. Cancel it first.`,
+      }, { status: 409 });
+    }
+
     const { error } = await supabaseAdmin
       .from('broadcast_campaigns')
       .delete()

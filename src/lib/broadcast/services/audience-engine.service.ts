@@ -92,9 +92,17 @@ export class AudienceEngineService {
             if (m.contact_id && !readIds.has(m.contact_id)) targetContactIds.push(m.contact_id);
           });
         } else if (audience.retargetCondition === 'no_reply') {
-          // No inbound response recorded
+          // Only target contacts who were sent the campaign but did NOT send any inbound reply.
+          // Fetch inbound messages linked to this campaign to find who replied.
+          const { data: inboundReplies } = await supabaseAdmin
+            .from('messages')
+            .select('contact_id')
+            .eq('campaign_id', audience.retargetCampaignId)
+            .eq('direction', 'inbound');
+          const repliedContactIds = new Set((inboundReplies || []).map((r: any) => r.contact_id).filter(Boolean));
           const sentIds = (parentMsgs || []).map(m => m.contact_id).filter(Boolean) as string[];
-          targetContactIds.push(...sentIds);
+          // Exclude contacts who replied — target only those who didn't respond
+          sentIds.filter(id => !repliedContactIds.has(id)).forEach(id => targetContactIds.push(id));
         }
 
         if (targetContactIds.length > 0) {

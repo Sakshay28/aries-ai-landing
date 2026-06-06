@@ -99,15 +99,8 @@ export async function POST(req: NextRequest) {
 
     if (sendErr) {
       console.error('send-otp Resend send error:', sendErr);
-      // TEMP DIAGNOSTIC — fingerprint the key (no full secret) + real Resend error
-      const k = apiKey || '';
-      const fp = `${k.slice(0, 6)}…${k.slice(-4)} len=${k.length}`;
       return NextResponse.json(
-        {
-          success: false,
-          error: 'Could not send verification email. Please try again or use Google sign-up.',
-          _debug: { resendError: sendErr, keyFingerprint: fp, from: 'noreply@ariesai.in' },
-        },
+        { success: false, error: 'Could not send verification email. Please try again or use Google sign-up.' },
         { status: 502 }
       );
     }

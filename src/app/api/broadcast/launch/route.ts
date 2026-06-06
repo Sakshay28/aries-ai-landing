@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
+import { getCurrentUser } from '@/lib/auth/getCurrentUser';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { BroadcastEngineService } from '@/lib/broadcast/services/broadcast-engine.service';
 import { AuditLogService } from '@/lib/broadcast/services/audit-log.service';
@@ -34,7 +35,15 @@ export async function POST(req: NextRequest) {
 
     console.log('[BROADCAST_LAUNCH] Campaign:', campaign.name, 'status:', campaign.status);
 
-    // 2. Verify WhatsApp credentials exist
+    // 2. Guard against re-launching an already active or completed campaign (prevents duplicate sends)
+    if (!['draft', 'scheduled'].includes(campaign.status)) {
+      return NextResponse.json({
+        success: false,
+        error: `Campaign is already "${campaign.status}" and cannot be re-launched. Duplicate sends prevented.`,
+      }, { status: 409 });
+    }
+
+    // 3. Verify WhatsApp credentials exist
     const { data: tenant } = await supabaseAdmin
       .from('tenants')
       .select('wa_access_token, wa_phone_number_id')
@@ -48,7 +57,7 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // 3. Handle scheduled campaigns
+    // 4. Handle scheduled campaigns
     const deliveryMode = campaign.delivery_mode || 'now';
     const scheduledAt  = campaign.scheduled_for || null;
 
@@ -72,7 +81,8 @@ export async function POST(req: NextRequest) {
         .eq('id', campaignId)
         .eq('tenant_id', tenantId);
 
-      await AuditLogService.logChange(tenantId, campaignId, null, 'schedule', 'campaign', { status: 'draft' }, { status: 'scheduled' });
+      const schedulingUser = await getCurrentUser();
+      await AuditLogService.logChange(tenantId, campaignId, schedulingUser?.id ?? null, 'schedule', 'campaign', { status: 'draft' }, { status: 'scheduled' });
       await ExecutionEventService.logEvent(tenantId, campaignId, 'campaign_scheduled', 'Campaign scheduled', `Scheduled for ${new Date(scheduledAt).toLocaleString()}`);
 
       console.log('[BROADCAST_LAUNCH] Scheduled for:', scheduledAt);
@@ -101,7 +111,9 @@ export async function POST(req: NextRequest) {
       .eq('tenant_id', tenantId);
 
     // 6. Observability logs
-    await AuditLogService.logChange(tenantId, campaignId, null, 'launch', 'campaign', { status: 'draft' }, { status: 'sending' });
+    const currentUser = await getCurrentUser();
+    const actorId = currentUser?.id ?? null;
+    await AuditLogService.logChange(tenantId, campaignId, actorId, 'launch', 'campaign', { status: 'draft' }, { status: 'sending' });
     await ExecutionEventService.logEvent(tenantId, campaignId, 'launch_requested', 'Launch requested', 'Campaign launch initiated.');
     await ExecutionEventService.logEvent(tenantId, campaignId, 'queue_created', 'Queue initialized', `${result.queuedCount} messages queued for dispatch.`);
 

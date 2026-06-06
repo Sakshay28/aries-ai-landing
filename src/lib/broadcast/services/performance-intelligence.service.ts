@@ -30,13 +30,12 @@ export class PerformanceIntelligenceService {
       if (cErr) throw cErr;
 
       if (!campaigns || campaigns.length === 0) {
-        // Fallback default statistics for cold accounts
         return {
-          deliveryRatePct: 96,
-          readRatePct: 63,
-          replyRatePct: 18,
-          bestSendHourText: '7:00 PM',
-          bestTemplateName: 'Reservation Reminder',
+          deliveryRatePct: 0,
+          readRatePct: 0,
+          replyRatePct: 0,
+          bestSendHourText: 'Not enough data',
+          bestTemplateName: 'Not enough data',
           totalCampaignsExecuted: 0
         };
       }
@@ -76,7 +75,7 @@ export class PerformanceIntelligenceService {
         }
       });
 
-      let bestTemplateName = 'Reservation Reminder';
+      let bestTemplateName = 'Not enough data';
       let maxCount = 0;
       Object.entries(templateCounts).forEach(([name, count]) => {
         if (count > maxCount) {
@@ -85,28 +84,47 @@ export class PerformanceIntelligenceService {
         }
       });
 
-      // Format template name to title case for premium display
-      bestTemplateName = bestTemplateName
-        .split('_')
-        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-        .join(' ');
+      // Format template name to title case for display
+      if (bestTemplateName !== 'Not enough data') {
+        bestTemplateName = bestTemplateName
+          .split('_')
+          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ');
+      }
+
+      // Compute best send hour from campaign created_at timestamps
+      const hourCounts: Record<number, number> = {};
+      campaigns.forEach(c => {
+        if (c.created_at) {
+          const hour = new Date(c.created_at).getHours();
+          hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+        }
+      });
+      let bestHour = -1;
+      let bestHourCount = 0;
+      Object.entries(hourCounts).forEach(([h, count]) => {
+        if (count > bestHourCount) { bestHourCount = count; bestHour = Number(h); }
+      });
+      const bestSendHourText = bestHour >= 0
+        ? new Date(0, 0, 0, bestHour).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+        : 'Not enough data';
 
       return {
         deliveryRatePct: Math.min(100, Math.max(0, deliveryRatePct)),
         readRatePct: Math.min(100, Math.max(0, readRatePct)),
         replyRatePct: Math.min(100, Math.max(0, replyRatePct)),
-        bestSendHourText: '7:00 PM', // Best engagement hour window based on local trends
+        bestSendHourText,
         bestTemplateName,
         totalCampaignsExecuted: campaigns.length
       };
     } catch (err) {
       console.error('❌ Failed to calculate performance intelligence rates:', err);
       return {
-        deliveryRatePct: 96,
-        readRatePct: 63,
-        replyRatePct: 18,
-        bestSendHourText: '7:00 PM',
-        bestTemplateName: 'Reservation Reminder',
+        deliveryRatePct: 0,
+        readRatePct: 0,
+        replyRatePct: 0,
+        bestSendHourText: 'Not enough data',
+        bestTemplateName: 'Not enough data',
         totalCampaignsExecuted: 0
       };
     }

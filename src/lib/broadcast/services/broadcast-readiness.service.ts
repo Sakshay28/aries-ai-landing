@@ -109,10 +109,10 @@ export class BroadcastReadinessService {
           .maybeSingle();
 
         if (draftTemplate) {
-          templateStatus = draftTemplate.status || 'APPROVED';
+          templateStatus = draftTemplate.status || 'UNKNOWN';
           templateBody = draftTemplate.body || '';
         } else {
-          templateStatus = 'APPROVED'; // Default to approved if we don't track status
+          templateStatus = 'UNKNOWN'; // Cannot verify — treat as unverified, never assume APPROVED
         }
       }
     }
@@ -236,8 +236,12 @@ export class BroadcastReadinessService {
     const metaApproved = templateStatus === 'APPROVED';
     if (metaApproved) {
       score += 10;
+    } else if (templateStatus === 'PENDING') {
+      warnings.push(`WhatsApp template status is "PENDING". Sending will fail until Meta approves it.`);
+    } else if (templateStatus === 'REJECTED') {
+      blockers.push(`WhatsApp template was REJECTED by Meta and cannot be sent.`);
     } else {
-      warnings.push(`WhatsApp template status is "${templateStatus}". Sending might fail.`);
+      blockers.push(`WhatsApp template approval status is unknown. Sync templates from Meta before launching.`);
     }
 
     // 6. Low spam risk: +10 (Formula: Low spam risk if spamRisk is LOW)

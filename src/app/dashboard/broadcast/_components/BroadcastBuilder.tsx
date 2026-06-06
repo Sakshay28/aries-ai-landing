@@ -252,7 +252,8 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
       const res = await fetch('/api/dashboard/templates');
       const j   = await res.json();
       if (j.success && Array.isArray(j.data)) {
-        setTemplates(j.data.filter((t: Template) => ['APPROVED', 'PENDING'].includes(t.status)));
+        // Only show APPROVED templates — PENDING/REJECTED templates will fail at send time
+        setTemplates(j.data.filter((t: Template) => t.status === 'APPROVED'));
       }
     } catch {
       toast.error('Failed to load templates');

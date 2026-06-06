@@ -9,7 +9,10 @@ const BATCH_SIZE = 15;
 
 function isAuthorized(req: NextRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) return true; // allow unauthenticated if secret not set (dev)
+  if (!cronSecret) {
+    console.error('[cron] CRON_SECRET is not configured — endpoint disabled for security');
+    return false;
+  }
   const auth = req.headers.get('Authorization');
   return auth === `Bearer ${cronSecret}`;
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
+import { getCurrentUser } from '@/lib/auth/getCurrentUser';
 import { BroadcastEngineService } from '@/lib/broadcast/services/broadcast-engine.service';
 import { AuditLogService } from '@/lib/broadcast/services/audit-log.service';
 import { ExecutionEventService } from '@/lib/broadcast/services/execution-event.service';
@@ -57,7 +58,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Enterprise Logging (Phase 1 & Phase 2)
-    const actorId = null; // System user or platform default
+    const currentUser = await getCurrentUser();
+    const actorId = currentUser?.id ?? null;
     await AuditLogService.logChange(tenantId, campaignId, actorId, 'launch', 'campaign', { status: 'draft' }, { status: 'sending' });
     await ExecutionEventService.logEvent(tenantId, campaignId, 'launch_requested', 'Launch requested', 'Campaign launch process initiated.');
     await ExecutionEventService.logEvent(tenantId, campaignId, 'queue_created', 'Queue initialized', `${res.queuedCount} recipient messages enqueued for dispatch.`);

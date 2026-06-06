@@ -120,7 +120,7 @@ export async function sendMetaCapiEvent(
       user_data: userData,
       custom_data: Object.keys(formattedCustomData).length > 0 ? formattedCustomData : undefined,
       event_source_url: eventSourceUrl || 'https://www.ariesai.in',
-      action_source: 'system_generated',
+      action_source: 'business_messaging',
     };
 
     // 4. Fire POST request to Facebook Graph API

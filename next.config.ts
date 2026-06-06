@@ -100,7 +100,6 @@ export default process.env.NEXT_PUBLIC_SENTRY_DSN
   ? withSentryConfig(nextConfig, {
       silent: true,          // suppress build output
       disableLogger: true,   // no Sentry SDK logs in prod
-      hideSourceMaps: true,  // don't expose source maps publicly
       widenClientFileUpload: true,
     })
   : nextConfig;

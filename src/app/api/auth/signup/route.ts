@@ -132,6 +132,7 @@ export async function POST(req: NextRequest) {
       const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
         type: 'signup',
         email,
+        password,
         options: {
           redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback?next=/dashboard`,
         },
