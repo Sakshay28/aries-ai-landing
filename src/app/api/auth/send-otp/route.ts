@@ -97,8 +97,8 @@ export async function POST(req: NextRequest) {
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #eaecef;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
           <!-- Header -->
           <tr>
-            <td style="background-color:#0c0e14;padding:28px 32px;text-align:center;">
-              <img src="https://ariesai.in/logo.png" width="120" alt="AriesAI" style="height:auto;max-height:34px;display:inline-block;">
+            <td style="background-color:#0c0e14;padding:26px 32px;text-align:center;">
+              <span style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:26px;font-weight:800;letter-spacing:-0.5px;color:#ffffff;line-height:1;">Aries<span style="color:#25D366;">AI</span></span>
             </td>
           </tr>
           <!-- Body -->
