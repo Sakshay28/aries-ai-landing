@@ -102,15 +102,16 @@ Please verify your production environment variables in your deployment dashboard
     setLoading(true);
     setError("");
     try {
-      const supabase = createBrowserSupabaseClient();
-      const { error: otpError } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          shouldCreateUser: true,
-          emailRedirectTo: `${window.location.origin}/api/auth/callback`,
-        }
+      // Send OTP via our Resend-backed route (bypasses Supabase SMTP).
+      const res = await fetch("/api/auth/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, fullName, businessName }),
       });
-      if (otpError) throw otpError;
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to send verification code.");
+      }
       setOtpSent(true);
       setCountdown(60);
     } catch (err) {
