@@ -68,7 +68,17 @@ export function getRedisClient(): RedisClient | null {
 
 
 export async function isDuplicateMessage(messageId: string): Promise<boolean> {
-  // Database-only dedup (Redis disabled on Vercel)
+  const redis = getRedisClient();
+  if (redis) {
+    try {
+      const result = await redis.set(`dedup:msg:${messageId}`, '1', 'EX', 86400, 'NX');
+      if (!result) return true; // Key already existed = duplicate
+      return false;
+    } catch {
+      // Fall through to DB check
+    }
+  }
+
   try {
     const { supabaseAdmin } = await import('@/lib/supabase/admin');
     const { data } = await supabaseAdmin
@@ -76,11 +86,7 @@ export async function isDuplicateMessage(messageId: string): Promise<boolean> {
       .select('id')
       .eq('wa_message_id', messageId)
       .limit(1);
-      
-    if (data && data.length > 0) {
-      return true;
-    }
-    return false;
+    return !!(data && data.length > 0);
   } catch (err) {
     console.error('❌ DB dedup failed:', err);
     return false;
@@ -91,12 +97,22 @@ export async function isDuplicateMessage(messageId: string): Promise<boolean> {
 // GENERIC CACHE — Redis-backed with fallback
 // ═══════════════════════════════════════
 
-export async function cacheGet(_key: string): Promise<string | null> {
-  return null;
+export async function cacheGet(key: string): Promise<string | null> {
+  const redis = getRedisClient();
+  if (!redis) return null;
+  try {
+    return await redis.get(key);
+  } catch {
+    return null;
+  }
 }
 
-export async function cacheSet(_key: string, _value: string, _ttlSeconds: number): Promise<void> {
-  // No-op without Redis
+export async function cacheSet(key: string, value: string, ttlSeconds: number): Promise<void> {
+  const redis = getRedisClient();
+  if (!redis) return;
+  try {
+    await redis.set(key, value, 'EX', ttlSeconds);
+  } catch {}
 }
 
 // ═══════════════════════════════════════

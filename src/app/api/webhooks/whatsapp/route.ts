@@ -12,7 +12,7 @@ import { isDuplicateMessage, getRedisClient } from '@/lib/redis/client';
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
 import { appendLeadRow, appendBookingRow } from '@/lib/integrations/google-sheets';
-import { parseMetaWebhook, sendTextMessage, getMediaUrl, verifySignature } from '@/lib/meta/service';
+import { parseMetaWebhook, sendTextMessage, getMediaUrl, verifySignature, markMessageAsRead } from '@/lib/meta/service';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
 import { decryptToken } from '@/lib/utils/crypto';
@@ -80,18 +80,33 @@ export async function POST(req: NextRequest) {
   let appSecretToUse = process.env.META_APP_SECRET ?? '';
 
   if (phoneNumberId) {
-    const { data: tenantRow } = await supabaseAdmin
-      .from('tenants')
-      .select('wa_app_secret')
-      .eq('wa_phone_number_id', phoneNumberId)
-      .maybeSingle();
+    const redis = getRedisClient();
+    const secretCacheKey = `app_secret:${phoneNumberId}`;
+    let cachedSecret: string | null = null;
 
-    if (tenantRow?.wa_app_secret) {
-      try {
-        const decrypted = decryptToken(tenantRow.wa_app_secret as string);
-        if (decrypted) appSecretToUse = decrypted;
-      } catch {
-        // Fall through to global secret
+    if (redis) {
+      try { cachedSecret = await redis.get(secretCacheKey); } catch {}
+    }
+
+    if (cachedSecret) {
+      appSecretToUse = cachedSecret;
+    } else {
+      const { data: tenantRow } = await supabaseAdmin
+        .from('tenants')
+        .select('wa_app_secret')
+        .eq('wa_phone_number_id', phoneNumberId)
+        .maybeSingle();
+
+      if (tenantRow?.wa_app_secret) {
+        try {
+          const decrypted = decryptToken(tenantRow.wa_app_secret as string);
+          if (decrypted) {
+            appSecretToUse = decrypted;
+            if (redis) redis.set(secretCacheKey, decrypted, 'EX', 300).catch(() => {});
+          }
+        } catch {
+          // Fall through to global secret
+        }
       }
     }
   }
@@ -163,6 +178,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   console.log(`✅ Meta Webhook: tenant resolved: ${tenant.business_name} (${tenant.id})`);
 
+  // 2b. Mark message as read immediately (triggers blue ticks on sender's phone)
+  const decryptedTokenForRead = decryptToken(tenant.wa_access_token);
+  if (decryptedTokenForRead && tenant.wa_phone_number_id) {
+    markMessageAsRead(decryptedTokenForRead, tenant.wa_phone_number_id, msg.messageId).catch(() => {});
+  }
+
   // 3. Resolve Media URL if this is a media message
   let content = msg.text;
   if (msg.mediaId) {
@@ -185,19 +206,17 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const isFromAd = !!msg.referral && msg.referral.source_type === 'ad';
   const leadSource = isFromAd ? 'meta_ctwa' : 'whatsapp';
 
-  // Try to fetch existing lead first
-  const { data: existingLead } = await supabaseAdmin
-    .from('leads')
-    .select('*')
-    .eq('tenant_id', tenant.id)
-    .eq('phone', cleanPhone)
-    .maybeSingle();
+  // Fetch lead + conversation in parallel (independent queries)
+  const [{ data: existingLead }, { data: existingConv }] = await Promise.all([
+    supabaseAdmin.from('leads').select('*').eq('tenant_id', tenant.id).eq('phone', cleanPhone).maybeSingle(),
+    supabaseAdmin.from('conversations').select('*').eq('tenant_id', tenant.id).eq('sender_id', cleanPhone).eq('is_active', true).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+  ]);
 
   if (existingLead) {
     lead = existingLead;
     const updateData: Record<string, any> = { last_message_at: new Date().toISOString() };
     if (isFromAd && !existingLead.source) updateData.source = leadSource;
-    await supabaseAdmin.from('leads').update(updateData).eq('id', existingLead.id);
+    void supabaseAdmin.from('leads').update(updateData).eq('id', existingLead.id);
   } else {
     // New lead — round-robin assignment
     let assignedTo: string | null = null;
@@ -294,7 +313,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         },
       }).catch(e => console.error('Integration runner (new_lead):', e.message));
 
-      await appendLeadRow(tenant.id, {
+      appendLeadRow(tenant.id, {
         name: newLead.name || undefined,
         phone: cleanPhone,
         email: newLead.email || undefined,
@@ -325,44 +344,32 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // Must run after lead is resolved (existing or new).
   let ctwaContext = '';
   if (isFromAd && msg.referral) {
-    try {
-      await processCtwaLead(
-        tenant.id,
-        cleanPhone,
-        (lead as Record<string, any> | null)?.name ?? null,
-        {
-          source_type: msg.referral.source_type,
-          source_id: msg.referral.source_id,
-          headline: msg.referral.headline,
-          body: msg.referral.body,
-          ctwa_clid: msg.referral.ctwa_clid,
-          source_url: msg.referral.source_url,
-        }
-      );
-      ctwaContext = getCampaignContextForAI(msg.referral);
-      console.log(`🎯 CTWA lead attributed for ${cleanPhone}, campaign source: ${msg.referral.source_id}`);
-    } catch (ctwaErr) {
-      // Non-fatal — attribution tracking should never block the main conversation
+    ctwaContext = getCampaignContextForAI(msg.referral);
+    processCtwaLead(
+      tenant.id,
+      cleanPhone,
+      (lead as Record<string, any> | null)?.name ?? null,
+      {
+        source_type: msg.referral.source_type,
+        source_id: msg.referral.source_id,
+        headline: msg.referral.headline,
+        body: msg.referral.body,
+        ctwa_clid: msg.referral.ctwa_clid,
+        source_url: msg.referral.source_url,
+      }
+    ).then(() => {
+      console.log(`🎯 CTWA lead attributed for ${cleanPhone}, campaign source: ${msg.referral!.source_id}`);
+    }).catch(ctwaErr => {
       console.warn('⚠️ CTWA attribution failed (non-fatal):', ctwaErr);
-    }
+    });
   }
 
-  // 5. Resolve/Create Conversation
+  // 5. Resolve/Create Conversation (initial fetch was done in parallel above)
   let conversation: Record<string, any> | null = null;
-
-  const { data: existingConv } = await supabaseAdmin
-    .from('conversations')
-    .select('*')
-    .eq('tenant_id', tenant.id)
-    .eq('sender_id', cleanPhone)
-    .eq('is_active', true)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
 
   if (existingConv) {
     conversation = existingConv;
-    await supabaseAdmin
+    void supabaseAdmin
       .from('conversations')
       .update({ last_message_at: new Date().toISOString() })
       .eq('id', existingConv.id);

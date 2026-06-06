@@ -51,6 +51,32 @@ export interface MetaSendResult {
 }
 
 // ═══════════════════════════════════════
+// MARK: Message as Read (Blue Ticks)
+// ═══════════════════════════════════════
+export async function markMessageAsRead(
+  accessToken: string,
+  phoneNumberId: string,
+  messageId: string
+): Promise<void> {
+  if (!accessToken || !phoneNumberId || !messageId) return;
+
+  try {
+    await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: headers(accessToken),
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        status: 'read',
+        message_id: messageId,
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch {
+    // Non-fatal — don't block message processing for a read receipt
+  }
+}
+
+// ═══════════════════════════════════════
 // SEND: Text Message
 // ═══════════════════════════════════════
 export async function sendTextMessage(
