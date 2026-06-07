@@ -285,6 +285,7 @@ export async function processMessageWithAI(
           maxOutputTokens: 500,
           topP: 0.9,
           responseMimeType: 'application/json',
+          thinkingConfig: { thinkingBudget: 0 },
         },
       }),
       15000 // 15 second hard circuit breaker
