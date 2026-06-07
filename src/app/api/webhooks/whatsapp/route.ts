@@ -394,7 +394,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         is_active: true,
         bot_paused: false,
         escalated: false,
-        ai_model_used: 'gemini-2.5-flash',
+        ai_model_used: 'gemini-2.0-flash',
         ai_tokens_used: 0,
         message_count: 0,
         last_message_at: new Date().toISOString(),
