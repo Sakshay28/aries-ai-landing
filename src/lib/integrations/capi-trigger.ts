@@ -7,6 +7,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { sendMetaCapiEvent } from './meta-capi';
+import { decryptToken } from '@/lib/utils/crypto';
 
 interface TriggerContext {
   tenantId: string;
@@ -42,7 +43,7 @@ export async function triggerCapiEvent(
 
     const config = integration.config as Record<string, any>;
     const pixelId = config.pixel_id;
-    const accessToken = config.access_token;
+    const accessToken = decryptToken(config.access_token);
 
     // Check if CAPI mapping is enabled for this specific event type
     const capiEvents = config.capi_events || ['Lead', 'Schedule', 'Purchase'];
@@ -51,7 +52,7 @@ export async function triggerCapiEvent(
     }
 
     if (!pixelId || !accessToken) {
-      return { success: false, message: 'Missing Meta Pixel ID or System Access Token in integration settings.' };
+      return { success: false, message: 'Missing or invalid Meta Pixel ID or System Access Token in integration settings.' };
     }
 
     // 2. Retrieve lead contact and attribution details

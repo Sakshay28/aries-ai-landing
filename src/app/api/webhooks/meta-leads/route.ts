@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { triggerCapiEvent } from '@/lib/integrations/capi-trigger';
 import { verifySignature } from '@/lib/meta/service';
+import { decryptToken } from '@/lib/utils/crypto';
 
 // The Verification Token you set in your Meta Developer Console → Webhooks configuration.
 // Must be set as META_WEBHOOK_VERIFY_TOKEN in environment variables — no fallback (fail-closed).
@@ -97,7 +98,11 @@ export async function POST(req: NextRequest) {
         // Find matching tenant integration
         const matchedIntegration = integrations.find((integration: any) => {
           const cfg = integration.config || {};
-          const pageIds = cfg.page_ids || [];
+          // page_ids stored as comma-separated string or array
+          const rawPageIds = cfg.page_ids || '';
+          const pageIds = Array.isArray(rawPageIds)
+            ? rawPageIds
+            : String(rawPageIds).split(',').map((s: string) => s.trim()).filter(Boolean);
           const formIds = (cfg.forms || []).map((f: any) => f.form_id);
           return pageIds.includes(pageId) || formIds.includes(formId);
         });
@@ -109,10 +114,10 @@ export async function POST(req: NextRequest) {
 
         const tenantId = matchedIntegration.tenant_id;
         const config = matchedIntegration.config as Record<string, any>;
-        const systemToken = config.access_token;
+        const systemToken = decryptToken(config.access_token);
 
         if (!systemToken) {
-          console.error(`❌ Integration found but System Access Token is missing for tenant: ${tenantId}`);
+          console.error(`❌ Integration found but System Access Token is missing or could not be decrypted for tenant: ${tenantId}`);
           continue;
         }
 

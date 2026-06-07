@@ -17,10 +17,8 @@ import {
   ChevronRight,
   CreditCard,
   Settings,
-  Zap,
   Bot,
   UserCog,
-  Library,
   Activity,
   CalendarDays,
   UtensilsCrossed,
@@ -31,18 +29,12 @@ import {
   Radar,
   Target,
   ShieldCheck,
-  TrendingUp,
-  BarChart3,
-  PhoneCall,
-  LinkIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useSidebar } from "./SidebarContext";
-import { MetaAdsNotificationBell } from "./MetaAdsNotificationBell";
 import { useEffect, useState } from "react";
 import { detectBrandFromHost, BRANDS } from "@/lib/brand";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 
 type NavItem = {
@@ -91,8 +83,6 @@ export default function AppSidebar({ userEmail, modules = [], businessType = "",
     modules.includes("restaurant_reservations") ||
     RESTAURANT_TYPES.some((t) => businessType.toLowerCase().includes(t));
 
-  const hasMetaAds = true; // Always visible — users connect their own Meta account from settings
-
   const isActive = (href: string) =>
     href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href);
 
@@ -111,7 +101,6 @@ export default function AppSidebar({ userEmail, modules = [], businessType = "",
         userEmail={userEmail}
         displayName={displayName}
         hasRestaurant={hasRestaurant}
-        hasMetaAds={hasMetaAds}
         isPlatformAdmin={isPlatformAdmin}
       />
 
@@ -131,7 +120,6 @@ export default function AppSidebar({ userEmail, modules = [], businessType = "",
           userEmail={userEmail}
           displayName={displayName}
           hasRestaurant={hasRestaurant}
-          hasMetaAds={hasMetaAds}
           isPlatformAdmin={isPlatformAdmin}
         />
       </aside>
@@ -148,7 +136,6 @@ function DesktopSidebar(props: {
   userEmail?: string;
   displayName: string;
   hasRestaurant: boolean;
-  hasMetaAds: boolean;
   isPlatformAdmin: boolean;
 }) {
   return (
@@ -164,7 +151,6 @@ function DesktopSidebar(props: {
         userEmail={props.userEmail}
         displayName={props.displayName}
         hasRestaurant={props.hasRestaurant}
-        hasMetaAds={props.hasMetaAds}
         isPlatformAdmin={props.isPlatformAdmin}
       />
     </aside>
@@ -179,7 +165,6 @@ function SidebarBody({
   userEmail,
   displayName,
   hasRestaurant,
-  hasMetaAds,
   isPlatformAdmin,
 }: {
   isOpen: boolean;
@@ -189,7 +174,6 @@ function SidebarBody({
   userEmail?: string;
   displayName: string;
   hasRestaurant: boolean;
-  hasMetaAds: boolean;
   isPlatformAdmin: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -311,50 +295,7 @@ function SidebarBody({
           </>
         )}
 
-        {/* Meta Ads section */}
-        {hasMetaAds && (
-          <>
-            {isOpen && (
-              <p className="mt-4 mb-1 px-3 text-[10px] font-bold tracking-widest text-muted-foreground/60 uppercase select-none">
-                Meta Ads
-              </p>
-            )}
-            {!isOpen && <div className="my-2 border-t border-sidebar-border/40" />}
-            <NavButton
-              item={{ label: "Campaigns", icon: TrendingUp, href: "/dashboard/meta-ads" }}
-              isOpen={isOpen}
-              isActive={isActive("/dashboard/meta-ads") && !isActive("/dashboard/meta-ads/analytics") && !isActive("/dashboard/meta-ads/leads") && !isActive("/dashboard/meta-ads/settings")}
-              userPlan={plan}
-            />
-            <NavButton
-              item={{ label: "Analytics", icon: BarChart3, href: "/dashboard/meta-ads/analytics" }}
-              isOpen={isOpen}
-              isActive={isActive("/dashboard/meta-ads/analytics")}
-              userPlan={plan}
-            />
-            <NavButton
-              item={{ label: "Ad Leads", icon: PhoneCall, href: "/dashboard/meta-ads/leads" }}
-              isOpen={isOpen}
-              isActive={isActive("/dashboard/meta-ads/leads")}
-              userPlan={plan}
-            />
-            <NavButton
-              item={{ label: "Connection", icon: LinkIcon, href: "/dashboard/meta-ads/settings" }}
-              isOpen={isOpen}
-              isActive={isActive("/dashboard/meta-ads/settings")}
-              userPlan={plan}
-            />
-          </>
-        )}
       </nav>
-
-      {/* Notification bell (desktop) — only visible when sidebar is open */}
-      {isOpen && (
-        <div className="border-t border-sidebar-border/60 px-4 py-2 flex items-center gap-2">
-          <MetaAdsNotificationBell />
-          <span className="text-xs text-muted-foreground/70">Notifications</span>
-        </div>
-      )}
 
       {/* Bottom nav */}
       <div className="space-y-1 border-t border-sidebar-border p-3">
