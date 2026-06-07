@@ -308,7 +308,7 @@ export async function processMessageWithAI(
     const parsed = parseAIResponse(text);
 
     // ── Guardrail: output leakage check ──
-    parsed.reply = guardOutput(parsed.reply, getFallbackResponse(safeMessage, context, tenantConfig).reply);
+    parsed.reply = guardOutput(parsed.reply, getFallbackResponse(safeMessage, context, tenantConfig, tenantConfig.isFirstMessage ?? false).reply);
 
     // ── Guardrail: hallucination redirect ──
     const hasKB = (tenantConfig.knowledgeDocs?.length ?? 0) > 0 || (tenantConfig.customFaqs?.length ?? 0) > 0;
@@ -333,7 +333,7 @@ export async function processMessageWithAI(
     console.error('❌ AI Engine error:', error);
     Sentry.captureException(error);
     // NEVER crash — return a graceful fallback
-    return getFallbackResponse(message, context, tenantConfig);
+    return getFallbackResponse(message, context, tenantConfig, tenantConfig.isFirstMessage ?? false);
   }
 }
 
@@ -427,7 +427,8 @@ function parseAIResponse(text: string): AIResponse {
 function getFallbackResponse(
   message: string,
   _context: ConversationContext,
-  config: TenantAIConfig
+  config: TenantAIConfig,
+  isFirstMessage = false
 ): AIResponse {
   const lower = message.toLowerCase();
 
@@ -494,15 +495,27 @@ function getFallbackResponse(
     };
   }
 
-  // Default: generic welcome — works for any business type
+  // Default: welcome only on first message; for ongoing conversations use a neutral holding reply
+  if (isFirstMessage) {
+    return {
+      reply: config.welcomeMessage || `Hi! 👋 Welcome to ${config.businessName}. How can I help you today?`,
+      extractedData: {},
+      intent: 'greeting',
+      sentiment: 'neutral',
+      shouldEscalate: false,
+      nextStep: 'ask_intent',
+      confidence: 0.5,
+    };
+  }
+
   return {
-    reply: `Hi! 👋 Welcome to ${config.businessName}. How can I help you today?`,
+    reply: `Sorry, I missed that! Could you say that again? 😊`,
     extractedData: {},
-    intent: 'greeting',
+    intent: 'unknown',
     sentiment: 'neutral',
     shouldEscalate: false,
     nextStep: 'ask_intent',
-    confidence: 0.5,
+    confidence: 0.3,
   };
 }
 
