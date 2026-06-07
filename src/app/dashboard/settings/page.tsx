@@ -43,6 +43,7 @@ interface SettingsData {
   wa_phone_number_id: string;
   wa_business_account_id: string;
   wa_access_token: string;
+  wa_app_secret: string;
   wa_verify_token: string;
   // Outbound webhook
   outbound_webhook_url: string;
@@ -60,6 +61,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   wa_phone_number_id: '',
   wa_business_account_id: '',
   wa_access_token: '',
+  wa_app_secret: '',
   wa_verify_token: '',
   outbound_webhook_url: ''
 };
@@ -222,6 +224,7 @@ export default function SettingsPage() {
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; error?: string; details?: any } | null>(null);
   const [showToken, setShowToken] = useState(false);
+  const [showAppSecret, setShowAppSecret] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState('');
 
   const update = useCallback(<K extends keyof SettingsData>(key: K, value: SettingsData[K]) => {
@@ -519,6 +522,35 @@ export default function SettingsPage() {
                 </div>
                 <p className="text-[11px] mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
                   A permanent access token generated via Meta Business Manager for your System User.
+                </p>
+              </Field>
+            </div>
+
+            <div className="mt-4">
+              <Field label="Meta App Secret">
+                <div className="relative flex items-center">
+                  <input
+                    type={showAppSecret ? 'text' : 'password'}
+                    value={settings.wa_app_secret || ''}
+                    onChange={e => update('wa_app_secret', e.target.value)}
+                    placeholder="e.g. a1b2c3d4e5f6..."
+                    className="w-full h-10 pl-3 pr-10 rounded-xl text-sm outline-none transition-all"
+                    style={{
+                      background: 'var(--background)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--foreground)',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAppSecret(!showAppSecret)}
+                    className="absolute right-3 text-muted-foreground hover:text-foreground focus:outline-none"
+                  >
+                    {showAppSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-[11px] mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                  Found in your Meta Developer App &gt; Settings &gt; Basic &gt; App Secret. Used to verify webhook signatures.
                 </p>
               </Field>
             </div>

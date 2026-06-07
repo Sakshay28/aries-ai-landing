@@ -25,7 +25,7 @@ export async function GET() {
       escalation_timeout_mins, hot_keywords, warm_keywords,
       custom_faqs, off_hours_message, off_hours_capture_lead,
       google_review_url, review_automation_enabled,
-      wa_phone_number_id, wa_business_account_id, wa_access_token, wa_verify_token,
+      wa_phone_number_id, wa_business_account_id, wa_access_token, wa_app_secret, wa_verify_token,
       outbound_webhook_url, system_prompt
     `)
     .eq('id', tenantId)
@@ -38,6 +38,9 @@ export async function GET() {
   // Mask sensitive credentials
   if (data && data.wa_access_token) {
     data.wa_access_token = '••••••••';
+  }
+  if (data && data.wa_app_secret) {
+    data.wa_app_secret = '••••••••';
   }
 
   return NextResponse.json({ success: true, data });
@@ -85,6 +88,17 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
+  // Handle encrypted app secret (same pattern as access token)
+  if (body.wa_app_secret !== undefined) {
+    if (body.wa_app_secret === '••••••••') {
+      // Do nothing, do not overwrite existing encrypted secret
+    } else if (body.wa_app_secret === '' || body.wa_app_secret === null) {
+      updates.wa_app_secret = null;
+    } else {
+      updates.wa_app_secret = encryptToken(body.wa_app_secret);
+    }
+  }
+
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ success: false, error: 'No valid fields to update' }, { status: 400 });
   }
@@ -103,9 +117,12 @@ export async function PATCH(req: NextRequest) {
   // Invalidate cached tenant config so changes take effect immediately
   await invalidateCache(tenantId);
 
-  // Mask token on response
+  // Mask tokens on response
   if (data && data.wa_access_token) {
     data.wa_access_token = '••••••••';
+  }
+  if (data && data.wa_app_secret) {
+    data.wa_app_secret = '••••••••';
   }
 
   return NextResponse.json({ success: true, data });
