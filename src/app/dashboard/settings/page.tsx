@@ -476,9 +476,9 @@ export default function SettingsPage() {
           </SectionCard>
 
           {/* Credentials Card */}
-          <SectionCard title="Meta Cloud API Credentials (BYO-Keys)" icon={Key}>
+          <SectionCard title="Meta Cloud API Credentials" icon={Key}>
             <p className="text-xs -mt-1" style={{ color: 'var(--muted-foreground)' }}>
-              Configure your direct WhatsApp Business integration. Find these values in your Meta App Dashboard under WhatsApp &gt; API Setup.
+              Configure your WhatsApp Business integration using your own Meta Developer App credentials. Find these values in your Meta App Dashboard under WhatsApp &gt; API Setup.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-2">
               <Field label="WhatsApp Phone Number ID">
@@ -557,7 +557,7 @@ export default function SettingsPage() {
 
             <div className="mt-6 pt-5 border-t flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4" style={{ borderColor: 'var(--border)' }}>
               <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                Make sure to save changes before running the connection test.
+                Save your changes before running the connection test.
               </div>
               <button
                 type="button"
