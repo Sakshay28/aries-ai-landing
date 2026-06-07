@@ -165,8 +165,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     return;
   }
 
+  const _t0 = Date.now();
+  const perf = (label: string) => console.log(`[PERF] ${label}: +${Date.now() - _t0}ms`);
+
   // 1. Early dedup soft-check (non-atomic, just quick filter)
   const isDup = await isDuplicateMessage(msg.messageId);
+  perf('dedup');
   if (isDup) {
     console.log(`⚡ Meta Webhook: duplicate message skipped early: ${msg.messageId}`);
     return;
@@ -174,6 +178,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   // 2. Resolve Tenant by App Phone Number ID
   const tenant = await getTenantByPhoneNumberId(msg.appPhoneId);
+  perf('tenant_lookup');
   if (!tenant) {
     console.error(`❌ Meta Webhook: no tenant found with wa_phone_number_id="${msg.appPhoneId}"`);
     return;
@@ -441,6 +446,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     console.error('❌ Meta Webhook: failed to resolve conversation');
     return;
   }
+  perf('lead+conv_resolved');
 
   // 6. Broadcast reply tracking (non-blocking)
   try {
@@ -503,6 +509,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   }
 
   console.log(`✅ Inbound message saved: "${content.slice(0, 100)}" from ${cleanPhone}`);
+  perf('msg_inserted');
 
   // Increment message counter (non-blocking — counter accuracy doesn't need to delay the reply)
   void supabaseAdmin.rpc('increment_message_count_conv', { conv_id: conversation.id });
@@ -694,6 +701,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   } catch (flowErr) {
     console.error('❌ Flow engine error (falling back to AI):', (flowErr as Error).message);
   }
+  perf('flows_done');
 
   const storedMsgCount = conversation.message_count ?? 0;
 
@@ -754,6 +762,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   const isFirstMessageForAI = storedMsgCount === 0 && history.length === 0;
 
+  perf('parallel_fetch_done');
+
   // Use RAG only when embeddings exist — avoids Gemini embedding API call (~500-700ms) otherwise
   let knowledgeRows: Array<{ filename: string; content_text: string }> = (kbDocs || []) as Array<{ filename: string; content_text: string }>;
   if (kbEmbedCheck && kbEmbedCheck.length > 0) {
@@ -807,6 +817,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     console.error('❌ Meta: AI engine error:', err);
     return;
   }
+  perf('ai_done');
 
   if (!aiResponse?.reply) return;
 
@@ -848,6 +859,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       console.error('❌ Meta: failed to send AI reply:', (sendErr as Error).message);
     }
   }
+  perf('send_done');
 
   // 16. Save Outbound AI Reply
   const { error: aiMsgErr } = await supabaseAdmin.from('messages').insert({
