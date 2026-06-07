@@ -189,7 +189,8 @@ export async function POST(req: NextRequest) {
             name,
             phone,
             email,
-            channel: 'manual', // or introduce 'meta_ads' channel in CHECK constraint if altered
+            channel: 'manual',
+            source: 'meta_lead_form',
             source_detail: 'Meta Lead Gen Form',
             meta_campaign_id: campaignId,
             meta_adset_id: adsetId,

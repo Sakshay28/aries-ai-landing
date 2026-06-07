@@ -20,7 +20,8 @@ const STATUS_COLUMNS = [
 type Member = { id: string; full_name: string | null; email: string };
 
 const SOURCE_LABELS: Record<string, string> = {
-  meta_ctwa: 'Meta Ad',
+  meta_ctwa: 'Meta Ad (CTWA)',
+  meta_lead_form: 'Meta Lead Form',
   whatsapp: 'WhatsApp',
   instagram: 'Instagram',
   manual: 'Manual',
@@ -169,7 +170,8 @@ export function LeadsClient() {
             </select>
             <select className={selectCls} value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} title="Filter by source">
               <option value="all">All sources</option>
-              <option value="meta_ctwa">Meta Ads</option>
+              <option value="meta_ctwa">Meta Ad (CTWA)</option>
+              <option value="meta_lead_form">Meta Lead Form</option>
               <option value="whatsapp">WhatsApp</option>
               <option value="instagram">Instagram</option>
             </select>
@@ -238,7 +240,7 @@ export function LeadsClient() {
                           <div className="flex gap-2 items-center shrink-0">
                             {a.source && SOURCE_LABELS[a.source] && (
                               <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
-                                {a.source === 'meta_ctwa' && <Megaphone className="w-2.5 h-2.5" />}
+                                {(a.source === 'meta_ctwa' || a.source === 'meta_lead_form') && <Megaphone className="w-2.5 h-2.5" />}
                                 {SOURCE_LABELS[a.source]}
                               </span>
                             )}
