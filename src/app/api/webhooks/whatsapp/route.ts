@@ -504,10 +504,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   console.log(`✅ Inbound message saved: "${content.slice(0, 100)}" from ${cleanPhone}`);
 
-  // Increment message counter
-  try {
-    await supabaseAdmin.rpc('increment_message_count_conv', { conv_id: conversation.id });
-  } catch {}
+  // Increment message counter (non-blocking — counter accuracy doesn't need to delay the reply)
+  void supabaseAdmin.rpc('increment_message_count_conv', { conv_id: conversation.id });
 
   // Update conversation last_message_at for UI responsiveness
   void supabaseAdmin
@@ -697,27 +695,19 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     console.error('❌ Flow engine error (falling back to AI):', (flowErr as Error).message);
   }
 
-  // 13. Get Conversation History
-  const { data: recentMsgs } = await supabaseAdmin
-    .from('messages')
-    .select('direction, content')
-    .eq('conversation_id', conversation.id)
-    .order('created_at', { ascending: false })
-    .limit(10);
-
-  const history = (recentMsgs || [])
-    .reverse()
-    .slice(0, -1) // Exclude current message
-    .map(m => ({
-      role: m.direction === 'inbound' ? 'user' as const : 'assistant' as const,
-      content: m.content,
-    }));
-
   const storedMsgCount = conversation.message_count ?? 0;
-  const isFirstMessageForAI = storedMsgCount === 0 && history.length === 0;
 
-  // Load Smart Rules + Agent configs + Knowledge docs + existing booking in parallel
-  const [{ data: smartRulesRows }, { data: agentRows }, ragDocs, { data: existingBookingRow }] = await Promise.all([
+  // 13. Fetch everything needed for AI in a single parallel batch — avoids 3 sequential DB roundtrips.
+  // NOTE: knowledge_docs are fetched directly here (no embedding API). Semantic search (RAG) only
+  // runs when the tenant actually has docs with stored embeddings — skipping it saves ~500-700ms
+  // on every message for the majority of tenants who have no knowledge base.
+  const [{ data: recentMsgs }, { data: smartRulesRows }, { data: agentRows }, { data: existingBookingRow }, { data: kbDocs }, { data: kbEmbedCheck }] = await Promise.all([
+    supabaseAdmin
+      .from('messages')
+      .select('direction, content')
+      .eq('conversation_id', conversation.id)
+      .order('created_at', { ascending: false })
+      .limit(10),
     supabaseAdmin
       .from('smart_rules')
       .select('name, trigger_source, ai_summary')
@@ -728,7 +718,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       .select('agent_name, routing_keywords, bot_name, bot_personality, system_prompt')
       .eq('tenant_id', tenant.id)
       .eq('is_active', true),
-    retrieveRelevantDocs(tenant.id, msg.text, 3).catch(() => []),
     // Look up customer's most recent confirmed/pending booking so AI can handle cancel/modify
     supabaseAdmin
       .from('restaurant_bookings')
@@ -739,17 +728,37 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       .order('booking_date', { ascending: false })
       .limit(1)
       .maybeSingle(),
-  ]);
-
-  let knowledgeRows: Array<{ filename: string; content_text: string }> = ragDocs;
-  if (ragDocs.length === 0) {
-    const { data: fallback } = await supabaseAdmin
+    // Fetch KB doc text directly (no embedding — fast)
+    supabaseAdmin
       .from('knowledge_docs')
       .select('filename, content_text')
       .eq('tenant_id', tenant.id)
       .neq('content_text', '')
-      .limit(5);
-    knowledgeRows = (fallback || []) as Array<{ filename: string; content_text: string }>;
+      .limit(5),
+    // Check if any docs have stored embeddings (for conditional RAG)
+    supabaseAdmin
+      .from('knowledge_docs')
+      .select('id')
+      .eq('tenant_id', tenant.id)
+      .not('embedding', 'is', null)
+      .limit(1),
+  ]);
+
+  const history = (recentMsgs || [])
+    .reverse()
+    .slice(0, -1) // Exclude current message
+    .map(m => ({
+      role: m.direction === 'inbound' ? 'user' as const : 'assistant' as const,
+      content: m.content,
+    }));
+
+  const isFirstMessageForAI = storedMsgCount === 0 && history.length === 0;
+
+  // Use RAG only when embeddings exist — avoids Gemini embedding API call (~500-700ms) otherwise
+  let knowledgeRows: Array<{ filename: string; content_text: string }> = (kbDocs || []) as Array<{ filename: string; content_text: string }>;
+  if (kbEmbedCheck && kbEmbedCheck.length > 0) {
+    const ragDocs = await retrieveRelevantDocs(tenant.id, msg.text, 3).catch(() => []);
+    if (ragDocs.length > 0) knowledgeRows = ragDocs;
   }
 
   const lowerMsgText = msg.text.toLowerCase();
@@ -801,12 +810,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   if (!aiResponse?.reply) return;
 
-  // 13b. Increment AI conversation counter (gates the cost cap check)
-  try {
-    await supabaseAdmin.rpc('increment_ai_conversations', { p_tenant_id: tenant.id });
-  } catch (e) {
-    console.error('Failed to increment ai_conversations counter:', e);
-  }
+  // 13b. Increment AI conversation counter (non-blocking)
+  void supabaseAdmin.rpc('increment_ai_conversations', { p_tenant_id: tenant.id });
 
   // 14. Payment Links Injection
   if (aiResponse.extractedData?.requestPayment === 'true') {
