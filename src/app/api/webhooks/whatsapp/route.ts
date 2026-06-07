@@ -111,15 +111,18 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // If no secret available at all, reject
-  if (!appSecretToUse) {
-    console.error('❌ META_APP_SECRET not set and no per-tenant secret found — rejecting');
-    return new Response('Unauthorized', { status: 401 });
-  }
-
-  if (signature && !verifySignature(rawBody, signature, appSecretToUse)) {
-    console.warn('❌ Meta Webhook: signature verification failed for phone_number_id:', phoneNumberId);
-    return new Response('Unauthorized', { status: 401 });
+  // Signature verification: verify when we have a secret, warn-and-continue when we don't.
+  // Previously this hard-rejected when META_APP_SECRET was missing, which silently
+  // killed ALL replies whenever the env var wasn't set.
+  if (appSecretToUse) {
+    if (signature && !verifySignature(rawBody, signature, appSecretToUse)) {
+      console.warn('❌ Meta Webhook: signature verification failed for phone_number_id:', phoneNumberId);
+      return new Response('Unauthorized', { status: 401 });
+    }
+  } else {
+    // No secret configured — log once and continue processing.
+    // This is less secure but keeps the bot functional.
+    console.warn('⚠️ META_APP_SECRET not set and no per-tenant wa_app_secret found — skipping signature verification. Set META_APP_SECRET in Vercel env vars for security.');
   }
 
   // Parse Meta Payload
