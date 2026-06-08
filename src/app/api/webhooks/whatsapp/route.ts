@@ -668,25 +668,28 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
             .maybeSingle();
 
           if (recentOffHours) {
-            // Already told this person we're closed recently — just silently acknowledge, don't repeat
-            console.log(`🌙 Off-hours: already sent off-hours message recently, skipping repeat for ${cleanPhone}`);
+            // Already sent the closed notice — let AI handle the conversation naturally.
+            // Returning here caused Issue #3: all subsequent messages while closed were
+            // silently dropped, creating a dead conversation.
+            console.log(`🌙 Off-hours: notice already sent for ${cleanPhone}, continuing with AI`);
+            // NOTE: intentionally does NOT return — falls through to AI section below.
+          } else {
+            // First time telling this person we're closed — send notice and stop.
+            const offHoursMsg = (tenant.off_hours_message as string) ||
+              `We're currently closed. Our hours are ${hoursStr} (IST). We'll get back to you as soon as we open! 🙏`;
+
+            if (decryptedAccessToken && tenant.wa_phone_number_id) {
+              await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, offHoursMsg);
+              await supabaseAdmin.from('messages').insert({
+                tenant_id: tenant.id, conversation_id: conversation.id,
+                direction: 'outbound', content: offHoursMsg,
+                message_type: 'text', channel: 'whatsapp',
+                status: 'sent', ai_generated: false,
+              });
+            }
+            console.log(`🌙 Off-hours: sent off-hours notice to ${cleanPhone}`);
             return;
           }
-
-          const offHoursMsg = (tenant.off_hours_message as string) ||
-            `We're currently closed. Our hours are ${hoursStr} (IST). We'll get back to you as soon as we open! 🙏`;
-
-          if (decryptedAccessToken && tenant.wa_phone_number_id) {
-            await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, offHoursMsg);
-            await supabaseAdmin.from('messages').insert({
-              tenant_id: tenant.id, conversation_id: conversation.id,
-              direction: 'outbound', content: offHoursMsg,
-              message_type: 'text', channel: 'whatsapp',
-              status: 'sent', ai_generated: false,
-            });
-          }
-          console.log(`🌙 Off-hours: sent off-hours message to ${cleanPhone}`);
-          return; // Don't run AI or flows outside business hours
         }
       }
     }
@@ -703,7 +706,11 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     return;
   }
 
-  const isFirstMessage = (conversation.message_count ?? 0) <= 1;
+  // isFirstMessage = truly the first message in this conversation session.
+  // We use existingConv === null (newly created conversation) rather than
+  // message_count because the counter is incremented non-blocking (void rpc),
+  // so rapid second/third messages still see count=0 and falsely trigger welcome.
+  const isFirstMessage = existingConv === null;
 
   // 12. Flow Engine Execution
   try {
@@ -783,7 +790,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       content: m.content,
     }));
 
-  const isFirstMessageForAI = storedMsgCount === 0 && history.length === 0;
+  // Reliable first-message check: look for any prior outbound (assistant) messages.
+  // storedMsgCount is stale (non-blocking update) so we use the actual fetched history.
+  const isFirstMessageForAI = history.filter(h => h.role === 'assistant').length === 0;
 
   perf('parallel_fetch_done');
 

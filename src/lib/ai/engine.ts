@@ -495,7 +495,32 @@ function getFallbackResponse(
     };
   }
 
-  // Default: welcome only on first message; for ongoing conversations use a neutral holding reply
+  // Detect greetings — these should never return "Sorry I missed that"
+  const greetingWords = ['hi', 'hello', 'hey', 'hii', 'helo', 'namaste', 'good morning', 'good evening', 'good afternoon', 'sup', 'howdy'];
+  if (greetingWords.some(w => lower === w || lower.startsWith(w + ' '))) {
+    if (isFirstMessage) {
+      return {
+        reply: config.welcomeMessage || `Hi! 👋 Welcome to ${config.businessName}. How can I help you today?`,
+        extractedData: {},
+        intent: 'greeting',
+        sentiment: 'positive',
+        shouldEscalate: false,
+        nextStep: 'ask_intent',
+        confidence: 0.9,
+      };
+    }
+    return {
+      reply: `Hi again! 😊 How can I help you with ${config.businessName} today?`,
+      extractedData: {},
+      intent: 'greeting',
+      sentiment: 'positive',
+      shouldEscalate: false,
+      nextStep: 'ask_intent',
+      confidence: 0.9,
+    };
+  }
+
+  // Default: welcome only on first message; for ongoing conversations use a helpful prompt
   if (isFirstMessage) {
     return {
       reply: config.welcomeMessage || `Hi! 👋 Welcome to ${config.businessName}. How can I help you today?`,
@@ -508,14 +533,15 @@ function getFallbackResponse(
     };
   }
 
+  // For ongoing conversations, offer helpful options rather than "Sorry I missed that"
   return {
-    reply: `Sorry, I missed that! Could you say that again? 😊`,
+    reply: `Happy to help! Are you looking to make a booking or have a question about ${config.businessName}? 😊`,
     extractedData: {},
     intent: 'unknown',
     sentiment: 'neutral',
     shouldEscalate: false,
     nextStep: 'ask_intent',
-    confidence: 0.3,
+    confidence: 0.4,
   };
 }
 

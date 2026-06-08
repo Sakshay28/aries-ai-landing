@@ -35,15 +35,17 @@ const OUT_OF_SCOPE_PATTERNS: RegExp[] = [
 ];
 
 // ─── RESPONSE LEAKAGE PATTERNS (check AI output) ─────────────
+// These must match system-prompt section headers EXACTLY, not natural language.
+// "/RULES:/i" was too broad — matched any restaurant mentioning "house rules:", etc.,
+// causing legitimate AI replies to be silently replaced with the fallback.
 const LEAKAGE_PATTERNS: RegExp[] = [
-  /you\s+are\s+.*\s*an\s+AI\s+assistant\s+for/i,
-  /PERSONALITY:/i,
-  /BUSINESS INFO:/i,
-  /YOUR JOB:/i,
-  /RULES:/i,
-  /SMART RULES/i,
-  /KNOWLEDGE BASE/i,
-  /CONVERSATION STATE:/i,
+  /you\s+are\s+\S+,\s+an\s+AI\s+assistant\s+for\s+\S/i, // "You are Aria, an AI assistant for X"
+  /^PERSONALITY:\s/im,       // Only at line start — exact system prompt header
+  /^BUSINESS INFO:\s/im,     // Only at line start
+  /^YOUR JOB:\s*$/im,        // Only at line start, standalone
+  /^RULES:\s*$/im,           // Exact standalone header only — not "house rules:", "our rules:", etc.
+  /^SMART RULES\s*\(/im,     // Only at line start with context
+  /^CONVERSATION STATE:\s/im, // Only at line start
 ];
 
 // ─── SANITIZE INPUT ───────────────────────────────────────────
@@ -99,15 +101,20 @@ export function guardOutput(reply: string, fallback: string): string {
 }
 
 // ─── HALLUCINATION GUARD ──────────────────────────────────────
-// When KB is empty and AI confidence is low, redirect to human
+// Only redirect when AI is genuinely uncertain AND there's no KB to back it up.
+// Previous threshold of 0.55 was too aggressive — conversational replies like
+// "Hi", "Who is your founder" were redirected because Gemini returned ~0.5 confidence.
 export function shouldRedirectToHuman(
   confidence: number,
   hasKnowledgeBase: boolean,
   intent: string,
-  threshold = 0.55
+  threshold = 0.25
 ): boolean {
+  // Never redirect pure conversational intents — AI can handle these without a KB.
+  const conversationalIntents = ['greeting', 'thank_you', 'confirm', 'cancel', 'unknown'];
+  if (conversationalIntents.includes(intent)) return false;
   if (confidence < threshold && !hasKnowledgeBase) return true;
-  if (intent === 'menu' && !hasKnowledgeBase && confidence < 0.8) return true;
+  if (intent === 'menu' && !hasKnowledgeBase && confidence < 0.6) return true;
   return false;
 }
 
