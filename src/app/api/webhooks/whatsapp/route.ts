@@ -168,17 +168,17 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const _t0 = Date.now();
   const perf = (label: string) => console.log(`[PERF] ${label}: +${Date.now() - _t0}ms`);
 
-  // 1. Early dedup soft-check (non-atomic, just quick filter)
-  const isDup = await isDuplicateMessage(msg.messageId);
-  perf('dedup');
+  // 1. Dedup + Tenant lookup in PARALLEL — saves ~50-100ms vs sequential
+  const [isDup, tenant] = await Promise.all([
+    isDuplicateMessage(msg.messageId),
+    getTenantByPhoneNumberId(msg.appPhoneId),
+  ]);
+  perf('dedup+tenant');
+
   if (isDup) {
     console.log(`⚡ Meta Webhook: duplicate message skipped early: ${msg.messageId}`);
     return;
   }
-
-  // 2. Resolve Tenant by App Phone Number ID
-  const tenant = await getTenantByPhoneNumberId(msg.appPhoneId);
-  perf('tenant_lookup');
   if (!tenant) {
     console.error(`❌ Meta Webhook: no tenant found with wa_phone_number_id="${msg.appPhoneId}"`);
     return;
@@ -186,18 +186,19 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   console.log(`✅ Meta Webhook: tenant resolved: ${tenant.business_name} (${tenant.id})`);
 
+  // Decrypt token ONCE — reused for read receipt, media, AI reply, off-hours, booking
+  const decryptedAccessToken = decryptToken(tenant.wa_access_token);
+
   // 2b. Mark message as read immediately (triggers blue ticks on sender's phone)
-  const decryptedTokenForRead = decryptToken(tenant.wa_access_token);
-  if (decryptedTokenForRead && tenant.wa_phone_number_id) {
-    markMessageAsRead(decryptedTokenForRead, tenant.wa_phone_number_id, msg.messageId).catch(() => {});
+  if (decryptedAccessToken && tenant.wa_phone_number_id) {
+    markMessageAsRead(decryptedAccessToken, tenant.wa_phone_number_id, msg.messageId).catch(() => {});
   }
 
   // 3. Resolve Media URL if this is a media message
   let content = msg.text;
   if (msg.mediaId) {
-    const decryptedToken = decryptToken(tenant.wa_access_token);
-    if (decryptedToken) {
-      const mediaUrl = await getMediaUrl(decryptedToken, msg.mediaId);
+    if (decryptedAccessToken) {
+      const mediaUrl = await getMediaUrl(decryptedAccessToken, msg.mediaId);
       if (mediaUrl) {
         content = mediaUrl;
         console.log(`📸 Resolved Meta media ID "${msg.mediaId}" to URL: ${mediaUrl.slice(0, 100)}...`);
@@ -476,7 +477,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // pass the soft-check above, only ONE can insert successfully.
   // The others get a unique_violation (code 23505) → return immediately.
   // This permanently eliminates triple/duplicate replies.
-  const isMedia = ['image', 'video', 'audio', 'document', 'voice'].includes(msg.type);
+  const isMedia = ['image', 'video', 'audio', 'document', 'voice', 'sticker'].includes(msg.type);
   const inboundMsgPayload = {
     tenant_id: tenant.id,
     conversation_id: conversation.id,
@@ -557,10 +558,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       }
     }
     // Send STOP confirmation (required by WhatsApp policy)
-    const decTok = decryptToken(tenant.wa_access_token as string);
-    if (decTok && tenant.wa_phone_number_id) {
+    if (decryptedAccessToken && tenant.wa_phone_number_id) {
       const stopMsg = `You've been unsubscribed from ${tenant.business_name || 'our'} messages. Reply START to resubscribe.`;
-      await sendTextMessage(decTok, tenant.wa_phone_number_id as string, cleanPhone, stopMsg).catch(() => {});
+      await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, stopMsg).catch(() => {});
     }
     console.log(`🚫 Opt-out recorded for ${cleanPhone} (tenant ${tenant.id})`);
     return;
@@ -578,16 +578,21 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         .update({ tags: currentTags.filter(t => !['opt-out', 'optout', 'unsubscribe', 'stop'].includes(t.toLowerCase())) })
         .eq('id', lead.id);
     }
-    const decTok = decryptToken(tenant.wa_access_token as string);
-    if (decTok && tenant.wa_phone_number_id) {
+    if (decryptedAccessToken && tenant.wa_phone_number_id) {
       const startMsg = `Welcome back! You're now subscribed to messages from ${tenant.business_name || 'us'}. 😊`;
-      await sendTextMessage(decTok, tenant.wa_phone_number_id as string, cleanPhone, startMsg).catch(() => {});
+      await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, startMsg).catch(() => {});
     }
     console.log(`✅ Opt-in restored for ${cleanPhone} (tenant ${tenant.id})`);
     return;
   }
 
   // 10. Pause / Escalated checks
+  // Skip AI entirely for message types that have no actionable text content
+  if (msg.type === 'unsupported' || msg.type === 'sticker') {
+    console.log(`⏭️ Meta: skipping AI for non-text message type "${msg.type}"`);
+    return;
+  }
+
   // bot_paused = hard stop (human agent has taken over — never override)
   if (conversation.bot_paused) {
     console.log(`🔇 Meta: bot paused (human takeover) for conversation ${conversation.id}, skipping AI`);
@@ -671,9 +676,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           const offHoursMsg = (tenant.off_hours_message as string) ||
             `We're currently closed. Our hours are ${hoursStr} (IST). We'll get back to you as soon as we open! 🙏`;
 
-          const decryptedTok = decryptToken(tenant.wa_access_token as string);
-          if (decryptedTok && tenant.wa_phone_number_id) {
-            await sendTextMessage(decryptedTok, tenant.wa_phone_number_id as string, cleanPhone, offHoursMsg);
+          if (decryptedAccessToken && tenant.wa_phone_number_id) {
+            await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, offHoursMsg);
             await supabaseAdmin.from('messages').insert({
               tenant_id: tenant.id, conversation_id: conversation.id,
               direction: 'outbound', content: offHoursMsg,
@@ -871,13 +875,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   // 15. Send reply via Meta
   let metaMsgId: string | null = null;
-  const decryptedToken = decryptToken(tenant.wa_access_token);
-  if (!decryptedToken || !tenant.wa_phone_number_id) {
+  if (!decryptedAccessToken || !tenant.wa_phone_number_id) {
     console.error(`❌ Meta: missing credentials to send AI reply for tenant ${tenant.id}`);
   } else {
     try {
       const result = await sendTextMessage(
-        decryptedToken,
+        decryptedAccessToken,
         tenant.wa_phone_number_id,
         cleanPhone,
         aiResponse.reply
@@ -889,77 +892,50 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   }
   perf('send_done');
 
-  // 16. Save Outbound AI Reply
-  const { error: aiMsgErr } = await supabaseAdmin.from('messages').insert({
-    tenant_id: tenant.id,
-    conversation_id: conversation.id,
-    direction: 'outbound',
-    content: aiResponse.reply,
-    message_type: 'text',
-    channel: 'whatsapp',
-    sender_id: null,
-    status: metaMsgId ? 'sent' : 'failed',
-    ai_generated: true,
-    wa_message_id: metaMsgId,
-  });
-
-  if (aiMsgErr) {
-    console.error('❌ Meta: failed to save AI outbound message:', aiMsgErr.message);
-  }
-
-  // 17. Update Conversation Context — only keep booking-relevant fields.
-  // Merging ALL extractedData into context every message caused unbounded JSONB
-  // growth: after 50 messages, the blob contained every partial extraction attempt.
-  // We now keep a whitelist of meaningful fields and discard nulls.
+  // 16 + 17. Save outbound message + build context update IN PARALLEL
+  // Context computation is CPU-only (no I/O), so we prepare it while the insert runs.
   const CONTEXT_FIELDS = [
     'name', 'phone', 'email', 'guestCount', 'date', 'time', 'occasion',
     'eventType', 'companyName', 'specialRequests',
     'booking_saved', 'booking_reservation_id',
     'booking_date', 'booking_time', 'party_size',
-    'pending_flow_node',        // used by flow engine for wait_for_reply
-    'inactivity_flow_fired_',   // prefix — matched by startsWith check below
+    'pending_flow_node',
+    'inactivity_flow_fired_',
   ];
 
   const prevContext = context as Record<string, any>;
   const updatedContext: Record<string, any> = {};
 
-  // Preserve flow-engine fields (inactivity tracking keys, pending_flow_node)
   for (const [k, v] of Object.entries(prevContext)) {
     if (k.startsWith('inactivity_flow_fired_') || k === 'pending_flow_node') {
       updatedContext[k] = v;
     }
   }
 
-  // Merge only whitelisted booking/contact fields
   for (const field of CONTEXT_FIELDS) {
-    if (field.endsWith('_')) continue; // prefix pattern, skip
+    if (field.endsWith('_')) continue;
     const newVal = (aiResponse.extractedData as Record<string, any>)?.[field];
     const oldVal = prevContext[field];
-    // Keep new value if non-null, otherwise preserve existing
     const val = (newVal !== null && newVal !== undefined && newVal !== 'null') ? newVal : oldVal;
     if (val !== undefined && val !== null && val !== 'null') {
       updatedContext[field] = val;
     }
   }
 
-  // Always carry booking_saved and reservation_id forward
   if (prevContext.booking_saved) updatedContext.booking_saved = prevContext.booking_saved;
   if (prevContext.booking_reservation_id) updatedContext.booking_reservation_id = prevContext.booking_reservation_id;
 
-  // Reset booking_saved when a NEW booking flow starts (so repeat bookings work)
-  // If AI is asking for guests/date/name = new booking, clear the old saved flag
   const newBookingIntents = ['reserve_table', 'private_event', 'corporate_booking'];
   const newBookingSteps = ['ask_guests', 'ask_date', 'ask_time', 'ask_name', 'ask_phone'];
-  const isNewBookingFlow = 
+  const isNewBookingFlow =
     newBookingIntents.includes(aiResponse.intent) ||
     newBookingSteps.includes(aiResponse.nextStep);
-  
+
   if (isNewBookingFlow && (updatedContext as Record<string, any>).booking_saved) {
     console.log(`🔄 New booking flow detected — resetting booking_saved flag`);
     const uc = updatedContext as Record<string, any>;
     uc.booking_saved = false;
     uc.booking_reservation_id = null;
-    // Also clear old booking data so fresh data gets used
     uc.date = aiResponse.extractedData?.date || undefined;
     uc.time = aiResponse.extractedData?.time || undefined;
     uc.guestCount = aiResponse.extractedData?.guestCount || undefined;
@@ -967,18 +943,36 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     uc.phone = aiResponse.extractedData?.phone || undefined;
   }
 
+  // Run BOTH DB writes in parallel — saves ~30-60ms
+  const [{ error: aiMsgErr }] = await Promise.all([
+    supabaseAdmin.from('messages').insert({
+      tenant_id: tenant.id,
+      conversation_id: conversation.id,
+      direction: 'outbound',
+      content: aiResponse.reply,
+      message_type: 'text',
+      channel: 'whatsapp',
+      sender_id: null,
+      status: metaMsgId ? 'sent' : 'failed',
+      ai_generated: true,
+      wa_message_id: metaMsgId,
+    }),
+    supabaseAdmin
+      .from('conversations')
+      .update({
+        context: updatedContext,
+        current_step: aiResponse.nextStep,
+        last_message_at: new Date().toISOString(),
+        escalated: aiResponse.shouldEscalate,
+        escalated_at: aiResponse.shouldEscalate ? new Date().toISOString() : null,
+        escalation_reason: aiResponse.escalationReason || null,
+      })
+      .eq('id', conversation.id),
+  ]);
 
-  await supabaseAdmin
-    .from('conversations')
-    .update({
-      context: updatedContext,
-      current_step: aiResponse.nextStep,
-      last_message_at: new Date().toISOString(),
-      escalated: aiResponse.shouldEscalate,
-      escalated_at: aiResponse.shouldEscalate ? new Date().toISOString() : null,
-      escalation_reason: aiResponse.escalationReason || null,
-    })
-    .eq('id', conversation.id);
+  if (aiMsgErr) {
+    console.error('❌ Meta: failed to save AI outbound message:', aiMsgErr.message);
+  }
 
 
   // 18. Schedule follow-ups for new WhatsApp leads (first message only)
@@ -1034,7 +1028,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     }
   }
 
-  // 18b. Update Lead Score
+  // 18b. Update Lead Score (non-blocking — doesn't affect reply latency)
   if (lead?.id && aiResponse.intent) {
     const scoreMap: Record<string, number> = {
       human_request: 60, complaint: 30, reserve_table: 80, private_event: 85,
@@ -1044,7 +1038,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     const newScore = scoreMap[aiResponse.intent] ?? (lead.lead_score as number);
     const newStatus = newScore >= 80 ? 'hot' : newScore >= 50 ? 'warm' : 'cold';
 
-    await supabaseAdmin
+    void supabaseAdmin
       .from('leads')
       .update({ lead_score: newScore, lead_status: newStatus })
       .eq('id', lead.id);
@@ -1144,13 +1138,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         special_request: contextObj.specialRequests || '',
       };
 
-      // 1. Sync to Google Sheets — await so we can log success/failure
-      try {
-        await appendBookingRow(tenant.id, bookingPayload);
-        console.log(`   ✅ Google Sheets booking row saved successfully.`);
-      } catch (sheetsErr: any) {
-        console.error(`   ❌ Google Sheets booking save FAILED: ${sheetsErr.message}`);
-      }
+      // 1. Sync to Google Sheets (non-blocking — don't delay WhatsApp reply)
+      appendBookingRow(tenant.id, bookingPayload)
+        .then(() => console.log(`   ✅ Google Sheets booking row saved successfully.`))
+        .catch((sheetsErr: any) => console.error(`   ❌ Google Sheets booking save FAILED: ${sheetsErr.message}`));
 
       // 2. Find best matching slot by time — pick the slot whose slot_time is
       //    closest to the requested slotTime. Fall back to creating a default.
@@ -1236,33 +1227,36 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
             .eq('restaurant_id', tenant.id)
             .eq('is_active', true);
 
-          const availableAlternatives: string[] = [];
-          for (const s of (slotsForDate || []) as Array<{ id: string; slot_time: string }>) {
-            if (s.id === slotId) continue;
-            const { data: altAvail } = await supabaseAdmin.rpc('check_seat_availability', {
-              p_slot_id:      s.id,
-              p_booking_date: bookingDate,
-              p_party_size:   guestCount,
-            });
-            const alt = altAvail as { available: boolean } | null;
-            if (alt?.available) {
-              const [h, m] = s.slot_time.split(':');
+          // Check all alternative slots in PARALLEL — eliminates waterfall of sequential RPC calls
+          const otherSlots = ((slotsForDate || []) as Array<{ id: string; slot_time: string }>).filter(s => s.id !== slotId);
+          const altResults = await Promise.all(
+            otherSlots.map(async (s) => {
+              const { data: altAvail } = await supabaseAdmin.rpc('check_seat_availability', {
+                p_slot_id:      s.id,
+                p_booking_date: bookingDate,
+                p_party_size:   guestCount,
+              });
+              return { slot: s, available: (altAvail as { available: boolean } | null)?.available ?? false };
+            })
+          );
+          const availableAlternatives: string[] = altResults
+            .filter(r => r.available)
+            .map(r => {
+              const [h, m] = r.slot.slot_time.split(':');
               const hr = parseInt(h);
               const ampm = hr >= 12 ? 'PM' : 'AM';
               const hr12 = hr > 12 ? hr - 12 : hr;
-              availableAlternatives.push(`${hr12}:${m} ${ampm}`);
-            }
-          }
+              return `${hr12}:${m} ${ampm}`;
+            });
 
           // Send "fully booked" message with alternatives
-          const waToken   = decryptToken(tenant.wa_access_token as string);
           const waPhoneId = tenant.wa_phone_number_id as string;
-          if (waToken && waPhoneId) {
+          if (decryptedAccessToken && waPhoneId) {
             const altText = availableAlternatives.length > 0
               ? `\n\nAlternative slots available: ${availableAlternatives.slice(0, 3).join(', ')}`
               : '\n\nPlease contact us for availability on another date.';
             const fullMsg = `Sorry ${customerName}, our ${slotTime.slice(0,5)} slot on ${bookingDate} is fully booked (${avail.remaining_seats} seats left).${altText}\n\nWould you like to book one of these instead?`;
-            await sendTextMessage(waToken, waPhoneId, cleanPhone, fullMsg).catch(() => {});
+            await sendTextMessage(decryptedAccessToken, waPhoneId, cleanPhone, fullMsg).catch(() => {});
             // Log as outbound message
             try {
               await supabaseAdmin.from('messages').insert({
@@ -1324,11 +1318,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       }
 
       if (bookingWritten && isPrepaid && paymentLink) {
-        const waToken    = decryptToken((tenant as any).wa_access_token) as string;
         const waPhoneId  = (tenant as any).wa_phone_number_id as string;
-        if (waToken && waPhoneId) {
+        if (decryptedAccessToken && waPhoneId) {
           const payMsg = `🎉 Almost done, ${customerName}!\n\nTo confirm your table for ${guestCount} guest${guestCount !== 1 ? 's' : ''} on ${bookingDate}, please pay the ₹${feeRupees} booking fee:\n\n💳 ${paymentLink.short_url}\n\nReservation ID: ${reservationId}`;
-          sendTextMessage(waToken, waPhoneId, customerPhone, payMsg).catch(e =>
+          sendTextMessage(decryptedAccessToken, waPhoneId, customerPhone, payMsg).catch(e =>
             console.error('❌ Failed to send payment link WA message:', (e as Error).message)
           );
         }

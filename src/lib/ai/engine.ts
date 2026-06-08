@@ -282,12 +282,12 @@ export async function processMessageWithAI(
         config: {
           systemInstruction: systemPrompt,
           temperature: 0.7,
-          maxOutputTokens: 500,
+          maxOutputTokens: 400,
           topP: 0.9,
           responseMimeType: 'application/json',
         },
       }),
-      15000 // 15 second hard circuit breaker
+      10000 // 10 second hard circuit breaker — WhatsApp users expect fast replies
     );
 
     if (tenantId && response.usageMetadata?.totalTokenCount) {
