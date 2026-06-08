@@ -649,6 +649,25 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         const isOpen = currentMins >= openMins && currentMins < closeMins;
 
         if (!isOpen) {
+          // Only send the off-hours message ONCE per conversation per closed window.
+          // Check if we already sent one in the last 6 hours for this conversation.
+          const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+          const { data: recentOffHours } = await supabaseAdmin
+            .from('messages')
+            .select('id')
+            .eq('conversation_id', conversation.id)
+            .eq('direction', 'outbound')
+            .eq('ai_generated', false)
+            .gte('created_at', sixHoursAgo)
+            .limit(1)
+            .maybeSingle();
+
+          if (recentOffHours) {
+            // Already told this person we're closed recently — just silently acknowledge, don't repeat
+            console.log(`🌙 Off-hours: already sent off-hours message recently, skipping repeat for ${cleanPhone}`);
+            return;
+          }
+
           const offHoursMsg = (tenant.off_hours_message as string) ||
             `We're currently closed. Our hours are ${hoursStr} (IST). We'll get back to you as soon as we open! 🙏`;
 
@@ -773,9 +792,18 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   const lowerMsgText = msg.text.toLowerCase();
   type AgentRow = { agent_name: string; routing_keywords: string[]; bot_name?: string; bot_personality?: string; system_prompt?: string };
-  const matchedAgent = (agentRows as AgentRow[] | null)?.find(agent =>
-    agent.routing_keywords?.some((kw: string) => lowerMsgText.includes(kw.toLowerCase()))
-  ) ?? null;
+  const activeAgents = (agentRows as AgentRow[] | null) ?? [];
+
+  // 1. Try keyword match first
+  // 2. Fall back to a "default" agent — one with no routing keywords configured (catch-all)
+  // This is how trained behavior flows even without keywords
+  const matchedAgent =
+    activeAgents.find(agent =>
+      agent.routing_keywords?.length > 0 &&
+      agent.routing_keywords.some((kw: string) => lowerMsgText.includes(kw.toLowerCase()))
+    ) ??
+    activeAgents.find(agent => !agent.routing_keywords || agent.routing_keywords.length === 0) ??
+    null;
 
   const baseConfig = getTenantConfig(tenant);
   const tenantConfig = {
