@@ -24,6 +24,8 @@ import { scheduleFollowUp } from '@/lib/followup/engine';
 import { randomUUID } from 'crypto';
 import { triggerCapiEvent } from '@/lib/integrations/capi-trigger';
 import { processCtwaLead, getCampaignContextForAI } from '@/lib/meta-ads/attribution';
+import { notifyAdmin } from '@/lib/alerts/admin';
+import * as Sentry from '@/lib/sentry-stub';
 
 // ── GET: Webhook Verification Handshake ──
 export async function GET(req: NextRequest) {
@@ -934,8 +936,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   // 15. Send reply via Meta
   let metaMsgId: string | null = null;
+  let sendFailureMsg: string | null = null;
   if (!decryptedAccessToken || !tenant.wa_phone_number_id) {
-    console.error(`❌ Meta: missing credentials to send AI reply for tenant ${tenant.id}`);
+    sendFailureMsg = !decryptedAccessToken
+      ? 'missing/undecryptable wa_access_token'
+      : 'missing wa_phone_number_id';
+    console.error(`❌ Meta: ${sendFailureMsg} for tenant ${tenant.id}`);
   } else {
     try {
       const result = await sendTextMessage(
@@ -946,8 +952,29 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       );
       metaMsgId = result.messageId;
     } catch (sendErr) {
-      console.error('❌ Meta: failed to send AI reply:', (sendErr as Error).message);
+      sendFailureMsg = (sendErr as Error).message;
+      console.error('❌ Meta: failed to send AI reply:', sendFailureMsg);
+      Sentry.captureException(sendErr);
     }
+  }
+  if (sendFailureMsg) {
+    // Out-of-band: kick off the admin alert. Don't await — webhook must still
+    // return 200 to Meta within timeout. The notifyAdmin path debounces.
+    notifyAdmin({
+      dedupeKey: `wa-send-fail:${tenant.id}`,
+      subject: `WhatsApp send failed for ${tenant.business_name || tenant.id}`,
+      summary:
+        `AI reply was generated but Meta send failed. Customers messaging this ` +
+        `tenant are not receiving any response. Check tenant credentials and ` +
+        `Vercel logs immediately.`,
+      context: {
+        tenantId: tenant.id,
+        businessName: tenant.business_name,
+        recipient: cleanPhone,
+        error: sendFailureMsg,
+        replyPreview: aiResponse.reply.slice(0, 200),
+      },
+    }).catch((e) => console.error('notifyAdmin failed:', (e as Error).message));
   }
   perf('send_done');
 
@@ -1034,6 +1061,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       status: metaMsgId ? 'sent' : 'failed',
       ai_generated: true,
       wa_message_id: metaMsgId,
+      error_message: sendFailureMsg,
+      failure_reason: sendFailureMsg ? sendFailureMsg.slice(0, 80) : null,
     }),
     supabaseAdmin.rpc('update_conversation_after_ai', {
       p_conv_id:             conversation.id,

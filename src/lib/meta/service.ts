@@ -35,7 +35,21 @@ export function cleanPhone(phone: string): string {
 }
 
 // ── Generate Request Headers ──
+// Meta Cloud API access tokens always start with "EAA". If a caller hands us
+// anything else (encrypted ciphertext that bypassed the version-aware
+// decryptor, a misnamed env var, a half-rotated token) we throw here rather
+// than letting Meta reply 401 "Cannot parse access token" 600ms later. The
+// alerting layer relies on this exception to surface the real cause.
 function headers(accessToken: string): Record<string, string> {
+  if (!/^EAA[A-Za-z0-9]/.test(accessToken)) {
+    const preview = accessToken
+      ? `${accessToken.slice(0, 8)}…(${accessToken.length} chars)`
+      : 'empty';
+    throw new Error(
+      `Meta token shape invalid (expected EAA…, got ${preview}). ` +
+      `Likely cause: decryptToken returned ciphertext or the token env is wrong.`
+    );
+  }
   return {
     'Authorization': `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
