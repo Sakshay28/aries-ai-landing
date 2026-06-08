@@ -62,7 +62,20 @@ export async function POST(req: NextRequest) {
       systemPrompt: draftConfig.system_prompt || '',
     };
 
-    // 4. Run AI engine in sandbox
+    // 4. Debug: log what config is being injected so stale context is immediately visible
+    console.log(`🔍 Playground config [tenant=${tenantId}]:`, {
+      botName: tenantConfig.botName,
+      businessName: tenantConfig.businessName,
+      businessType: tenantConfig.businessType,
+      personality: tenantConfig.botPersonality,
+      faqCount: tenantConfig.customFaqs?.length ?? 0,
+      kbDocCount: tenantConfig.knowledgeDocs?.length ?? 0,
+      kbDocNames: tenantConfig.knowledgeDocs?.map((d: { filename: string }) => d.filename) ?? [],
+      hasSystemPrompt: !!(tenantConfig.systemPrompt?.length),
+      isFirstMessage: tenantConfig.isFirstMessage,
+    });
+
+    // 5. Run AI engine in sandbox
     const aiResponse = await processMessageWithAI(
       message,
       history,

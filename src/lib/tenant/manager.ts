@@ -28,28 +28,86 @@ async function setCache(key: string, tenant: Tenant) {
   await cacheSet(`tenant_cache:${key}`, JSON.stringify(tenant), CACHE_TTL_SECONDS);
 }
 
+// ── Stampede Protection (module-level, referenced by invalidateTenantAllCaches) ──
+const inFlightPromises = new Map<string, Promise<Tenant | null>>();
+
 export async function invalidateCache(tenantId: string) {
-  // Try to get tenant to find all associated keys to invalidate
-  const tenant = await getTenantById(tenantId);
+  // Directly delete ALL tenant_cache keys for this tenantId — no cache read to avoid circular dependency.
+  // We also scan for phone/ig/shopify sub-keys by pattern.
   const redis = getRedisClient();
-  if (!redis || !tenant) return;
-  
-  const keysToDelete = [`tenant_cache:id:${tenantId}`];
-  if (tenant.wa_phone_number_id) keysToDelete.push(`tenant_cache:phone:${tenant.wa_phone_number_id}`);
-  if (tenant.ig_page_id) keysToDelete.push(`tenant_cache:ig:${tenant.ig_page_id}`);
-  if (tenant.shopify_store_url) keysToDelete.push(`tenant_cache:shopify:${tenant.shopify_store_url}`);
-  
+  if (!redis) return;
+
   try {
-    await redis.del(...keysToDelete);
+    // Always delete the id-keyed entry first
+    const keysToDelete = [`tenant_cache:id:${tenantId}`];
+
+    // Pattern scan for any other keys containing this tenantId
+    try {
+      const patternKeys = await redis.keys(`tenant_cache:*${tenantId}*`);
+      for (const k of patternKeys) {
+        if (!keysToDelete.includes(k)) keysToDelete.push(k);
+      }
+    } catch {
+      // KEYS may be unavailable on some Redis configs — proceed with known keys
+    }
+
+    if (keysToDelete.length > 0) await redis.del(...keysToDelete);
   } catch (err) {
     console.warn('⚠️ Failed to invalidate tenant cache:', err);
   }
 }
 
-// ── Stampede Protection ──
-const inFlightPromises = new Map<string, Promise<Tenant | null>>();
-
 // ═══════════════════════════════════════
+// FULL PUBLISH CACHE INVALIDATION
+// ═══════════════════════════════════════
+// Called on every publish action. Nukes ALL cache keys that could
+// cause stale AI context — tenant config, app secrets, RAG results,
+// prompt caches, and knowledge caches.
+export async function invalidateTenantAllCaches(tenantId: string): Promise<void> {
+  const redis = getRedisClient();
+
+  // Always invalidate in-memory stampede protection entries
+  inFlightPromises.delete(`id:${tenantId}`);
+
+  if (!redis) {
+    console.warn(`⚠️ Redis unavailable — skipping full cache flush for tenant ${tenantId}`);
+    return;
+  }
+
+  const patterns = [
+    `tenant_cache:*${tenantId}*`,
+    `tenant:${tenantId}:*`,
+    `app_secret:*`,       // app secrets are short-lived (5 min) but nuke anyway
+    `prompt:${tenantId}:*`,
+    `rag:${tenantId}:*`,
+    `knowledge:${tenantId}:*`,
+    `A:${tenantId}:*`,
+  ];
+
+  const allKeys: string[] = [`tenant_cache:id:${tenantId}`];
+
+  for (const pattern of patterns) {
+    try {
+      const keys = await redis.keys(pattern);
+      for (const k of keys) {
+        if (!allKeys.includes(k)) allKeys.push(k);
+      }
+    } catch {
+      // Pattern scan unavailable — skip
+    }
+  }
+
+  if (allKeys.length > 0) {
+    try {
+      await redis.del(...allKeys);
+      console.log(`🗑️ Flushed ${allKeys.length} cache keys for tenant ${tenantId}`);
+    } catch (err) {
+      console.warn('⚠️ Failed to flush all tenant caches:', err);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────
 // LOOKUP: By Tenant ID
 // ═══════════════════════════════════════
 export async function getTenantById(tenantId: string): Promise<Tenant | null> {
@@ -225,7 +283,8 @@ export async function updateTenant(
   if (error) throw new Error(`Failed to update tenant: ${error.message}`);
 
   const tenant = data as Tenant;
-  invalidateCache(tenantId);
+  // Await cache invalidation — ensures callers get fresh data on next fetch
+  await invalidateCache(tenantId);
   return tenant;
 }
 

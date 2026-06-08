@@ -627,7 +627,7 @@ export default function AISettingsPage() {
     handleSendMessage(undefined, firstPrompt);
   };
 
-  const handleResetChat = () => {
+  const handleResetChat = async () => {
     setChatHistory([]);
     setDemoQueue([]);
     // Scroll back to top of message list after state clears
@@ -637,7 +637,15 @@ export default function AISettingsPage() {
         if (scrollEl) scrollEl.scrollTop = 0;
       }
     });
-    toast.success('Simulation chat reset');
+
+    // Also flush server-side AI caches so the next message uses the latest published config
+    try {
+      await fetch('/api/dashboard/playground/reset', { method: 'DELETE' });
+    } catch {
+      // Non-fatal — local state is already cleared
+    }
+
+    toast.success('Simulation chat reset ✅');
   };
 
   // ── Publish Configuration ──

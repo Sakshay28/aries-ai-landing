@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { enqueueEmbedding } from '@/lib/ai/embedding-queue';
+import { checkRedisRateLimit } from '@/lib/redis/client';
+import { invalidateTenantAllCaches } from '@/lib/tenant/manager';
 import { GoogleGenAI } from '@google/genai';
 
 const TEXT_TYPES = new Set(['txt', 'md', 'csv', 'json', 'html', 'xml']);
-const MAX_BYTES = 500_000; // 500 KB text cap before truncation
+const ALLOWED_EXTS = new Set([...TEXT_TYPES, 'pdf']);
+const MAX_BYTES = 500_000;          // 500 KB text cap before truncation
+const MAX_UPLOAD_BYTES = 5_000_000; // 5 MB hard cap on the uploaded file itself
+const MAX_UPLOADS_PER_DAY = 20;     // per-tenant upload cap (Gemini cost abuse guard)
 
 // ── GET: list all knowledge docs for the tenant ──────────────
 export async function GET() {
@@ -27,11 +32,37 @@ export async function POST(req: NextRequest) {
   const tenantId = await getTenantId();
   if (!tenantId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  // Per-tenant upload rate limit — caps Gemini PDF-extraction cost abuse.
+  const rl = await checkRedisRateLimit(`kb_upload:${tenantId}`, MAX_UPLOADS_PER_DAY, 86400);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Daily knowledge upload limit reached. Try again tomorrow.' },
+      { status: 429 }
+    );
+  }
+
   const form = await req.formData();
   const file = form.get('file') as File | null;
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
 
   const ext = file.name.split('.').pop()?.toLowerCase() ?? 'txt';
+
+  // Reject unsupported types up front (only text formats + pdf are processed).
+  if (!ALLOWED_EXTS.has(ext)) {
+    return NextResponse.json(
+      { error: `Unsupported file type ".${ext}". Allowed: ${[...ALLOWED_EXTS].join(', ')}.` },
+      { status: 400 }
+    );
+  }
+
+  // Hard size cap BEFORE we read the buffer or send anything to Gemini.
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return NextResponse.json(
+      { error: `File too large. Maximum size is ${Math.floor(MAX_UPLOAD_BYTES / 1_000_000)} MB.` },
+      { status: 413 }
+    );
+  }
+
   const isText = TEXT_TYPES.has(ext);
 
   let contentText = '';
@@ -116,5 +147,9 @@ export async function DELETE(req: NextRequest) {
     .eq('tenant_id', tenantId);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Flush all tenant caches so the next AI request won't use stale RAG results
+  await invalidateTenantAllCaches(tenantId);
+
   return NextResponse.json({ success: true });
 }

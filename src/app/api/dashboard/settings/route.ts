@@ -4,9 +4,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { invalidateCache } from '@/lib/tenant/manager';
+import { invalidateTenantAllCaches } from '@/lib/tenant/manager';
 import { getTenantId } from '@/lib/auth/getTenantId';
+import { getCurrentUser, canManageTeam } from '@/lib/auth/getCurrentUser';
 import { encryptToken } from '@/lib/utils/crypto';
+import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 
 export async function GET() {
   const tenantId = await getTenantId();
@@ -48,12 +50,32 @@ export async function GET() {
 
 // PATCH /api/dashboard/settings — Update settings
 export async function PATCH(req: NextRequest) {
-  const tenantId = await getTenantId();
-  if (!tenantId) {
+  // Role gate: changing bot config / webhook / WhatsApp credentials is an
+  // owner/admin action. Staff & viewer members must not be able to repoint
+  // the outbound webhook, poison the system prompt, or swap WA credentials.
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
   }
+  if (!canManageTeam(user.role)) {
+    return NextResponse.json({ success: false, error: 'Forbidden: insufficient permissions' }, { status: 403 });
+  }
+  const tenantId = user.tenant_id;
 
   const body = await req.json();
+
+  // SSRF guard: reject an unsafe outbound_webhook_url before persisting it.
+  if (
+    body.outbound_webhook_url !== undefined &&
+    body.outbound_webhook_url !== null &&
+    body.outbound_webhook_url !== '' &&
+    !isSafeWebhookUrl(body.outbound_webhook_url)
+  ) {
+    return NextResponse.json(
+      { success: false, error: 'Outbound webhook URL must be a public HTTPS address.' },
+      { status: 400 }
+    );
+  }
 
   // Whitelist allowed fields to prevent updating sensitive data
   const allowedFields = [
@@ -114,8 +136,10 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 
-  // Invalidate cached tenant config so changes take effect immediately
-  await invalidateCache(tenantId);
+  // Invalidate ALL cached context (tenant config, app secrets, RAG, prompts) so
+  // changes take effect on the VERY NEXT message — zero stale context.
+  await invalidateTenantAllCaches(tenantId);
+  console.log(`🟢 Publish complete: all caches flushed for tenant ${tenantId}`);
 
   // Mask tokens on response
   if (data && data.wa_access_token) {
