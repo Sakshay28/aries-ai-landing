@@ -491,6 +491,33 @@ function parseAIResponse(text: string): AIResponse {
   }
 }
 
+// ─── Synonym map for offline keyword expansion ────────────────────────────────
+// Expands user query words to include common synonyms before matching.
+// This bridges semantic gaps without an AI provider.
+const OFFLINE_SYNONYMS: Record<string, string[]> = {
+  cost:     ['price', 'pricing', 'rate', 'charge', 'fee', 'charges'],
+  price:    ['cost', 'pricing', 'rate', 'charge', 'fee'],
+  pricing:  ['cost', 'price', 'rate', 'charge', 'fee'],
+  rate:     ['cost', 'price', 'pricing', 'charge', 'fee'],
+  charge:   ['cost', 'price', 'pricing', 'rate', 'fee'],
+  plan:     ['pricing', 'package', 'subscription', 'tier', 'option'],
+  support:  ['help', 'assist', 'service', 'languages', 'available'],
+  feature:  ['capability', 'function', 'service', 'offer', 'option'],
+  connect:  ['integrate', 'link', 'sync', 'attach', 'add', 'setup'],
+  language: ['support', 'multilingual', 'hindi', 'english', 'hinglish'],
+  book:     ['reserve', 'appointment', 'schedule', 'slot', 'booking'],
+  hours:    ['timing', 'open', 'schedule', 'time', 'available'],
+};
+
+function expandSynonyms(words: string[]): string[] {
+  const expanded = new Set(words);
+  for (const w of words) {
+    const syns = OFFLINE_SYNONYMS[w];
+    if (syns) syns.forEach(s => expanded.add(s));
+  }
+  return Array.from(expanded);
+}
+
 // ═══════════════════════════════════════
 // OFFLINE KB/FAQ SEARCH — No AI Required
 // ═══════════════════════════════════════
@@ -501,17 +528,36 @@ function offlineKBSearch(
   message: string,
   config: TenantAIConfig
 ): string | null {
-  const lower = message.toLowerCase().trim();
+  // Strip punctuation and lowercase the message for clean matching
+  const lower = message.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim();
   if (!lower) return null;
 
-  // 1. Search custom FAQs first (exact substring match)
+  // 1. Search custom FAQs first — bidirectional keyword match with synonym expansion
+  const STOP_WORDS = new Set(['what', 'when', 'where', 'which', 'who', 'how', 'why', 'the', 'a', 'an', 'is', 'are', 'was', 'were', 'do', 'does', 'can', 'will', 'your', 'you', 'have', 'has', 'had', 'for', 'from', 'with', 'not', 'and', 'but', 'or', 'of', 'to', 'in', 'at', 'on', 'by']);
+
   if (config.customFaqs && config.customFaqs.length > 0) {
     for (const faq of config.customFaqs) {
-      const qLower = faq.question.toLowerCase();
-      // Check if significant words from the question appear in the message
-      const qWords = qLower.split(/\s+/).filter(w => w.length > 3);
-      const matchCount = qWords.filter(w => lower.includes(w)).length;
-      if (qWords.length > 0 && matchCount >= Math.ceil(qWords.length * 0.5)) {
+      // Combine question + answer for richer matching surface (punctuation stripped)
+      const qLower = faq.question.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+      const aLower = faq.answer.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+      const combinedText = `${qLower} ${aLower}`;
+
+      // Meaningful words from the FAQ question — strip stop words & short tokens
+      const qWords = qLower.split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w));
+      // Words from the user message — expanded with synonyms
+      const mWordsRaw = lower.split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w));
+      const mWords = expandSynonyms(mWordsRaw);
+
+      if (qWords.length === 0 || mWords.length === 0) continue;
+
+      // Score A: how many FAQ-question words appear in the message (with synonyms)
+      const scoreA = qWords.filter(w => mWords.includes(w)).length / qWords.length;
+      // Score B: how many message words (with synonyms) appear in the combined FAQ text
+      const scoreB = mWords.filter(w => combinedText.includes(w)).length / mWords.length;
+      // Take the maximum of both directions
+      const score = Math.max(scoreA, scoreB);
+
+      if (score >= 0.4) {
         return faq.answer;
       }
     }
