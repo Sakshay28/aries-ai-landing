@@ -4,7 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { enqueueEmbedding } from '@/lib/ai/embedding-queue';
 import { checkRedisRateLimit } from '@/lib/redis/client';
 import { invalidateTenantAllCaches } from '@/lib/tenant/manager';
-import { GoogleGenAI } from '@google/genai';
+import { getAI } from '@/lib/ai/client';
 
 const TEXT_TYPES = new Set(['txt', 'md', 'csv', 'json', 'html', 'xml']);
 const ALLOWED_EXTS = new Set([...TEXT_TYPES, 'pdf']);
@@ -111,8 +111,7 @@ export async function POST(req: NextRequest) {
     contentText = raw.length > MAX_BYTES ? raw.slice(0, MAX_BYTES) + '\n...[truncated]' : raw;
   } else if (ext === 'pdf') {
     try {
-      const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      const genAIResponse = await genAI.models.generateContent({
+      const genAIResponse = await getAI().models.generateContent({
         model: 'gemini-2.5-flash',
         contents: [
           {

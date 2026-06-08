@@ -9,21 +9,13 @@
 //  4. Never crashes — always has a graceful fallback
 // ═══════════════════════════════════════════════════════════
 
-import { GoogleGenAI } from '@google/genai';
 import type { ConversationContext } from '@/lib/types';
 import * as Sentry from '@/lib/sentry-stub';
 import { withTimeout } from '@/lib/utils/safety';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { guardInput, guardOutput, shouldRedirectToHuman, HALLUCINATION_REDIRECT, SYSTEM_PROMPT_SAFETY_APPENDIX } from '@/lib/ai/guardrails';
-
-let _ai: GoogleGenAI | null = null;
-function getAI(): GoogleGenAI {
-  if (!_ai) {
-    _ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-  }
-  return _ai;
-}
-const MODEL = 'gemini-2.0-flash';
+import { getAI } from '@/lib/ai/client';
+const MODEL = 'gemini-2.5-flash';
 
 // ── Response Types ──
 export interface AIResponse {

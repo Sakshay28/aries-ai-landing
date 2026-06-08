@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════
 // RAG (Retrieval-Augmented Generation) Pipeline
 // ═══════════════════════════════════════════════════════════
-// Uses Gemini text-embedding-004 (768 dims) + pgvector for
+// Uses Vertex text-embedding-005 (768 dims) + pgvector for
 // semantic similarity search over tenant knowledge_docs.
 //
 // Usage:
@@ -9,16 +9,10 @@
 //   // inject docs into system prompt instead of bulk loading all docs
 // ═══════════════════════════════════════════════════════════
 
-import { GoogleGenAI } from '@google/genai';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { getAI } from '@/lib/ai/client';
 
-let _ai: GoogleGenAI | null = null;
-function getAI(): GoogleGenAI {
-  if (!_ai) _ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-  return _ai;
-}
-
-const EMBED_MODEL = 'gemini-embedding-2';
+const EMBED_MODEL = 'text-embedding-005';
 
 // ── Generate a 768-dim embedding vector for a text string ──
 export async function embedText(text: string): Promise<number[]> {

@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { GoogleGenAI } from '@google/genai';
-
-let _ai: GoogleGenAI | null = null;
-function getAI(): GoogleGenAI {
-  if (!_ai) _ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-  return _ai;
-}
+import { getAI } from '@/lib/ai/client';
 
 export interface AISummaryBrief {
   conversationGoal: string;
