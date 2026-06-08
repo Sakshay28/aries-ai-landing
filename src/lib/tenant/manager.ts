@@ -41,6 +41,37 @@ export async function invalidateCache(tenantId: string) {
     // Always delete the id-keyed entry first
     const keysToDelete = [`tenant_cache:id:${tenantId}`];
 
+    // Read cached tenant directly from Redis to nuke its sub-keys
+    try {
+      const cachedStr = await redis.get(`tenant_cache:id:${tenantId}`);
+      if (cachedStr) {
+        const cachedTenant = JSON.parse(cachedStr);
+        if (cachedTenant.wa_phone_number_id) {
+          keysToDelete.push(`tenant_cache:phone:${cachedTenant.wa_phone_number_id}`);
+        }
+        if (cachedTenant.ig_page_id) {
+          keysToDelete.push(`tenant_cache:ig:${cachedTenant.ig_page_id}`);
+        }
+        if (cachedTenant.shopify_store_url) {
+          keysToDelete.push(`tenant_cache:shopify:${cachedTenant.shopify_store_url}`);
+        }
+      }
+    } catch {}
+
+    // Direct DB query (non-cached) to nuke current sub-keys
+    try {
+      const { data } = await supabaseAdmin
+        .from('tenants')
+        .select('wa_phone_number_id, ig_page_id, shopify_store_url')
+        .eq('id', tenantId)
+        .single();
+      if (data) {
+        if (data.wa_phone_number_id) keysToDelete.push(`tenant_cache:phone:${data.wa_phone_number_id}`);
+        if (data.ig_page_id) keysToDelete.push(`tenant_cache:ig:${data.ig_page_id}`);
+        if (data.shopify_store_url) keysToDelete.push(`tenant_cache:shopify:${data.shopify_store_url}`);
+      }
+    } catch {}
+
     // Pattern scan for any other keys containing this tenantId
     try {
       const patternKeys = await redis.keys(`tenant_cache:*${tenantId}*`);
@@ -74,6 +105,39 @@ export async function invalidateTenantAllCaches(tenantId: string): Promise<void>
     return;
   }
 
+  const allKeys: string[] = [`tenant_cache:id:${tenantId}`];
+
+  // 1. Read cached tenant directly from Redis to nuke its sub-keys
+  try {
+    const cachedStr = await redis.get(`tenant_cache:id:${tenantId}`);
+    if (cachedStr) {
+      const cachedTenant = JSON.parse(cachedStr);
+      if (cachedTenant.wa_phone_number_id) {
+        allKeys.push(`tenant_cache:phone:${cachedTenant.wa_phone_number_id}`);
+      }
+      if (cachedTenant.ig_page_id) {
+        allKeys.push(`tenant_cache:ig:${cachedTenant.ig_page_id}`);
+      }
+      if (cachedTenant.shopify_store_url) {
+        allKeys.push(`tenant_cache:shopify:${cachedTenant.shopify_store_url}`);
+      }
+    }
+  } catch {}
+
+  // 2. Direct DB query (non-cached) to nuke current sub-keys
+  try {
+    const { data } = await supabaseAdmin
+      .from('tenants')
+      .select('wa_phone_number_id, ig_page_id, shopify_store_url')
+      .eq('id', tenantId)
+      .single();
+    if (data) {
+      if (data.wa_phone_number_id) allKeys.push(`tenant_cache:phone:${data.wa_phone_number_id}`);
+      if (data.ig_page_id) allKeys.push(`tenant_cache:ig:${data.ig_page_id}`);
+      if (data.shopify_store_url) allKeys.push(`tenant_cache:shopify:${data.shopify_store_url}`);
+    }
+  } catch {}
+
   const patterns = [
     `tenant_cache:*${tenantId}*`,
     `tenant:${tenantId}:*`,
@@ -83,8 +147,6 @@ export async function invalidateTenantAllCaches(tenantId: string): Promise<void>
     `knowledge:${tenantId}:*`,
     `A:${tenantId}:*`,
   ];
-
-  const allKeys: string[] = [`tenant_cache:id:${tenantId}`];
 
   for (const pattern of patterns) {
     try {
