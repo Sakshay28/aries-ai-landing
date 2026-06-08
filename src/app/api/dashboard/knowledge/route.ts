@@ -24,7 +24,25 @@ export async function GET() {
     .order('created_at', { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true, data: data || [], docs: data || [] });
+
+  // Generate time-limited signed URLs (1 hour) for any doc stored as a path.
+  // Docs uploaded after the switch store a storage path in file_url; older docs
+  // stored with a full public URL are returned as-is until re-uploaded.
+  const SIGNED_URL_EXPIRY_SECS = 3600;
+  const docs = await Promise.all(
+    (data || []).map(async (doc) => {
+      const storagePath = doc.file_url as string | null;
+      if (storagePath && !storagePath.startsWith('http')) {
+        const { data: signed } = await supabaseAdmin.storage
+          .from('knowledge-docs')
+          .createSignedUrl(storagePath, SIGNED_URL_EXPIRY_SECS);
+        return { ...doc, file_url: signed?.signedUrl ?? null };
+      }
+      return doc;
+    })
+  );
+
+  return NextResponse.json({ success: true, data: docs, docs });
 }
 
 // ── POST: upload a file, extract text, store ─────────────────
@@ -78,10 +96,13 @@ export async function POST(req: NextRequest) {
     .upload(storagePath, buffer, { contentType: file.type || 'application/octet-stream', upsert: false });
 
   if (!uploadErr) {
-    const { data: urlData } = supabaseAdmin.storage
-      .from('knowledge-docs')
-      .getPublicUrl(storagePath);
-    fileUrl = urlData?.publicUrl ?? null;
+    // Store the storage path, not a permanent public URL.
+    // Knowledge docs may contain proprietary content (menus, SOPs, pricing).
+    // Public URLs are guessable from the path pattern; signed URLs (generated
+    // on read with a 1-hour expiry) require server-side generation and are
+    // not accessible to unauthenticated parties. The GET handler now generates
+    // signed URLs on each listing request so the dashboard can display/download files.
+    fileUrl = storagePath;
   }
 
   // ── Extract text for supported types ────────────────────
@@ -127,6 +148,9 @@ export async function POST(req: NextRequest) {
   if (data?.id && contentText) {
     enqueueEmbedding({ docId: data.id, contentText });
   }
+
+  // Flush all tenant caches so the next AI request immediately uses the new document
+  await invalidateTenantAllCaches(tenantId);
 
   return NextResponse.json({ success: true, data });
 }

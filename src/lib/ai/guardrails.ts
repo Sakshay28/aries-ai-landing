@@ -40,12 +40,12 @@ const OUT_OF_SCOPE_PATTERNS: RegExp[] = [
 // causing legitimate AI replies to be silently replaced with the fallback.
 const LEAKAGE_PATTERNS: RegExp[] = [
   /you\s+are\s+\S+,\s+an\s+AI\s+assistant\s+for\s+\S/i, // "You are Aria, an AI assistant for X"
-  /^PERSONALITY:\s/im,       // Only at line start — exact system prompt header
-  /^BUSINESS INFO:\s/im,     // Only at line start
-  /^YOUR JOB:\s*$/im,        // Only at line start, standalone
-  /^RULES:\s*$/im,           // Exact standalone header only — not "house rules:", "our rules:", etc.
-  /^SMART RULES\s*\(/im,     // Only at line start with context
-  /^CONVERSATION STATE:\s/im, // Only at line start
+  /^PERSONALITY:/m,          // Case-sensitive, start of line
+  /^BUSINESS INFO:/m,        // Case-sensitive, start of line
+  /^YOUR JOB:/m,             // Case-sensitive, start of line
+  /^RULES:/m,                // Case-sensitive, start of line
+  /^SMART RULES/m,           // Case-sensitive, start of line
+  /^CONVERSATION STATE:/m,   // Case-sensitive, start of line
 ];
 
 // ─── SANITIZE INPUT ───────────────────────────────────────────

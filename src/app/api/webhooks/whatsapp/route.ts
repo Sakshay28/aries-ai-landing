@@ -8,11 +8,12 @@
 
 import { NextRequest, NextResponse, after } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { isDuplicateMessage, getRedisClient } from '@/lib/redis/client';
+import { isDuplicateMessage, getRedisClient, acquireOffHoursLock } from '@/lib/redis/client';
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
 import { appendLeadRow, appendBookingRow } from '@/lib/integrations/google-sheets';
 import { parseMetaWebhook, sendTextMessage, getMediaUrl, verifySignature, markMessageAsRead } from '@/lib/meta/service';
+import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
 import { decryptToken } from '@/lib/utils/crypto';
@@ -115,8 +116,12 @@ export async function POST(req: NextRequest) {
   // Previously this hard-rejected when META_APP_SECRET was missing, which silently
   // killed ALL replies whenever the env var wasn't set.
   if (appSecretToUse) {
-    if (signature && !verifySignature(rawBody, signature, appSecretToUse)) {
-      console.warn('❌ Meta Webhook: signature verification failed for phone_number_id:', phoneNumberId);
+    // A secret is configured → require a signature that is BOTH present AND valid.
+    // The previous `signature && !verify` form let an attacker bypass verification
+    // entirely just by omitting the x-hub-signature-256 header (signature falsy →
+    // condition short-circuits to false → request accepted unsigned).
+    if (!signature || !verifySignature(rawBody, signature, appSecretToUse)) {
+      console.warn('❌ Meta Webhook: missing or invalid signature for phone_number_id:', phoneNumberId);
       return new Response('Unauthorized', { status: 401 });
     }
   } else {
@@ -129,6 +134,19 @@ export async function POST(req: NextRequest) {
   const parsed = parseMetaWebhook(body);
   if (!parsed) {
     return NextResponse.json({ ok: true });
+  }
+
+  // Replay-attack guard: reject messages with a timestamp more than 5 minutes old.
+  // Meta's webhooks include a Unix timestamp on every message. Even if the dedup
+  // Redis key has expired, a replayed signed message from days/months ago is rejected
+  // here before any DB writes or AI invocations are triggered.
+  // Status updates don't carry a user-level timestamp — skip the check for those.
+  if (!parsed.isStatusUpdate && parsed.timestamp) {
+    const ageMs = Math.abs(Date.now() - parsed.timestamp);
+    if (ageMs > 5 * 60 * 1000) {
+      console.warn(`⏱️ Meta Webhook: stale message rejected (age=${Math.round(ageMs / 1000)}s), phone_number_id=${parsed.appPhoneId}`);
+      return NextResponse.json({ ok: true }); // return 200 so Meta doesn't retry
+    }
   }
 
   // Defer heavy execution using Next.js after() to return 200 quickly
@@ -220,6 +238,23 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     supabaseAdmin.from('leads').select('*').eq('tenant_id', tenant.id).eq('phone', cleanPhone).maybeSingle(),
     supabaseAdmin.from('conversations').select('*').eq('tenant_id', tenant.id).eq('sender_id', cleanPhone).eq('is_active', true).order('created_at', { ascending: false }).limit(1).maybeSingle(),
   ]);
+
+  // Session expiry: if the last message in an active conversation was >24h ago, close it
+  // and start fresh. This allows the welcome message to trigger again for returning customers
+  // and prevents stale booking context from polluting new sessions.
+  const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000;
+  let sessionExpired = false;
+  if (existingConv?.last_message_at) {
+    const idleMs = Date.now() - new Date(existingConv.last_message_at as string).getTime();
+    if (idleMs > SESSION_EXPIRY_MS) {
+      sessionExpired = true;
+      void supabaseAdmin.from('conversations').update({ is_active: false }).eq('id', existingConv.id);
+      console.log(`⏰ Session expired for ${cleanPhone} (idle ${Math.round(idleMs / 3600000)}h) — starting fresh session`);
+    }
+  }
+  // activeExistingConv is null when no session exists OR when the previous session expired.
+  // isFirstMessage and conversation creation both derive from this.
+  const activeExistingConv = sessionExpired ? null : existingConv;
 
   if (existingLead) {
     lead = existingLead;
@@ -376,12 +411,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // 5. Resolve/Create Conversation (initial fetch was done in parallel above)
   let conversation: Record<string, any> | null = null;
 
-  if (existingConv) {
-    conversation = existingConv;
+  if (activeExistingConv) {
+    conversation = activeExistingConv;
     void supabaseAdmin
       .from('conversations')
       .update({ last_message_at: new Date().toISOString() })
-      .eq('id', existingConv.id);
+      .eq('id', activeExistingConv.id);
   } else {
     const { data: newConv, error: convInsertErr } = await supabaseAdmin
       .from('conversations')
@@ -522,8 +557,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     .eq('id', conversation.id);
 
   // 9. Fire Outbound Integration Webhook
+  // SSRF guard: only fire to public HTTPS hosts. Blocks cloud-metadata,
+  // loopback, and private-range targets a tenant could set in Settings.
   const outboundUrl = tenant.outbound_webhook_url;
-  if (outboundUrl) {
+  if (outboundUrl && !isSafeWebhookUrl(outboundUrl)) {
+    console.warn('🚫 Outbound webhook blocked by SSRF guard:', outboundUrl);
+  } else if (outboundUrl) {
     fetch(outboundUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -618,84 +657,85 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   }
 
 
-  // 10.5. Off-hours check — send off_hours_message and optionally capture lead
-  // Previously the bot confirmed bookings at 3am. Now we respect working_hours.
+  // 10.5. Business hours — compute ONCE, reused by both the off-hours guard and the AI prompt.
+  // Hoisted outside the try-catch so both sections share the same computed values.
+  let isBusinessOpen: boolean | undefined;
+  let businessCurrentTimeIST: string | undefined;
+  let businessHoursStr: string | undefined;
+
   try {
     const workingHours = tenant.working_hours as Record<string, string> | null;
     if (workingHours) {
-      // Determine IST time (UTC+5:30)
       const nowUTC  = new Date();
       const nowIST  = new Date(nowUTC.getTime() + 5.5 * 60 * 60 * 1000);
       const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
       const todayKey = dayKeys[nowIST.getUTCDay()];
       const currentMins = nowIST.getUTCHours() * 60 + nowIST.getUTCMinutes();
 
-      // Find applicable hours — try specific day first, then ranges like "mon-fri"
-      let hoursStr: string | undefined;
       for (const [key, val] of Object.entries(workingHours)) {
         const keys = key.toLowerCase().split('-');
         if (keys.includes(todayKey) ||
             (keys.length === 2 &&
               dayKeys.indexOf(keys[0]) <= dayKeys.indexOf(todayKey) &&
               dayKeys.indexOf(todayKey) <= dayKeys.indexOf(keys[1]))) {
-          hoursStr = val as string;
+          businessHoursStr = val as string;
           break;
         }
       }
 
-      if (hoursStr) {
-        const [openStr, closeStr] = hoursStr.split('-');
-        const toMins = (t: string) => {
-          const [h, m] = t.trim().split(':').map(Number);
-          return h * 60 + (m || 0);
-        };
-        const openMins  = toMins(openStr);
-        const closeMins = toMins(closeStr);
-        const isOpen = currentMins >= openMins && currentMins < closeMins;
-
-        if (!isOpen) {
-          // Only send the off-hours message ONCE per conversation per closed window.
-          // Check if we already sent one in the last 6 hours for this conversation.
-          const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
-          const { data: recentOffHours } = await supabaseAdmin
-            .from('messages')
-            .select('id')
-            .eq('conversation_id', conversation.id)
-            .eq('direction', 'outbound')
-            .eq('ai_generated', false)
-            .gte('created_at', sixHoursAgo)
-            .limit(1)
-            .maybeSingle();
-
-          if (recentOffHours) {
-            // Already sent the closed notice — let AI handle the conversation naturally.
-            // Returning here caused Issue #3: all subsequent messages while closed were
-            // silently dropped, creating a dead conversation.
-            console.log(`🌙 Off-hours: notice already sent for ${cleanPhone}, continuing with AI`);
-            // NOTE: intentionally does NOT return — falls through to AI section below.
-          } else {
-            // First time telling this person we're closed — send notice and stop.
-            const offHoursMsg = (tenant.off_hours_message as string) ||
-              `We're currently closed. Our hours are ${hoursStr} (IST). We'll get back to you as soon as we open! 🙏`;
-
-            if (decryptedAccessToken && tenant.wa_phone_number_id) {
-              await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, offHoursMsg);
-              await supabaseAdmin.from('messages').insert({
-                tenant_id: tenant.id, conversation_id: conversation.id,
-                direction: 'outbound', content: offHoursMsg,
-                message_type: 'text', channel: 'whatsapp',
-                status: 'sent', ai_generated: false,
-              });
-            }
-            console.log(`🌙 Off-hours: sent off-hours notice to ${cleanPhone}`);
-            return;
-          }
-        }
+      if (businessHoursStr) {
+        const [openStr, closeStr] = businessHoursStr.split('-');
+        const toMins = (t: string) => { const [h, m] = t.trim().split(':').map(Number); return h * 60 + (m || 0); };
+        isBusinessOpen = currentMins >= toMins(openStr) && currentMins < toMins(closeStr);
+        businessCurrentTimeIST = `${String(nowIST.getUTCHours()).padStart(2, '0')}:${String(nowIST.getUTCMinutes()).padStart(2, '0')}`;
       }
     }
   } catch (offHoursErr) {
-    // Non-fatal — don't block the message if hours check fails
-    console.warn('⚠️ Off-hours check failed (non-fatal):', offHoursErr);
+    console.warn('⚠️ Business hours check failed (non-fatal):', offHoursErr);
+  }
+
+  // Off-hours guard: send ONE notice per 6-hour closed window per conversation.
+  // Race-safe: acquireOffHoursLock uses Redis SET NX (atomic) — only the FIRST
+  // concurrent request can acquire the lock; all others see 'already_sent'.
+  if (isBusinessOpen === false && businessHoursStr) {
+    const lockResult = await acquireOffHoursLock(conversation.id);
+
+    let offHoursNoticeSent: boolean;
+    if (lockResult === 'use_db_fallback') {
+      // Redis unavailable — fall back to DB query (small race window is acceptable)
+      const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+      const { data: recentMsg } = await supabaseAdmin
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', conversation.id)
+        .eq('direction', 'outbound')
+        .eq('ai_generated', false)
+        .gte('created_at', sixHoursAgo)
+        .limit(1)
+        .maybeSingle();
+      offHoursNoticeSent = !!recentMsg;
+    } else {
+      offHoursNoticeSent = lockResult === 'already_sent';
+    }
+
+    if (offHoursNoticeSent) {
+      console.log(`🌙 Off-hours: notice already sent for ${cleanPhone}, continuing with AI`);
+      // intentionally falls through — AI handles subsequent closed-hours messages
+    } else {
+      const offHoursMsg = (tenant.off_hours_message as string) ||
+        `We're currently closed. Our hours are ${businessHoursStr} (IST). We'll get back to you as soon as we open! 🙏`;
+      if (decryptedAccessToken && tenant.wa_phone_number_id) {
+        await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, offHoursMsg);
+        await supabaseAdmin.from('messages').insert({
+          tenant_id: tenant.id, conversation_id: conversation.id,
+          direction: 'outbound', content: offHoursMsg,
+          message_type: 'text', channel: 'whatsapp',
+          status: 'sent', ai_generated: false,
+        });
+      }
+      console.log(`🌙 Off-hours: sent off-hours notice to ${cleanPhone}`);
+      return;
+    }
   }
 
   // 11. AI Cost Cap Checks
@@ -710,7 +750,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // We use existingConv === null (newly created conversation) rather than
   // message_count because the counter is incremented non-blocking (void rpc),
   // so rapid second/third messages still see count=0 and falsely trigger welcome.
-  const isFirstMessage = existingConv === null;
+  const isFirstMessage = activeExistingConv === null;
 
   // 12. Flow Engine Execution
   try {
@@ -744,6 +784,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       .from('messages')
       .select('direction, content')
       .eq('conversation_id', conversation.id)
+      // Defence-in-depth: also filter by tenant_id so a race-condition that assigns
+      // a conversation to the wrong tenant never bleeds another tenant's history into
+      // this AI context. The admin client bypasses RLS so we enforce it explicitly.
+      .eq('tenant_id', tenant.id)
       .order('created_at', { ascending: false })
       .limit(10),
     supabaseAdmin
@@ -822,7 +866,13 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const tenantConfig = {
     ...baseConfig,
     isFirstMessage: isFirstMessageForAI,
-    ctwaContext, // Campaign context injected for ad-sourced leads
+    ctwaContext,
+    // Business hours status — AI uses this to avoid confirming bookings while closed
+    ...(businessHoursStr !== undefined ? {
+      businessIsOpen: isBusinessOpen ?? true,
+      businessCurrentTime: businessCurrentTimeIST,
+      businessHours: businessHoursStr,
+    } : {}),
     smartRules: (smartRulesRows || []) as Array<{ name: string; trigger_source: string; ai_summary: string }>,
     knowledgeDocs: knowledgeRows,
     // Inject existing booking so AI can handle cancel/modify requests
@@ -901,38 +951,36 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   }
   perf('send_done');
 
-  // 16 + 17. Save outbound message + build context update IN PARALLEL
-  // Context computation is CPU-only (no I/O), so we prepare it while the insert runs.
-  const CONTEXT_FIELDS = [
+  // 16 + 17. Save outbound message + update conversation context IN PARALLEL
+  //
+  // Context update uses an atomic PostgreSQL RPC (update_conversation_after_ai) that
+  // merges via the || JSONB operator inside a single UPDATE statement.  PostgreSQL's
+  // row-level locking serialises concurrent calls on the same conversation row, so
+  // concurrent AI calls each accumulate their extracted fields rather than overwriting.
+  //
+  // DO NOT revert to .update({ context: fullObject }) — that is a full-overwrite
+  // read-modify-write pattern and loses fields under concurrent load (proven by
+  // conversation-race-test.mjs, 6/6 runs with field loss at 3+ concurrent messages).
+
+  const BOOKING_CONTEXT_FIELDS = [
     'name', 'phone', 'email', 'guestCount', 'date', 'time', 'occasion',
     'eventType', 'companyName', 'specialRequests',
     'booking_saved', 'booking_reservation_id',
     'booking_date', 'booking_time', 'party_size',
-    'pending_flow_node',
-    'inactivity_flow_fired_',
   ];
 
   const prevContext = context as Record<string, any>;
-  const updatedContext: Record<string, any> = {};
+  const extracted = (aiResponse.extractedData as Record<string, any>) ?? {};
 
-  for (const [k, v] of Object.entries(prevContext)) {
-    if (k.startsWith('inactivity_flow_fired_') || k === 'pending_flow_node') {
-      updatedContext[k] = v;
-    }
+  // Build top-level context delta: only newly extracted non-null values.
+  // Existing fields not in the delta are preserved by PostgreSQL's || operator.
+  // inactivity_flow_fired_* and pending_flow_node are NOT in the delta — they
+  // survive untouched via ||.
+  const contextDelta: Record<string, any> = {};
+  for (const field of BOOKING_CONTEXT_FIELDS) {
+    const v = extracted[field];
+    if (v !== null && v !== undefined && v !== 'null') contextDelta[field] = v;
   }
-
-  for (const field of CONTEXT_FIELDS) {
-    if (field.endsWith('_')) continue;
-    const newVal = (aiResponse.extractedData as Record<string, any>)?.[field];
-    const oldVal = prevContext[field];
-    const val = (newVal !== null && newVal !== undefined && newVal !== 'null') ? newVal : oldVal;
-    if (val !== undefined && val !== null && val !== 'null') {
-      updatedContext[field] = val;
-    }
-  }
-
-  if (prevContext.booking_saved) updatedContext.booking_saved = prevContext.booking_saved;
-  if (prevContext.booking_reservation_id) updatedContext.booking_reservation_id = prevContext.booking_reservation_id;
 
   const newBookingIntents = ['reserve_table', 'private_event', 'corporate_booking'];
   const newBookingSteps = ['ask_guests', 'ask_date', 'ask_time', 'ask_name', 'ask_phone'];
@@ -940,16 +988,37 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     newBookingIntents.includes(aiResponse.intent) ||
     newBookingSteps.includes(aiResponse.nextStep);
 
-  if (isNewBookingFlow && (updatedContext as Record<string, any>).booking_saved) {
+  // Booking reset: new booking started after a previous one completed.
+  // Explicitly zero out old booking fields in the delta so || overwrites them.
+  const isBookingReset = isNewBookingFlow && !!prevContext.booking_saved;
+  if (isBookingReset) {
     console.log(`🔄 New booking flow detected — resetting booking_saved flag`);
-    const uc = updatedContext as Record<string, any>;
-    uc.booking_saved = false;
-    uc.booking_reservation_id = null;
-    uc.date = aiResponse.extractedData?.date || undefined;
-    uc.time = aiResponse.extractedData?.time || undefined;
-    uc.guestCount = aiResponse.extractedData?.guestCount || undefined;
-    uc.name = aiResponse.extractedData?.name || undefined;
-    uc.phone = aiResponse.extractedData?.phone || undefined;
+    contextDelta.booking_saved = false;
+    contextDelta.booking_reservation_id = null;
+    for (const f of ['date', 'time', 'guestCount', 'name', 'phone']) {
+      contextDelta[f] = extracted[f] ?? null;
+    }
+  }
+
+  // Build booking_state delta: only the fields extracted by THIS message.
+  // The DB function merges this into the existing booking_state atomically.
+  const bsFieldMap: [string, string][] = [
+    ['guest_count', 'guestCount'],
+    ['date',        'date'],
+    ['time',        'time'],
+    ['name',        'name'],
+    ['phone',       'phone'],
+  ];
+  const bookingStateDelta: Record<string, unknown> = {};
+  for (const [bsKey, extractKey] of bsFieldMap) {
+    const v = extracted[extractKey];
+    if (v && v !== 'null') bookingStateDelta[bsKey] = v;
+  }
+  if (contextDelta.booking_saved) {
+    bookingStateDelta.booking_confirmed = true;
+    if (contextDelta.booking_reservation_id) {
+      bookingStateDelta.reservation_id = contextDelta.booking_reservation_id;
+    }
   }
 
   // Run BOTH DB writes in parallel — saves ~30-60ms
@@ -966,17 +1035,17 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       ai_generated: true,
       wa_message_id: metaMsgId,
     }),
-    supabaseAdmin
-      .from('conversations')
-      .update({
-        context: updatedContext,
-        current_step: aiResponse.nextStep,
-        last_message_at: new Date().toISOString(),
-        escalated: aiResponse.shouldEscalate,
-        escalated_at: aiResponse.shouldEscalate ? new Date().toISOString() : null,
-        escalation_reason: aiResponse.escalationReason || null,
-      })
-      .eq('id', conversation.id),
+    supabaseAdmin.rpc('update_conversation_after_ai', {
+      p_conv_id:             conversation.id,
+      p_context_delta:       contextDelta,
+      p_booking_state_delta: bookingStateDelta,
+      p_booking_state_reset: isBookingReset,
+      p_current_step:        aiResponse.nextStep,
+      p_last_message_at:     new Date().toISOString(),
+      p_escalated:           aiResponse.shouldEscalate,
+      p_escalated_at:        aiResponse.shouldEscalate ? new Date().toISOString() : null,
+      p_escalation_reason:   aiResponse.escalationReason || null,
+    }),
   ]);
 
   if (aiMsgErr) {
@@ -1054,6 +1123,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   }
 
   // 19. Auto-Save AI Booking to Database & Google Sheets
+  const updatedContext = { ...context, ...contextDelta };
   const contextObj = updatedContext as Record<string, any>;
   const bookingDateRaw = contextObj.date || contextObj.booking_date;
   const bookingTimeRaw = contextObj.time || contextObj.booking_time;

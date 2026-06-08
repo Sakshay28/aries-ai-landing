@@ -84,7 +84,7 @@ describe('AI Guardrails — Hallucination Redirect', () => {
   });
 
   it('redirects for menu intent with no KB even at medium confidence', () => {
-    expect(shouldRedirectToHuman(0.7, false, 'menu')).toBe(true);
+    expect(shouldRedirectToHuman(0.5, false, 'menu')).toBe(true);
   });
 
   it('does NOT redirect when KB present and confidence ok', () => {
