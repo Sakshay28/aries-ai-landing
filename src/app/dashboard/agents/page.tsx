@@ -209,6 +209,10 @@ export default function AISettingsPage() {
   const [providerDown, setProviderDown] = useState(false);
   const [providerError, setProviderError] = useState<string | null>(null);
 
+  // Name of the AI Flows agent currently overriding the base config (null = none).
+  // Shown so the user knows when a flow agent — not the AI Assistant config — is replying.
+  const [activeAgent, setActiveAgent] = useState<string | null>(null);
+
   // User-customizable sample simulator questions
   const [sampleQuestions, setSampleQuestions] = useState<string[]>([
     "How can you help me?",
@@ -579,6 +583,9 @@ export default function AISettingsPage() {
         setProviderError(null);
       }
 
+      // Surface AI Flows agent overrides — matches live WhatsApp behaviour.
+      setActiveAgent(json.activeAgent || null);
+
       const elapsed = Date.now() - start;
       const delay = Math.max(800 - elapsed, 0); // Guarantee 800ms minimum typing animation delay
 
@@ -643,6 +650,7 @@ export default function AISettingsPage() {
   const handleResetChat = async () => {
     setChatHistory([]);
     setDemoQueue([]);
+    setActiveAgent(null);
     // Scroll back to top of message list after state clears
     requestAnimationFrame(() => {
       if (chatEndRef.current) {
@@ -1372,6 +1380,17 @@ export default function AISettingsPage() {
               <div className="px-4 py-1.5 flex items-center justify-center shrink-0 border-b bg-red-50 border-red-100">
                 <span className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-red-600">
                   <AlertCircle className="w-3 h-3 animate-pulse" /> AI Provider Down • Offline fallback active
+                </span>
+              </div>
+            )}
+
+            {/* ── AI Flows Agent Override Banner (shrink-0) ── */}
+            {/* Warns when an AI Flows agent — not the AI Assistant config above — is generating
+                the reply. This is exactly what happens on live WhatsApp, so it must be visible. */}
+            {activeAgent && (
+              <div className="px-4 py-1.5 flex items-center justify-center shrink-0 border-b bg-amber-50 border-amber-100">
+                <span className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">
+                  <AlertTriangle className="w-3 h-3" /> AI Flow Agent “{activeAgent}” is replying — overrides this config
                 </span>
               </div>
             )}

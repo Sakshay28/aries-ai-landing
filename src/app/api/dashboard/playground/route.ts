@@ -62,6 +62,36 @@ export async function POST(req: NextRequest) {
       systemPrompt: draftConfig.system_prompt || '',
     };
 
+    // 3b. Apply AI Flows agent routing EXACTLY as the live webhook does.
+    // Without this the simulator silently diverges from real WhatsApp: an active
+    // agent_configs row whose keywords match (or a keyword-less catch-all agent)
+    // overrides bot_name / personality / system_prompt in production, but the
+    // playground would keep showing the AI Assistant config. Mirroring it here
+    // means "what you test is what customers get" — and a hijacking agent is
+    // visible in the simulator instead of only surfacing in real chats.
+    const { data: agentRows } = await supabaseAdmin
+      .from('agent_configs')
+      .select('agent_name, routing_keywords, bot_name, bot_personality, system_prompt')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true);
+
+    const lowerMsg = message.toLowerCase();
+    type AgentRow = { agent_name: string; routing_keywords: string[] | null; bot_name?: string; bot_personality?: string; system_prompt?: string };
+    const activeAgents = (agentRows as AgentRow[] | null) ?? [];
+    const matchedAgent =
+      activeAgents.find(a =>
+        (a.routing_keywords?.length ?? 0) > 0 &&
+        a.routing_keywords!.some(kw => lowerMsg.includes(kw.toLowerCase()))
+      ) ??
+      activeAgents.find(a => !a.routing_keywords || a.routing_keywords.length === 0) ??
+      null;
+
+    if (matchedAgent) {
+      tenantConfig.botName = matchedAgent.bot_name || tenantConfig.botName;
+      tenantConfig.botPersonality = matchedAgent.bot_personality || tenantConfig.botPersonality;
+      tenantConfig.systemPrompt = matchedAgent.system_prompt || tenantConfig.systemPrompt;
+    }
+
     // 4. Debug: log what config is being injected so stale context is immediately visible
     console.log(`🔍 Playground config [tenant=${tenantId}]:`, {
       botName: tenantConfig.botName,
@@ -93,6 +123,9 @@ export async function POST(req: NextRequest) {
         sentiment: aiResponse.sentiment,
         nextStep: aiResponse.nextStep,
       },
+      // When an AI Flows agent overrode the base config, tell the UI so the
+      // user understands why the reply may differ from their AI Assistant setup.
+      activeAgent: matchedAgent ? matchedAgent.agent_name : null,
       providerStatus: {
         available: providerStatus.available,
         consecutiveFailures: providerStatus.consecutiveFailures,
