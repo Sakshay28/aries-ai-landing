@@ -3,7 +3,6 @@
 import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured, getEnvDiagnostics, env } from "@/lib/env";
 
 // ═══════════════════════════════════════════════════════════════
@@ -62,27 +61,10 @@ Please verify your production environment variables in your deployment dashboard
     }
   }, []);
 
-  const handleGoogleClick = async () => {
-    if (!isSupabaseConfigured) {
-      setError("Authentication setup incomplete. Please contact support or try again shortly.");
-      return;
-    }
+  const handleGoogleClick = () => {
     setGoogleLoading(true);
     setError("");
-
-    try {
-      const supabase = createBrowserSupabaseClient();
-      const { error: authError } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: `${window.location.origin}/api/auth/callback`,
-        },
-      });
-      if (authError) throw authError;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Google sign-up failed. Please try again.");
-      setGoogleLoading(false);
-    }
+    window.location.href = "/api/auth/google";
   };
 
   async function sendSignupOtp(e: React.FormEvent) {
