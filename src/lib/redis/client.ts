@@ -94,6 +94,28 @@ export async function isDuplicateMessage(messageId: string): Promise<boolean> {
 }
 
 // ═══════════════════════════════════════
+// OFF-HOURS LOCK — atomic per-conversation, 6h TTL
+// ═══════════════════════════════════════
+// Returns 'first_notice'  → lock acquired, send the off-hours message
+//         'already_sent'  → lock exists,   fall through to AI
+//         'use_db_fallback' → Redis unavailable, caller must query DB
+export async function acquireOffHoursLock(
+  conversationId: string
+): Promise<'first_notice' | 'already_sent' | 'use_db_fallback'> {
+  const redis = getRedisClient();
+  if (!redis) return 'use_db_fallback';
+  try {
+    const key = `offhours:${conversationId}`;
+    const result = await redis.set(key, '1', 'EX', 21600, 'NX'); // 6 hours
+    // SET NX returns 'OK' when the key was newly created (we acquired the lock)
+    // Returns null when the key already existed (someone else already sent the notice)
+    return result ? 'first_notice' : 'already_sent';
+  } catch {
+    return 'use_db_fallback';
+  }
+}
+
+// ═══════════════════════════════════════
 // GENERIC CACHE — Redis-backed with fallback
 // ═══════════════════════════════════════
 

@@ -19,16 +19,18 @@ export const getTenantId = cache(async (): Promise<string | null> => {
       },
     });
 
-    // Try getUser() first (validates token server-side), fallback to getSession()
+    // getUser() validates the JWT server-side against Supabase — use it exclusively.
+    // We intentionally do NOT fall back to getSession() on network error: that path
+    // does only a local JWT decode without server verification, so a stolen/forged
+    // token would pass when the Supabase endpoint is unreachable. Fail closed.
     let userId: string | null = null;
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      userId = user?.id ?? null;
-    } catch {
-      // getUser can fail on network issues — fall back to local session decode
-      const { data: { session } } = await supabase.auth.getSession();
-      userId = session?.user?.id ?? null;
+    const { data: { user }, error: userErr } = await supabase.auth.getUser();
+    if (userErr) {
+      // Genuine network failure or invalid token — deny access either way.
+      console.warn('getTenantId: getUser() failed, denying access:', userErr.message);
+      return null;
     }
+    userId = user?.id ?? null;
 
     if (!userId) {
       console.log('getTenantId: no authenticated user found in session');

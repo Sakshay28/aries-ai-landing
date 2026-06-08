@@ -35,14 +35,15 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
       }
     );
 
+    // Fail closed: do not fall back to local getSession() on network errors.
+    // A forged/stolen JWT must not pass when the Supabase verifier is unavailable.
     let userId: string | null = null;
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      userId = user?.id ?? null;
-    } catch {
-      const { data: { session } } = await supabase.auth.getSession();
-      userId = session?.user?.id ?? null;
+    const { data: { user }, error: userErr } = await supabase.auth.getUser();
+    if (userErr) {
+      console.warn('getCurrentUser: getUser() failed, denying access:', userErr.message);
+      return null;
     }
+    userId = user?.id ?? null;
     if (!userId) return null;
 
     // select('*') keeps this resilient even if a column (e.g. is_sales_agent)

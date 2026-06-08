@@ -10,8 +10,14 @@
 // ═══════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getTenantId } from '@/lib/auth/getTenantId';
+import { getCurrentUser } from '@/lib/auth/getCurrentUser';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { checkRedisRateLimit } from '@/lib/redis/client';
+
+// Bulk CRM export is a privileged action — restrict to roles that are
+// trusted with the full contact list. Staff/viewer can work leads in the
+// UI but cannot exfiltrate the entire database as a CSV.
+const EXPORT_ROLES = new Set(['owner', 'admin', 'manager']);
 
 const COLUMNS = [
   'Name', 'Phone', 'Email', 'Status', 'Score',
@@ -46,9 +52,24 @@ function toRow(lead: Record<string, unknown>): string {
 
 export async function GET(req: NextRequest) {
   try {
-    const tenantId = await getTenantId();
-    if (!tenantId) {
+    const user = await getCurrentUser();
+    if (!user) {
       return NextResponse.json({ success: false, message: 'Unauthorized access.' }, { status: 401 });
+    }
+    if (!EXPORT_ROLES.has(user.role)) {
+      return NextResponse.json({ success: false, message: 'Forbidden: insufficient permissions to export contacts.' }, { status: 403 });
+    }
+    const tenantId = user.tenant_id;
+
+    // Rate-limit bulk exports: 10 per tenant per hour.
+    // Without this, a privileged user (or compromised account) can loop-call this
+    // endpoint and repeatedly download the entire CRM. Each call scans the full table.
+    const rl = await checkRedisRateLimit(`export:leads:${tenantId}`, 10, 3600);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, message: 'Export rate limit reached (10/hour). Try again later.' },
+        { status: 429 }
+      );
     }
 
     const { searchParams } = new URL(req.url);

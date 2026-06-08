@@ -94,15 +94,17 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  // Use getSession() here — it decodes the JWT from cookies locally without
-  // making a network round-trip to Supabase. getUser() (which verifies server-side)
-  // is used in dashboard layout/server components for actual security checks.
-  // Using getUser() in middleware caused infinite redirect loops when the
-  // Supabase verification call was slow or failed.
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  const user = session?.user ?? null;
+  // Use getUser() — validates the JWT server-side against Supabase rather than
+  // trusting the locally-decoded cookie. A crafted/revoked JWT is caught here.
+  //
+  // Previous concern: "getUser() caused redirect loops when slow/failed."
+  // That loop scenario cannot actually occur:
+  //   • middleware: getUser() errors → redirect to /login
+  //   • /login page: getUser() also errors → user stays on /login (no bounce back)
+  // So on Supabase downtime both checks fail the same way; the user waits on /login
+  // until the service recovers — correct behaviour, not a loop.
+  const { data: { user }, error: _authErr } = await supabase.auth.getUser();
+  // Any error (network failure, expired/invalid token) → treat as unauthenticated.
 
   // Protected route but no session → redirect to login
   // IMPORTANT: carry over any session cookies that getUser() refreshed
@@ -137,11 +139,22 @@ export async function middleware(request: NextRequest) {
     return redirectResponse;
   }
 
-  // Admin routes require platform admin check
+  // Admin routes: require is_platform_admin in addition to authentication.
+  // We do a single indexed query (auth_id is the PK lookup) — fast even in Edge.
+  // Non-admin authenticated users are redirected to /dashboard, not /login,
+  // so the redirect doesn't expose whether /admin exists to unauthenticated visitors.
   if (pathname.startsWith('/admin') && user) {
-    // We can't easily check is_platform_admin in middleware without
-    // a DB query. The admin page itself handles this via API.
-    // But we ensure they're at least authenticated.
+    const { data: userRow } = await supabase
+      .from('users')
+      .select('is_platform_admin')
+      .eq('auth_id', user.id)
+      .maybeSingle();
+
+    if (!userRow?.is_platform_admin) {
+      const denyResponse = NextResponse.redirect(new URL('/dashboard', request.url));
+      copyHardenedCookies(denyResponse);
+      return denyResponse;
+    }
   }
 
   return response;

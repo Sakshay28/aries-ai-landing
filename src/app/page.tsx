@@ -54,12 +54,24 @@ const jsonLd = {
   ],
 };
 
+// Safely embed JSON-LD: escape </script> break-out sequences.
+// If any value in jsonLd ever contains user-supplied data, a raw
+// JSON.stringify could contain </script> which breaks out of the tag.
+// Replacing the dangerous characters at JSON serialisation time prevents
+// the script-injection vector regardless of what values are in the object.
+function safeJsonLd(obj: unknown): string {
+  return JSON.stringify(obj)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026');
+}
+
 export default function LandingPage() {
   return (
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: safeJsonLd(jsonLd) }}
       />
       <LandingPageClient />
     </>

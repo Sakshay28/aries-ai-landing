@@ -72,6 +72,34 @@ export type Intent =
 
 export type Sentiment = 'positive' | 'neutral' | 'negative' | 'angry';
 
+// ── Provider Health Status ──
+export interface ProviderStatus {
+  available: boolean;
+  lastError?: string;
+  lastErrorTime?: number;
+  consecutiveFailures: number;
+}
+
+// Module-level provider status tracker
+let _providerStatus: ProviderStatus = { available: true, consecutiveFailures: 0 };
+
+export function getProviderStatus(): ProviderStatus {
+  return { ..._providerStatus };
+}
+
+function recordProviderSuccess(): void {
+  _providerStatus = { available: true, consecutiveFailures: 0 };
+}
+
+function recordProviderFailure(error: string): void {
+  _providerStatus = {
+    available: false,
+    lastError: error,
+    lastErrorTime: Date.now(),
+    consecutiveFailures: _providerStatus.consecutiveFailures + 1,
+  };
+}
+
 // ── Native Persona Instructions mapping ──
 const PERSONA_PROMPTS: Record<string, string> = {
   'Premium Fine Dining': 'Speak elegantly, politely, and formally. Reassure the customer about our premium quality, recommend expensive/premium dishes subtly (e.g. Chef specials), encourage reservations, and never sound overly casual.',
@@ -337,10 +365,46 @@ export async function processMessageWithAI(
 
     console.log(`🧠 AI responded in ${latency}ms (intent: ${parsed.intent}, confidence: ${parsed.confidence})`);
 
+    recordProviderSuccess();
+
     return parsed;
   } catch (error) {
-    console.error('❌ AI Engine error:', error);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    const latency = Date.now() - startTime;
+
+    // ── Structured error logging ──
+    console.error('❌ AI Engine error:', JSON.stringify({
+      timestamp: new Date().toISOString(),
+      tenantId: tenantId || 'unknown',
+      businessName: tenantConfig.businessName,
+      error: errorMsg,
+      latencyMs: latency,
+      provider: 'gemini',
+      model: MODEL,
+      messagePreview: message.slice(0, 80),
+      hadFaqs: (tenantConfig.customFaqs?.length ?? 0) > 0,
+      hadKBDocs: (tenantConfig.knowledgeDocs?.length ?? 0) > 0,
+    }));
     Sentry.captureException(error);
+
+    // ── Track provider health ──
+    recordProviderFailure(errorMsg);
+
+    // ── Attempt offline KB/FAQ search before generic fallback ──
+    const offlineAnswer = offlineKBSearch(message, tenantConfig);
+    if (offlineAnswer) {
+      console.log(`📚 Offline KB match found for tenant=${tenantId} (provider down)`);
+      return {
+        reply: offlineAnswer,
+        extractedData: {},
+        intent: 'general_enquiry' as Intent,
+        sentiment: 'neutral' as Sentiment,
+        shouldEscalate: false,
+        nextStep: 'ask_intent',
+        confidence: 0.6,
+      };
+    }
+
     // NEVER crash — return a graceful fallback
     return getFallbackResponse(message, context, tenantConfig, tenantConfig.isFirstMessage ?? false);
   }
@@ -425,6 +489,77 @@ function parseAIResponse(text: string): AIResponse {
       confidence: 0.3,
     };
   }
+}
+
+// ═══════════════════════════════════════
+// OFFLINE KB/FAQ SEARCH — No AI Required
+// ═══════════════════════════════════════
+// When Gemini is unavailable, this does simple keyword matching
+// against the tenant's FAQ and Knowledge Base to provide
+// contextually relevant answers WITHOUT the AI provider.
+function offlineKBSearch(
+  message: string,
+  config: TenantAIConfig
+): string | null {
+  const lower = message.toLowerCase().trim();
+  if (!lower) return null;
+
+  // 1. Search custom FAQs first (exact substring match)
+  if (config.customFaqs && config.customFaqs.length > 0) {
+    for (const faq of config.customFaqs) {
+      const qLower = faq.question.toLowerCase();
+      // Check if significant words from the question appear in the message
+      const qWords = qLower.split(/\s+/).filter(w => w.length > 3);
+      const matchCount = qWords.filter(w => lower.includes(w)).length;
+      if (qWords.length > 0 && matchCount >= Math.ceil(qWords.length * 0.5)) {
+        return faq.answer;
+      }
+    }
+  }
+
+  // 2. Search knowledge docs (simple keyword relevance scoring)
+  if (config.knowledgeDocs && config.knowledgeDocs.length > 0) {
+    const queryWords = lower.split(/\s+/).filter(w => w.length > 3);
+    if (queryWords.length === 0) return null;
+
+    let bestMatch: { text: string; score: number } | null = null;
+
+    for (const doc of config.knowledgeDocs) {
+      const docLower = doc.content_text.toLowerCase();
+      const score = queryWords.filter(w => docLower.includes(w)).length / queryWords.length;
+
+      if (score > 0.4 && (!bestMatch || score > bestMatch.score)) {
+        // Extract a relevant snippet (find the first matching paragraph)
+        const paragraphs = doc.content_text.split(/\n\n+/);
+        let bestParagraph = '';
+        let bestParaScore = 0;
+
+        for (const para of paragraphs) {
+          if (para.trim().length < 10) continue;
+          const paraLower = para.toLowerCase();
+          const paraScore = queryWords.filter(w => paraLower.includes(w)).length;
+          if (paraScore > bestParaScore) {
+            bestParaScore = paraScore;
+            bestParagraph = para.trim();
+          }
+        }
+
+        if (bestParagraph) {
+          // Truncate to ~300 chars for a concise response
+          const snippet = bestParagraph.length > 300
+            ? bestParagraph.slice(0, 300).replace(/\s+\S*$/, '') + '...'
+            : bestParagraph;
+          bestMatch = { text: snippet, score };
+        }
+      }
+    }
+
+    if (bestMatch) {
+      return bestMatch.text;
+    }
+  }
+
+  return null;
 }
 
 // ═══════════════════════════════════════
@@ -613,3 +748,6 @@ function getDefaultFollowUp(
       return `Hey ${name}! Just checking in from ${config.businessName} 👋`;
   }
 }
+
+// ── Exported for testing ──
+export { offlineKBSearch as _offlineKBSearch_forTesting };

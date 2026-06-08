@@ -1437,7 +1437,18 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                           )}
                         >
                           {replyPreviewCard}
-                          <p className="whitespace-pre-wrap break-all">{msg.content}</p>
+                          {/^\[[a-z_]+\]$/i.test(msg.content || '') ? (
+                            <p className="italic text-[12.5px] flex items-center gap-1.5 opacity-60">
+                              <span>🚫</span>
+                              <span>
+                                {msg.content === '[sticker]' ? 'Sticker' :
+                                 msg.content === '[unsupported]' ? 'Message type not supported' :
+                                 `${msg.content.slice(1, -1)} message`}
+                              </span>
+                            </p>
+                          ) : (
+                            <p className="whitespace-pre-wrap break-all">{msg.content}</p>
+                          )}
 
                           {/* Timestamp + ticks — shown on every bubble */}
                           <div className={cn('flex items-center gap-1 mt-0.5', isInbound ? 'justify-start' : 'justify-end')}>

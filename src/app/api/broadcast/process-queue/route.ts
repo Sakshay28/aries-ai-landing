@@ -1,12 +1,36 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { SchedulerService } from '@/lib/broadcast/services/scheduler.service';
 import { BroadcastEngineService } from '@/lib/broadcast/services/broadcast-engine.service';
+import { getRedisClient } from '@/lib/redis/client';
 
 // Vercel Hobby: 10s max. Each message takes ~400-600ms (Meta API + 3 DB writes).
 // 15 messages × 600ms = 9s — safe. If the batch is full, after() chains the next run.
 export const maxDuration = 10;
 
 const BATCH_SIZE = 15;
+
+// Circuit-breaker: cap the total number of automatic chain links per rolling minute.
+// Prevents a hung campaign (e.g. all recipients fail with retryable errors) from
+// consuming Vercel invocations indefinitely. The cron job is the recovery path.
+const CHAIN_LIMIT_PER_MINUTE = 20;
+const CHAIN_WINDOW_SECS = 60;
+const CHAIN_KEY = 'broadcast:queue:chains_per_min';
+
+async function withinChainBudget(): Promise<boolean> {
+  const redis = getRedisClient();
+  if (!redis) return true; // fail open if Redis unavailable
+  try {
+    const count = await redis.incr(CHAIN_KEY);
+    if (count === 1) await redis.expire(CHAIN_KEY, CHAIN_WINDOW_SECS);
+    if (count > CHAIN_LIMIT_PER_MINUTE) {
+      console.warn(`[queue] Circuit breaker: ${count} chains this minute — halting auto-chain. Cron will resume.`);
+      return false;
+    }
+    return true;
+  } catch {
+    return true; // fail open
+  }
+}
 
 function isAuthorized(req: NextRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
@@ -44,6 +68,10 @@ export async function POST(req: NextRequest) {
     const cronSecret = process.env.CRON_SECRET;
     if (appUrl && cronSecret) {
       after(async () => {
+        // Check circuit breaker before chaining — prevents runaway self-invocation
+        // on hung campaigns where every message fails with a retryable error.
+        const canChain = await withinChainBudget();
+        if (!canChain) return;
         try {
           await fetch(`${appUrl}/api/broadcast/process-queue`, {
             method: 'POST',

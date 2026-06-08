@@ -185,10 +185,23 @@ export async function runFlowsForMessage(
   // ── Check for a pending wait_for_reply node from a previous flow run ──
   const { data: conv } = await supabaseAdmin
     .from('conversations')
-    .select('context')
+    .select('context, current_step')
     .eq('id', conversationId)
     .single();
   const pendingNode = (conv?.context as Record<string, unknown>)?.pending_flow_node as string | undefined;
+
+  // Determine whether an active booking/workflow is in progress.
+  // all_messages flows must NOT fire mid-booking — they would inject messages into
+  // an ongoing AI-driven collection sequence (guest count → date → time → name → phone).
+  const convCtx = (conv?.context as Record<string, unknown>) || {};
+  const bookingState = convCtx.booking_state as Record<string, unknown> | undefined;
+  const hasActiveWorkflow = !!(
+    convCtx.pending_flow_node ||
+    convCtx.booking_saved ||
+    (bookingState && Object.values(bookingState).some(v => v != null && v !== '')) ||
+    (conv?.current_step &&
+      !['greeting', 'completed', 'escalated', 'ask_intent'].includes(conv.current_step as string))
+  );
 
   if (pendingNode) {
     // Restore saved variables and clear the pending marker
@@ -216,7 +229,7 @@ export async function runFlowsForMessage(
   );
 
   for (const flow of sorted) {
-    if (triggerMatches(flow, lowerMsg, isFirstMessage, messageType, buttonId)) {
+    if (triggerMatches(flow, lowerMsg, isFirstMessage, messageType, buttonId, hasActiveWorkflow)) {
       const handled = await executeFlow(flow, ctx);
       if (handled) return true;
     }
@@ -231,7 +244,8 @@ function triggerMatches(
   lowerMsg: string,
   isFirstMessage: boolean,
   messageType = 'text',
-  buttonId?: string
+  buttonId?: string,
+  hasActiveWorkflow = false
 ): boolean {
   // Check if this flow has a button_trigger node — if so, only fire on button clicks
   const hasButtonTriggerNode = flow.nodes?.some(n => n.type === 'button_trigger');
@@ -270,6 +284,12 @@ function triggerMatches(
 
   switch (flow.trigger_type) {
     case 'all_messages':
+      // Block all_messages flows when an AI booking or flow sequence is already in progress.
+      // Firing into mid-booking conversations injects unexpected messages that confuse the customer.
+      if (hasActiveWorkflow) {
+        console.log(`🛡️ Flow engine: skipping all_messages flow "${flow.name}" — active workflow in progress`);
+        return false;
+      }
       return true;
     case 'first_message':
       return isFirstMessage;

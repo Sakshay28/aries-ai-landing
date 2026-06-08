@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { processMessageWithAI } from '@/lib/ai/engine';
+import { processMessageWithAI, getProviderStatus } from '@/lib/ai/engine';
 import { getTenantById } from '@/lib/tenant/manager';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
 
@@ -84,6 +84,7 @@ export async function POST(req: NextRequest) {
       tenantId
     );
 
+    const providerStatus = getProviderStatus();
     return NextResponse.json({
       success: true,
       data: {
@@ -91,6 +92,11 @@ export async function POST(req: NextRequest) {
         intent: aiResponse.intent,
         sentiment: aiResponse.sentiment,
         nextStep: aiResponse.nextStep,
+      },
+      providerStatus: {
+        available: providerStatus.available,
+        consecutiveFailures: providerStatus.consecutiveFailures,
+        lastError: providerStatus.lastError,
       },
     });
 

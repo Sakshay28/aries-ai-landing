@@ -55,7 +55,10 @@ export const env = {
   SUPABASE_SERVICE_ROLE_KEY: isServer ? cleanEnvValue(rawServiceRoleKey) : '',
   NEXT_PUBLIC_APP_URL: cleanEnvValue(rawAppUrl) || 'http://localhost:3000',
   PLATFORM_ADMIN_EMAIL: cleanEnvValue(rawPlatformAdminEmail) || 'admin@ariesai.in',
-  NEXT_PUBLIC_GOOGLE_CLIENT_ID: cleanEnvValue(rawGoogleClientId) || '1020449040321-4162fmon61egbdv2k0lci4gq8m9s03qg.apps.googleusercontent.com',
+  // No hardcoded fallback — forces the env var to be set explicitly.
+  // Hardcoding the client ID leaks your Google project structure and
+  // makes key rotation a code-change instead of a config change.
+  NEXT_PUBLIC_GOOGLE_CLIENT_ID: cleanEnvValue(rawGoogleClientId) || '',
   NODE_ENV: process.env.NODE_ENV || 'development',
 };
 

@@ -431,9 +431,19 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
         mediaMimeType = mediaObj?.mime_type;
         mediaFilename = mediaObj?.filename;
         mediaCaption = mediaObj?.caption;
+      } else if (msgType === 'sticker') {
+        const stickerObj = msg.sticker;
+        mediaId = stickerObj?.id;
+        mediaMimeType = stickerObj?.mime_type || 'image/webp';
+        text = '[sticker]';
       } else if (msgType === 'location') {
         const loc = msg.location;
         text = loc ? `📍 Location: ${loc.latitude}, ${loc.longitude}` : '📍 Location shared';
+      } else if (msgType === 'contacts') {
+        const contact = msg.contacts?.[0];
+        text = contact ? `👤 ${contact.name?.formatted_name || 'Contact shared'}` : '👤 Contact shared';
+      } else if (msgType === 'unsupported') {
+        text = '[unsupported]';
       } else if (msgType === 'reaction') {
         const reactionObj = msg.reaction;
         return {

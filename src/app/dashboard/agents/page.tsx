@@ -205,6 +205,10 @@ export default function AISettingsPage() {
   // Demo play queue state
   const [demoQueue, setDemoQueue] = useState<string[]>([]);
 
+  // Provider health status from API responses
+  const [providerDown, setProviderDown] = useState(false);
+  const [providerError, setProviderError] = useState<string | null>(null);
+
   // User-customizable sample simulator questions
   const [sampleQuestions, setSampleQuestions] = useState<string[]>([
     "How can you help me?",
@@ -565,6 +569,15 @@ export default function AISettingsPage() {
         })
       });
       const json = await res.json();
+
+      // Track provider health from API response
+      if (json.providerStatus) {
+        setProviderDown(!json.providerStatus.available);
+        setProviderError(json.providerStatus.lastError || null);
+      } else {
+        setProviderDown(false);
+        setProviderError(null);
+      }
 
       const elapsed = Date.now() - start;
       const delay = Math.max(800 - elapsed, 0); // Guarantee 800ms minimum typing animation delay
@@ -1353,6 +1366,15 @@ export default function AISettingsPage() {
                 </span>
               )}
             </div>
+
+            {/* ── Provider Health Banner (shrink-0) ── */}
+            {providerDown && (
+              <div className="px-4 py-1.5 flex items-center justify-center shrink-0 border-b bg-red-50 border-red-100">
+                <span className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-red-600">
+                  <AlertCircle className="w-3 h-3 animate-pulse" /> AI Provider Down • Offline fallback active
+                </span>
+              </div>
+            )}
 
             {/* ── Knowledge Banner (shrink-0, animated expand/collapse) ── */}
             {docs.length > 0 && (

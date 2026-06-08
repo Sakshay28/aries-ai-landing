@@ -5,12 +5,23 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { BroadcastEngineService } from '@/lib/broadcast/services/broadcast-engine.service';
 import { AuditLogService } from '@/lib/broadcast/services/audit-log.service';
 import { ExecutionEventService } from '@/lib/broadcast/services/execution-event.service';
+import { checkBroadcastCap } from '@/lib/abuse/prevention';
+
+const LAUNCH_ROLES = new Set(['owner', 'admin', 'manager']);
 
 export async function POST(req: NextRequest) {
   try {
     const tenantId = await getTenantId();
     if (!tenantId) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Role gate: launching a broadcast sends real messages and consumes quota.
+    // Restrict to owner/admin/manager (getCurrentUser is request-cached, so the
+    // later getCurrentUser() calls reuse this result).
+    const launchUser = await getCurrentUser();
+    if (!launchUser || !LAUNCH_ROLES.has(launchUser.role)) {
+      return NextResponse.json({ success: false, error: 'Forbidden: insufficient permissions to launch broadcasts' }, { status: 403 });
     }
 
     const { campaignId } = await req.json();
@@ -46,7 +57,7 @@ export async function POST(req: NextRequest) {
     // 3. Verify WhatsApp credentials exist
     const { data: tenant } = await supabaseAdmin
       .from('tenants')
-      .select('wa_access_token, wa_phone_number_id')
+      .select('wa_access_token, wa_phone_number_id, plan')
       .eq('id', tenantId)
       .single();
 
@@ -55,6 +66,16 @@ export async function POST(req: NextRequest) {
         success: false,
         error: 'WhatsApp is not connected. Go to Settings → link your Meta Business account.',
       }, { status: 400 });
+    }
+
+    // 3b. Enforce the plan's broadcast recipient cap at launch time.
+    const recipientCount = campaign.audience_count ?? 0;
+    const cap = checkBroadcastCap(tenant.plan ?? 'starter', recipientCount);
+    if (!cap.allowed) {
+      return NextResponse.json({
+        success: false,
+        error: `This campaign targets ${recipientCount.toLocaleString()} recipients, which exceeds your plan limit of ${cap.cap.toLocaleString()}. Upgrade your plan or reduce the audience.`,
+      }, { status: 403 });
     }
 
     // 4. Handle scheduled campaigns
