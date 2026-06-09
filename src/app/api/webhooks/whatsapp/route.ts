@@ -942,11 +942,31 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     );
   } catch (err) {
     console.error('❌ Meta: AI engine error:', err);
+    Sentry.captureException(err);
+    // Alert operator — customer received no reply. Debounced 5 min per tenant
+    // so a sustained Vertex outage doesn't flood the inbox.
+    notifyAdmin({
+      dedupeKey: `ai-engine-fail:${tenant.id}`,
+      subject: `AI engine error — ${tenant.business_name || tenant.id}`,
+      summary:
+        `The AI engine failed to generate a reply. Customers messaging this tenant ` +
+        `are receiving no response. Check Vertex AI status and Vercel function logs.`,
+      context: {
+        tenantId: tenant.id,
+        businessName: tenant.business_name,
+        recipient: cleanPhone,
+        error: (err as Error).message,
+        messagePreview: msg.text?.slice(0, 120),
+      },
+    }).catch((e) => console.error('notifyAdmin failed:', (e as Error).message));
     return;
   }
   perf('ai_done');
 
-  if (!aiResponse?.reply) return;
+  if (!aiResponse?.reply) {
+    console.warn(`⚠️ Meta: AI returned empty reply for tenant ${tenant.id}, conversation ${conversation.id}`);
+    return;
+  }
 
   // 13b. Increment AI conversation counter (non-blocking)
   void supabaseAdmin.rpc('increment_ai_conversations', { p_tenant_id: tenant.id });
