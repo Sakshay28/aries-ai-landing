@@ -842,9 +842,15 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   perf('parallel_fetch_done');
 
-  // Use RAG only when embeddings exist — avoids Gemini embedding API call (~500-700ms) otherwise
+  // RAG (semantic doc search) only earns its ~500-700ms embedding round-trip
+  // when there are MORE docs than we'd inject anyway. The batch above already
+  // fetched up to 5 docs; if it returned fewer than 5, that IS the tenant's
+  // entire knowledge base, so ranking can't change which docs the AI sees —
+  // we skip the embedding call and feed those docs directly. RAG still runs
+  // for large knowledge bases (5+ docs) where it picks the best matches.
+  const KB_FETCH_LIMIT = 5;
   let knowledgeRows: Array<{ filename: string; content_text: string }> = (kbDocs || []) as Array<{ filename: string; content_text: string }>;
-  if (kbEmbedCheck && kbEmbedCheck.length > 0) {
+  if (kbEmbedCheck && kbEmbedCheck.length > 0 && (kbDocs?.length ?? 0) >= KB_FETCH_LIMIT) {
     const ragDocs = await retrieveRelevantDocs(tenant.id, msg.text, 3).catch(() => []);
     if (ragDocs.length > 0) knowledgeRows = ragDocs;
   }

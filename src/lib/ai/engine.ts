@@ -314,6 +314,12 @@ export async function processMessageWithAI(
           maxOutputTokens: 400,
           topP: 0.9,
           responseMimeType: 'application/json',
+          // Disable gemini-2.5-flash "thinking" tokens. For a KB-grounded,
+          // short-reply support/sales bot they add ~850ms (and 3s+ spikes)
+          // with no answer-quality gain — the knowledge base does the
+          // reasoning. Benchmarked 2224ms→1381ms avg. Behaves like the
+          // original gemini-2.0-flash but on a newer base model.
+          thinkingConfig: { thinkingBudget: 0 },
         },
       }),
       10000 // 10 second hard circuit breaker — WhatsApp users expect fast replies
@@ -757,7 +763,7 @@ Keep it casual, use 1-2 emojis, don't be salesy. Reply with ONLY the message tex
     const response = await getAI().models.generateContent({
       model: MODEL,
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: { temperature: 0.8, maxOutputTokens: 200 },
+      config: { temperature: 0.8, maxOutputTokens: 200, thinkingConfig: { thinkingBudget: 0 } },
     });
 
     return response.text?.trim() || getDefaultFollowUp(context, followUpType, tenantConfig);
