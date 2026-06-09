@@ -208,7 +208,9 @@ export default function AISettingsPage() {
   const [newSrKeywords, setNewSrKeywords] = useState('');
   const [newSrReply, setNewSrReply] = useState('');
   const [newSrMediaUrl, setNewSrMediaUrl] = useState('');
+  const [uploadingSrImage, setUploadingSrImage] = useState(false);
   const [addingSr, setAddingSr] = useState(false);
+  const srImageInputRef = useRef<HTMLInputElement>(null);
   
   // Playground Chat Simulator States
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -503,6 +505,28 @@ export default function AISettingsPage() {
     setScriptedReplies(prev => prev.filter(r => r.id !== id));
     await fetch(`/api/dashboard/scripted-replies/${id}`, { method: 'DELETE' }).catch(() => {});
     toast.success('Scripted reply deleted');
+  };
+
+  const handleSrImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingSrImage(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/dashboard/scripted-replies/upload', { method: 'POST', body: fd });
+      const json = await res.json();
+      if (json.url) {
+        setNewSrMediaUrl(json.url);
+        toast.success('Image uploaded!');
+      } else {
+        toast.error(json.error || 'Upload failed');
+      }
+    } catch {
+      toast.error('Upload error');
+    }
+    setUploadingSrImage(false);
+    if (srImageInputRef.current) srImageInputRef.current.value = '';
   };
 
   // ── RAG Knowledge File Uploader ──
@@ -1362,18 +1386,37 @@ export default function AISettingsPage() {
                       </div>
                       <div>
                         <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
-                          Image URL <span className="normal-case font-normal text-muted-foreground/50">(optional — paste a public image link)</span>
+                          Image <span className="normal-case font-normal text-muted-foreground/50">(optional)</span>
                         </label>
-                        <input
-                          value={newSrMediaUrl}
-                          onChange={e => setNewSrMediaUrl(e.target.value)}
-                          placeholder="https://example.com/menu.jpg"
-                          className="w-full h-9 px-3 rounded-xl text-xs border border-border bg-background outline-none focus:ring-1 focus:ring-primary/30"
-                        />
-                        {newSrMediaUrl.trim() && (
-                          <img src={newSrMediaUrl.trim()} alt="preview" className="mt-2 h-20 w-32 object-cover rounded-lg border border-border" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                        {newSrMediaUrl ? (
+                          <div className="flex items-start gap-3">
+                            <img src={newSrMediaUrl} alt="preview" className="h-20 w-28 object-cover rounded-xl border border-border" />
+                            <div className="flex flex-col gap-1.5 pt-1">
+                              <span className="text-[11px] text-emerald-600 font-bold">✓ Image ready</span>
+                              <button
+                                type="button"
+                                onClick={() => setNewSrMediaUrl('')}
+                                className="text-[10px] text-muted-foreground hover:text-red-500 flex items-center gap-1"
+                              >
+                                <X className="w-3 h-3" /> Remove
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => srImageInputRef.current?.click()}
+                            disabled={uploadingSrImage}
+                            className="flex items-center gap-2 h-9 px-4 rounded-xl text-xs font-bold border border-dashed border-border bg-secondary/30 hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-all disabled:opacity-50"
+                          >
+                            {uploadingSrImage
+                              ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading…</>
+                              : <><UploadCloud className="w-3.5 h-3.5" /> Upload Image</>
+                            }
+                          </button>
                         )}
-                        <p className="text-[10px] text-muted-foreground/50 mt-1">Image sends first, reply text appears as caption below it</p>
+                        <input ref={srImageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={handleSrImageUpload} />
+                        <p className="text-[10px] text-muted-foreground/50 mt-1">JPEG, PNG or WebP · Max 5 MB · Image sends first, text as caption below</p>
                       </div>
                       <button
                         onClick={handleAddScriptedReply}
