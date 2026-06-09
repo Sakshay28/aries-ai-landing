@@ -359,6 +359,51 @@ export async function processStaleConversations(tenantId?: string): Promise<void
 }
 
 // ═══════════════════════════════════════
+// AUTO-DE-ESCALATE: Re-enable bot after escalation_timeout_mins
+// ═══════════════════════════════════════
+// Each tenant sets their own escalation_timeout_mins in Settings → Staff & Alerts.
+// If no staff has manually resolved the escalation within that window,
+// the bot is automatically re-enabled so the customer isn't left waiting forever.
+// Runs on every cron tick (every 30 min). Safe for 50+ tenants — joins on tenants
+// table so each conversation is de-escalated using its own tenant's timeout.
+
+export async function processTimedOutEscalations(): Promise<number> {
+  // Join conversations → tenants to get per-tenant timeout_mins.
+  // Only look at escalated conversations that are still active.
+  const { data: escalated, error } = await supabaseAdmin
+    .from('conversations')
+    .select('id, escalated_at, tenants!inner(escalation_timeout_mins)')
+    .eq('is_active', true)
+    .eq('escalated', true)
+    .not('escalated_at', 'is', null)
+    .limit(200);
+
+  if (error || !escalated || escalated.length === 0) return 0;
+
+  const now = Date.now();
+  const timedOutIds: string[] = [];
+
+  for (const conv of escalated) {
+    const tenant = conv.tenants as unknown as { escalation_timeout_mins: number };
+    const timeoutMs = (tenant.escalation_timeout_mins || 30) * 60 * 1000;
+    const escalatedAt = new Date(conv.escalated_at as string).getTime();
+    if (now - escalatedAt >= timeoutMs) {
+      timedOutIds.push(conv.id);
+    }
+  }
+
+  if (timedOutIds.length === 0) return 0;
+
+  await supabaseAdmin
+    .from('conversations')
+    .update({ escalated: false, escalation_reason: null })
+    .in('id', timedOutIds);
+
+  console.log(`🔄 Auto-de-escalated ${timedOutIds.length} conversation(s) after timeout`);
+  return timedOutIds.length;
+}
+
+// ═══════════════════════════════════════
 // Cancel Follow-Ups
 // ═══════════════════════════════════════
 

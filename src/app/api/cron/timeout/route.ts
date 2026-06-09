@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { processPendingFollowUps, processStaleConversations } from '@/lib/followup/engine';
+import { processPendingFollowUps, processStaleConversations, processTimedOutEscalations } from '@/lib/followup/engine';
 import { runInactivityFlows } from '@/lib/flows/engine';
 
 export const maxDuration = 10;
@@ -26,12 +26,15 @@ async function handler(req: NextRequest) {
   // 1. Timeout stale conversations (no activity for 24h)
   await processStaleConversations();
 
-  // 2. Fire any pending follow-ups that are due
+  // 2. Auto-de-escalate conversations where staff didn't respond within the tenant's timeout
+  const deEscalated = await processTimedOutEscalations();
+
+  // 3. Fire any pending follow-ups that are due
   const followUpsSent = await processPendingFollowUps();
 
-  // 3. Fire inactivity_trigger flows for conversations with no reply
+  // 4. Fire inactivity_trigger flows for conversations with no reply
   const inactivityFired = await runInactivityFlows();
 
-  console.log(`[cron/timeout] followUpsSent=${followUpsSent} inactivityFired=${inactivityFired}`);
-  return NextResponse.json({ success: true, followUpsSent, inactivityFired });
+  console.log(`[cron/timeout] followUpsSent=${followUpsSent} inactivityFired=${inactivityFired} deEscalated=${deEscalated}`);
+  return NextResponse.json({ success: true, followUpsSent, inactivityFired, deEscalated });
 }

@@ -12,7 +12,7 @@ import { isDuplicateMessage, getRedisClient, acquireOffHoursLock } from '@/lib/r
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
 import { appendLeadRow, appendBookingRow } from '@/lib/integrations/google-sheets';
-import { parseMetaWebhook, sendTextMessage, sendMediaMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
+import { parseMetaWebhook, sendTextMessage, sendMediaMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator, sendStaffAlert } from '@/lib/meta/service';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
@@ -1186,6 +1186,26 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     console.error('❌ Meta: failed to save AI outbound message:', aiMsgErr.message);
   }
 
+  // 17b. Notify staff on WhatsApp when AI decides to escalate this conversation.
+  // sendStaffAlert uses the tenant's own WA number/token, so it is fully
+  // multi-tenant safe — each client's staff only receives their own alerts.
+  if (aiResponse.shouldEscalate) {
+    const leadName   = lead?.name || cleanPhone;
+    const reason     = aiResponse.escalationReason || 'Customer requested human assistance';
+    const preview    = msg.text ? `"${msg.text.slice(0, 120)}"` : '[media message]';
+    const alertMsg   =
+      `🚨 Escalation Alert — ${tenant.business_name || 'Your Business'}\n\n` +
+      `Customer: ${leadName}\n` +
+      `Phone: +${cleanPhone}\n` +
+      `Reason: ${reason}\n` +
+      `Message: ${preview}\n\n` +
+      `👉 Reply via Live Chat: https://ariesai.in/dashboard/live-chat\n` +
+      `(Bot is now paused for this customer — resume it from Live Chat when done)`;
+    sendStaffAlert(tenant, alertMsg).catch(err =>
+      console.error('❌ Staff escalation alert failed:', err)
+    );
+    console.log(`🚨 [${tenant.business_name}] Escalation fired for ${leadName} — staff notified`);
+  }
 
   // 18. Schedule follow-ups for new WhatsApp leads (first message only)
   // Instagram has this logic; WhatsApp was completely missing it.
