@@ -20,7 +20,7 @@ import { decryptToken } from '@/lib/utils/crypto';
 import { runFlowsForMessage } from '@/lib/flows/engine';
 import { fireIntegrations, createBookingPaymentLink } from '@/lib/integrations/runner';
 import { sendLeadAssignedEmail } from '@/lib/email/service';
-import { scheduleFollowUp } from '@/lib/followup/engine';
+import { scheduleFollowUp, cancelLeadFollowUps } from '@/lib/followup/engine';
 import { randomUUID } from 'crypto';
 import { triggerCapiEvent } from '@/lib/integrations/capi-trigger';
 import { processCtwaLead, getCampaignContextForAI } from '@/lib/meta-ads/attribution';
@@ -263,6 +263,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     const updateData: Record<string, any> = { last_message_at: new Date().toISOString() };
     if (isFromAd && !existingLead.source) updateData.source = leadSource;
     void supabaseAdmin.from('leads').update(updateData).eq('id', existingLead.id);
+    // Lead is actively messaging — cancel any pending follow-ups so they don't
+    // fire after the lead has already re-engaged. New follow-ups will be
+    // re-scheduled below if this is a fresh session (isFirstMessage = true).
+    cancelLeadFollowUps(existingLead.id).catch(() => {});
   } else {
     // New lead — round-robin assignment + campaign tracking in parallel (~100ms savings)
     let assignedTo: string | null = null;
