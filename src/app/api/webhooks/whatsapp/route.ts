@@ -1187,20 +1187,37 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   }
 
   // 17b. Notify staff on WhatsApp when AI decides to escalate this conversation.
-  // sendStaffAlert uses the tenant's own WA number/token, so it is fully
-  // multi-tenant safe — each client's staff only receives their own alerts.
+  // Uses the tenant's own custom alert template (set in Settings → Staff & Alerts).
+  // Falls back to the platform default if not configured.
+  // Fully multi-tenant: each client's staff only receives their own alerts,
+  // sent from their own WhatsApp number using their own token. Safe for 1500+ tenants.
   if (aiResponse.shouldEscalate) {
-    const leadName   = lead?.name || cleanPhone;
-    const reason     = aiResponse.escalationReason || 'Customer requested human assistance';
-    const preview    = msg.text ? `"${msg.text.slice(0, 120)}"` : '[media message]';
-    const alertMsg   =
-      `🚨 Escalation Alert — ${tenant.business_name || 'Your Business'}\n\n` +
-      `Customer: ${leadName}\n` +
-      `Phone: +${cleanPhone}\n` +
-      `Reason: ${reason}\n` +
-      `Message: ${preview}\n\n` +
+    const leadName = lead?.name || cleanPhone;
+    const reason   = aiResponse.escalationReason || 'Customer requested human assistance';
+    const preview  = msg.text ? msg.text.slice(0, 200) : '[media message]';
+
+    // Per-tenant template with variable interpolation.
+    // Variables: {{customer_name}} {{customer_phone}} {{reason}} {{message}} {{business_name}}
+    const DEFAULT_ESCALATION_TEMPLATE =
+      `🚨 Escalation Alert — {{business_name}}\n\n` +
+      `Customer: {{customer_name}}\n` +
+      `Phone: +{{customer_phone}}\n` +
+      `Reason: {{reason}}\n` +
+      `Message: {{message}}\n\n` +
       `👉 Reply via Live Chat: https://ariesai.in/dashboard/live-chat\n` +
       `(Bot is now paused for this customer — resume it from Live Chat when done)`;
+
+    const templateVars: Record<string, string> = {
+      customer_name:  leadName,
+      customer_phone: cleanPhone,
+      reason,
+      message:        preview,
+      business_name:  tenant.business_name || 'Your Business',
+    };
+
+    const rawTemplate = (tenant as any).escalation_alert_template?.trim() || DEFAULT_ESCALATION_TEMPLATE;
+    const alertMsg = rawTemplate.replace(/\{\{(\w+)\}\}/g, (_: string, key: string) => templateVars[key] ?? '');
+
     sendStaffAlert(tenant, alertMsg).catch(err =>
       console.error('❌ Staff escalation alert failed:', err)
     );
