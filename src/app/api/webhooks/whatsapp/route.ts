@@ -759,6 +759,34 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
             ...(matchedEarly.media_url && { media_url: matchedEarly.media_url }),
           });
         }
+        // Scripted reply exits before step 18, so schedule follow-ups here if this
+        // is the first message in the session. Without this they'd never get scheduled.
+        if (activeExistingConv === null && lead?.id) {
+          const _srNow = Date.now();
+          const _srFuConfigs = [
+            { enabled: tenant.followup_30min, type: '30min',  delayMs: 30 * 60 * 1000 },
+            { enabled: tenant.followup_3hr,   type: '3hr',    delayMs: 3 * 60 * 60 * 1000 },
+            { enabled: tenant.followup_24hr,  type: '24hr',   delayMs: 24 * 60 * 60 * 1000 },
+            { enabled: tenant.followup_7day,  type: '7day',   delayMs: 7 * 24 * 60 * 60 * 1000 },
+          ];
+          const _srFuRows = _srFuConfigs.filter(c => c.enabled).map(c => ({
+            id: randomUUID(),
+            tenant_id: tenant.id,
+            lead_id: lead!.id,
+            conversation_id: conversation.id,
+            follow_up_type: c.type,
+            scheduled_at: new Date(_srNow + c.delayMs).toISOString(),
+            message: null,
+            ai_generated: true,
+            status: 'pending',
+          }));
+          if (_srFuRows.length > 0) {
+            supabaseAdmin.from('follow_ups')
+              .upsert(_srFuRows, { onConflict: 'id', ignoreDuplicates: true })
+              .then(() => console.log(`⚡⏰ ${_srFuRows.length} follow-up(s) scheduled after scripted reply for lead ${lead!.id}`))
+              .catch(() => {});
+          }
+        }
         return;
       }
     }
