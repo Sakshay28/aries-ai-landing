@@ -45,7 +45,13 @@ const rawSupabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const rawServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const rawAppUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL;
 const rawPlatformAdminEmail = process.env.PLATFORM_ADMIN_EMAIL;
-const rawGoogleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+// Google OAuth client ID is consumed ONLY by the server-side sign-in + callback
+// route handlers, so it does not need (and should not use) the NEXT_PUBLIC_
+// prefix. The prefix previously caused production to silently break: Vercel had
+// GOOGLE_CLIENT_ID set but not NEXT_PUBLIC_GOOGLE_CLIENT_ID, so the inlined value
+// was empty and Google rejected the request with "Missing required parameter:
+// client_id". Prefer GOOGLE_CLIENT_ID; fall back to the legacy prefixed name.
+const rawGoogleClientId = process.env.GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
 // 2. Export sanitized environment variable block
 export const env = {
@@ -55,10 +61,9 @@ export const env = {
   SUPABASE_SERVICE_ROLE_KEY: isServer ? cleanEnvValue(rawServiceRoleKey) : '',
   NEXT_PUBLIC_APP_URL: cleanEnvValue(rawAppUrl) || 'http://localhost:3000',
   PLATFORM_ADMIN_EMAIL: cleanEnvValue(rawPlatformAdminEmail) || 'admin@ariesai.in',
-  // No hardcoded fallback — forces the env var to be set explicitly.
-  // Hardcoding the client ID leaks your Google project structure and
-  // makes key rotation a code-change instead of a config change.
-  NEXT_PUBLIC_GOOGLE_CLIENT_ID: cleanEnvValue(rawGoogleClientId) || '',
+  // Server-only — the client ID is not a secret, but it is only read by server
+  // route handlers, so we never inline it into the browser bundle.
+  GOOGLE_CLIENT_ID: isServer ? cleanEnvValue(rawGoogleClientId) : '',
   NODE_ENV: process.env.NODE_ENV || 'development',
 };
 

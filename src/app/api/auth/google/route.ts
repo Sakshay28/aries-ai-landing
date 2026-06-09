@@ -5,12 +5,17 @@ import crypto from 'crypto';
 export async function GET(req: NextRequest) {
   const origin = req.nextUrl.origin;
 
+  if (!env.GOOGLE_CLIENT_ID) {
+    console.error('GOOGLE_CLIENT_ID is not configured — cannot start Google sign-in');
+    return NextResponse.redirect(`${origin}/login?error=auth_failed`);
+  }
+
   const state = crypto.randomBytes(32).toString('hex');
   const rawNonce = crypto.randomBytes(32).toString('hex');
   const hashedNonce = crypto.createHash('sha256').update(rawNonce).digest('hex');
 
   const params = new URLSearchParams({
-    client_id: env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
+    client_id: env.GOOGLE_CLIENT_ID,
     redirect_uri: `${origin}/api/auth/google/callback`,
     response_type: 'code',
     scope: 'openid email profile',

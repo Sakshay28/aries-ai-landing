@@ -28,8 +28,8 @@ export async function GET(req: NextRequest) {
   }
 
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  if (!clientSecret) {
-    console.error('GOOGLE_CLIENT_SECRET is not configured');
+  if (!env.GOOGLE_CLIENT_ID || !clientSecret) {
+    console.error('Google OAuth client ID/secret is not configured');
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
   }
 
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       code,
-      client_id: env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
+      client_id: env.GOOGLE_CLIENT_ID,
       client_secret: clientSecret,
       redirect_uri: `${origin}/api/auth/google/callback`,
       grant_type: 'authorization_code',
