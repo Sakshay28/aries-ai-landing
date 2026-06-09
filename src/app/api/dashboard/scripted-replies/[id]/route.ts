@@ -18,8 +18,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (Array.isArray(body.keywords)) {
     updates.keywords = body.keywords.map((k: string) => k.trim().toLowerCase()).filter(Boolean);
   }
-  if (typeof body.reply === 'string' && body.reply.trim()) {
+  if (typeof body.reply === 'string') {
     updates.reply = body.reply.trim();
+  }
+  if ('media_url' in body) {
+    updates.media_url = (body.media_url ?? '').trim() || null;
   }
 
   const { data, error } = await supabaseAdmin

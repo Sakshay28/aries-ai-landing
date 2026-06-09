@@ -24,6 +24,7 @@ interface ScriptedReply {
   id: string;
   keywords: string[];
   reply: string;
+  media_url?: string | null;
   is_active: boolean;
   created_at: string;
 }
@@ -206,6 +207,7 @@ export default function AISettingsPage() {
   const [scriptedReplies, setScriptedReplies] = useState<ScriptedReply[]>([]);
   const [newSrKeywords, setNewSrKeywords] = useState('');
   const [newSrReply, setNewSrReply] = useState('');
+  const [newSrMediaUrl, setNewSrMediaUrl] = useState('');
   const [addingSr, setAddingSr] = useState(false);
   
   // Playground Chat Simulator States
@@ -464,20 +466,22 @@ export default function AISettingsPage() {
   const handleAddScriptedReply = async () => {
     const keywords = newSrKeywords.split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
     const reply = newSrReply.trim();
+    const mediaUrl = newSrMediaUrl.trim() || null;
     if (keywords.length === 0) { toast.error('Add at least one trigger keyword'); return; }
-    if (!reply) { toast.error('Reply text is required'); return; }
+    if (!reply && !mediaUrl) { toast.error('Reply text or image URL is required'); return; }
     setAddingSr(true);
     try {
       const res = await fetch('/api/dashboard/scripted-replies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keywords, reply }),
+        body: JSON.stringify({ keywords, reply, media_url: mediaUrl }),
       });
       const json = await res.json();
       if (json.data) {
         setScriptedReplies(prev => [...prev, json.data]);
         setNewSrKeywords('');
         setNewSrReply('');
+        setNewSrMediaUrl('');
         toast.success('Scripted reply added!');
       } else {
         toast.error(json.error || 'Failed to add');
@@ -1287,9 +1291,17 @@ export default function AISettingsPage() {
                                   </span>
                                 ))}
                               </div>
-                              <div className="text-muted-foreground bg-emerald-500/[0.03] px-2.5 py-1.5 rounded-lg border border-emerald-500/10 break-words">
-                                "{sr.reply.length > 120 ? sr.reply.slice(0, 120) + '…' : sr.reply}"
-                              </div>
+                              {sr.media_url && (
+                                <div className="flex items-center gap-2">
+                                  <img src={sr.media_url} alt="scripted reply image" className="h-16 w-24 object-cover rounded-lg border border-border" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                  <span className="text-[10px] text-muted-foreground/60 font-medium">📷 Image attached</span>
+                                </div>
+                              )}
+                              {sr.reply && (
+                                <div className="text-muted-foreground bg-emerald-500/[0.03] px-2.5 py-1.5 rounded-lg border border-emerald-500/10 break-words">
+                                  "{sr.reply.length > 120 ? sr.reply.slice(0, 120) + '…' : sr.reply}"
+                                </div>
+                              )}
                             </div>
                             <div className="flex flex-col items-end gap-1.5 shrink-0">
                               <button
@@ -1347,6 +1359,21 @@ export default function AISettingsPage() {
                           rows={3}
                           className="w-full px-3 py-2 rounded-xl text-xs border border-border bg-background outline-none focus:ring-1 focus:ring-primary/30 resize-none"
                         />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
+                          Image URL <span className="normal-case font-normal text-muted-foreground/50">(optional — paste a public image link)</span>
+                        </label>
+                        <input
+                          value={newSrMediaUrl}
+                          onChange={e => setNewSrMediaUrl(e.target.value)}
+                          placeholder="https://example.com/menu.jpg"
+                          className="w-full h-9 px-3 rounded-xl text-xs border border-border bg-background outline-none focus:ring-1 focus:ring-primary/30"
+                        />
+                        {newSrMediaUrl.trim() && (
+                          <img src={newSrMediaUrl.trim()} alt="preview" className="mt-2 h-20 w-32 object-cover rounded-lg border border-border" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                        )}
+                        <p className="text-[10px] text-muted-foreground/50 mt-1">Image sends first, reply text appears as caption below it</p>
                       </div>
                       <button
                         onClick={handleAddScriptedReply}

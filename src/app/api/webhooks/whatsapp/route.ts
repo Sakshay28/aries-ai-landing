@@ -12,7 +12,7 @@ import { isDuplicateMessage, getRedisClient, acquireOffHoursLock } from '@/lib/r
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
 import { appendLeadRow, appendBookingRow } from '@/lib/integrations/google-sheets';
-import { parseMetaWebhook, sendTextMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
+import { parseMetaWebhook, sendTextMessage, sendMediaMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
@@ -824,7 +824,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     // Scripted replies — exact-match keyword intercepts that bypass AI entirely
     supabaseAdmin
       .from('scripted_replies')
-      .select('keywords, reply')
+      .select('keywords, reply, media_url')
       .eq('tenant_id', tenant.id)
       .eq('is_active', true),
   ]);
@@ -875,7 +875,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // so more specific replies always take priority over broad single-word ones.
   if (scriptedRepliesRows && scriptedRepliesRows.length > 0 && msg.text) {
     const lowerMsg = msg.text.toLowerCase();
-    type ScriptedRow = { keywords: string[]; reply: string };
+    type ScriptedRow = { keywords: string[]; reply: string; media_url?: string | null };
     let matchedScript: ScriptedRow | undefined;
     let bestMatchLen = 0;
     for (const r of scriptedRepliesRows as ScriptedRow[]) {
@@ -888,25 +888,37 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       }
     }
     if (matchedScript) {
-      console.log(`⚡ Scripted reply matched for tenant ${tenant.id}: "${matchedScript.keywords.join(', ')}"`);
+      console.log(`⚡ Scripted reply matched for tenant ${tenant.id}: "${matchedScript.keywords.join(', ')}" (image: ${!!matchedScript.media_url})`);
       if (decryptedAccessToken && tenant.wa_phone_number_id) {
-        const sendResult = await sendTextMessage(
-          decryptedAccessToken,
-          tenant.wa_phone_number_id as string,
-          cleanPhone,
-          matchedScript.reply
-        ).catch((e: Error) => { console.error('❌ Scripted reply send failed:', e.message); return null; });
+        // Send image (with caption) if media_url set, otherwise plain text
+        const sendResult = matchedScript.media_url
+          ? await sendMediaMessage(
+              decryptedAccessToken,
+              tenant.wa_phone_number_id as string,
+              cleanPhone,
+              'image',
+              matchedScript.media_url,
+              matchedScript.reply || undefined
+            ).catch((e: Error) => { console.error('❌ Scripted reply image send failed:', e.message); return null; })
+          : await sendTextMessage(
+              decryptedAccessToken,
+              tenant.wa_phone_number_id as string,
+              cleanPhone,
+              matchedScript.reply
+            ).catch((e: Error) => { console.error('❌ Scripted reply send failed:', e.message); return null; });
+
         // Save outbound message to DB
         void supabaseAdmin.from('messages').insert({
           tenant_id: tenant.id,
           conversation_id: conversation.id,
           direction: 'outbound',
-          content: matchedScript.reply,
-          message_type: 'text',
+          content: matchedScript.reply || matchedScript.media_url || '',
+          message_type: matchedScript.media_url ? 'image' : 'text',
           channel: 'whatsapp',
           status: sendResult ? 'sent' : 'failed',
           ai_generated: false,
           wa_message_id: sendResult?.messageId ?? null,
+          ...(matchedScript.media_url && { media_url: matchedScript.media_url }),
         });
       }
       return;
