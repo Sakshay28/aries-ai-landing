@@ -62,7 +62,32 @@ export async function POST(req: NextRequest) {
       systemPrompt: draftConfig.system_prompt || '',
     };
 
-    // 3b. Apply AI Flows agent routing EXACTLY as the live webhook does.
+    // 3b. Check scripted replies — exact keyword intercepts that bypass AI.
+    // Must mirror the webhook behaviour exactly (simulator parity).
+    const { data: scriptedRepliesRows } = await supabaseAdmin
+      .from('scripted_replies')
+      .select('keywords, reply')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true);
+
+    if (scriptedRepliesRows && scriptedRepliesRows.length > 0) {
+      const lowerMsgForScript = message.toLowerCase();
+      type ScriptedRow = { keywords: string[]; reply: string };
+      const matchedScript = (scriptedRepliesRows as ScriptedRow[]).find(r =>
+        Array.isArray(r.keywords) && r.keywords.some((kw: string) => lowerMsgForScript.includes(kw.toLowerCase()))
+      );
+      if (matchedScript) {
+        return NextResponse.json({
+          success: true,
+          data: { reply: matchedScript.reply, intent: 'scripted', sentiment: 'neutral', nextStep: null },
+          activeAgent: null,
+          scriptedReply: true,
+          providerStatus: { available: true, consecutiveFailures: 0, lastError: null },
+        });
+      }
+    }
+
+    // 3c. Apply AI Flows agent routing EXACTLY as the live webhook does.
     // Without this the simulator silently diverges from real WhatsApp: an active
     // agent_configs row whose keywords match (or a keyword-less catch-all agent)
     // overrides bot_name / personality / system_prompt in production, but the

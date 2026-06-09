@@ -20,6 +20,14 @@ interface FAQ {
   answer: string;
 }
 
+interface ScriptedReply {
+  id: string;
+  keywords: string[];
+  reply: string;
+  is_active: boolean;
+  created_at: string;
+}
+
 interface KnowledgeDoc {
   id: string;
   filename: string;
@@ -193,6 +201,12 @@ export default function AISettingsPage() {
   const [uploading, setUploading] = useState(false);
   const [newFaqQuestion, setNewFaqQuestion] = useState('');
   const [newFaqAnswer, setNewFaqAnswer] = useState('');
+
+  // Scripted replies state
+  const [scriptedReplies, setScriptedReplies] = useState<ScriptedReply[]>([]);
+  const [newSrKeywords, setNewSrKeywords] = useState('');
+  const [newSrReply, setNewSrReply] = useState('');
+  const [addingSr, setAddingSr] = useState(false);
   
   // Playground Chat Simulator States
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -295,7 +309,12 @@ export default function AISettingsPage() {
   // Load configuration & documents on mount
   useEffect(() => {
     loadAllData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Load scripted replies separately (defined after this block)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetch('/api/dashboard/scripted-replies').then(r => r.json()).then(j => { if (j.data) setScriptedReplies(j.data); }).catch(() => {}); }, []);
 
   // Listen for scroll in workspace panel to collapse header
   useEffect(() => {
@@ -431,6 +450,55 @@ export default function AISettingsPage() {
     const updated = draft.custom_faqs.filter((_, i) => i !== index);
     update('custom_faqs', updated);
     toast.success('FAQ removed');
+  };
+
+  // ── Scripted Replies Management ──
+  const loadScriptedReplies = useCallback(async () => {
+    try {
+      const res = await fetch('/api/dashboard/scripted-replies');
+      const json = await res.json();
+      if (json.data) setScriptedReplies(json.data);
+    } catch { /* non-fatal */ }
+  }, []);
+
+  const handleAddScriptedReply = async () => {
+    const keywords = newSrKeywords.split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+    const reply = newSrReply.trim();
+    if (keywords.length === 0) { toast.error('Add at least one trigger keyword'); return; }
+    if (!reply) { toast.error('Reply text is required'); return; }
+    setAddingSr(true);
+    try {
+      const res = await fetch('/api/dashboard/scripted-replies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords, reply }),
+      });
+      const json = await res.json();
+      if (json.data) {
+        setScriptedReplies(prev => [...prev, json.data]);
+        setNewSrKeywords('');
+        setNewSrReply('');
+        toast.success('Scripted reply added!');
+      } else {
+        toast.error(json.error || 'Failed to add');
+      }
+    } catch { toast.error('Network error'); }
+    setAddingSr(false);
+  };
+
+  const handleToggleScriptedReply = async (id: string, is_active: boolean) => {
+    setScriptedReplies(prev => prev.map(r => r.id === id ? { ...r, is_active } : r));
+    await fetch(`/api/dashboard/scripted-replies/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_active }),
+    }).catch(() => {});
+  };
+
+  const handleDeleteScriptedReply = async (id: string) => {
+    setScriptedReplies(prev => prev.filter(r => r.id !== id));
+    await fetch(`/api/dashboard/scripted-replies/${id}`, { method: 'DELETE' }).catch(() => {});
+    toast.success('Scripted reply deleted');
   };
 
   // ── RAG Knowledge File Uploader ──
@@ -585,6 +653,10 @@ export default function AISettingsPage() {
 
       // Surface AI Flows agent overrides — matches live WhatsApp behaviour.
       setActiveAgent(json.activeAgent || null);
+      // Surface scripted reply intercepts so user sees "⚡ Scripted Reply" in simulator
+      if (json.scriptedReply) {
+        setActiveAgent('⚡ Scripted Reply — AI bypassed');
+      }
 
       const elapsed = Date.now() - start;
       const delay = Math.max(800 - elapsed, 0); // Guarantee 800ms minimum typing animation delay
@@ -1179,6 +1251,110 @@ export default function AISettingsPage() {
                         className="flex items-center gap-1.5 h-8 px-4 rounded-lg text-xs font-bold bg-secondary hover:bg-secondary/80 border border-border text-foreground transition-all ml-auto"
                       >
                         <Plus className="w-3.5 h-3.5" /> Add FAQ
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* ── Scripted Replies ── */}
+                  <div className="space-y-4 pt-4 border-t border-border">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <label className="text-[11px] font-bold tracking-wider uppercase text-muted-foreground block">
+                          ⚡ Scripted Replies
+                        </label>
+                        <p className="text-[11px] text-muted-foreground/70 mt-0.5">
+                          When a message contains any trigger keyword, this exact reply is sent — AI is bypassed entirely.
+                        </p>
+                      </div>
+                      <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                        {scriptedReplies.filter(r => r.is_active).length} active
+                      </span>
+                    </div>
+
+                    {/* Existing scripted replies list */}
+                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                      {scriptedReplies.map((sr) => (
+                        <div key={sr.id} className={cn(
+                          "p-3.5 rounded-xl border bg-background/50 text-xs leading-relaxed relative group transition-opacity",
+                          sr.is_active ? "border-border" : "border-border/40 opacity-50"
+                        )}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="space-y-2 flex-1 min-w-0">
+                              <div className="flex flex-wrap gap-1">
+                                {sr.keywords.map((kw, ki) => (
+                                  <span key={ki} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary border border-primary/20">
+                                    {kw}
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="text-muted-foreground bg-emerald-500/[0.03] px-2.5 py-1.5 rounded-lg border border-emerald-500/10 break-words">
+                                "{sr.reply.length > 120 ? sr.reply.slice(0, 120) + '…' : sr.reply}"
+                              </div>
+                            </div>
+                            <div className="flex flex-col items-end gap-1.5 shrink-0">
+                              <button
+                                onClick={() => handleDeleteScriptedReply(sr.id)}
+                                className="text-muted-foreground hover:text-red-500 p-1 rounded-lg hover:bg-red-500/5 transition-all opacity-0 group-hover:opacity-100"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleToggleScriptedReply(sr.id, !sr.is_active)}
+                                className={cn(
+                                  "text-[9px] font-bold px-2 py-0.5 rounded-full border transition-all",
+                                  sr.is_active
+                                    ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-red-500/10 hover:text-red-500 hover:border-red-500/20"
+                                    : "bg-secondary text-muted-foreground border-border hover:bg-emerald-500/10 hover:text-emerald-600 hover:border-emerald-500/20"
+                                )}
+                              >
+                                {sr.is_active ? 'ON' : 'OFF'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {scriptedReplies.length === 0 && (
+                        <div className="p-4 rounded-xl border border-dashed border-border/60 bg-secondary/10 text-center">
+                          <p className="text-[11px] text-muted-foreground/60 font-medium">No scripted replies yet.</p>
+                          <p className="text-[10px] text-muted-foreground/40 mt-0.5">Example: keywords "price, cost" → "Our plans start at ₹999/mo."</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Add new scripted reply */}
+                    <div className="p-3.5 rounded-xl border border-border bg-secondary/20 space-y-3">
+                      <div className="text-xs font-bold text-foreground">Add New Scripted Reply</div>
+                      <div>
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
+                          Trigger keywords (comma-separated)
+                        </label>
+                        <input
+                          value={newSrKeywords}
+                          onChange={e => setNewSrKeywords(e.target.value)}
+                          placeholder="e.g. price, cost, how much, rates"
+                          className="w-full h-9 px-3 rounded-xl text-xs border border-border bg-background outline-none focus:ring-1 focus:ring-primary/30"
+                        />
+                        <p className="text-[10px] text-muted-foreground/50 mt-1">Reply sends when the customer's message contains ANY of these words</p>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
+                          Exact reply to send
+                        </label>
+                        <textarea
+                          value={newSrReply}
+                          onChange={e => setNewSrReply(e.target.value)}
+                          placeholder="Type the exact message the customer will receive..."
+                          rows={3}
+                          className="w-full px-3 py-2 rounded-xl text-xs border border-border bg-background outline-none focus:ring-1 focus:ring-primary/30 resize-none"
+                        />
+                      </div>
+                      <button
+                        onClick={handleAddScriptedReply}
+                        disabled={addingSr || !newSrKeywords.trim() || !newSrReply.trim()}
+                        className="flex items-center gap-1.5 h-8 px-4 rounded-lg text-xs font-bold bg-foreground text-background hover:opacity-90 disabled:opacity-40 transition-all ml-auto"
+                      >
+                        {addingSr ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                        {addingSr ? 'Adding…' : 'Add Reply'}
                       </button>
                     </div>
                   </div>

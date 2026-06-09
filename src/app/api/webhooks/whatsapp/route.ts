@@ -773,7 +773,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   // 12+13. Fire the AI-context batch speculatively BEFORE the flow engine so its
   // DB time (~200-300ms) overlaps with the flow engine's own DB check (~50-150ms).
-  // All 6 queries are pure reads — no side effects. If flows handle the message
+  // All 7 queries are pure reads — no side effects. If flows handle the message
   // the results are simply discarded; otherwise they're ready (or very close) when
   // the AI needs them, saving ~100-150ms on every non-flow message.
   const _aiBatchPromise = Promise.all([
@@ -821,6 +821,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       .eq('tenant_id', tenant.id)
       .not('embedding', 'is', null)
       .limit(1),
+    // Scripted replies — exact-match keyword intercepts that bypass AI entirely
+    supabaseAdmin
+      .from('scripted_replies')
+      .select('keywords, reply')
+      .eq('tenant_id', tenant.id)
+      .eq('is_active', true),
   ]);
 
   // 12. Flow Engine Execution (runs concurrently with _aiBatchPromise above)
@@ -847,7 +853,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const storedMsgCount = conversation.message_count ?? 0;
 
   // 13. Await the speculative batch (started before flows — likely already resolved)
-  const [{ data: recentMsgs }, { data: smartRulesRows }, { data: agentRows }, { data: existingBookingRow }, { data: kbDocs }, { data: kbEmbedCheck }] = await _aiBatchPromise;
+  const [{ data: recentMsgs }, { data: smartRulesRows }, { data: agentRows }, { data: existingBookingRow }, { data: kbDocs }, { data: kbEmbedCheck }, { data: scriptedRepliesRows }] = await _aiBatchPromise;
 
   const history = (recentMsgs || [])
     .reverse()
@@ -862,6 +868,40 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const isFirstMessageForAI = history.filter(h => h.role === 'assistant').length === 0;
 
   perf('parallel_fetch_done');
+
+  // 13a. Scripted Replies — exact keyword intercept, bypasses AI entirely.
+  // No tokens consumed, guaranteed wording. Checked before RAG/agent/AI.
+  if (scriptedRepliesRows && scriptedRepliesRows.length > 0 && msg.text) {
+    const lowerMsg = msg.text.toLowerCase();
+    type ScriptedRow = { keywords: string[]; reply: string };
+    const matchedScript = (scriptedRepliesRows as ScriptedRow[]).find(r =>
+      Array.isArray(r.keywords) && r.keywords.some((kw: string) => lowerMsg.includes(kw.toLowerCase()))
+    );
+    if (matchedScript) {
+      console.log(`⚡ Scripted reply matched for tenant ${tenant.id}: "${matchedScript.keywords.join(', ')}"`);
+      if (decryptedAccessToken && tenant.wa_phone_number_id) {
+        const sendResult = await sendTextMessage(
+          decryptedAccessToken,
+          tenant.wa_phone_number_id as string,
+          cleanPhone,
+          matchedScript.reply
+        ).catch((e: Error) => { console.error('❌ Scripted reply send failed:', e.message); return null; });
+        // Save outbound message to DB
+        void supabaseAdmin.from('messages').insert({
+          tenant_id: tenant.id,
+          conversation_id: conversation.id,
+          direction: 'outbound',
+          content: matchedScript.reply,
+          message_type: 'text',
+          channel: 'whatsapp',
+          status: sendResult ? 'sent' : 'failed',
+          ai_generated: false,
+          wa_message_id: sendResult?.messageId ?? null,
+        });
+      }
+      return;
+    }
+  }
 
   // RAG (semantic doc search) only earns its ~500-700ms embedding round-trip
   // when there are MORE docs than we'd inject anyway. The batch above already
