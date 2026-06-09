@@ -871,12 +871,22 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   // 13a. Scripted Replies — exact keyword intercept, bypasses AI entirely.
   // No tokens consumed, guaranteed wording. Checked before RAG/agent/AI.
+  // Longest-keyword-match wins: "free trial" (10 chars) beats "price" (5 chars)
+  // so more specific replies always take priority over broad single-word ones.
   if (scriptedRepliesRows && scriptedRepliesRows.length > 0 && msg.text) {
     const lowerMsg = msg.text.toLowerCase();
     type ScriptedRow = { keywords: string[]; reply: string };
-    const matchedScript = (scriptedRepliesRows as ScriptedRow[]).find(r =>
-      Array.isArray(r.keywords) && r.keywords.some((kw: string) => lowerMsg.includes(kw.toLowerCase()))
-    );
+    let matchedScript: ScriptedRow | undefined;
+    let bestMatchLen = 0;
+    for (const r of scriptedRepliesRows as ScriptedRow[]) {
+      if (!Array.isArray(r.keywords)) continue;
+      for (const kw of r.keywords) {
+        if (kw && lowerMsg.includes(kw.toLowerCase()) && kw.length > bestMatchLen) {
+          bestMatchLen = kw.length;
+          matchedScript = r;
+        }
+      }
+    }
     if (matchedScript) {
       console.log(`⚡ Scripted reply matched for tenant ${tenant.id}: "${matchedScript.keywords.join(', ')}"`);
       if (decryptedAccessToken && tenant.wa_phone_number_id) {

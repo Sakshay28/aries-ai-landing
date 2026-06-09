@@ -73,9 +73,18 @@ export async function POST(req: NextRequest) {
     if (scriptedRepliesRows && scriptedRepliesRows.length > 0) {
       const lowerMsgForScript = message.toLowerCase();
       type ScriptedRow = { keywords: string[]; reply: string };
-      const matchedScript = (scriptedRepliesRows as ScriptedRow[]).find(r =>
-        Array.isArray(r.keywords) && r.keywords.some((kw: string) => lowerMsgForScript.includes(kw.toLowerCase()))
-      );
+      // Longest-keyword-match wins — more specific keywords beat broad single words
+      let matchedScript: ScriptedRow | undefined;
+      let bestMatchLen = 0;
+      for (const r of scriptedRepliesRows as ScriptedRow[]) {
+        if (!Array.isArray(r.keywords)) continue;
+        for (const kw of r.keywords) {
+          if (kw && lowerMsgForScript.includes(kw.toLowerCase()) && kw.length > bestMatchLen) {
+            bestMatchLen = kw.length;
+            matchedScript = r;
+          }
+        }
+      }
       if (matchedScript) {
         return NextResponse.json({
           success: true,
