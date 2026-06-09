@@ -713,6 +713,53 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     console.warn('⚠️ Business hours check failed (non-fatal):', offHoursErr);
   }
 
+  // ── Scripted Replies early check ────────────────────────────────────────────
+  // Must run BEFORE the off-hours guard so scripted replies (e.g. welcome image
+  // on "hi") always fire even when the business is closed. Longest-keyword-match
+  // wins so more specific keywords beat broad single words.
+  if (msg.text) {
+    const { data: earlyScriptedRows } = await supabaseAdmin
+      .from('scripted_replies')
+      .select('keywords, reply, media_url')
+      .eq('tenant_id', tenant.id)
+      .eq('is_active', true);
+
+    if (earlyScriptedRows && earlyScriptedRows.length > 0) {
+      const lowerMsgEarly = msg.text.toLowerCase();
+      type ESRow = { keywords: string[]; reply: string; media_url?: string | null };
+      let matchedEarly: ESRow | undefined;
+      let bestEarlyLen = 0;
+      for (const r of earlyScriptedRows as ESRow[]) {
+        if (!Array.isArray(r.keywords)) continue;
+        for (const kw of r.keywords) {
+          if (kw && lowerMsgEarly.includes(kw.toLowerCase()) && kw.length > bestEarlyLen) {
+            bestEarlyLen = kw.length;
+            matchedEarly = r;
+          }
+        }
+      }
+      if (matchedEarly) {
+        console.log(`⚡ Scripted reply (early) matched for tenant ${tenant.id}: "${matchedEarly.keywords.join(', ')}"`);
+        if (decryptedAccessToken && tenant.wa_phone_number_id) {
+          const sendResult = matchedEarly.media_url
+            ? await sendMediaMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, 'image', matchedEarly.media_url, matchedEarly.reply || undefined)
+                .catch((e: Error) => { console.error('❌ Scripted reply image send failed:', e.message); return null; })
+            : await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, matchedEarly.reply)
+                .catch((e: Error) => { console.error('❌ Scripted reply send failed:', e.message); return null; });
+          void supabaseAdmin.from('messages').insert({
+            tenant_id: tenant.id, conversation_id: conversation.id,
+            direction: 'outbound', content: matchedEarly.reply || matchedEarly.media_url || '',
+            message_type: matchedEarly.media_url ? 'image' : 'text',
+            channel: 'whatsapp', status: sendResult ? 'sent' : 'failed',
+            ai_generated: false, wa_message_id: sendResult?.messageId ?? null,
+            ...(matchedEarly.media_url && { media_url: matchedEarly.media_url }),
+          });
+        }
+        return;
+      }
+    }
+  }
+
   // Off-hours guard: send ONE notice per 6-hour closed window per conversation.
   // Race-safe: acquireOffHoursLock uses Redis SET NX (atomic) — only the FIRST
   // concurrent request can acquire the lock; all others see 'already_sent'.
@@ -821,12 +868,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       .eq('tenant_id', tenant.id)
       .not('embedding', 'is', null)
       .limit(1),
-    // Scripted replies — exact-match keyword intercepts that bypass AI entirely
-    supabaseAdmin
-      .from('scripted_replies')
-      .select('keywords, reply, media_url')
-      .eq('tenant_id', tenant.id)
-      .eq('is_active', true),
   ]);
 
   // 12. Flow Engine Execution (runs concurrently with _aiBatchPromise above)
@@ -853,7 +894,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const storedMsgCount = conversation.message_count ?? 0;
 
   // 13. Await the speculative batch (started before flows — likely already resolved)
-  const [{ data: recentMsgs }, { data: smartRulesRows }, { data: agentRows }, { data: existingBookingRow }, { data: kbDocs }, { data: kbEmbedCheck }, { data: scriptedRepliesRows }] = await _aiBatchPromise;
+  const [{ data: recentMsgs }, { data: smartRulesRows }, { data: agentRows }, { data: existingBookingRow }, { data: kbDocs }, { data: kbEmbedCheck }] = await _aiBatchPromise;
 
   const history = (recentMsgs || [])
     .reverse()
@@ -868,62 +909,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const isFirstMessageForAI = history.filter(h => h.role === 'assistant').length === 0;
 
   perf('parallel_fetch_done');
-
-  // 13a. Scripted Replies — exact keyword intercept, bypasses AI entirely.
-  // No tokens consumed, guaranteed wording. Checked before RAG/agent/AI.
-  // Longest-keyword-match wins: "free trial" (10 chars) beats "price" (5 chars)
-  // so more specific replies always take priority over broad single-word ones.
-  if (scriptedRepliesRows && scriptedRepliesRows.length > 0 && msg.text) {
-    const lowerMsg = msg.text.toLowerCase();
-    type ScriptedRow = { keywords: string[]; reply: string; media_url?: string | null };
-    let matchedScript: ScriptedRow | undefined;
-    let bestMatchLen = 0;
-    for (const r of scriptedRepliesRows as ScriptedRow[]) {
-      if (!Array.isArray(r.keywords)) continue;
-      for (const kw of r.keywords) {
-        if (kw && lowerMsg.includes(kw.toLowerCase()) && kw.length > bestMatchLen) {
-          bestMatchLen = kw.length;
-          matchedScript = r;
-        }
-      }
-    }
-    if (matchedScript) {
-      console.log(`⚡ Scripted reply matched for tenant ${tenant.id}: "${matchedScript.keywords.join(', ')}" (image: ${!!matchedScript.media_url})`);
-      if (decryptedAccessToken && tenant.wa_phone_number_id) {
-        // Send image (with caption) if media_url set, otherwise plain text
-        const sendResult = matchedScript.media_url
-          ? await sendMediaMessage(
-              decryptedAccessToken,
-              tenant.wa_phone_number_id as string,
-              cleanPhone,
-              'image',
-              matchedScript.media_url,
-              matchedScript.reply || undefined
-            ).catch((e: Error) => { console.error('❌ Scripted reply image send failed:', e.message); return null; })
-          : await sendTextMessage(
-              decryptedAccessToken,
-              tenant.wa_phone_number_id as string,
-              cleanPhone,
-              matchedScript.reply
-            ).catch((e: Error) => { console.error('❌ Scripted reply send failed:', e.message); return null; });
-
-        // Save outbound message to DB
-        void supabaseAdmin.from('messages').insert({
-          tenant_id: tenant.id,
-          conversation_id: conversation.id,
-          direction: 'outbound',
-          content: matchedScript.reply || matchedScript.media_url || '',
-          message_type: matchedScript.media_url ? 'image' : 'text',
-          channel: 'whatsapp',
-          status: sendResult ? 'sent' : 'failed',
-          ai_generated: false,
-          wa_message_id: sendResult?.messageId ?? null,
-          ...(matchedScript.media_url && { media_url: matchedScript.media_url }),
-        });
-      }
-      return;
-    }
-  }
 
   // RAG (semantic doc search) only earns its ~500-700ms embedding round-trip
   // when there are MORE docs than we'd inject anyway. The batch above already
