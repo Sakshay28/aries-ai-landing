@@ -264,18 +264,43 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     if (isFromAd && !existingLead.source) updateData.source = leadSource;
     void supabaseAdmin.from('leads').update(updateData).eq('id', existingLead.id);
   } else {
-    // New lead — round-robin assignment
+    // New lead — round-robin assignment + campaign tracking in parallel (~100ms savings)
     let assignedTo: string | null = null;
     let assignedMember: { id: string; email?: string; full_name?: string } | null = null;
-    try {
-      const { data: teamMembers } = await supabaseAdmin
-        .from('users')
-        .select('id, is_sales_agent, email, full_name')
-        .eq('tenant_id', tenant.id)
-        .order('created_at', { ascending: true });
+    let campaignId: string | null = null;
+    let campaignName: string | undefined;
 
+    const [teamMembersResult, campaignsResult] = await Promise.all([
+      (async () => {
+        try {
+          return await supabaseAdmin
+            .from('users')
+            .select('id, is_sales_agent, email, full_name')
+            .eq('tenant_id', tenant.id)
+            .order('created_at', { ascending: true });
+        } catch (e) {
+          console.warn('⚠️ Assignment query failed:', e);
+          return { data: null };
+        }
+      })(),
+      (async () => {
+        try {
+          return await supabaseAdmin
+            .from('lead_campaigns')
+            .select('id, name, ref_code, meta_ad_id')
+            .eq('tenant_id', tenant.id)
+            .eq('is_active', true);
+        } catch {
+          return { data: null }; // lead_campaigns may not exist yet — safe to skip
+        }
+      })(),
+    ]);
+
+    // Process team assignment
+    try {
+      const teamMembers = teamMembersResult.data as Array<{ id: string; is_sales_agent?: boolean; email?: string; full_name?: string }> | null;
       if (teamMembers && teamMembers.length > 0) {
-        const salesPool = teamMembers.filter((m: { is_sales_agent?: boolean }) => m.is_sales_agent);
+        const salesPool = teamMembers.filter((m) => m.is_sales_agent);
         const pool = salesPool.length > 0 ? salesPool : teamMembers;
         const counter = (tenant.lead_assignment_counter as number) ?? 0;
         const idx = counter % pool.length;
@@ -290,33 +315,25 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       console.warn('⚠️ Assignment failed:', e);
     }
 
-    // Campaign tracking
-    let campaignId: string | null = null;
-    let campaignName: string | undefined;
+    // Process campaign tracking
     try {
-      const { data: campaigns } = await supabaseAdmin
-        .from('lead_campaigns')
-        .select('id, name, ref_code, meta_ad_id')
-        .eq('tenant_id', tenant.id)
-        .eq('is_active', true);
-
+      const campaigns = campaignsResult.data as Array<{ id: string; name: string; ref_code?: string; meta_ad_id?: string }> | null;
       const text = (msg.text || '').toLowerCase();
       let hit: { id: string; name: string } | undefined;
-      if (text) {
-        hit = (campaigns || []).find((c: { ref_code?: string }) => {
+      if (text && campaigns) {
+        hit = campaigns.find((c) => {
           if (!c.ref_code) return false;
           const esc = c.ref_code.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           return new RegExp(`\\b${esc}\\b`).test(text);
         });
       }
       const adId = isFromAd ? msg.referral?.source_id : undefined;
-      if (!hit && adId) {
-        hit = (campaigns || []).find((c: { meta_ad_id?: string }) =>
-          !!c.meta_ad_id && c.meta_ad_id === adId);
+      if (!hit && adId && campaigns) {
+        hit = campaigns.find((c) => !!c.meta_ad_id && c.meta_ad_id === adId);
       }
       if (hit) { campaignId = hit.id; campaignName = hit.name; }
     } catch {
-      // lead_campaigns table may not be migrated yet — skip tagging gracefully
+      // skip silently
     }
 
     // INSERT with ON CONFLICT DO NOTHING so a concurrent race still resolves safely
@@ -754,34 +771,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // so rapid second/third messages still see count=0 and falsely trigger welcome.
   const isFirstMessage = activeExistingConv === null;
 
-  // 12. Flow Engine Execution
-  try {
-    const flowHandled = await runFlowsForMessage(
-      tenant.id,
-      msg.text,
-      cleanPhone,
-      conversation.id,
-      lead?.id ?? null,
-      isFirstMessage,
-      msg.type,        // "text" | "interactive" | "button" — for button_trigger matching
-      msg.buttonId     // raw button reply id from Meta
-    );
-    if (flowHandled) {
-      console.log(`✅ Flow engine handled message for conversation ${conversation.id}, skipping AI`);
-      return;
-    }
-  } catch (flowErr) {
-    console.error('❌ Flow engine error (falling back to AI):', (flowErr as Error).message);
-  }
-  perf('flows_done');
-
-  const storedMsgCount = conversation.message_count ?? 0;
-
-  // 13. Fetch everything needed for AI in a single parallel batch — avoids 3 sequential DB roundtrips.
-  // NOTE: knowledge_docs are fetched directly here (no embedding API). Semantic search (RAG) only
-  // runs when the tenant actually has docs with stored embeddings — skipping it saves ~500-700ms
-  // on every message for the majority of tenants who have no knowledge base.
-  const [{ data: recentMsgs }, { data: smartRulesRows }, { data: agentRows }, { data: existingBookingRow }, { data: kbDocs }, { data: kbEmbedCheck }] = await Promise.all([
+  // 12+13. Fire the AI-context batch speculatively BEFORE the flow engine so its
+  // DB time (~200-300ms) overlaps with the flow engine's own DB check (~50-150ms).
+  // All 6 queries are pure reads — no side effects. If flows handle the message
+  // the results are simply discarded; otherwise they're ready (or very close) when
+  // the AI needs them, saving ~100-150ms on every non-flow message.
+  const _aiBatchPromise = Promise.all([
     supabaseAdmin
       .from('messages')
       .select('direction, content')
@@ -827,6 +822,32 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       .not('embedding', 'is', null)
       .limit(1),
   ]);
+
+  // 12. Flow Engine Execution (runs concurrently with _aiBatchPromise above)
+  try {
+    const flowHandled = await runFlowsForMessage(
+      tenant.id,
+      msg.text,
+      cleanPhone,
+      conversation.id,
+      lead?.id ?? null,
+      isFirstMessage,
+      msg.type,        // "text" | "interactive" | "button" — for button_trigger matching
+      msg.buttonId     // raw button reply id from Meta
+    );
+    if (flowHandled) {
+      console.log(`✅ Flow engine handled message for conversation ${conversation.id}, skipping AI`);
+      return;
+    }
+  } catch (flowErr) {
+    console.error('❌ Flow engine error (falling back to AI):', (flowErr as Error).message);
+  }
+  perf('flows_done');
+
+  const storedMsgCount = conversation.message_count ?? 0;
+
+  // 13. Await the speculative batch (started before flows — likely already resolved)
+  const [{ data: recentMsgs }, { data: smartRulesRows }, { data: agentRows }, { data: existingBookingRow }, { data: kbDocs }, { data: kbEmbedCheck }] = await _aiBatchPromise;
 
   const history = (recentMsgs || [])
     .reverse()
