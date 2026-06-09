@@ -12,7 +12,7 @@ import { isDuplicateMessage, getRedisClient, acquireOffHoursLock } from '@/lib/r
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
 import { appendLeadRow, appendBookingRow } from '@/lib/integrations/google-sheets';
-import { parseMetaWebhook, sendTextMessage, getMediaUrl, verifySignature, markMessageAsRead } from '@/lib/meta/service';
+import { parseMetaWebhook, sendTextMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
@@ -896,6 +896,13 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     } : {}),
   };
   const context = (conversation.context as Record<string, any>) || {};
+
+  // Show "typing…" to the customer while the AI generates. Fire-and-forget:
+  // we're past the bot_paused / escalation guards, so the bot WILL reply, and
+  // WhatsApp clears the bubble the moment our reply lands (or after 25s).
+  if (decryptedAccessToken && tenant.wa_phone_number_id) {
+    sendTypingIndicator(decryptedAccessToken, tenant.wa_phone_number_id, msg.messageId).catch(() => {});
+  }
 
   let aiResponse;
   try {

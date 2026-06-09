@@ -91,6 +91,38 @@ export async function markMessageAsRead(
 }
 
 // ═══════════════════════════════════════
+// TYPING: Show "typing…" bubble to the customer
+// ═══════════════════════════════════════
+// Meta's typing indicator piggybacks on a read receipt: marking the customer's
+// last message read with a typing_indicator makes WhatsApp show "typing…" for
+// up to 25 seconds OR until our next outbound message — whichever comes first.
+// Call this right before AI generation so the customer sees the bot "thinking",
+// then the reply replaces the bubble. Fire-and-forget; never block the reply.
+export async function sendTypingIndicator(
+  accessToken: string,
+  phoneNumberId: string,
+  messageId: string
+): Promise<void> {
+  if (!accessToken || !phoneNumberId || !messageId) return;
+
+  try {
+    await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: headers(accessToken),
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        status: 'read',
+        message_id: messageId,
+        typing_indicator: { type: 'text' },
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch {
+    // Non-fatal — a missing typing bubble must never block the actual reply
+  }
+}
+
+// ═══════════════════════════════════════
 // SEND: Text Message
 // ═══════════════════════════════════════
 export async function sendTextMessage(
