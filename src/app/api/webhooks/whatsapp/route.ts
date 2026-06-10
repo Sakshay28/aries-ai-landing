@@ -235,9 +235,13 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const isFromAd = !!msg.referral && msg.referral.source_type === 'ad';
   const leadSource = isFromAd ? 'meta_ctwa' : 'whatsapp';
 
+  // Leads are stored with a "+" prefix in the DB (e.g. "+918233451667") but Meta
+  // delivers the sender phone without "+" (e.g. "918233451667"). Search both formats
+  // so we never miss an existing lead regardless of how it was originally created.
+  const leadPhone = '+' + cleanPhone; // canonical form for lead storage
   // Fetch lead + conversation in parallel (independent queries)
   const [{ data: existingLead }, { data: existingConv }] = await Promise.all([
-    supabaseAdmin.from('leads').select('*').eq('tenant_id', tenant.id).eq('phone', cleanPhone).maybeSingle(),
+    supabaseAdmin.from('leads').select('*').eq('tenant_id', tenant.id).in('phone', [leadPhone, cleanPhone]).order('created_at', { ascending: false }).limit(1).maybeSingle(),
     supabaseAdmin.from('conversations').select('*').eq('tenant_id', tenant.id).eq('sender_id', cleanPhone).eq('is_active', true).order('created_at', { ascending: false }).limit(1).maybeSingle(),
   ]);
 
@@ -346,7 +350,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       .upsert(
         {
           tenant_id: tenant.id,
-          phone: cleanPhone,
+          phone: leadPhone, // always store with + prefix for consistency
           channel: 'whatsapp',
           lead_status: 'new',
           lead_score: isFromAd ? 30 : 10,
@@ -366,6 +370,23 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       .single();
 
     lead = newLead;
+
+    // ignoreDuplicates: true silently swallows ON CONFLICT rows and returns null.
+    // This happens when the DB normalises the phone (e.g. adds "+") and the row
+    // already exists under a slightly different format. Recover by re-fetching.
+    if (!newLead) {
+      const { data: retryLead } = await supabaseAdmin
+        .from('leads').select('*')
+        .eq('tenant_id', tenant.id)
+        .in('phone', [leadPhone, cleanPhone])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (retryLead) {
+        lead = retryLead;
+        console.log(`🔄 Lead re-fetched after upsert conflict: ${retryLead.id} (phone ${retryLead.phone})`);
+      }
+    }
 
     if (newLead) {
       fireIntegrations({
