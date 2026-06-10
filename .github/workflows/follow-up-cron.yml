@@ -1,0 +1,28 @@
+name: Follow-Up Cron
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-followups:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger follow-up processing
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            https://ariesai.in/api/cron/timeout)
+
+          echo "Response status: $response"
+
+          if [ "$response" != "200" ]; then
+            echo "❌ Cron endpoint returned $response"
+            exit 1
+          fi
+
+          echo "✅ Follow-up cron completed"
