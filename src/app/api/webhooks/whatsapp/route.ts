@@ -683,20 +683,36 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     return;
   }
 
-  // escalated = soft state — if booking is already saved, auto-clear so bot can handle follow-up
+  // escalated = soft state — resolve via booking completion OR timeout, else pause bot
   if (conversation.escalated) {
     const ctx = (conversation.context as Record<string, any>) || {};
     if (ctx.booking_saved) {
-      // Auto-clear escalation after a completed booking so bot handles follow-up messages
+      // Booking completed — auto-clear so bot handles follow-up
       console.log(`🔄 Auto-clearing escalation for conversation ${conversation.id} (booking already saved)`);
       await supabaseAdmin
         .from('conversations')
         .update({ escalated: false, escalation_reason: null })
         .eq('id', conversation.id);
       conversation.escalated = false;
+    } else if (conversation.escalated_at) {
+      // Real-time timeout check — don't wait for the daily cron
+      const timeoutMs = (tenant.escalation_timeout_mins || 30) * 60 * 1000;
+      const escalatedAt = new Date(conversation.escalated_at).getTime();
+      if (Date.now() - escalatedAt >= timeoutMs) {
+        console.log(`⏱️ Escalation timed out for conversation ${conversation.id} — resuming bot`);
+        await supabaseAdmin
+          .from('conversations')
+          .update({ escalated: false, escalation_reason: null })
+          .eq('id', conversation.id);
+        conversation.escalated = false;
+      } else {
+        // Still within timeout window — bot paused, human should handle
+        console.log(`🔇 Meta: conversation ${conversation.id} escalated (${Math.round((Date.now() - escalatedAt) / 60000)}/${tenant.escalation_timeout_mins || 30} mins), skipping AI`);
+        return;
+      }
     } else {
-      // Still in escalation with no completed booking — skip AI (human should handle)
-      console.log(`🔇 Meta: conversation ${conversation.id} escalated (no booking), skipping AI`);
+      // No escalated_at timestamp — treat as timed out (data issue)
+      console.log(`🔇 Meta: conversation ${conversation.id} escalated (no timestamp), skipping AI`);
       return;
     }
   }
@@ -1272,7 +1288,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       business_name:  tenant.business_name || 'Your Business',
     };
 
-    const rawTemplate = (tenant as any).escalation_alert_template?.trim() || DEFAULT_ESCALATION_TEMPLATE;
+    const rawTemplate = tenant.escalation_alert_template?.trim() || DEFAULT_ESCALATION_TEMPLATE;
     const alertMsg = rawTemplate.replace(/\{\{(\w+)\}\}/g, (_: string, key: string) => templateVars[key] ?? '');
 
     sendStaffAlert(tenant, alertMsg).catch(err =>
