@@ -588,6 +588,18 @@ export async function deleteWhatsAppMessage(
 // ═══════════════════════════════════════
 // STAFF ALERTS
 // ═══════════════════════════════════════
+export interface StaffAlertResult {
+  phone: string;
+  ok: boolean;
+  error?: string;
+}
+
+function normalizePhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 10) return '91' + digits;
+  return digits;
+}
+
 export async function sendStaffAlert(
   tenant: {
     wa_phone_number_id?: string | null;
@@ -596,25 +608,32 @@ export async function sendStaffAlert(
     manager_phone?: string | null;
   },
   text: string
-): Promise<void> {
-  if (!tenant.wa_phone_number_id || !tenant.wa_access_token) return;
-  if (!tenant.staff_phone && !tenant.manager_phone) return;
+): Promise<StaffAlertResult[]> {
+  if (!tenant.wa_phone_number_id || !tenant.wa_access_token) return [];
 
-  const phones = [tenant.staff_phone, tenant.manager_phone].filter(Boolean) as string[];
+  const rawPhones = [tenant.staff_phone, tenant.manager_phone].filter(Boolean) as string[];
+  if (rawPhones.length === 0) return [];
+
+  const phones = [...new Set(rawPhones.map(normalizePhone))];
   const token = decryptToken(tenant.wa_access_token) as string;
 
-  for (const phone of phones) {
-    try {
-      await sendTextMessage(
-        token,
-        tenant.wa_phone_number_id,
-        phone,
-        text
-      );
-    } catch (err) {
-      console.error(`Failed to send staff alert to ${phone} via Meta:`, err);
-    }
-  }
+  const results: StaffAlertResult[] = [];
+
+  await Promise.all(
+    phones.map(async (phone) => {
+      try {
+        await sendTextMessage(token, tenant.wa_phone_number_id!, phone, text);
+        console.log(`✅ Staff alert delivered → ${phone}`);
+        results.push({ phone, ok: true });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`❌ Staff alert failed → ${phone}: ${msg}`);
+        results.push({ phone, ok: false, error: msg });
+      }
+    })
+  );
+
+  return results;
 }
 
 // ═══════════════════════════════════════

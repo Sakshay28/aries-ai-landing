@@ -1308,10 +1308,24 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     const rawTemplate = tenant.escalation_alert_template?.trim() || DEFAULT_ESCALATION_TEMPLATE;
     const alertMsg = rawTemplate.replace(/\{\{(\w+)\}\}/g, (_: string, key: string) => templateVars[key] ?? '');
 
-    sendStaffAlert(tenant, alertMsg).catch(err =>
-      console.error('❌ Staff escalation alert failed:', err)
-    );
-    console.log(`🚨 [${tenant.business_name}] Escalation fired for ${leadName} — staff notified`);
+    const alertResults = await sendStaffAlert(tenant, alertMsg);
+    const alertFailures = alertResults.filter(r => !r.ok);
+    if (alertFailures.length > 0) {
+      notifyAdmin({
+        dedupeKey: `staff-alert-fail:${tenant.id}`,
+        subject: `Staff alert delivery failed — ${tenant.business_name || tenant.id}`,
+        summary:
+          `Escalation alert could not be delivered to: ${alertFailures.map(f => f.phone).join(', ')}. ` +
+          `Customer ${leadName} (+${cleanPhone}) triggered escalation but staff may not have been notified.`,
+        context: {
+          tenantId: tenant.id,
+          businessName: tenant.business_name,
+          failedPhones: alertFailures.map(f => f.phone),
+          errors: alertFailures.map(f => f.error),
+        },
+      }).catch(() => {});
+    }
+    console.log(`🚨 [${tenant.business_name}] Escalation fired for ${leadName} — delivered: ${alertResults.filter(r => r.ok).length}/${alertResults.length}`);
   }
 
   // 18. Schedule follow-ups — runs on every message, resetting the 30-min timer.
