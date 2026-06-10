@@ -83,6 +83,7 @@ export interface Tenant {
   system_prompt?: string | null;
 
   // Off-Hours Config (Fix #8)
+  off_hours_enabled: boolean;        // master on/off switch for the automatic off-hours reply
   off_hours_message: string | null;
   off_hours_capture_lead: boolean;
 

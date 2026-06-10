@@ -75,12 +75,18 @@ export function decryptTokenV2(encryptedText: string | null): string | null {
 
   const withoutPrefix = encryptedText.slice(PREFIX.length); // "v2:iv:authTag:cipher"
   const firstColon = withoutPrefix.indexOf(':');
-  if (firstColon === -1) return encryptedText;
+  // Has the enc: prefix but no version segment — this was MEANT to be ciphertext.
+  // Fail closed (null) rather than returning the blob, which would otherwise be
+  // sent downstream (e.g. to Meta) as if it were a real token.
+  if (firstColon === -1) return null;
 
   const version = withoutPrefix.slice(0, firstColon);
   const rest = withoutPrefix.slice(firstColon + 1); // "iv:authTag:cipher"
   const parts = rest.split(':');
-  if (parts.length !== 3) return encryptedText; // malformed
+  // A well-formed encrypted token is exactly iv:authTag:cipher (3 parts). Anything
+  // else carrying the enc: prefix is corrupt — fail closed so we never leak the
+  // raw ciphertext/garbage to a downstream API by treating it as plaintext.
+  if (parts.length !== 3) return null; // malformed enc: blob
 
   const store = getKeyStore();
   const rawKey = store[version];

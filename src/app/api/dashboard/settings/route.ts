@@ -26,7 +26,7 @@ export async function GET() {
       escalation_enabled, escalation_keywords, escalation_reply,
       followup_30min, followup_3hr, followup_24hr, followup_7day,
       escalation_timeout_mins, hot_keywords, warm_keywords,
-      custom_faqs, off_hours_message, off_hours_capture_lead,
+      custom_faqs, off_hours_enabled, off_hours_message, off_hours_capture_lead,
       google_review_url, review_automation_enabled,
       wa_phone_number_id, wa_business_account_id, wa_access_token, wa_app_secret, wa_verify_token,
       outbound_webhook_url, system_prompt
@@ -87,7 +87,7 @@ export async function PATCH(req: NextRequest) {
     'escalation_enabled', 'escalation_keywords', 'escalation_reply',
     'followup_30min', 'followup_3hr', 'followup_24hr', 'followup_7day',
     'escalation_timeout_mins', 'hot_keywords', 'warm_keywords',
-    'custom_faqs', 'off_hours_message', 'off_hours_capture_lead',
+    'custom_faqs', 'off_hours_enabled', 'off_hours_message', 'off_hours_capture_lead',
     'google_review_url', 'review_automation_enabled',
     'wa_phone_number_id', 'wa_business_account_id', 'wa_verify_token',
     'outbound_webhook_url', 'system_prompt'

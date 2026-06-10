@@ -12,7 +12,7 @@
 import type { ConversationContext } from '@/lib/types';
 import * as Sentry from '@/lib/sentry-stub';
 import { withTimeout } from '@/lib/utils/safety';
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { recordAITokenUsage, recordDailyTokenUsage } from '@/lib/billing/costProtection';
 import { guardInput, guardOutput, shouldRedirectToHuman, HALLUCINATION_REDIRECT, SYSTEM_PROMPT_SAFETY_APPENDIX } from '@/lib/ai/guardrails';
 import { getAI } from '@/lib/ai/client';
 const MODEL = 'gemini-2.5-flash';
@@ -102,13 +102,45 @@ const PERSONA_PROMPTS: Record<string, string> = {
   'Upsell Specialist': 'Actively but politely recommend additions, special promotions, premium seating, beverage pairings, and exclusive menu items. Highlight value and premium offers to maximize customer order size.',
 };
 
-function getPersonaInstruction(personality: string): string {
+// Neutral, industry-agnostic persona — used for NON-hospitality businesses
+// (SaaS, services, retail, clinics, agencies, etc.) so the bot never talks
+// about "dishes", "the table", or "beverage pairings" where that makes no sense.
+const NEUTRAL_PERSONA =
+  'Speak in a warm, clear, and professional tone. Be concise and genuinely helpful. Focus on understanding exactly what the customer needs and answering accurately from what you actually know about the business.';
+
+// Business types that should get the restaurant/hospitality booking flow + personas.
+// Anything not matching this list is treated as a generic business and gets a clean,
+// knowledge-base-grounded prompt with NO hardcoded booking/seating assumptions.
+const HOSPITALITY_TYPES = [
+  'restaurant', 'cafe', 'café', 'coffee', 'hotel', 'resort', 'bar', 'lounge', 'pub',
+  'bistro', 'diner', 'dining', 'eatery', 'bakery', 'banquet', 'catering', 'food',
+  'kitchen', 'hospitality', 'dhaba', 'fine dining',
+];
+
+export function isHospitalityBusiness(businessType?: string): boolean {
+  const t = (businessType || '').toLowerCase();
+  return HOSPITALITY_TYPES.some(k => t.includes(k));
+}
+
+function getPersonaInstruction(personality: string, isHospitality: boolean): string {
   const p = personality.trim();
-  if (p === 'sales_pro') return PERSONA_PROMPTS['Upsell Specialist'];
-  if (p === 'concierge') return PERSONA_PROMPTS['Luxury Hospitality'];
+  // Industry-agnostic personalities — phrased per industry so a SaaS bot never
+  // recommends "premium seating" or "beverage pairings".
+  if (p === 'sales_pro') {
+    return isHospitality
+      ? PERSONA_PROMPTS['Upsell Specialist']
+      : 'Be proactive and value-driven. Highlight the key benefits and standout features, suggest the most relevant plan or add-on for their need, and guide them toward the next step — without being pushy.';
+  }
+  if (p === 'concierge') {
+    return isHospitality
+      ? PERSONA_PROMPTS['Luxury Hospitality']
+      : 'Provide attentive, proactive, white-glove service. Anticipate the customer’s needs, make them feel valued, and go the extra mile to help them.';
+  }
   if (p === 'support_hero') return 'Focus on being extremely empathetic, helpful, reassuring, and quick to resolve issues or escalate if needed.';
-  
-  return PERSONA_PROMPTS[p] || PERSONA_PROMPTS['Premium Fine Dining'];
+
+  // The named restaurant/hospitality personas only make sense for hospitality.
+  if (isHospitality) return PERSONA_PROMPTS[p] || PERSONA_PROMPTS['Premium Fine Dining'];
+  return NEUTRAL_PERSONA;
 }
 
 function buildSystemPrompt(tenantConfig: TenantAIConfig): string {
@@ -117,7 +149,8 @@ function buildSystemPrompt(tenantConfig: TenantAIConfig): string {
     ? `This is the FIRST message from this customer. Greet them warmly.${tenantConfig.welcomeMessage ? ` Use this as your opening: "${tenantConfig.welcomeMessage}"` : ''}`
     : 'This is an ONGOING conversation. The customer has already been greeted. DO NOT say Hi/Hello/Welcome again — respond directly to what they just said.';
 
-  const personaInstruction = getPersonaInstruction(tenantConfig.botPersonality);
+  const isHospitality = isHospitalityBusiness(tenantConfig.businessType);
+  const personaInstruction = getPersonaInstruction(tenantConfig.botPersonality, isHospitality);
 
   return `You are ${tenantConfig.botName}, an AI assistant for ${tenantConfig.businessName} (${tenantConfig.businessType}).
 
@@ -140,7 +173,7 @@ CONVERSATION STATE: ${conversationState}
 ${tenantConfig.businessHours ? `
 BUSINESS STATUS: Currently ${tenantConfig.businessIsOpen ? '🟢 OPEN' : '🔴 CLOSED'} | Time: ${tenantConfig.businessCurrentTime} (IST) | Hours: ${tenantConfig.businessHours}${!tenantConfig.businessIsOpen ? '\nIMPORTANT: The business is CLOSED right now. You may answer questions and collect booking details, but do NOT confirm any reservation — tell customers their request is noted and will be confirmed when the business opens.' : ''}
 ` : ''}
-YOUR JOB:
+${isHospitality ? `YOUR JOB:
 1. ${isFirst ? 'Greet the customer warmly (first contact only)' : 'Continue helping — no re-introduction needed'}
 2. Understand what they want (table booking, event, enquiry, etc.)
 3. Collect required info naturally: guests → date → time → name → phone
@@ -153,7 +186,12 @@ BOOKING FLOW RULES:
 - Confirmation message format: "✅ Booked! [Name], table for [N] on [date] at [time]. See you then!" (Or for the manager confirmation exception: "Thank you, [Name]. Since this is a reservation for [N] guests, manager confirmation is required. I've noted [date] at [time] using [phone]. We'll confirm availability shortly.")
 - Do NOT say "our team will contact you" for standard bookings — the booking is instantly confirmed. For the large group or manager confirmation exception, do state you will confirm shortly.
 - Do NOT ask the customer to wait for anything after booking is confirmed
-- Do NOT promise callbacks, follow-ups, or team contact
+- Do NOT promise callbacks, follow-ups, or team contact` : `YOUR JOB:
+1. ${isFirst ? 'Greet the customer warmly (first contact only)' : 'Continue helping — no re-introduction needed'}
+2. Understand exactly what the customer is asking for
+3. Answer accurately using the BUSINESS INFO, CUSTOM FAQ, and KNOWLEDGE BASE below — these are your ONLY source of truth. Do not invent features, prices, or policies that are not stated there.
+4. If you don't have the answer, say so honestly and offer to connect them with the team (set shouldEscalate=true). Never guess.
+5. When the customer shows genuine interest, capture their name and phone naturally so the team can follow up`}
 
 ${tenantConfig.smartRules && tenantConfig.smartRules.length > 0 ? `SMART RULES (always follow these alongside your core job):
 ${tenantConfig.smartRules.map((r, i) => `${i + 1}. [${r.name}] When: ${r.trigger_source} → ${r.ai_summary}`).join('\n')}` : ''}
@@ -167,11 +205,11 @@ ${tenantConfig.knowledgeDocs.map(d => `--- ${d.filename} ---\n${d.content_text}`
 RULES:
 - NEVER make up information you don't have
 - NEVER start with a greeting if this is not the first message in the conversation
-- NEVER say "our team will contact you" or "someone will reach out" for standard bookings — the booking is confirmed instantly. (For large groups of 8+ guests or manager confirmation rules, you may state you will confirm shortly).
-- If someone is angry or asks for a human, say you're connecting them to the team${tenantConfig.escalationReply ? ` using this exact message: "${tenantConfig.escalationReply}"` : ''}
+${isHospitality ? `- NEVER say "our team will contact you" or "someone will reach out" for standard bookings — the booking is confirmed instantly. (For large groups of 8+ guests or manager confirmation rules, you may state you will confirm shortly).
+` : ''}- HUMAN HANDOFF: If the customer is angry/frustrated, or asks to talk to a human/agent/real person/the team, or asks to book/schedule a demo or call with the team — do NOT try to handle it or pitch to them yourself. Say you're connecting them to the team and set shouldEscalate=true${tenantConfig.escalationReply ? ` using this exact message: "${tenantConfig.escalationReply}"` : ''}
 - Keep responses EXTREMELY direct and short (max 1-2 lines, under 150 characters). No essays.
 - Be helpful but don't be pushy
-- Always respond in the same language the customer is using
+- LANGUAGE: Reply in the SAME language AND script the customer is using. If they write Hindi in Roman/English letters (Hinglish), reply in Hinglish using Roman script — do NOT switch to Devanagari or to full English. If they explicitly ask you to use a language (e.g. "Hinglish main baat karo"), use it for the rest of the conversation. Mirror their tone.
 
 ${(tenantConfig.visitCount ?? 0) >= 2 ? `
 RETURNING CUSTOMER: This guest has visited ${tenantConfig.visitCount} times before${tenantConfig.lastVisitDate ? ` (last visit ${tenantConfig.lastVisitDate})` : ''}. Acknowledge them warmly as a valued regular (e.g. "Great to have you back!"). Do NOT overdo it — one short warm line is enough.
@@ -330,14 +368,13 @@ export async function processMessageWithAI(
     );
 
     if (tenantId && response.usageMetadata?.totalTokenCount) {
-      try {
-        await supabaseAdmin.rpc('increment_ai_tokens', {
-          t_id: tenantId,
-          token_count: response.usageMetadata.totalTokenCount
-        });
-      } catch (e: unknown) {
-        console.error('Failed to log tokens:', e);
-      }
+      // Record usage to BOTH the monthly + daily counters (Redis fast-path + DB)
+      // so checkAICostLimit / checkDailyAICostLimit can actually read it. Without
+      // this the cost guards always saw 0 and never fired. Fire-and-forget with
+      // internal error handling — never blocks or throws into the reply path.
+      const used = response.usageMetadata.totalTokenCount;
+      void recordAITokenUsage(tenantId, used);
+      void recordDailyTokenUsage(tenantId, used);
     }
 
     const text = response.text?.trim() || '';
@@ -813,6 +850,33 @@ function getDefaultFollowUp(
     default:
       return `Hey ${name}! Just checking in from ${config.businessName} 👋`;
   }
+}
+
+// ═══════════════════════════════════════
+// HUMAN-HANDOFF DETECTION (deterministic)
+// ═══════════════════════════════════════
+// Built-in safety net so explicit "talk to a human" / "book a demo with the
+// team" requests ALWAYS escalate — even if the model misreads the intent and
+// even if the tenant hasn't configured custom escalation keywords. Used by the
+// webhook on the MAIN reply path, not just the provider-down fallback. Kept
+// conservative (specific phrases) so feature questions like "do you offer
+// support?" do NOT false-trigger an escalation.
+const HUMAN_HANDOFF_PHRASES = [
+  'talk to human', 'talk to a human', 'talk to real', 'speak to human', 'speak to a human',
+  'speak to someone', 'talk to someone', 'talk to a person', 'speak to a person',
+  'real person', 'real human', 'human agent', 'live agent', 'human team',
+  'talk to your team', 'talk to the team', 'talk to staff', 'speak to staff',
+  'connect me to', 'connect with a human', 'want to speak to', 'want to talk to',
+  'book a demo', 'schedule a demo', 'arrange a demo', 'request a demo', 'demo with the',
+  'insaan se baat', 'kisi insaan', 'aadmi se baat', 'bande se baat',
+];
+const HUMAN_HANDOFF_WORDS = ['human', 'representative', 'insaan'];
+
+export function isHumanHandoffRequest(message?: string): boolean {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  if (HUMAN_HANDOFF_PHRASES.some(p => lower.includes(p))) return true;
+  return HUMAN_HANDOFF_WORDS.some(w => new RegExp(`\\b${w}\\b`).test(lower));
 }
 
 // ── Exported for testing ──

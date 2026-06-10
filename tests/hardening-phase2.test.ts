@@ -150,7 +150,7 @@ describe('AI Cost Protection', () => {
   it('unknown plan defaults to starter limits', async () => {
     const result = await checkAICostLimit('tenant-fresh', 'unknown_plan');
     expect(result.allowed).toBe(true); // usage is 0 → ok
-    expect(result.limitTokens).toBe(50_000_000);
+    expect(result.limitTokens).toBe(10_000_000); // starter cap — unknown plan falls back to starter
   });
 
   it('daily check passes for fresh tenant', async () => {

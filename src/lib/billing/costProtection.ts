@@ -12,8 +12,8 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 // ─── Plan limits (INR cost equivalent via token mapping) ─────
 // Approx: ₹1 ≈ 100k Gemini 2.0 Flash tokens (very rough)
 const MONTHLY_TOKEN_LIMITS: Record<string, number> = {
-  starter:    50_000_000,  // ≈ ₹500/mo
-  growth:     500_000_000, // ≈ ₹5,000/mo
+  starter:    10_000_000,  // ~2,500 AI replies/mo — abuse/cost ceiling, not metered billing
+  growth:     100_000_000, // ~25,000 AI replies/mo
   pro:        Infinity,
   enterprise: Infinity,
 };
@@ -78,10 +78,10 @@ async function getMonthlyTokenUsage(tenantId: string): Promise<number> {
   try {
     const { data } = await supabaseAdmin
       .from('tenants')
-      .select('ai_tokens_this_month')
+      .select('ai_tokens_used_this_month')
       .eq('id', tenantId)
       .single();
-    return (data as any)?.ai_tokens_this_month ?? 0;
+    return (data as any)?.ai_tokens_used_this_month ?? 0;
   } catch {
     return 0; // fail open — don't block on DB error
   }
@@ -111,8 +111,8 @@ export async function recordAITokenUsage(tenantId: string, tokens: number): Prom
 
 // ─── Daily usage guard ────────────────────────────────────────
 const DAILY_TOKEN_LIMITS: Record<string, number> = {
-  starter:    2_000_000,
-  growth:     20_000_000,
+  starter:    400_000,    // 1/25th of monthly — daily burst guard
+  growth:     4_000_000,
   pro:        Infinity,
   enterprise: Infinity,
 };

@@ -39,6 +39,8 @@ interface SettingsData {
   escalation_timeout_mins: number;
   hot_keywords: string[];
   warm_keywords: string[];
+  working_hours: Record<string, string>;
+  off_hours_enabled: boolean;
   off_hours_message: string;
   off_hours_capture_lead: boolean;
   // Revenue features
@@ -62,7 +64,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   escalation_alert_template: '',
   followup_30min: true, followup_3hr: true, followup_24hr: true, followup_7day: false,
   escalation_timeout_mins: 5, hot_keywords: [], warm_keywords: [],
-  off_hours_message: '', off_hours_capture_lead: true,
+  working_hours: {}, off_hours_enabled: false, off_hours_message: '', off_hours_capture_lead: true,
   google_review_url: '', review_automation_enabled: true,
   wa_phone_number_id: '',
   wa_business_account_id: '',
@@ -217,6 +219,103 @@ function TagInput({ tags, onChange, placeholder }: {
   );
 }
 
+// ─── Working Hours Editor ──────────────────────────────────────────────────
+// Writes the FLAT format the WhatsApp webhook reads: { mon: "09:00-18:00", ... }.
+// A day toggled OFF is omitted → the assistant replies normally all day (no
+// off-hours notice that day). Day-range keys ("mon-fri") from older/onboarding
+// data are expanded on read so an existing config still displays correctly.
+const WH_DAYS: { key: string; label: string }[] = [
+  { key: 'mon', label: 'Monday' },
+  { key: 'tue', label: 'Tuesday' },
+  { key: 'wed', label: 'Wednesday' },
+  { key: 'thu', label: 'Thursday' },
+  { key: 'fri', label: 'Friday' },
+  { key: 'sat', label: 'Saturday' },
+  { key: 'sun', label: 'Sunday' },
+];
+// Order used by the webhook for range matching (sun = index 0).
+const WH_ORDER = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+function normalizeTime(t: string): string {
+  const [h, m] = (t || '').trim().split(':');
+  const hh = String(Math.max(0, Math.min(23, Number(h) || 0))).padStart(2, '0');
+  const mm = String(Math.max(0, Math.min(59, Number(m) || 0))).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+function dayHoursFromConfig(wh: Record<string, string>, dayKey: string): { open: string; close: string } | null {
+  for (const [k, v] of Object.entries(wh || {})) {
+    if (!v || typeof v !== 'string' || !v.includes('-')) continue;
+    const keys = k.toLowerCase().split('-');
+    const matches =
+      keys.includes(dayKey) ||
+      (keys.length === 2 &&
+        WH_ORDER.indexOf(keys[0]) <= WH_ORDER.indexOf(dayKey) &&
+        WH_ORDER.indexOf(dayKey) <= WH_ORDER.indexOf(keys[1]));
+    if (matches) {
+      const [open, close] = v.split('-');
+      return { open: normalizeTime(open), close: normalizeTime(close) };
+    }
+  }
+  return null;
+}
+
+function WorkingHoursEditor({ value, onChange }: {
+  value: Record<string, string>; onChange: (v: Record<string, string>) => void;
+}) {
+  const rows = WH_DAYS.map(d => {
+    const parsed = dayHoursFromConfig(value, d.key);
+    return { ...d, enabled: !!parsed, open: parsed?.open || '09:00', close: parsed?.close || '18:00' };
+  });
+
+  const apply = (key: string, patch: Partial<{ enabled: boolean; open: string; close: string }>) => {
+    const next: Record<string, string> = {};
+    for (const r of rows) {
+      const merged = r.key === key ? { ...r, ...patch } : r;
+      if (merged.enabled) next[r.key] = `${normalizeTime(merged.open)}-${normalizeTime(merged.close)}`;
+    }
+    onChange(next);
+  };
+
+  return (
+    <div className="space-y-1.5">
+      {rows.map(r => (
+        <div key={r.key} className="flex items-center gap-3 py-1">
+          <button
+            onClick={() => apply(r.key, { enabled: !r.enabled })}
+            className="relative w-9 h-5 rounded-full transition-colors shrink-0"
+            style={{ background: r.enabled ? '#10B981' : 'var(--muted)' }}
+            aria-label={`Toggle hours for ${r.label}`}
+          >
+            <div
+              className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform"
+              style={{ transform: r.enabled ? 'translateX(16px)' : 'translateX(0)' }}
+            />
+          </button>
+          <span className="text-sm w-24 shrink-0" style={{ color: 'var(--foreground)' }}>{r.label}</span>
+          {r.enabled ? (
+            <div className="flex items-center gap-2">
+              <input
+                type="time" value={r.open} onChange={e => apply(r.key, { open: e.target.value })}
+                className="h-9 px-2 rounded-lg text-sm outline-none"
+                style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+              />
+              <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>to</span>
+              <input
+                type="time" value={r.close} onChange={e => apply(r.key, { close: e.target.value })}
+                className="h-9 px-2 rounded-lg text-sm outline-none"
+                style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+              />
+            </div>
+          ) : (
+            <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Open all day — no off-hours notice</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 interface FollowUpTemplate {
   message: string;
   media_url: string;
@@ -321,19 +420,19 @@ export default function SettingsPage() {
   };
 
   const updateTemplate = useCallback((type: string, field: keyof FollowUpTemplate, value: string) => {
-    setTemplates(prev => ({
-      ...prev,
-      [type]: { message: '', media_url: '', media_type: 'image', ...(prev[type] || {}), [field]: value },
-    }));
+    setTemplates(prev => {
+      const base: FollowUpTemplate = prev[type] || { message: '', media_url: '', media_type: 'image' };
+      return { ...prev, [type]: { ...base, [field]: value } };
+    });
     setDirty(true);
   }, []);
 
   const insertTemplateVar = useCallback((type: string, variable: string) => {
     setTemplates(prev => {
-      const current = prev[type]?.message || '';
+      const base: FollowUpTemplate = prev[type] || { message: '', media_url: '', media_type: 'image' };
       return {
         ...prev,
-        [type]: { message: '', media_url: '', media_type: 'image', ...(prev[type] || {}), message: current + variable },
+        [type]: { ...base, message: base.message + variable },
       };
     });
     setDirty(true);
@@ -1039,29 +1138,46 @@ export default function SettingsPage() {
         <motion.div key="offhours" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
           <SectionCard title="Off-Hours Handling" icon={Clock}>
             <Toggle
-              checked={settings.off_hours_capture_lead}
-              onChange={v => update('off_hours_capture_lead', v)}
-              label="Capture lead when offline"
-              description="Still collect name and phone even outside working hours"
+              checked={settings.off_hours_enabled}
+              onChange={v => update('off_hours_enabled', v)}
+              label="Send automatic off-hours reply"
+              description="When ON, anyone messaging outside the hours below gets an automatic notice. When OFF, your AI assistant replies normally 24/7."
             />
-            <Field label="Off-Hours Message">
-              <Textarea
-                value={settings.off_hours_message || ''}
-                onChange={v => update('off_hours_message', v)}
-                placeholder="Thanks for reaching out! We're currently closed. Our team will get back to you during business hours (9 AM – 6 PM)."
-                rows={4}
-              />
-            </Field>
-            <div
-              className="rounded-xl p-4 text-xs"
-              style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)', color: 'var(--muted-foreground)' }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
-                <span className="font-semibold" style={{ color: 'var(--foreground)' }}>Working hours are set in your profile</span>
+            {settings.off_hours_enabled ? (
+              <>
+                <Field label="Working Hours (IST)">
+                  <WorkingHoursEditor
+                    value={settings.working_hours || {}}
+                    onChange={v => update('working_hours', v)}
+                  />
+                </Field>
+                <Field label="Off-Hours Message">
+                  <Textarea
+                    value={settings.off_hours_message || ''}
+                    onChange={v => update('off_hours_message', v)}
+                    placeholder="Thanks for reaching out! We're currently closed. Our team will get back to you during business hours."
+                    rows={4}
+                  />
+                </Field>
+                <Toggle
+                  checked={settings.off_hours_capture_lead}
+                  onChange={v => update('off_hours_capture_lead', v)}
+                  label="Capture lead when offline"
+                  description="Still collect name and phone even outside working hours"
+                />
+              </>
+            ) : (
+              <div
+                className="rounded-xl p-4 text-xs"
+                style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.2)', color: 'var(--muted-foreground)' }}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                  <span className="font-semibold" style={{ color: 'var(--foreground)' }}>Off-hours auto-reply is off</span>
+                </div>
+                Your AI assistant answers messages 24/7. Turn this on to set business hours and send an automatic notice when you&apos;re closed.
               </div>
-              Configure working hours in the Business tab. Off-hours messages are sent automatically outside those times.
-            </div>
+            )}
           </SectionCard>
 
           <SectionCard title="Review Automation" icon={Star}>

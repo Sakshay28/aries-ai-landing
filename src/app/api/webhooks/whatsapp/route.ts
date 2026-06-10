@@ -14,7 +14,9 @@ import { retrieveRelevantDocs } from '@/lib/ai/rag';
 import { appendLeadRow, appendBookingRow } from '@/lib/integrations/google-sheets';
 import { parseMetaWebhook, sendTextMessage, sendMediaMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator, sendStaffAlert } from '@/lib/meta/service';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
-import { processMessageWithAI } from '@/lib/ai/engine';
+import { processMessageWithAI, isHumanHandoffRequest } from '@/lib/ai/engine';
+import { checkSenderRateLimit } from '@/lib/abuse/prevention';
+import { checkAICostLimit, checkDailyAICostLimit, AI_FALLBACK_MESSAGE } from '@/lib/billing/costProtection';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
 import { decryptToken } from '@/lib/utils/crypto';
 import { runFlowsForMessage } from '@/lib/flows/engine';
@@ -625,8 +627,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // 9.5. Opt-out / opt-in detection — check BEFORE AI runs
   // Handles STOP (opt-out) and START (opt-in) keywords per WhatsApp policy.
   const msgLower = msg.text?.toLowerCase().trim() || '';
-  const STOP_KEYWORDS  = ['stop', 'unsubscribe', 'opt out', 'optout', 'cancel', 'quit', 'end', 'remove me'];
-  const START_KEYWORDS = ['start', 'subscribe', 'opt in', 'optin', 'yes', 'join', 'resume'];
+  // ONLY true WhatsApp compliance keywords. Conversational words ('yes', 'cancel',
+  // 'end', 'quit', 'join') were hijacking normal replies — e.g. answering "Yes" to
+  // "Want a walkthrough?" was treated as a resubscribe command and the AI never ran;
+  // a customer saying "cancel" (a booking) was being unsubscribed.
+  const STOP_KEYWORDS  = ['stop', 'unsubscribe', 'opt out', 'optout', 'remove me'];
+  const START_KEYWORDS = ['start', 'subscribe', 'opt in', 'optin', 'resume'];
 
   if (STOP_KEYWORDS.some(k => msgLower === k)) {
     // Upsert into optouts table — sets is_active=true
@@ -840,7 +846,19 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // Off-hours guard: send ONE notice per 6-hour closed window per conversation.
   // Race-safe: acquireOffHoursLock uses Redis SET NX (atomic) — only the FIRST
   // concurrent request can acquire the lock; all others see 'already_sent'.
-  if (isBusinessOpen === false && businessHoursStr) {
+  //
+  // Only fires when the tenant has explicitly enabled the off-hours auto-reply
+  // (off_hours_enabled). Without that flag the assistant answers 24/7 — there is
+  // no longer any "silent" off-hours behavior driven purely by working_hours.
+  // A human-handoff request ("talk to a human", "book a demo with the team") is
+  // NEVER swallowed by the closed notice — it falls through to the AI + escalation
+  // path so staff still get notified even outside business hours.
+  if (
+    tenant.off_hours_enabled &&
+    isBusinessOpen === false &&
+    businessHoursStr &&
+    !isHumanHandoffRequest(msg.text)
+  ) {
     const lockResult = await acquireOffHoursLock(conversation.id);
 
     let offHoursNoticeSent: boolean;
@@ -987,6 +1005,33 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   perf('parallel_fetch_done');
 
+  // ── P0: per-sender flood protection + AI cost ceiling ──────────────────────
+  // Bound runaway Gemini spend and webhook abuse BEFORE any expensive work
+  // (RAG embedding, typing indicator, model call). Both checks fail OPEN when
+  // Redis is unavailable so a cache outage never blocks real customer traffic.
+  const floodCheck = await checkSenderRateLimit(cleanPhone);
+  if (!floodCheck.allowed) {
+    // Sustained flood from one sender — drop silently (no AI, no outbound) to
+    // avoid amplifying cost and tripping Meta's own per-number rate limits.
+    console.warn(`⏱️ Rate-limited inbound from ${cleanPhone} (tenant ${tenant.id}) — dropping`);
+    return;
+  }
+
+  const plan = (tenant.plan as string) || 'starter';
+  const [dailyOk, monthly] = await Promise.all([
+    checkDailyAICostLimit(tenant.id, plan),
+    checkAICostLimit(tenant.id, plan),
+  ]);
+  if (!dailyOk || !monthly.allowed) {
+    // Tenant has hit their plan's AI usage cap — reply gracefully without
+    // calling Gemini so they stop burning tokens past the limit.
+    console.warn(`💰 AI cost cap reached: tenant=${tenant.id} plan=${plan} used=${monthly.usedTokens}/${monthly.limitTokens} daily_ok=${dailyOk}`);
+    if (decryptedAccessToken && tenant.wa_phone_number_id) {
+      await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, AI_FALLBACK_MESSAGE).catch(() => {});
+    }
+    return;
+  }
+
   // RAG (semantic doc search) only earns its ~500-700ms embedding round-trip
   // when there are MORE docs than we'd inject anyway. The batch above already
   // fetched up to 5 docs; if it returned fewer than 5, that IS the tenant's
@@ -1124,9 +1169,27 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     aiResponse.escalationReason = 'keyword_match';
   }
 
-  // Apply custom escalation reply (for both AI-detected and keyword-triggered escalations)
-  if (aiResponse.shouldEscalate && tenant.escalation_reply?.trim()) {
-    aiResponse.reply = tenant.escalation_reply.trim();
+  // 14c. Built-in human-handoff safety net — independent of the AI model AND of
+  // tenant-configured keywords. Guarantees explicit "talk to a human" / "book a
+  // demo with the team" requests escalate even if the model misread the intent
+  // (e.g. answered with a sales pitch). This is the deterministic backstop the
+  // main reply path was previously missing — it only existed in the provider-down
+  // fallback, so it never fired while Gemini was healthy.
+  if (!aiResponse.shouldEscalate && isHumanHandoffRequest(msg.text)) {
+    aiResponse.shouldEscalate = true;
+    aiResponse.escalationReason = 'human_request';
+  }
+
+  // Apply the escalation reply. A tenant's custom reply always wins; otherwise,
+  // when WE forced the escalation (keyword / human request), replace whatever the
+  // AI said (which may be an off-topic pitch) with a clean handoff line so the
+  // customer isn't sold to when they asked for a person.
+  if (aiResponse.shouldEscalate) {
+    if (tenant.escalation_reply?.trim()) {
+      aiResponse.reply = tenant.escalation_reply.trim();
+    } else if (aiResponse.escalationReason === 'human_request' || aiResponse.escalationReason === 'keyword_match') {
+      aiResponse.reply = `I'm connecting you with ${tenant.staff_name || 'our team'} right away 🙏 They'll be with you shortly.`;
+    }
   }
 
   // 15. Send reply via Meta
