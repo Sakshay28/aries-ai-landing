@@ -28,6 +28,9 @@ interface SettingsData {
   staff_phone: string;
   staff_name: string;
   manager_phone: string;
+  escalation_enabled: boolean;
+  escalation_keywords: string[];
+  escalation_reply: string;
   escalation_alert_template: string;
   followup_30min: boolean;
   followup_3hr: boolean;
@@ -55,6 +58,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   business_address: '', business_website: '', business_email: '',
   bot_name: '', bot_personality: 'sales_pro', welcome_message: '', welcome_offer: '',
   usps: [], core_services: '', industry: 'retail', staff_phone: '', staff_name: '', manager_phone: '',
+  escalation_enabled: true, escalation_keywords: [], escalation_reply: '',
   escalation_alert_template: '',
   followup_30min: true, followup_3hr: true, followup_24hr: true, followup_7day: false,
   escalation_timeout_mins: 5, hot_keywords: [], warm_keywords: [],
@@ -744,7 +748,37 @@ export default function SettingsPage() {
       {/* Tab: Staff */}
       {activeTab === 'staff' && (
         <motion.div key="staff" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+
+          {/* Enable / Disable toggle */}
           <SectionCard title="Staff Contact" icon={Users}>
+            {/* Master on/off toggle */}
+            <div
+              className="flex items-center justify-between p-3 rounded-xl mb-5"
+              style={{ background: settings.escalation_enabled ? 'rgba(16,185,129,0.06)' : 'var(--secondary)', border: `1px solid ${settings.escalation_enabled ? 'rgba(16,185,129,0.25)' : 'var(--border)'}` }}
+            >
+              <div>
+                <div className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>
+                  Staff Alerts {settings.escalation_enabled ? '— Active' : '— Disabled'}
+                </div>
+                <div className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                  {settings.escalation_enabled ? 'Staff will be notified on WhatsApp when a customer needs help.' : 'Alerts are off — the bot will still pause but staff won\'t be notified.'}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => update('escalation_enabled', !settings.escalation_enabled)}
+                className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none"
+                style={{ background: settings.escalation_enabled ? 'rgb(16,185,129)' : 'var(--muted)' }}
+                role="switch"
+                aria-checked={settings.escalation_enabled}
+              >
+                <span
+                  className="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transition-transform duration-200"
+                  style={{ transform: settings.escalation_enabled ? 'translateX(20px)' : 'translateX(0px)' }}
+                />
+              </button>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <Field label="Staff Name">
                 <Input value={settings.staff_name || ''} onChange={v => update('staff_name', v)} placeholder="Rahul" />
@@ -760,19 +794,33 @@ export default function SettingsPage() {
                   type="number"
                   value={String(settings.escalation_timeout_mins)}
                   onChange={v => update('escalation_timeout_mins', parseInt(v) || 5)}
-                  placeholder="5"
+                  placeholder="30"
                 />
               </Field>
             </div>
+          </SectionCard>
 
-            {/* Custom Alert Message */}
+          {/* Escalation triggers */}
+          <SectionCard title="Escalation Triggers" icon={Zap}>
+            <p className="text-xs -mt-1 mb-4" style={{ color: 'var(--muted-foreground)' }}>
+              Add keywords that force an escalation when a customer says them — on top of the AI's own judgment. Type a word and press Enter.
+            </p>
+            <Field label="Escalation Keywords">
+              <TagInput
+                tags={settings.escalation_keywords || []}
+                onChange={v => update('escalation_keywords', v)}
+                placeholder="e.g. complaint, cancel, refund, manager…"
+              />
+            </Field>
+
+            {/* Customer-facing reply */}
             <div className="mt-5">
-              <Field label="Staff Alert Message">
+              <Field label="Bot Reply to Customer (on escalation)">
                 <textarea
-                  rows={7}
-                  value={settings.escalation_alert_template || ''}
-                  onChange={e => update('escalation_alert_template', e.target.value)}
-                  placeholder={`🚨 Escalation Alert — {{business_name}}\n\nCustomer: {{customer_name}}\nPhone: +{{customer_phone}}\nReason: {{reason}}\nMessage: {{message}}\n\n👉 Reply on Live Chat: https://ariesai.in/dashboard/live-chat`}
+                  rows={3}
+                  value={settings.escalation_reply || ''}
+                  onChange={e => update('escalation_reply', e.target.value)}
+                  placeholder={`I'm connecting you with ${settings.staff_name || 'our team'} right away 🙏 They'll be with you shortly.`}
                   className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none transition-colors"
                   style={{
                     background: 'var(--input)',
@@ -783,35 +831,61 @@ export default function SettingsPage() {
                   }}
                 />
               </Field>
-              {/* Variable chips */}
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {[
-                  { tag: '{{customer_name}}',  label: 'Customer Name' },
-                  { tag: '{{customer_phone}}', label: 'Phone' },
-                  { tag: '{{reason}}',         label: 'Reason' },
-                  { tag: '{{message}}',        label: 'Last Message' },
-                  { tag: '{{business_name}}',  label: 'Business Name' },
-                ].map(({ tag, label }) => (
-                  <button
-                    key={tag}
-                    type="button"
-                    onClick={() => update('escalation_alert_template', (settings.escalation_alert_template || '') + tag)}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono transition-colors cursor-pointer"
-                    style={{
-                      background: 'rgba(6,182,212,0.08)',
-                      border: '1px solid rgba(6,182,212,0.25)',
-                      color: 'var(--foreground)',
-                    }}
-                    title={`Insert ${label}`}
-                  >
-                    <span style={{ color: 'rgb(6,182,212)' }}>+</span> {tag}
-                  </button>
-                ))}
-              </div>
               <p className="text-xs mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
-                Click a variable to insert it. Leave blank to use the platform default.
+                What the bot says to the customer when it hands over to staff. Leave blank to use the default.
               </p>
             </div>
+          </SectionCard>
+
+          {/* Staff alert message */}
+          <SectionCard title="Staff Alert Message" icon={Bell}>
+            <p className="text-xs -mt-1 mb-4" style={{ color: 'var(--muted-foreground)' }}>
+              This WhatsApp message is sent to your staff number when an escalation fires. Use variables to include customer details.
+            </p>
+            <Field label="Alert Template">
+              <textarea
+                rows={7}
+                value={settings.escalation_alert_template || ''}
+                onChange={e => update('escalation_alert_template', e.target.value)}
+                placeholder={`🚨 Escalation Alert — {{business_name}}\n\nCustomer: {{customer_name}}\nPhone: +{{customer_phone}}\nReason: {{reason}}\nMessage: {{message}}\n\n👉 Reply on Live Chat: https://ariesai.in/dashboard/live-chat`}
+                className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none transition-colors"
+                style={{
+                  background: 'var(--input)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--foreground)',
+                  fontFamily: 'inherit',
+                  lineHeight: '1.6',
+                }}
+              />
+            </Field>
+            {/* Variable chips */}
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {[
+                { tag: '{{customer_name}}',  label: 'Customer Name' },
+                { tag: '{{customer_phone}}', label: 'Phone' },
+                { tag: '{{reason}}',         label: 'Reason' },
+                { tag: '{{message}}',        label: 'Last Message' },
+                { tag: '{{business_name}}',  label: 'Business Name' },
+              ].map(({ tag, label }) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => update('escalation_alert_template', (settings.escalation_alert_template || '') + tag)}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono transition-colors cursor-pointer"
+                  style={{
+                    background: 'rgba(6,182,212,0.08)',
+                    border: '1px solid rgba(6,182,212,0.25)',
+                    color: 'var(--foreground)',
+                  }}
+                  title={`Insert ${label}`}
+                >
+                  <span style={{ color: 'rgb(6,182,212)' }}>+</span> {tag}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
+              Click a variable to insert it. Leave blank to use the platform default.
+            </p>
 
             <div
               className="rounded-xl p-4 text-sm mt-4"
@@ -821,9 +895,10 @@ export default function SettingsPage() {
                 <MessageSquare className="w-3.5 h-3.5 text-cyan-500" />
                 <span className="font-semibold text-xs" style={{ color: 'var(--foreground)' }}>How escalation works</span>
               </div>
-              When a customer asks for a human or uses escalation keywords, the AI pauses and sends your custom alert to staff on WhatsApp. After the timeout, the bot resumes automatically.
+              When a customer says a trigger keyword or asks for a human, the AI pauses and sends your alert to staff on WhatsApp. After {settings.escalation_timeout_mins || 30} mins the bot resumes automatically.
             </div>
           </SectionCard>
+
         </motion.div>
       )}
 

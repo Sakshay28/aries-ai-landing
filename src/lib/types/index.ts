@@ -61,6 +61,9 @@ export interface Tenant {
   // Supports variables: {{customer_name}} {{customer_phone}} {{reason}} {{message}} {{business_name}}
   // Falls back to the platform default if null.
   escalation_alert_template: string | null;
+  escalation_enabled: boolean;
+  escalation_keywords: string[];
+  escalation_reply: string | null;
 
   // Follow-up Config
   followup_30min: boolean;

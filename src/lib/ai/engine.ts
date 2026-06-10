@@ -168,7 +168,7 @@ RULES:
 - NEVER make up information you don't have
 - NEVER start with a greeting if this is not the first message in the conversation
 - NEVER say "our team will contact you" or "someone will reach out" for standard bookings — the booking is confirmed instantly. (For large groups of 8+ guests or manager confirmation rules, you may state you will confirm shortly).
-- If someone is angry or asks for a human, say you're connecting them to the team
+- If someone is angry or asks for a human, say you're connecting them to the team${tenantConfig.escalationReply ? ` using this exact message: "${tenantConfig.escalationReply}"` : ''}
 - Keep responses EXTREMELY direct and short (max 1-2 lines, under 150 characters). No essays.
 - Be helpful but don't be pushy
 - Always respond in the same language the customer is using
@@ -195,7 +195,9 @@ ${tenantConfig.ctwaContext ? `
 # META ADS CAMPAIGN CONTEXT (Important — read carefully):
 ${tenantConfig.ctwaContext}
 ` : ''}
-${tenantConfig.systemPrompt ? `
+${tenantConfig.escalationKeywords && tenantConfig.escalationKeywords.length > 0 ? `
+ESCALATION KEYWORDS: If the customer's message contains any of these words or phrases, you MUST set shouldEscalate=true immediately: ${tenantConfig.escalationKeywords.join(', ')}
+` : ''}${tenantConfig.systemPrompt ? `
 # STAFF_GUIDELINES (Always follow these custom operational instructions alongside core rules):
 ${tenantConfig.systemPrompt}
 ` : ''}
@@ -237,6 +239,8 @@ export interface TenantAIConfig {
   welcomeOffer: string;
   usps: string[];
   staffName: string;
+  escalationKeywords?: string[];
+  escalationReply?: string;
   isFirstMessage?: boolean;
   smartRules?: Array<{ name: string; trigger_source: string; ai_summary: string }>;
   customFaqs?: Array<{ question: string; answer: string }>;
@@ -620,15 +624,33 @@ function getFallbackResponse(
 ): AIResponse {
   const lower = message.toLowerCase();
 
-  // Detect angry/escalation keywords (language-agnostic approach)
+  const defaultEscalationReply = config.escalationReply?.trim()
+    || (config.staffName
+      ? `I'm connecting you with ${config.staffName} right away 🙏 They'll be with you shortly.`
+      : `I'm connecting you with our team right away 🙏 They'll be with you shortly.`);
+
+  // Check custom escalation keywords first (tenant-defined, highest priority)
+  const customKeywords = config.escalationKeywords || [];
+  if (customKeywords.length > 0 && customKeywords.some((kw) => kw.trim() && lower.includes(kw.trim().toLowerCase()))) {
+    return {
+      reply: defaultEscalationReply,
+      extractedData: {},
+      intent: 'human_request',
+      sentiment: 'neutral',
+      shouldEscalate: true,
+      escalationReason: 'keyword_match',
+      nextStep: 'escalated',
+      confidence: 0.95,
+    };
+  }
+
+  // Detect angry/escalation keywords (built-in fallback)
   const angryWords = ['angry', 'upset', 'terrible', 'worst', 'complaint', 'manager', 'refund', 'fuck', 'shit', 'bakwaas', 'bekar'];
   const humanWords = ['human', 'real person', 'agent', 'staff', 'speak to', 'insaan', 'banda'];
 
   if (angryWords.some((w) => lower.includes(w)) || humanWords.some((w) => lower.includes(w))) {
     return {
-      reply: config.staffName
-        ? `I'm connecting you with ${config.staffName} right away 🙏 They'll be with you shortly.`
-        : `I'm connecting you with our team right away 🙏 They'll be with you shortly.`,
+      reply: defaultEscalationReply,
       extractedData: {},
       intent: angryWords.some((w) => lower.includes(w)) ? 'complaint' : 'human_request',
       sentiment: 'angry',

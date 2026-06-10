@@ -1112,6 +1112,23 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     }
   }
 
+  // 14b. Custom keyword escalation override — runs after AI so existing shouldEscalate=true is preserved.
+  // If the message contains a tenant-defined keyword and AI didn't already escalate, force it now.
+  const customEscKeywords: string[] = tenant.escalation_keywords || [];
+  if (
+    customEscKeywords.length > 0 &&
+    !aiResponse.shouldEscalate &&
+    customEscKeywords.some((kw) => kw.trim() && (msg.text?.toLowerCase() || '').includes(kw.trim().toLowerCase()))
+  ) {
+    aiResponse.shouldEscalate = true;
+    aiResponse.escalationReason = 'keyword_match';
+  }
+
+  // Apply custom escalation reply (for both AI-detected and keyword-triggered escalations)
+  if (aiResponse.shouldEscalate && tenant.escalation_reply?.trim()) {
+    aiResponse.reply = tenant.escalation_reply.trim();
+  }
+
   // 15. Send reply via Meta
   let metaMsgId: string | null = null;
   let sendFailureMsg: string | null = null;
@@ -1264,7 +1281,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // Falls back to the platform default if not configured.
   // Fully multi-tenant: each client's staff only receives their own alerts,
   // sent from their own WhatsApp number using their own token. Safe for 1500+ tenants.
-  if (aiResponse.shouldEscalate) {
+  if (aiResponse.shouldEscalate && tenant.escalation_enabled !== false) {
     const leadName = lead?.name || cleanPhone;
     const reason   = aiResponse.escalationReason || 'Customer requested human assistance';
     const preview  = msg.text ? msg.text.slice(0, 200) : '[media message]';
