@@ -267,14 +267,11 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     const updateData: Record<string, any> = { last_message_at: new Date().toISOString() };
     if (isFromAd && !existingLead.source) updateData.source = leadSource;
     void supabaseAdmin.from('leads').update(updateData).eq('id', existingLead.id);
-    // Cancel pending follow-ups ONLY when the lead messages in an already-active
-    // session (they are visibly engaged). If this is a brand-new session
-    // (activeExistingConv === null), the scripted-reply block or Step 18 is about
-    // to schedule fresh follow-ups — cancelling here would immediately wipe them
-    // out if the lead sends a second message within the same burst.
-    if (activeExistingConv !== null) {
-      cancelLeadFollowUps(existingLead.id).catch(() => {});
-    }
+    // Cancel any pending follow-ups — they will be re-scheduled below (either in
+    // the scripted-reply block or Step 18) with a fresh timer from THIS message.
+    // This means the 30-min clock resets with every message the lead sends, so
+    // if they go silent mid-conversation they still get a follow-up.
+    cancelLeadFollowUps(existingLead.id).catch(() => {});
   } else {
     // New lead — round-robin assignment + campaign tracking in parallel (~100ms savings)
     let assignedTo: string | null = null;
@@ -784,10 +781,11 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
             ...(matchedEarly.media_url && { media_url: matchedEarly.media_url }),
           });
         }
-        // Scripted reply exits before step 18, so schedule follow-ups here if this
-        // is the first message in the session. Awaited so it completes before
-        // the function returns (fire-and-forget is unreliable on serverless).
-        if (activeExistingConv === null && lead?.id) {
+        // Scripted reply exits before step 18, so schedule follow-ups here.
+        // Run for EVERY scripted reply (not just first message) so the 30-min
+        // timer resets whenever the lead re-engages. Awaited — fire-and-forget
+        // is unreliable on serverless.
+        if (lead?.id) {
           const _srNow = Date.now();
           const _srFuConfigs = [
             { enabled: !!tenant.followup_30min, type: '30min',  delayMs: 30 * 60 * 1000 },
@@ -1283,9 +1281,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     console.log(`🚨 [${tenant.business_name}] Escalation fired for ${leadName} — staff notified`);
   }
 
-  // 18. Schedule follow-ups for new WhatsApp leads (first message only)
-  // Instagram has this logic; WhatsApp was completely missing it.
-  if (isFirstMessage && lead?.id) {
+  // 18. Schedule follow-ups — runs on every message, resetting the 30-min timer.
+  // cancelLeadFollowUps (above, step 4) already cancelled the previous pending
+  // rows, so this always represents "30 min from the lead's most recent message."
+  if (lead?.id) {
     const now = Date.now();
     const followUpConfigs = [
       { enabled: tenant.followup_30min, type: '30min',  delayMs: 30 * 60 * 1000 },
