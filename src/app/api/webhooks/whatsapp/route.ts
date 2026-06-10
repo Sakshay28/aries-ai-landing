@@ -267,10 +267,14 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     const updateData: Record<string, any> = { last_message_at: new Date().toISOString() };
     if (isFromAd && !existingLead.source) updateData.source = leadSource;
     void supabaseAdmin.from('leads').update(updateData).eq('id', existingLead.id);
-    // Lead is actively messaging — cancel any pending follow-ups so they don't
-    // fire after the lead has already re-engaged. New follow-ups will be
-    // re-scheduled below if this is a fresh session (isFirstMessage = true).
-    cancelLeadFollowUps(existingLead.id).catch(() => {});
+    // Cancel pending follow-ups ONLY when the lead messages in an already-active
+    // session (they are visibly engaged). If this is a brand-new session
+    // (activeExistingConv === null), the scripted-reply block or Step 18 is about
+    // to schedule fresh follow-ups — cancelling here would immediately wipe them
+    // out if the lead sends a second message within the same burst.
+    if (activeExistingConv !== null) {
+      cancelLeadFollowUps(existingLead.id).catch(() => {});
+    }
   } else {
     // New lead — round-robin assignment + campaign tracking in parallel (~100ms savings)
     let assignedTo: string | null = null;
