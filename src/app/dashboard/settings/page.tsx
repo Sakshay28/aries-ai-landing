@@ -5,7 +5,8 @@ import { motion } from 'framer-motion';
 import {
   Building2, Bot, Clock, Phone, Mail, Globe, MapPin,
   Users, Zap, Save, CheckCircle2, AlertCircle, Plus, X,
-  MessageSquare, BrainCircuit, Bell, Copy, Eye, EyeOff, Key, HelpCircle, ExternalLink, RefreshCw, Star
+  MessageSquare, BrainCircuit, Bell, Copy, Eye, EyeOff, Key, HelpCircle, ExternalLink, RefreshCw, Star,
+  ChevronDown, ChevronUp, Image as ImageIcon
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PhoneInput } from '@/components/ui/phone-input';
@@ -215,12 +216,28 @@ function TagInput({ tags, onChange, placeholder }: {
   );
 }
 
+interface FollowUpTemplate {
+  message: string;
+  media_url: string;
+  media_type: string;
+}
+type FollowUpTemplates = Record<string, FollowUpTemplate>;
+
+const FOLLOW_UP_TYPES = [
+  { key: '30min', label: '30-minute follow-up',   description: 'Gentle nudge if no reply within 30 minutes',   settingKey: 'followup_30min' as const },
+  { key: '3hr',   label: '3-hour follow-up',       description: 'Re-engagement message after 3 hours',           settingKey: 'followup_3hr'   as const },
+  { key: '24hr',  label: '24-hour follow-up',      description: 'Next-day check-in message',                     settingKey: 'followup_24hr'  as const },
+  { key: '7day',  label: '7-day re-engagement',    description: 'Long-term nurture for cold leads',              settingKey: 'followup_7day'  as const },
+];
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('business');
   const [dirty, setDirty] = useState(false);
+  const [templates, setTemplates] = useState<FollowUpTemplates>({});
+  const [expandedFu, setExpandedFu] = useState<Record<string, boolean>>({});
 
   // Meta Cloud API States
   const [testingConnection, setTestingConnection] = useState(false);
@@ -253,10 +270,13 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    fetch('/api/dashboard/settings')
-      .then(r => r.json())
-      .then(({ data }) => {
-        if (data) setSettings({ ...DEFAULT_SETTINGS, ...data });
+    Promise.all([
+      fetch('/api/dashboard/settings').then(r => r.json()),
+      fetch('/api/dashboard/follow-up-templates').then(r => r.json()),
+    ])
+      .then(([settingsRes, tplRes]) => {
+        if (settingsRes.data) setSettings({ ...DEFAULT_SETTINGS, ...settingsRes.data });
+        if (tplRes.data)      setTemplates(tplRes.data);
       })
       .catch(() => toast.error('Failed to load settings'))
       .finally(() => setLoading(false));
@@ -299,9 +319,29 @@ export default function SettingsPage() {
     toast.success(`${label} copied to clipboard`);
   };
 
+  const updateTemplate = useCallback((type: string, field: keyof FollowUpTemplate, value: string) => {
+    setTemplates(prev => ({
+      ...prev,
+      [type]: { message: '', media_url: '', media_type: 'image', ...(prev[type] || {}), [field]: value },
+    }));
+    setDirty(true);
+  }, []);
+
+  const insertTemplateVar = useCallback((type: string, variable: string) => {
+    setTemplates(prev => {
+      const current = prev[type]?.message || '';
+      return {
+        ...prev,
+        [type]: { message: '', media_url: '', media_type: 'image', ...(prev[type] || {}), message: current + variable },
+      };
+    });
+    setDirty(true);
+  }, []);
+
   const save = async () => {
     setSaving(true);
     try {
+      // Save main settings
       const res = await fetch('/api/dashboard/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -312,6 +352,23 @@ export default function SettingsPage() {
         toast.error(`Save failed (${res.status}): ${data.error || 'unknown error'}`);
         return;
       }
+
+      // Save follow-up templates (all 4 types)
+      await Promise.all(
+        FOLLOW_UP_TYPES.map(({ key }) =>
+          fetch('/api/dashboard/follow-up-templates', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              follow_up_type: key,
+              message:    templates[key]?.message   || null,
+              media_url:  templates[key]?.media_url || null,
+              media_type: templates[key]?.media_type || 'image',
+            }),
+          })
+        )
+      );
+
       toast.success('Settings saved successfully');
       setDirty(false);
     } catch (err) {
@@ -829,33 +886,128 @@ export default function SettingsPage() {
         <motion.div key="followup" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
           <SectionCard title="Automated Follow-up Sequences" icon={Bell}>
             <p className="text-xs mb-2" style={{ color: 'var(--muted-foreground)' }}>
-              The AI will automatically follow up with leads who haven't responded. Enable the sequences you want.
+              Enable sequences and optionally write a custom message with an image. Leave message blank to use AI-generated text.
             </p>
-            <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-              <Toggle
-                checked={settings.followup_30min}
-                onChange={v => update('followup_30min', v)}
-                label="30-minute follow-up"
-                description="Gentle nudge if no reply within 30 minutes"
-              />
-              <Toggle
-                checked={settings.followup_3hr}
-                onChange={v => update('followup_3hr', v)}
-                label="3-hour follow-up"
-                description="Re-engagement message after 3 hours"
-              />
-              <Toggle
-                checked={settings.followup_24hr}
-                onChange={v => update('followup_24hr', v)}
-                label="24-hour follow-up"
-                description="Next-day check-in message"
-              />
-              <Toggle
-                checked={settings.followup_7day}
-                onChange={v => update('followup_7day', v)}
-                label="7-day re-engagement"
-                description="Long-term nurture for cold leads"
-              />
+            <div className="space-y-3">
+              {FOLLOW_UP_TYPES.map(({ key, label, description, settingKey }) => {
+                const enabled  = settings[settingKey] as boolean;
+                const expanded = expandedFu[key] ?? false;
+                const tpl      = templates[key] || { message: '', media_url: '', media_type: 'image' };
+                const hasMedia = !!tpl.media_url;
+                return (
+                  <div
+                    key={key}
+                    className="rounded-xl overflow-hidden border"
+                    style={{ borderColor: enabled ? 'rgba(16,185,129,0.3)' : 'var(--border)', background: 'var(--card)' }}
+                  >
+                    {/* Toggle row */}
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div className="flex-1">
+                        <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>{label}</div>
+                        <div className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>{description}</div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {/* Expand/customise button */}
+                        <button
+                          onClick={() => setExpandedFu(p => ({ ...p, [key]: !p[key] }))}
+                          className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-colors"
+                          style={{ background: 'var(--secondary)', border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}
+                        >
+                          {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          Customize
+                        </button>
+                        {/* Toggle */}
+                        <button
+                          onClick={() => update(settingKey, !enabled)}
+                          className="relative w-10 h-6 rounded-full transition-colors shrink-0"
+                          style={{ background: enabled ? '#10B981' : 'var(--muted)' }}
+                        >
+                          <div
+                            className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform"
+                            style={{ transform: enabled ? 'translateX(16px)' : 'translateX(0)' }}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Expandable customisation panel */}
+                    {expanded && (
+                      <div
+                        className="px-4 pb-4 space-y-3 border-t"
+                        style={{ borderColor: 'var(--border)', background: 'rgba(0,0,0,0.02)' }}
+                      >
+                        {/* Variable chips */}
+                        <div className="flex flex-wrap gap-1.5 pt-3">
+                          <span className="text-[10px] font-semibold uppercase tracking-widest self-center pr-1" style={{ color: 'var(--muted-foreground)' }}>Variables:</span>
+                          {['{{name}}', '{{business_name}}'].map(v => (
+                            <button
+                              key={v}
+                              onClick={() => insertTemplateVar(key, v)}
+                              className="text-xs px-2 py-0.5 rounded-md font-mono transition-colors"
+                              style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: '#10B981' }}
+                            >
+                              {v}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Message textarea */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--muted-foreground)' }}>
+                            Message
+                          </label>
+                          <textarea
+                            value={tpl.message}
+                            onChange={e => updateTemplate(key, 'message', e.target.value)}
+                            placeholder={`e.g. Hey {{name}}! Just checking in from {{business_name}}. Did you get a chance to review our offer? 😊`}
+                            rows={4}
+                            className="w-full px-3 py-2.5 rounded-xl text-sm outline-none resize-none transition-all"
+                            style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                          />
+                          <p className="text-[10px]" style={{ color: 'var(--muted-foreground)' }}>
+                            Leave blank to let AI generate a contextual message automatically.
+                          </p>
+                        </div>
+
+                        {/* Image URL */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--muted-foreground)' }}>
+                            Image URL (optional)
+                          </label>
+                          <div className="flex gap-2">
+                            <div className="relative flex-1">
+                              <ImageIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: 'var(--muted-foreground)' }} />
+                              <input
+                                type="url"
+                                value={tpl.media_url}
+                                onChange={e => updateTemplate(key, 'media_url', e.target.value)}
+                                placeholder="https://your-site.com/image.jpg"
+                                className="w-full h-10 pl-8 pr-3 rounded-xl text-sm outline-none transition-all"
+                                style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                              />
+                            </div>
+                          </div>
+                          {/* Live image preview */}
+                          {hasMedia && (
+                            <div className="mt-2 rounded-xl overflow-hidden border" style={{ borderColor: 'var(--border)', maxWidth: 180 }}>
+                              <img
+                                src={tpl.media_url}
+                                alt="preview"
+                                className="w-full object-cover"
+                                style={{ maxHeight: 120 }}
+                                onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                              />
+                            </div>
+                          )}
+                          <p className="text-[10px]" style={{ color: 'var(--muted-foreground)' }}>
+                            Paste a direct image link. If provided, the message becomes the image caption.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </SectionCard>
         </motion.div>

@@ -11,7 +11,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantById, getTenantConfig } from '@/lib/tenant/manager';
-import { sendTextMessage, sendTemplateMessage } from '@/lib/meta/service';
+import { sendTextMessage, sendTemplateMessage, sendMediaMessage } from '@/lib/meta/service';
 const isMetaConfigured = (t: Tenant) => !!t.wa_access_token && !!t.wa_phone_number_id;
 import { generateFollowUpMessage } from '@/lib/ai/engine';
 import type { Tenant } from '@/lib/types';
@@ -275,7 +275,33 @@ export async function processPendingFollowUps(): Promise<number> {
         continue;
       }
 
-      let message = followUp.message;
+      // ── Resolve message: custom template > AI-generated ──
+      let message = followUp.message as string | null;
+      let mediaUrl: string | null = null;
+      let mediaType: string = 'image';
+
+      // Look up per-tenant custom template for this follow-up type
+      const { data: customTpl } = await supabaseAdmin
+        .from('follow_up_templates')
+        .select('message, media_url, media_type')
+        .eq('tenant_id', followUp.tenant_id)
+        .eq('follow_up_type', followUp.follow_up_type)
+        .maybeSingle();
+
+      if (customTpl) {
+        // Interpolate {{name}} and {{business_name}} variables
+        if (customTpl.message) {
+          message = customTpl.message
+            .replace(/\{\{name\}\}/g, lead.name || 'there')
+            .replace(/\{\{business_name\}\}/g, (tenant.business_name as string) || '');
+        }
+        if (customTpl.media_url) {
+          mediaUrl  = customTpl.media_url;
+          mediaType = customTpl.media_type || 'image';
+        }
+      }
+
+      // Fall back to AI-generated message if no custom message set
       if (!message) {
         const tenantConfig = getTenantConfig(tenant);
         message = await generateFollowUpMessage(
@@ -285,16 +311,18 @@ export async function processPendingFollowUps(): Promise<number> {
         );
       }
 
+      const token = decryptToken(tenant.wa_access_token as string) as string;
+      const phoneNumberId = tenant.wa_phone_number_id as string;
       const hoursSinceScheduled = getHoursSince(followUp.created_at);
+
       if (hoursSinceScheduled > 24) {
+        // Outside 24h window — must use approved Meta template
         await sendFollowUpWithTemplate(tenant, lead.phone, followUp.follow_up_type, lead.name);
+      } else if (mediaUrl) {
+        // Custom image/media + optional caption
+        await sendMediaMessage(token, phoneNumberId, lead.phone, mediaType as any, mediaUrl, message || undefined);
       } else {
-        await sendTextMessage(
-          decryptToken(tenant.wa_access_token as string) as string,
-          tenant.wa_phone_number_id as string,
-          lead.phone,
-          message
-        );
+        await sendTextMessage(token, phoneNumberId, lead.phone, message as string);
       }
 
       await supabaseAdmin
