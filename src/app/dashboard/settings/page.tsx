@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Building2, Bot, Clock, Phone, Mail, Globe, MapPin,
+  Building2, Clock, Phone, Mail, Globe, MapPin,
   Users, Zap, Save, CheckCircle2, AlertCircle, Plus, X,
   MessageSquare, BrainCircuit, Bell, Copy, Eye, EyeOff, Key, HelpCircle, ExternalLink, RefreshCw, Star,
   ChevronDown, ChevronUp, Image as ImageIcon
@@ -47,8 +47,7 @@ interface SettingsData {
   wa_access_token: string;
   wa_app_secret: string;
   wa_verify_token: string;
-  // Outbound webhook
-  outbound_webhook_url: string;
+
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -66,13 +65,11 @@ const DEFAULT_SETTINGS: SettingsData = {
   wa_access_token: '',
   wa_app_secret: '',
   wa_verify_token: '',
-  outbound_webhook_url: ''
 };
 
 const TABS = [
   { id: 'business', label: 'Business', icon: Building2 },
   { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
-  { id: 'bot', label: 'AI Bot', icon: Bot },
   { id: 'staff', label: 'Staff & Alerts', icon: Users },
   { id: 'followup', label: 'Follow-ups', icon: Bell },
   { id: 'offhours', label: 'Off-Hours', icon: Clock },
@@ -741,57 +738,6 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          {/* Outbound Webhook Card */}
-          <SectionCard title="Outbound Webhook (Zapier / Make / Custom)" icon={Zap}>
-            <Field label="Webhook URL">
-              <Input
-                value={settings.outbound_webhook_url || ''}
-                onChange={v => update('outbound_webhook_url', v)}
-                placeholder="https://hooks.zapier.com/hooks/catch/..."
-              />
-            </Field>
-            <p className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
-              Every inbound WhatsApp message will be POSTed to this URL as JSON,
-              including phone, message text, conversation ID, and timestamp.
-              Compatible with Zapier, Make, n8n, or any custom HTTP endpoint.
-            </p>
-          </SectionCard>
-        </motion.div>
-      )}
-
-      {/* Tab: AI Bot */}
-
-      {activeTab === 'bot' && (
-        <motion.div key="bot" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
-          <div 
-            className="p-8 rounded-2xl border text-center space-y-5"
-            style={{ 
-              background: 'var(--card)',
-              borderColor: 'var(--border)'
-            }}
-          >
-            <div className="w-16 h-16 mx-auto rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-              <Bot className="w-8 h-8" />
-            </div>
-            
-            <div className="space-y-2">
-              <h3 className="text-lg font-bold text-foreground">AI Configuration has Moved!</h3>
-              <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
-                We have consolidated your Bot Name, Persona, Welcomes, Offers, Staff Guidelines, FAQs, and Knowledge files into a single, unified **AI Staff Manager** page.
-              </p>
-            </div>
-            
-            <button
-              onClick={() => window.location.href = '/dashboard/agents'}
-              className="inline-flex items-center gap-2 h-10 px-5 rounded-xl text-xs font-semibold transition-all cursor-pointer"
-              style={{
-                background: 'var(--foreground)',
-                color: 'var(--background)'
-              }}
-            >
-              Go to AI Staff Manager
-            </button>
-          </div>
         </motion.div>
       )}
 

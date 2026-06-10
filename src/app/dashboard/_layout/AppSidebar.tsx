@@ -18,7 +18,6 @@ import {
   CreditCard,
   Settings,
   Bot,
-  UserCog,
   Activity,
   CalendarDays,
   UtensilsCrossed,
@@ -66,7 +65,6 @@ const navigationItems: NavItem[] = [
 const bottomItems: NavItem[] = [
   { label: "Team", icon: Users, href: "/dashboard/team" },
   { label: "Billing", icon: CreditCard, href: "/dashboard/billing" },
-  { label: "Business Profile", icon: UserCog, href: "/dashboard/settings/profile" },
   { label: "Settings", icon: Settings, href: "/dashboard/settings" },
 ];
 
@@ -355,16 +353,6 @@ function SidebarBody({
                 <p className="truncate text-[10px] text-sidebar-foreground/75">{userEmail || "preview@aries.ai"}</p>
               </div>
             )}
-
-            <Link
-              href="/dashboard/settings/profile"
-              prefetch={false}
-              onClick={() => setMenuOpen(false)}
-              className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-sidebar-foreground hover:bg-black/5 dark:hover:bg-white/5 hover:text-sidebar-accent-foreground transition-colors"
-            >
-              <UserCog className="h-3.5 w-3.5" />
-              <span>Business Profile</span>
-            </Link>
 
             <Link
               href="/dashboard/settings"
