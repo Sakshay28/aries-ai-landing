@@ -908,10 +908,29 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   }
 
   // isFirstMessage = truly the first message in this conversation session.
-  // We use existingConv === null (newly created conversation) rather than
-  // message_count because the counter is incremented non-blocking (void rpc),
-  // so rapid second/third messages still see count=0 and falsely trigger welcome.
-  const isFirstMessage = activeExistingConv === null;
+  // Race-condition guard: when a user sends multiple messages rapidly, several
+  // concurrent webhook calls may all see activeExistingConv === null (the first
+  // call's conversation insert hasn't committed yet). Without a gate, ALL of them
+  // would fire the welcome message/flow. We use Redis SET NX to let exactly ONE
+  // concurrent call claim "first message" ownership — the rest proceed as non-first.
+  let isFirstMessage = activeExistingConv === null;
+  if (isFirstMessage) {
+    const redis = getRedisClient();
+    if (redis) {
+      try {
+        const claimed = await redis.set(
+          `welcome:${tenant.id}:${cleanPhone}`,
+          '1',
+          'EX', 120,
+          'NX'
+        );
+        if (!claimed) {
+          isFirstMessage = false;
+          console.log(`🔒 Welcome dedup: another call already claimed first-message for ${cleanPhone}`);
+        }
+      } catch {}
+    }
+  }
 
   // 12+13. Fire the AI-context batch speculatively BEFORE the flow engine so its
   // DB time (~200-300ms) overlaps with the flow engine's own DB check (~50-150ms).
@@ -1001,7 +1020,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   // Reliable first-message check: look for any prior outbound (assistant) messages.
   // storedMsgCount is stale (non-blocking update) so we use the actual fetched history.
-  const isFirstMessageForAI = history.filter(h => h.role === 'assistant').length === 0;
+  // Also honour the Redis welcome gate: if another concurrent call already claimed
+  // first-message for this sender, this call must NOT trigger the welcome prompt.
+  const isFirstMessageForAI = isFirstMessage && history.filter(h => h.role === 'assistant').length === 0;
 
   perf('parallel_fetch_done');
 
