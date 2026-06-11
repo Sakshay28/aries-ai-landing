@@ -777,10 +777,18 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       type ESRow = { keywords: string[]; reply: string; media_url?: string | null };
       let matchedEarly: ESRow | undefined;
       let bestEarlyLen = 0;
+      // Word-boundary match: "hi" must not match inside "bhi", "hain", "sahi", etc.
+      // Uses same regex as the flow engine's keywordMatches().
+      const scriptedKwMatch = (text: string, kw: string): boolean => {
+        const k = kw.trim().toLowerCase();
+        if (!k) return false;
+        const escaped = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(text);
+      };
       for (const r of earlyScriptedRows as ESRow[]) {
         if (!Array.isArray(r.keywords)) continue;
         for (const kw of r.keywords) {
-          if (kw && lowerMsgEarly.includes(kw.toLowerCase()) && kw.length > bestEarlyLen) {
+          if (kw && scriptedKwMatch(lowerMsgEarly, kw) && kw.length > bestEarlyLen) {
             bestEarlyLen = kw.length;
             matchedEarly = r;
           }
@@ -1073,10 +1081,16 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // 1. Try keyword match first
   // 2. Fall back to a "default" agent — one with no routing keywords configured (catch-all)
   // This is how trained behavior flows even without keywords
+  const kwWordMatch = (text: string, kw: string) => {
+    const k = kw.trim().toLowerCase();
+    if (!k) return false;
+    const escaped = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(text);
+  };
   const matchedAgent =
     activeAgents.find(agent =>
       agent.routing_keywords?.length > 0 &&
-      agent.routing_keywords.some((kw: string) => lowerMsgText.includes(kw.toLowerCase()))
+      agent.routing_keywords.some((kw: string) => kwWordMatch(lowerMsgText, kw))
     ) ??
     activeAgents.find(agent => !agent.routing_keywords || agent.routing_keywords.length === 0) ??
     null;
@@ -1184,7 +1198,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   if (
     customEscKeywords.length > 0 &&
     !aiResponse.shouldEscalate &&
-    customEscKeywords.some((kw) => kw.trim() && (msg.text?.toLowerCase() || '').includes(kw.trim().toLowerCase()))
+    customEscKeywords.some((kw) => kw.trim() && kwWordMatch(msg.text?.toLowerCase() || '', kw))
   ) {
     aiResponse.shouldEscalate = true;
     aiResponse.escalationReason = 'keyword_match';
