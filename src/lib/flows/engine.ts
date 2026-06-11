@@ -25,6 +25,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { getRedisClient } from '@/lib/redis/client';
 import { sendTextMessage, sendMediaMessage, MetaMediaType } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { processMessageWithAI, TenantAIConfig } from '@/lib/ai/engine';
@@ -1258,6 +1259,43 @@ export async function runInactivityFlows(): Promise<number> {
  * cron expression matches the current time window.
  * Returns the number of flows executed.
  */
+// ── Scheduled-occurrence window matching ─────────────────────
+// Returns the schedule's occurrence Date if it falls inside the half-open
+// window (windowStart, windowEnd], else null. Pure function so any invocation
+// cadence (10-min external cron, daily Vercel cron, manual curl) fires each
+// occurrence exactly once — the old `hhmm === schedTime` exact-minute match
+// only ever worked when the endpoint was invoked every single minute; on the
+// daily 09:00 UTC cron, flows scheduled for any other time NEVER fired.
+export function scheduledOccurrenceInWindow(
+  schedTime: string,
+  freq: string,
+  schedDow: number,
+  schedDom: number,
+  windowStart: Date,
+  windowEnd: Date,
+): Date | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(schedTime.trim());
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (hh > 23 || mm > 59) return null;
+
+  // Scan each UTC day the window touches (window is capped at 60 min upstream,
+  // so this is at most 2 iterations — handles windows crossing midnight).
+  const day = new Date(Date.UTC(windowStart.getUTCFullYear(), windowStart.getUTCMonth(), windowStart.getUTCDate()));
+  for (; day.getTime() <= windowEnd.getTime(); day.setUTCDate(day.getUTCDate() + 1)) {
+    const occ = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hh, mm));
+    if (occ.getTime() <= windowStart.getTime() || occ.getTime() > windowEnd.getTime()) continue;
+    const freqMatch =
+      freq === 'daily'   ? true :
+      freq === 'weekly'  ? occ.getUTCDay() === schedDow :
+      freq === 'monthly' ? occ.getUTCDate() === schedDom :
+      false;
+    if (freqMatch) return occ;
+  }
+  return null;
+}
+
 export async function runScheduledFlows(): Promise<number> {
   let fired = 0;
   try {
@@ -1273,6 +1311,28 @@ export async function runScheduledFlows(): Promise<number> {
     const dow   = now.getUTCDay(); // 0=Sun … 6=Sat
     const dom   = now.getUTCDate();
 
+    // Catch-up window since the previous check, persisted in Redis. Capped at
+    // 60 min so a long outage doesn't dump days of stale scheduled sends on
+    // customers when service resumes. When Redis is unavailable we fall back
+    // to the legacy exact-minute match (windowStart=null) — that mode can
+    // never double-fire, which matters because the NX dedup below also needs
+    // Redis; we accept missed schedules over duplicate customer messages.
+    const redis = getRedisClient();
+    let windowStart: Date | null = null;
+    if (redis) {
+      windowStart = new Date(now.getTime() - 60 * 60 * 1000);
+      try {
+        const last = await redis.get('flows:sched:last_run');
+        if (last) {
+          const lastDate = new Date(last);
+          if (!isNaN(lastDate.getTime()) && lastDate.getTime() > windowStart.getTime() && lastDate.getTime() <= now.getTime()) {
+            windowStart = lastDate;
+          }
+        }
+        await redis.set('flows:sched:last_run', now.toISOString());
+      } catch { /* keep the capped 60-min default window */ }
+    }
+
     for (const flow of flows as Array<FlowRecord & { tenant_id: string }>) {
       const schedNode = (flow.nodes as FlowNode[]).find(n => n.type === 'schedule_trigger');
       if (!schedNode) continue;
@@ -1284,15 +1344,31 @@ export async function runScheduledFlows(): Promise<number> {
       const schedDow  = Number(schedNode.data?.dayOfWeek ?? 1);   // 1=Mon for weekly
       const schedDom  = Number(schedNode.data?.dayOfMonth ?? 1);  // 1 for monthly
 
-      const timeMatch = hhmm === schedTime;
-      if (!timeMatch) continue;
+      let occurrence: Date | null = null;
+      if (windowStart) {
+        occurrence = scheduledOccurrenceInWindow(schedTime, freq, schedDow, schedDom, windowStart, now);
+      } else {
+        // Legacy exact-minute match (Redis unavailable)
+        const timeMatch = hhmm === schedTime;
+        const freqMatch =
+          freq === 'daily' ? true :
+          freq === 'weekly' ? dow === schedDow :
+          freq === 'monthly' ? dom === schedDom :
+          false;
+        occurrence = timeMatch && freqMatch ? now : null;
+      }
+      if (!occurrence) continue;
 
-      const freqMatch =
-        freq === 'daily' ? true :
-        freq === 'weekly' ? dow === schedDow :
-        freq === 'monthly' ? dom === schedDom :
-        false;
-      if (!freqMatch) continue;
+      // Per-occurrence dedup: overlapping invocations (e.g. the daily Vercel
+      // cron and the external 10-min cron landing in the same window) must not
+      // send the same scheduled flow twice. SET NX is atomic across instances.
+      if (redis) {
+        try {
+          const dedupKey = `flows:sched:fired:${flow.id}:${occurrence.toISOString().slice(0, 16)}`;
+          const acquired = await redis.set(dedupKey, '1', 'EX', 90000, 'NX');
+          if (!acquired) continue; // another invocation already fired this occurrence
+        } catch { /* Redis hiccup mid-run — proceed; window math still bounds duplicates */ }
+      }
 
       // Load tenant credentials
       const { data: tenant } = await supabaseAdmin
