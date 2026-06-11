@@ -48,11 +48,12 @@ export async function GET(req: NextRequest) {
       lead = data;
     }
 
-    // Get messages
+    // Get messages — filter by tenant_id for defense-in-depth (admin client bypasses RLS)
     const { data: msgs } = await supabaseAdmin
       .from("messages")
       .select("*")
       .eq("conversation_id", id)
+      .eq("tenant_id", tenantId)
       .order("created_at", { ascending: true });
 
     return NextResponse.json({

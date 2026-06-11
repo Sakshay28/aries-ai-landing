@@ -171,15 +171,36 @@ async function processFollowUpJob(data: FollowUpJobData): Promise<void> {
     (await supabaseAdmin.from('follow_ups').select('created_at').eq('id', followUpId).single()).data?.created_at || ''
   );
 
+  let metaMsgId: string | null = null;
+  let sentContent = message as string;
+
   if (hoursSinceCreated > 24) {
     await sendFollowUpWithTemplate(tenant, leadPhone, followUpType, leadName);
+    sentContent = `[follow_up_template:${followUpType}]`;
   } else {
-    await sendTextMessage(
+    const result = await sendTextMessage(
       decryptToken(tenant.wa_access_token as string) as string,
       tenant.wa_phone_number_id as string,
       leadPhone,
       message
     );
+    metaMsgId = result?.messageId ?? null;
+  }
+
+  // Store the follow-up message in the messages table so it appears in the dashboard
+  if (data.conversationId) {
+    await supabaseAdmin.from('messages').insert({
+      tenant_id: tenantId,
+      conversation_id: data.conversationId,
+      direction: 'outbound',
+      content: sentContent,
+      message_type: 'text',
+      channel: 'whatsapp',
+      sender_id: null,
+      status: 'sent',
+      ai_generated: true,
+      wa_message_id: metaMsgId,
+    });
   }
 
   // Mark as sent
@@ -315,15 +336,46 @@ export async function processPendingFollowUps(): Promise<number> {
       const phoneNumberId = tenant.wa_phone_number_id as string;
       const hoursSinceScheduled = getHoursSince(followUp.created_at);
 
+      let metaMsgId: string | null = null;
+      let sentContent = message as string;
+      let sentMediaUrl: string | null = null;
+      let sentMimeType: string | null = null;
+      let sentMessageType = 'text';
+
       if (hoursSinceScheduled > 24) {
         // Outside 24h window — must use approved Meta template
         await sendFollowUpWithTemplate(tenant, lead.phone, followUp.follow_up_type, lead.name);
+        sentContent = `[follow_up_template:${followUp.follow_up_type}]`;
+        sentMessageType = 'template';
       } else if (mediaUrl) {
-        // Custom image/media + optional caption
-        await sendMediaMessage(token, phoneNumberId, lead.phone, mediaType as any, mediaUrl, message || undefined);
+        const result = await sendMediaMessage(token, phoneNumberId, lead.phone, mediaType as any, mediaUrl, message || undefined);
+        metaMsgId = result?.messageId ?? null;
+        sentMediaUrl = mediaUrl;
+        sentMimeType = mediaType === 'image' ? 'image/jpeg' : mediaType === 'video' ? 'video/mp4' : 'application/octet-stream';
+        sentMessageType = mediaType;
       } else {
-        await sendTextMessage(token, phoneNumberId, lead.phone, message as string);
+        const result = await sendTextMessage(token, phoneNumberId, lead.phone, message as string);
+        metaMsgId = result?.messageId ?? null;
       }
+
+      // Store the follow-up message in the messages table so it appears in the dashboard
+      await supabaseAdmin.from('messages').insert({
+        tenant_id: tenant.id,
+        conversation_id: followUp.conversation_id,
+        direction: 'outbound',
+        content: sentContent,
+        message_type: sentMessageType,
+        channel: 'whatsapp',
+        sender_id: null,
+        status: metaMsgId ? 'sent' : 'sent',
+        ai_generated: true,
+        wa_message_id: metaMsgId,
+        ...(sentMediaUrl && {
+          media_url: sentMediaUrl,
+          mime_type: sentMimeType,
+          media_caption: message || null,
+        }),
+      });
 
       await supabaseAdmin
         .from('follow_ups')

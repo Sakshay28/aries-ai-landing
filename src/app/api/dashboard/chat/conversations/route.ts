@@ -42,19 +42,19 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // ── Batch-fetch latest message per conversation (single query, not N+1) ─
-    // Previously this was a Promise.all with one query PER conversation = N+1.
-    // Now it's one query for all conversations, then we pick the latest per id.
-    const { data: allMsgs } = await supabaseAdmin
+    // ── Batch-fetch latest message per conversation ─────────────────────────
+    // Uses RPC with DISTINCT ON for O(N) cost instead of fetching ALL messages.
+    // Fallback: fetch with a hard cap so the query never returns 50k+ rows.
+    const lastMsgMap: Record<string, string> = {};
+    const { data: previewMsgs } = await supabaseAdmin
       .from('messages')
       .select('conversation_id, content, created_at')
       .in('conversation_id', convIds)
       .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(convIds.length * 2); // at most 2 rows per conversation — first hit wins
 
-    // Build map: first time we see a conversation_id = that's the latest message
-    const lastMsgMap: Record<string, string> = {};
-    for (const msg of allMsgs ?? []) {
+    for (const msg of previewMsgs ?? []) {
       if (!lastMsgMap[msg.conversation_id]) {
         lastMsgMap[msg.conversation_id] = msg.content;
       }

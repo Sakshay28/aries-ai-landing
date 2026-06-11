@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     // Build query — fetch messages newer than `after` timestamp
     let query = supabaseAdmin
       .from('messages')
-      .select('id, conversation_id, direction, content, message_type, status, created_at, ai_generated, sender_id, wa_message_id, reply_to_message_id, media_url, media_caption, file_name, file_size, mime_type, reaction')
+      .select('id, tenant_id, conversation_id, direction, content, message_type, channel, status, error_message, created_at, ai_generated, ai_latency_ms, sender_id, wa_message_id, reply_to_message_id, media_url, media_caption, file_name, file_size, mime_type, reaction')
       .eq('conversation_id', conversationId)
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: true });
