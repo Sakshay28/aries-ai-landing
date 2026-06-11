@@ -29,11 +29,12 @@ export async function GET(req: NextRequest) {
     }
 
     // Fetch lead: first try lead_id FK, fallback to phone (sender_id) lookup
-    let lead = null;
+    let lead: Record<string, any> | null = null;
+    const LEAD_FIELDS = 'id, name, phone, email, lead_status, lead_score, tags, created_at, first_message_at, last_message_at, assigned_to';
     if (conv.lead_id) {
       const { data } = await supabaseAdmin
         .from('leads')
-        .select('id, name, phone, email, lead_status, lead_score, tags, created_at, first_message_at, assigned_to')
+        .select(LEAD_FIELDS)
         .eq('id', conv.lead_id)
         .single();
       lead = data;
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
     if (!lead && conv.sender_id) {
       const { data } = await supabaseAdmin
         .from('leads')
-        .select('id, name, phone, email, lead_status, lead_score, tags, created_at, first_message_at, assigned_to')
+        .select(LEAD_FIELDS)
         .eq('tenant_id', tenantId)
         .eq('phone', conv.sender_id)
         .maybeSingle();
@@ -55,6 +56,13 @@ export async function GET(req: NextRequest) {
       .eq("conversation_id", id)
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: true });
+
+    // Self-heal the lead's last_message_at from the actual newest message —
+    // the webhook's lead update can lag, leaving the CRM panel showing stale times
+    const newestAt = msgs?.length ? msgs[msgs.length - 1].created_at : null;
+    if (lead && newestAt && (!lead.last_message_at || newestAt > lead.last_message_at)) {
+      lead = { ...lead, last_message_at: newestAt };
+    }
 
     return NextResponse.json({
       success: true,

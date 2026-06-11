@@ -43,33 +43,53 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Batch-fetch latest message per conversation ─────────────────────────
-    // Uses RPC with DISTINCT ON for O(N) cost instead of fetching ALL messages.
-    // Fallback: fetch with a hard cap so the query never returns 50k+ rows.
-    const lastMsgMap: Record<string, string> = {};
+    // Fetch with a hard cap so the query never returns 50k+ rows.
+    // The newest row per conversation also provides the authoritative timestamp —
+    // conversations.last_message_at can lag (it's updated separately in the
+    // webhook), so we self-heal stale values from the messages table here.
+    const lastMsgMap: Record<string, { preview: string; at: string }> = {};
     const { data: previewMsgs } = await supabaseAdmin
       .from('messages')
-      .select('conversation_id, content, created_at')
+      .select('conversation_id, content, created_at, message_type, media_caption')
       .in('conversation_id', convIds)
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
-      .limit(convIds.length * 2); // at most 2 rows per conversation — first hit wins
+      .limit(Math.min(convIds.length * 3, 300));
 
+    const MEDIA_LABELS: Record<string, string> = {
+      image: '📷 Photo', video: '🎥 Video', audio: '🎵 Audio',
+      voice: '🎵 Voice message', document: '📄 Document', sticker: '💟 Sticker',
+    };
     for (const msg of previewMsgs ?? []) {
       if (!lastMsgMap[msg.conversation_id]) {
-        lastMsgMap[msg.conversation_id] = msg.content;
+        const mediaLabel = MEDIA_LABELS[msg.message_type as string];
+        const preview = mediaLabel
+          ? (msg.media_caption ? `${mediaLabel} · ${msg.media_caption}` : mediaLabel)
+          : msg.content;
+        lastMsgMap[msg.conversation_id] = { preview, at: msg.created_at };
       }
     }
 
     // ── Assemble final response ──────────────────────────────────────────────
     const enriched = convos.map((c: any) => {
       const lead = leadsMap[c.lead_id] ?? { name: null, phone: c.sender_id ?? null, assigned_to: null };
+      const lastMsg = lastMsgMap[c.id];
+      // Trust the newest message timestamp over the conversation column when newer
+      const effectiveAt = lastMsg && (!c.last_message_at || lastMsg.at > c.last_message_at)
+        ? lastMsg.at
+        : c.last_message_at;
       return {
         ...c,
+        last_message_at: effectiveAt,
         leads: lead,
         assigned_to: lead.assigned_to ?? null,
-        last_message_preview: lastMsgMap[c.id] ?? null,
+        last_message_preview: lastMsg?.preview ?? null,
       };
     });
+
+    // Re-sort by the healed timestamps so the freshest conversation is on top
+    enriched.sort((a: any, b: any) =>
+      (b.last_message_at ?? '').localeCompare(a.last_message_at ?? ''));
 
     return NextResponse.json({ success: true, conversations: enriched, tenantId, me: { id: me.id } });
   } catch (error: any) {

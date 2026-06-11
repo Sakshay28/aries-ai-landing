@@ -214,7 +214,9 @@ export interface Message {
   reaction?: string | null;
 }
 
-export type MessageType = 'text' | 'interactive' | 'template' | 'image' | 'video' | 'audio' | 'document' | 'location' | 'reaction';
+// Mirrors what the webhook actually stores: msg.type passes through for all media
+// types, including 'voice' (WhatsApp voice notes) and 'sticker'.
+export type MessageType = 'text' | 'interactive' | 'template' | 'image' | 'video' | 'audio' | 'voice' | 'sticker' | 'document' | 'location' | 'reaction';
 export type MessageStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
 
 // ── Follow-Up ──

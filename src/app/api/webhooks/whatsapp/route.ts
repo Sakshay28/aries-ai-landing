@@ -333,7 +333,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     lead = existingLead;
     const updateData: Record<string, any> = { last_message_at: new Date().toISOString() };
     if (isFromAd && !existingLead.source) updateData.source = leadSource;
-    void supabaseAdmin.from('leads').update(updateData).eq('id', existingLead.id);
+    // Awaited — fire-and-forget dies on serverless freeze, leaving CRM timestamps stale
+    await supabaseAdmin.from('leads').update(updateData).eq('id', existingLead.id);
     // Cancel any pending follow-ups — they will be re-scheduled below (either in
     // the scripted-reply block or Step 18) with a fresh timer from THIS message.
     // This means the 30-min clock resets with every message the lead sends, so
@@ -675,8 +676,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // Increment message counter (non-blocking — counter accuracy doesn't need to delay the reply)
   void supabaseAdmin.rpc('increment_message_count_conv', { conv_id: conversation.id });
 
-  // Update conversation last_message_at for UI responsiveness
-  void supabaseAdmin
+  // Update conversation last_message_at for UI responsiveness.
+  // Awaited — `void` fire-and-forget dies when the serverless function freezes,
+  // which left the sidebar showing stale timestamps for hours.
+  await supabaseAdmin
     .from('conversations')
     .update({ last_message_at: new Date().toISOString() })
     .eq('id', conversation.id);

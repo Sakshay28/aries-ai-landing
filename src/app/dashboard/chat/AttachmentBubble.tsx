@@ -147,72 +147,81 @@ export default function AttachmentBubble({
         {lightboxOpen && !imgError && (
           <ImageLightbox src={mediaUrl} alt={fileName} onClose={() => setLightboxOpen(false)} />
         )}
-        <div
-          className={cn("relative group cursor-pointer", imgError && "cursor-default")}
-          onClick={() => !imgError && setLightboxOpen(true)}
-        >
-          {/* Loading skeleton — shown until image loads or errors */}
-          {!imgLoaded && !imgError && (
-            <div className={cn(
-              "w-[200px] h-[160px] rounded-xl animate-pulse",
-              isOutbound ? "bg-white/20" : "bg-black/10 dark:bg-white/10"
-            )} />
-          )}
+        {/* Fixed media column — bubble hugs the image and the caption wraps
+            underneath at the same width (WhatsApp behavior), instead of a long
+            caption stretching the bubble far wider than the image. */}
+        <div className="w-[280px] max-w-full">
+          <div
+            className={cn("relative group cursor-pointer", imgError && "cursor-default")}
+            onClick={() => !imgError && setLightboxOpen(true)}
+          >
+            {/* Loading skeleton — shown until image loads or errors */}
+            {!imgLoaded && !imgError && (
+              <div className={cn(
+                "w-full h-[200px] rounded-xl animate-pulse",
+                isOutbound ? "bg-white/20" : "bg-black/10 dark:bg-white/10"
+              )} />
+            )}
 
-          {/* Error state — shown when image URL is broken/expired */}
-          {imgError ? (
-            <div className={cn(
-              "w-[200px] h-[140px] rounded-xl flex flex-col items-center justify-center gap-2",
-              isOutbound ? "bg-white/10" : "bg-black/[0.06] dark:bg-white/[0.06]"
-            )}>
-              <ImageOff className={cn("w-8 h-8", isOutbound ? "text-white/40" : "text-muted-foreground/40")} />
-              <span className={cn("text-[11px]", isOutbound ? "text-white/50" : "text-muted-foreground/50")}>
-                Image unavailable
-              </span>
-              <a
-                href={mediaUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className={cn(
-                  "text-[11px] hover:underline font-medium",
-                  isOutbound ? "text-white/70 hover:text-white" : "text-indigo-500 hover:text-indigo-600"
-                )}
-              >
-                Open link ↗
-              </a>
-            </div>
-          ) : (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={mediaUrl}
-                alt={fileName}
-                loading="lazy"
-                onLoad={() => setImgLoaded(true)}
-                onError={() => {
-                  setImgError(true);
-                  setImgLoaded(true); // stop the loading skeleton
-                }}
-                className={cn(
-                  "max-w-[220px] max-h-[300px] rounded-xl object-cover transition-opacity duration-200",
-                  imgLoaded ? "opacity-100" : "opacity-0 absolute inset-0"
-                )}
-              />
-              {/* Expand overlay */}
-              <div className="absolute inset-0 rounded-xl bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-                <Maximize2 className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+            {/* Error state — shown when image URL is broken/expired */}
+            {imgError ? (
+              <div className={cn(
+                "w-full h-[140px] rounded-xl flex flex-col items-center justify-center gap-2",
+                isOutbound ? "bg-white/10" : "bg-black/[0.06] dark:bg-white/[0.06]"
+              )}>
+                <ImageOff className={cn("w-8 h-8", isOutbound ? "text-white/40" : "text-muted-foreground/40")} />
+                <span className={cn("text-[11px]", isOutbound ? "text-white/50" : "text-muted-foreground/50")}>
+                  Image unavailable
+                </span>
+                <a
+                  href={mediaUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className={cn(
+                    "text-[11px] hover:underline font-medium",
+                    isOutbound ? "text-white/70 hover:text-white" : "text-indigo-500 hover:text-indigo-600"
+                  )}
+                >
+                  Open link ↗
+                </a>
               </div>
-            </>
-          )}
+            ) : (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={mediaUrl}
+                  alt={fileName}
+                  loading="lazy"
+                  onLoad={() => setImgLoaded(true)}
+                  onError={() => {
+                    setImgError(true);
+                    setImgLoaded(true); // stop the loading skeleton
+                  }}
+                  className={cn(
+                    "w-full max-h-[340px] rounded-xl object-cover transition-opacity duration-200",
+                    imgLoaded ? "opacity-100" : "opacity-0 absolute inset-0"
+                  )}
+                />
+                {/* Expand overlay */}
+                <div className="absolute inset-0 rounded-xl bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                  <Maximize2 className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+              </>
+            )}
 
-          {isOptimistic && !imgError && (
-            <div className="absolute inset-0 rounded-xl bg-black/30 flex items-center justify-center">
-              <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-            </div>
+            {isOptimistic && !imgError && (
+              <div className="absolute inset-0 rounded-xl bg-black/30 flex items-center justify-center">
+                <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+              </div>
+            )}
+          </div>
+          {caption && (
+            <p className="text-[13px] leading-relaxed mt-1.5 [word-break:normal] break-words">
+              {caption}
+            </p>
           )}
         </div>
-        {caption && <p className="text-[13px] leading-relaxed mt-1">{caption}</p>}
       </>
     );
   }
@@ -220,20 +229,26 @@ export default function AttachmentBubble({
   // ── Video ──────────────────────────────────────────────────────────────────
   if (category === 'video') {
     return (
-      <div className="relative">
-        <video
-          src={mediaUrl}
-          controls
-          preload="metadata"
-          className="max-w-[220px] max-h-[200px] rounded-xl object-cover"
-          style={{ background: '#000' }}
-        />
-        {isOptimistic && (
-          <div className="absolute inset-0 rounded-xl bg-black/50 flex items-center justify-center">
-            <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-          </div>
+      <div className="w-[280px] max-w-full">
+        <div className="relative">
+          <video
+            src={mediaUrl}
+            controls
+            preload="metadata"
+            className="w-full max-h-[240px] rounded-xl object-cover"
+            style={{ background: '#000' }}
+          />
+          {isOptimistic && (
+            <div className="absolute inset-0 rounded-xl bg-black/50 flex items-center justify-center">
+              <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+            </div>
+          )}
+        </div>
+        {caption && (
+          <p className="text-[13px] leading-relaxed mt-1.5 [word-break:normal] break-words">
+            {caption}
+          </p>
         )}
-        {caption && <p className="text-[13px] leading-relaxed mt-1">{caption}</p>}
       </div>
     );
   }

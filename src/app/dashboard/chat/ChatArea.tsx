@@ -1330,7 +1330,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                         <div 
                           id={`msg-${msg.id}`}
                           className={cn(
-                            'max-w-[65%] px-2.5 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150 relative break-all',
+                            'max-w-[65%] px-2.5 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150 relative break-words',
                             isInbound
                               ? cn(
                                   'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10',
@@ -1353,7 +1353,15 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                             mediaUrl={msg.media_url}
                             fileName={msg.file_name || msg.content || 'file'}
                             fileSize={msg.file_size}
-                            mimeType={msg.mime_type || 'application/octet-stream'}
+                            mimeType={
+                              msg.mime_type ||
+                              // Older rows stored media without mime_type — infer from
+                              // message_type so images render inline, not as file chips
+                              (msg.message_type === 'image' ? 'image/jpeg'
+                                : msg.message_type === 'video' ? 'video/mp4'
+                                : msg.message_type === 'audio' || msg.message_type === 'voice' ? 'audio/ogg'
+                                : 'application/octet-stream')
+                            }
                             caption={msg.media_caption}
                             isOutbound={!isInbound}
                             isOptimistic={isOptimistic}
