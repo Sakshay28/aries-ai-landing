@@ -15,6 +15,7 @@ import { withTimeout } from '@/lib/utils/safety';
 import { recordAITokenUsage, recordDailyTokenUsage } from '@/lib/billing/costProtection';
 import { guardInput, guardOutput, shouldRedirectToHuman, HALLUCINATION_REDIRECT, SYSTEM_PROMPT_SAFETY_APPENDIX } from '@/lib/ai/guardrails';
 import { getAI } from '@/lib/ai/client';
+import { getRedisClient } from '@/lib/redis/client';
 const MODEL = 'gemini-2.5-flash';
 
 // ── Response Types ──
@@ -64,7 +65,7 @@ export type Intent =
 
 export type Sentiment = 'positive' | 'neutral' | 'negative' | 'angry';
 
-// ── Provider Health Status ──
+// ── Provider Health Status (Redis-backed, fleet-wide) ──
 export interface ProviderStatus {
   available: boolean;
   lastError?: string;
@@ -72,24 +73,71 @@ export interface ProviderStatus {
   consecutiveFailures: number;
 }
 
-// Module-level provider status tracker
-let _providerStatus: ProviderStatus = { available: true, consecutiveFailures: 0 };
+const CIRCUIT_KEY_FAILURES = 'ai:circuit:failures';
+const CIRCUIT_KEY_ERROR    = 'ai:circuit:error';
+const CIRCUIT_TTL          = 120; // auto-recover after 2 min of no failures
+const CIRCUIT_TRIP_THRESHOLD = 3; // trip after 3 consecutive failures
 
-export function getProviderStatus(): ProviderStatus {
-  return { ..._providerStatus };
+// In-memory fallback for when Redis is unavailable
+let _localStatus: ProviderStatus = { available: true, consecutiveFailures: 0 };
+
+export async function getProviderStatus(): Promise<ProviderStatus> {
+  const redis = getRedisClient();
+  if (!redis) return { ..._localStatus };
+  try {
+    const [failStr, error] = await Promise.all([
+      redis.get(CIRCUIT_KEY_FAILURES),
+      redis.get(CIRCUIT_KEY_ERROR),
+    ]);
+    const failures = failStr ? parseInt(failStr, 10) : 0;
+    return {
+      available: failures < CIRCUIT_TRIP_THRESHOLD,
+      lastError: error ?? undefined,
+      lastErrorTime: failures > 0 ? Date.now() : undefined,
+      consecutiveFailures: failures,
+    };
+  } catch {
+    return { ..._localStatus };
+  }
 }
 
-function recordProviderSuccess(): void {
-  _providerStatus = { available: true, consecutiveFailures: 0 };
+async function isCircuitOpen(): Promise<boolean> {
+  const redis = getRedisClient();
+  if (!redis) return _localStatus.consecutiveFailures >= CIRCUIT_TRIP_THRESHOLD;
+  try {
+    const failStr = await redis.get(CIRCUIT_KEY_FAILURES);
+    return (failStr ? parseInt(failStr, 10) : 0) >= CIRCUIT_TRIP_THRESHOLD;
+  } catch {
+    return _localStatus.consecutiveFailures >= CIRCUIT_TRIP_THRESHOLD;
+  }
 }
 
-function recordProviderFailure(error: string): void {
-  _providerStatus = {
+async function recordProviderSuccess(): Promise<void> {
+  _localStatus = { available: true, consecutiveFailures: 0 };
+  const redis = getRedisClient();
+  if (!redis) return;
+  try { await redis.del(CIRCUIT_KEY_FAILURES, CIRCUIT_KEY_ERROR); } catch {}
+}
+
+async function recordProviderFailure(error: string): Promise<void> {
+  _localStatus = {
     available: false,
     lastError: error,
     lastErrorTime: Date.now(),
-    consecutiveFailures: _providerStatus.consecutiveFailures + 1,
+    consecutiveFailures: _localStatus.consecutiveFailures + 1,
   };
+  const redis = getRedisClient();
+  if (!redis) return;
+  try {
+    const count = await redis.incr(CIRCUIT_KEY_FAILURES);
+    await Promise.all([
+      redis.expire(CIRCUIT_KEY_FAILURES, CIRCUIT_TTL),
+      redis.set(CIRCUIT_KEY_ERROR, error, 'EX', CIRCUIT_TTL),
+    ]);
+    if (count === CIRCUIT_TRIP_THRESHOLD) {
+      console.warn(`🔌 AI circuit breaker TRIPPED — ${count} consecutive Gemini failures in ${CIRCUIT_TTL}s`);
+    }
+  } catch {}
 }
 
 // ── Native Persona Instructions mapping ──
@@ -331,6 +379,24 @@ export async function processMessageWithAI(
   }
   const safeMessage = guard.safeResponse; // may be truncated
 
+  // ── Circuit breaker: skip Gemini if it's been failing fleet-wide ──
+  if (await isCircuitOpen()) {
+    console.warn(`🔌 Circuit open — skipping Gemini for tenant=${tenantId}, trying offline KB`);
+    const offlineAnswer = offlineKBSearch(safeMessage, tenantConfig);
+    if (offlineAnswer) {
+      return {
+        reply: offlineAnswer,
+        extractedData: {},
+        intent: 'general_enquiry' as Intent,
+        sentiment: 'neutral' as Sentiment,
+        shouldEscalate: false,
+        nextStep: 'ask_intent',
+        confidence: 0.6,
+      };
+    }
+    return getFallbackResponse(safeMessage, context, tenantConfig, tenantConfig.isFirstMessage ?? false);
+  }
+
   try {
     const systemPrompt = buildSystemPrompt(tenantConfig);
 
@@ -404,7 +470,7 @@ export async function processMessageWithAI(
 
     console.log(`🧠 AI responded in ${latency}ms (intent: ${parsed.intent}, confidence: ${parsed.confidence})`);
 
-    recordProviderSuccess();
+    void recordProviderSuccess();
 
     return parsed;
   } catch (error) {
@@ -426,8 +492,8 @@ export async function processMessageWithAI(
     }));
     Sentry.captureException(error);
 
-    // ── Track provider health ──
-    recordProviderFailure(errorMsg);
+    // ── Track provider health (fleet-wide via Redis) ──
+    void recordProviderFailure(errorMsg);
 
     // ── Attempt offline KB/FAQ search before generic fallback ──
     const offlineAnswer = offlineKBSearch(message, tenantConfig);

@@ -148,7 +148,7 @@ export async function POST(req: NextRequest) {
       tenantId
     );
 
-    const providerStatus = getProviderStatus();
+    const providerStatus = await getProviderStatus();
     return NextResponse.json({
       success: true,
       data: {

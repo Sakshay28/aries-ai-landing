@@ -131,17 +131,17 @@ describe('offlineKBSearch', () => {
 // TEST SUITE 2: Provider Status
 // ═══════════════════════════════════════
 describe('getProviderStatus', () => {
-  it('returns a status object with required fields', () => {
-    const status = getProviderStatus();
+  it('returns a status object with required fields', async () => {
+    const status = await getProviderStatus();
     expect(status).toHaveProperty('available');
     expect(status).toHaveProperty('consecutiveFailures');
     expect(typeof status.available).toBe('boolean');
     expect(typeof status.consecutiveFailures).toBe('number');
   });
 
-  it('returns a copy (not a reference to the internal state)', () => {
-    const status1 = getProviderStatus();
-    const status2 = getProviderStatus();
+  it('returns a copy (not a reference to the internal state)', async () => {
+    const status1 = await getProviderStatus();
+    const status2 = await getProviderStatus();
     expect(status1).not.toBe(status2); // Different object references
     expect(status1).toEqual(status2);  // Same values
   });
