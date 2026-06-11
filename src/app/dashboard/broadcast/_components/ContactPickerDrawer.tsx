@@ -3,8 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, Check, Filter, User, Tag, Star, Users } from 'lucide-react';
-// @ts-ignore
-import { FixedSizeList as List } from 'react-window';
+import { List } from 'react-window';
 import { useDebounceCallback } from '../hooks/useDebounce';
 
 interface Contact {

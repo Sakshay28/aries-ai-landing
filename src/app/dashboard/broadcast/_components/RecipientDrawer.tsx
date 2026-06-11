@@ -3,8 +3,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Search, Check, FileText, RotateCcw, AlertTriangle, Users } from 'lucide-react';
-// @ts-ignore
-import { FixedSizeList as List } from 'react-window';
+import { List } from 'react-window';
 import { RecipientRecord } from '@/lib/broadcast/services/broadcast-recipient.service';
 import toast from 'react-hot-toast';
 
