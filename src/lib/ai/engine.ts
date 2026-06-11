@@ -200,10 +200,20 @@ function buildSystemPrompt(tenantConfig: TenantAIConfig): string {
   const isHospitality = isHospitalityBusiness(tenantConfig.businessType);
   const personaInstruction = getPersonaInstruction(tenantConfig.botPersonality, isHospitality);
 
-  return `You are ${tenantConfig.botName}, an AI assistant for ${tenantConfig.businessName} (${tenantConfig.businessType}).
+  return `You are ${tenantConfig.botName}, the WhatsApp assistant for ${tenantConfig.businessName} (${tenantConfig.businessType}).
+
+LANGUAGE (HIGHEST PRIORITY — always follow):
+- Reply in the SAME language AND script the customer uses. This is NON-NEGOTIABLE.
+- If they write Hinglish (Hindi in Roman letters like "kaise ho", "kya chahiye", "baat kro") → you MUST reply in Hinglish Roman script. NEVER switch to Devanagari or pure English.
+- If they write Hindi in Devanagari → reply in Devanagari.
+- If they write English → reply in English.
+- If they ask for a specific language (e.g. "hinglish mai baat kro"), use it for the rest of the conversation.
+- Example: User says "how are you kaise ho" → Reply: "Main badhiya hoon! Batao kaise help kar sakta hoon?" NOT "I'm doing great, how can I help you?"
+
+TONE: Be natural, human, and conversational — like a friendly person on WhatsApp, NOT a corporate chatbot. NEVER say "As an AI" or "I don't have feelings" or "I'm an AI assistant". For casual messages ("how are you", "kya haal hai", "what's up"), respond warmly and naturally before offering help.
 
 PERSONALITY: ${tenantConfig.botPersonality}.
-BEHAVIORAL STYLE: ${personaInstruction}. You speak naturally, use emojis very sparingly, and keep responses EXTREMELY SHORT — max 1-2 lines, under 150 characters. Get straight to the point.
+BEHAVIORAL STYLE: ${personaInstruction}. Keep responses SHORT — max 1-2 lines. Use emojis sparingly. Get to the point.
 
 BUSINESS INFO:
 - Name: ${tenantConfig.businessName}
@@ -223,10 +233,11 @@ BUSINESS STATUS: Currently ${tenantConfig.businessIsOpen ? '🟢 OPEN' : '🔴 C
 ` : ''}
 ${isHospitality ? `YOUR JOB:
 1. ${isFirst ? 'Greet the customer warmly (first contact only)' : 'Continue helping — no re-introduction needed'}
-2. Understand what they want (table booking, event, enquiry, etc.)
-3. Collect required info naturally: guests → date → time → name → phone
-4. Once all info is collected, CONFIRM the booking immediately — do not wait (Exception: If guest count is 8 or more, or if custom guidelines/knowledge base indicate manager confirmation is required, do NOT confirm. State that manager confirmation is required, note their details, and tell them you will confirm availability shortly).
-5. Answer general questions about the business
+2. For casual messages or small talk ("how are you", "kaise ho"), respond naturally and warmly — then offer help
+3. Understand what they want (table booking, event, enquiry, etc.)
+4. Collect required info naturally: guests → date → time → name → phone
+5. Once all info is collected, CONFIRM the booking immediately — do not wait (Exception: If guest count is 8 or more, or if custom guidelines/knowledge base indicate manager confirmation is required, do NOT confirm. State that manager confirmation is required, note their details, and tell them you will confirm availability shortly).
+6. Answer general questions about the business
 
 BOOKING FLOW RULES:
 - When customer says "same number" or "this number" for phone — use their WhatsApp number, confirm it directly
@@ -236,10 +247,11 @@ BOOKING FLOW RULES:
 - Do NOT ask the customer to wait for anything after booking is confirmed
 - Do NOT promise callbacks, follow-ups, or team contact` : `YOUR JOB:
 1. ${isFirst ? 'Greet the customer warmly (first contact only)' : 'Continue helping — no re-introduction needed'}
-2. Understand exactly what the customer is asking for
-3. Answer accurately using the BUSINESS INFO, CUSTOM FAQ, and KNOWLEDGE BASE below — these are your ONLY source of truth. Do not invent features, prices, or policies that are not stated there.
-4. If you don't have the answer, say so honestly and offer to connect them with the team (set shouldEscalate=true). Never guess.
-5. When the customer shows genuine interest, capture their name and phone naturally so the team can follow up`}
+2. For casual messages or small talk ("how are you", "kaise ho", "what's up"), respond naturally and warmly like a friend — then offer help. Don't ignore the question or deflect.
+3. Understand exactly what the customer is asking for
+4. Answer accurately using the BUSINESS INFO, CUSTOM FAQ, and KNOWLEDGE BASE below — these are your ONLY source of truth. Do not invent features, prices, or policies that are not stated there.
+5. If you don't have the answer, say so honestly and offer to connect them with the team (set shouldEscalate=true). Never guess.
+6. When the customer shows genuine interest, capture their name and phone naturally so the team can follow up`}
 
 ${tenantConfig.smartRules && tenantConfig.smartRules.length > 0 ? `SMART RULES (always follow these alongside your core job):
 ${tenantConfig.smartRules.map((r, i) => `${i + 1}. [${r.name}] When: ${r.trigger_source} → ${r.ai_summary}`).join('\n')}` : ''}
@@ -255,9 +267,10 @@ RULES:
 - NEVER start with a greeting if this is not the first message in the conversation
 ${isHospitality ? `- NEVER say "our team will contact you" or "someone will reach out" for standard bookings — the booking is confirmed instantly. (For large groups of 8+ guests or manager confirmation rules, you may state you will confirm shortly).
 ` : ''}- HUMAN HANDOFF: If the customer is angry/frustrated, or asks to talk to a human/agent/real person/the team, or asks to book/schedule a demo or call with the team — do NOT try to handle it or pitch to them yourself. Say you're connecting them to the team and set shouldEscalate=true${tenantConfig.escalationReply ? ` using this exact message: "${tenantConfig.escalationReply}"` : ''}
-- Keep responses EXTREMELY direct and short (max 1-2 lines, under 150 characters). No essays.
+- Keep responses EXTREMELY direct and short (max 1-2 lines). No essays.
 - Be helpful but don't be pushy
-- LANGUAGE: Reply in the SAME language AND script the customer is using. If they write Hindi in Roman/English letters (Hinglish), reply in Hinglish using Roman script — do NOT switch to Devanagari or to full English. If they explicitly ask you to use a language (e.g. "Hinglish main baat karo"), use it for the rest of the conversation. Mirror their tone.
+- LANGUAGE REMINDER: Always match the customer's language/script. Hinglish in → Hinglish out. This overrides ALL other rules.
+- NEVER say "As an AI...", "I don't have feelings", or identify as artificial. Just be helpful like a human would.
 
 ${(tenantConfig.visitCount ?? 0) >= 2 ? `
 RETURNING CUSTOMER: This guest has visited ${tenantConfig.visitCount} times before${tenantConfig.lastVisitDate ? ` (last visit ${tenantConfig.lastVisitDate})` : ''}. Acknowledge them warmly as a valued regular (e.g. "Great to have you back!"). Do NOT overdo it — one short warm line is enough.
@@ -719,6 +732,12 @@ function offlineKBSearch(
 // This ensures the bot NEVER crashes or goes silent.
 // IMPORTANT: No hardcoded pricing, menu items, or business-type-specific content here.
 // This fallback fires for ALL tenants — restaurants, hotels, trekking companies, etc.
+function isHinglishMessage(text: string): boolean {
+  const hindiWords = ['kaise', 'kya', 'hai', 'haan', 'nahi', 'bhai', 'yaar', 'baat', 'karo', 'kro', 'batao', 'chahiye', 'mujhe', 'mujhko', 'tum', 'aap', 'hum', 'theek', 'accha', 'acha', 'suno', 'bolo', 'dekho', 'matlab', 'samjho', 'pata', 'wala', 'abhi', 'bahut', 'bohot', 'bilkul', 'zaroor', 'please', 'ho', 'hoon', 'main', 'mai', 'bol', 'kar', 'karna', 'hota', 'raha', 'rahi', 'sala', 'chal', 'chalo'];
+  const lower = text.toLowerCase();
+  return hindiWords.filter(w => lower.includes(w)).length >= 2;
+}
+
 function getFallbackResponse(
   message: string,
   _context: ConversationContext,
@@ -726,11 +745,12 @@ function getFallbackResponse(
   isFirstMessage = false
 ): AIResponse {
   const lower = message.toLowerCase();
+  const hinglish = isHinglishMessage(message);
 
   const defaultEscalationReply = config.escalationReply?.trim()
     || (config.staffName
-      ? `I'm connecting you with ${config.staffName} right away 🙏 They'll be with you shortly.`
-      : `I'm connecting you with our team right away 🙏 They'll be with you shortly.`);
+      ? (hinglish ? `Main aapko ${config.staffName} se connect kar raha hoon 🙏 Thoda wait karo.` : `I'm connecting you with ${config.staffName} right away 🙏 They'll be with you shortly.`)
+      : (hinglish ? `Main aapko humari team se connect kar raha hoon 🙏 Thoda wait karo.` : `I'm connecting you with our team right away 🙏 They'll be with you shortly.`));
 
   // Check custom escalation keywords first (tenant-defined, highest priority)
   const customKeywords = config.escalationKeywords || [];
@@ -808,12 +828,29 @@ function getFallbackResponse(
     };
   }
 
+  // Detect small talk — "how are you", "kaise ho", "kya haal" etc.
+  const smallTalkPatterns = ['how are you', 'how r u', 'kaise ho', 'kya haal', 'kya hal', 'kaisa hai', 'theek ho', 'sab theek', "what's up", 'whats up', 'wassup', 'how do you do'];
+  if (smallTalkPatterns.some(p => lower.includes(p))) {
+    const reply = hinglish
+      ? `Bilkul badhiya! 😊 Batao, ${config.businessName} ke baare mein kaise help karun?`
+      : `Doing great, thanks for asking! 😊 How can I help you with ${config.businessName}?`;
+    return {
+      reply,
+      extractedData: {},
+      intent: 'greeting',
+      sentiment: 'positive',
+      shouldEscalate: false,
+      nextStep: 'ask_intent',
+      confidence: 0.85,
+    };
+  }
+
   // Detect greetings — these should never return "Sorry I missed that"
   const greetingWords = ['hi', 'hello', 'hey', 'hii', 'helo', 'namaste', 'good morning', 'good evening', 'good afternoon', 'sup', 'howdy'];
   if (greetingWords.some(w => lower === w || lower.startsWith(w + ' '))) {
     if (isFirstMessage) {
       return {
-        reply: config.welcomeMessage || `Hi! 👋 Welcome to ${config.businessName}. How can I help you today?`,
+        reply: config.welcomeMessage || (hinglish ? `Hey! 👋 ${config.businessName} mein aapka swagat hai. Kaise help karun?` : `Hi! 👋 Welcome to ${config.businessName}. How can I help you today?`),
         extractedData: {},
         intent: 'greeting',
         sentiment: 'positive',
@@ -823,7 +860,7 @@ function getFallbackResponse(
       };
     }
     return {
-      reply: `Hi again! 😊 How can I help you with ${config.businessName} today?`,
+      reply: hinglish ? `Hey! 😊 Batao kaise help karun?` : `Hi again! 😊 How can I help you with ${config.businessName} today?`,
       extractedData: {},
       intent: 'greeting',
       sentiment: 'positive',
@@ -836,7 +873,7 @@ function getFallbackResponse(
   // Default: welcome only on first message; for ongoing conversations use a helpful prompt
   if (isFirstMessage) {
     return {
-      reply: config.welcomeMessage || `Hi! 👋 Welcome to ${config.businessName}. How can I help you today?`,
+      reply: config.welcomeMessage || (hinglish ? `Hey! 👋 ${config.businessName} mein aapka swagat hai. Kaise help karun?` : `Hi! 👋 Welcome to ${config.businessName}. How can I help you today?`),
       extractedData: {},
       intent: 'greeting',
       sentiment: 'neutral',
@@ -846,10 +883,8 @@ function getFallbackResponse(
     };
   }
 
-  // For ongoing conversations, use a generic helpful prompt that works for ANY business type
-  // (restaurant, SaaS, dental, hotel, real estate — no assumptions)
   return {
-    reply: `Happy to help! What would you like to know about ${config.businessName}? 😊`,
+    reply: hinglish ? `Zaroor help karunga! ${config.businessName} ke baare mein kya jaanna hai? 😊` : `Happy to help! What would you like to know about ${config.businessName}? 😊`,
     extractedData: {},
     intent: 'unknown',
     sentiment: 'neutral',
