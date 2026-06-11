@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   FileText, FileArchive, File, Music, Video, Download,
-  Play, Pause, ExternalLink, Maximize2, X,
+  Play, Pause, ExternalLink, Maximize2, X, ImageOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -140,35 +140,73 @@ export default function AttachmentBubble({
 
   // ── Image ──────────────────────────────────────────────────────────────────
   if (category === 'image') {
+    const [imgError, setImgError] = useState(false);
+
     return (
       <>
-        {lightboxOpen && (
+        {lightboxOpen && !imgError && (
           <ImageLightbox src={mediaUrl} alt={fileName} onClose={() => setLightboxOpen(false)} />
         )}
-        <div className="relative group cursor-pointer" onClick={() => setLightboxOpen(true)}>
-          {/* Loading skeleton */}
-          {!imgLoaded && (
+        <div
+          className={cn("relative group cursor-pointer", imgError && "cursor-default")}
+          onClick={() => !imgError && setLightboxOpen(true)}
+        >
+          {/* Loading skeleton — shown until image loads or errors */}
+          {!imgLoaded && !imgError && (
             <div className={cn(
               "w-[200px] h-[160px] rounded-xl animate-pulse",
               isOutbound ? "bg-white/20" : "bg-black/10 dark:bg-white/10"
             )} />
           )}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={mediaUrl}
-            alt={fileName}
-            loading="lazy"
-            onLoad={() => setImgLoaded(true)}
-            className={cn(
-              "max-w-[220px] max-h-[300px] rounded-xl object-cover transition-opacity duration-200",
-              imgLoaded ? "opacity-100" : "opacity-0 absolute inset-0"
-            )}
-          />
-          {/* Expand overlay */}
-          <div className="absolute inset-0 rounded-xl bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-            <Maximize2 className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-          </div>
-          {isOptimistic && (
+
+          {/* Error state — shown when image URL is broken/expired */}
+          {imgError ? (
+            <div className={cn(
+              "w-[200px] h-[140px] rounded-xl flex flex-col items-center justify-center gap-2",
+              isOutbound ? "bg-white/10" : "bg-black/[0.06] dark:bg-white/[0.06]"
+            )}>
+              <ImageOff className={cn("w-8 h-8", isOutbound ? "text-white/40" : "text-muted-foreground/40")} />
+              <span className={cn("text-[11px]", isOutbound ? "text-white/50" : "text-muted-foreground/50")}>
+                Image unavailable
+              </span>
+              <a
+                href={mediaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className={cn(
+                  "text-[11px] hover:underline font-medium",
+                  isOutbound ? "text-white/70 hover:text-white" : "text-indigo-500 hover:text-indigo-600"
+                )}
+              >
+                Open link ↗
+              </a>
+            </div>
+          ) : (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={mediaUrl}
+                alt={fileName}
+                loading="lazy"
+                onLoad={() => setImgLoaded(true)}
+                onError={() => {
+                  setImgError(true);
+                  setImgLoaded(true); // stop the loading skeleton
+                }}
+                className={cn(
+                  "max-w-[220px] max-h-[300px] rounded-xl object-cover transition-opacity duration-200",
+                  imgLoaded ? "opacity-100" : "opacity-0 absolute inset-0"
+                )}
+              />
+              {/* Expand overlay */}
+              <div className="absolute inset-0 rounded-xl bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                <Maximize2 className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
+            </>
+          )}
+
+          {isOptimistic && !imgError && (
             <div className="absolute inset-0 rounded-xl bg-black/30 flex items-center justify-center">
               <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
             </div>

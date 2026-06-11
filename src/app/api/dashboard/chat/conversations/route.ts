@@ -14,8 +14,9 @@ export async function GET(req: NextRequest) {
       .from('conversations')
       .select('id, last_message_at, is_active, bot_paused, sender_id, lead_id, escalated')
       .eq('tenant_id', tenantId)
+      .eq('is_active', true)  // Only show active conversations — hides old closed/duplicate threads
       .order('last_message_at', { ascending: false, nullsFirst: false })
-      .limit(50);
+      .limit(100);  // Increased from 50 — businesses with many contacts need full visibility
 
     if (convErr) {
       console.error('Conversations fetch error:', convErr);

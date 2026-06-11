@@ -141,12 +141,14 @@ export default function ChatSidebar() {
     const channel = supabase
       .channel(`chat-sidebar-${tenantId}`)
       // Conversation updates: status changes, escalations, bot_paused toggles
+      // Filter server-side so this browser only receives events for THIS tenant
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
-          table: "conversations"
+          table: "conversations",
+          filter: `tenant_id=eq.${tenantId}`,
         },
         (payload) => {
           if (payload.new && (payload.new as any).tenant_id === tenantId) {
@@ -160,7 +162,8 @@ export default function ChatSidebar() {
         {
           event: "INSERT",
           schema: "public",
-          table: "messages"
+          table: "messages",
+          filter: `tenant_id=eq.${tenantId}`,
         },
         (payload) => {
           if (payload.new && (payload.new as any).tenant_id === tenantId) {
