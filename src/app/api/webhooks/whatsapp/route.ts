@@ -217,13 +217,70 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   }
 
   // 3. Resolve Media URL if this is a media message
+  // CRITICAL: Meta's media URLs are temporary signed S3 URLs that expire in ~5 minutes.
+  // We MUST download the binary and re-upload to Supabase Storage for a permanent URL.
+  // Without this, all images/videos/audio in the inbox appear broken after a few minutes.
   let content = msg.text;
+  let resolvedMediaUrl: string | null = null;
+
   if (msg.mediaId) {
     if (decryptedAccessToken) {
-      const mediaUrl = await getMediaUrl(decryptedAccessToken, msg.mediaId);
-      if (mediaUrl) {
-        content = mediaUrl;
-        console.log(`📸 Resolved Meta media ID "${msg.mediaId}" to URL: ${mediaUrl.slice(0, 100)}...`);
+      try {
+        // Step 1: Get the temporary Meta URL (the URL itself needs auth to download)
+        const tempUrl = await getMediaUrl(decryptedAccessToken, msg.mediaId);
+
+        if (tempUrl) {
+          // Step 2: Download the actual media binary from Meta (requires Bearer token)
+          const mimeType = msg.mediaMimeType || 'application/octet-stream';
+          let ext = mimeType.split('/')[1]?.split(';')[0]?.split('+')[0] || 'bin';
+          // Normalize common extensions
+          if (ext === 'mpeg') ext = 'mp3';
+          if (ext === 'quicktime') ext = 'mov';
+          if (ext === 'x-m4a') ext = 'm4a';
+
+          const mediaResp = await fetch(tempUrl, {
+            headers: { 'Authorization': `Bearer ${decryptedAccessToken}` },
+            signal: AbortSignal.timeout(20000),
+          });
+
+          if (mediaResp.ok) {
+            // Step 3: Upload to Supabase Storage (whatsapp-media bucket)
+            const mediaBuffer = await mediaResp.arrayBuffer();
+            const storagePath = `${tenant.id}/${msg.mediaId}.${ext}`;
+
+            const { data: uploadData, error: uploadErr } = await supabaseAdmin.storage
+              .from('whatsapp-media')
+              .upload(storagePath, mediaBuffer, {
+                contentType: mimeType,
+                upsert: true,
+                cacheControl: '31536000', // 1 year cache
+              });
+
+            if (!uploadErr && uploadData) {
+              // Step 4: Get permanent public URL
+              const { data: urlData } = supabaseAdmin.storage
+                .from('whatsapp-media')
+                .getPublicUrl(storagePath);
+              resolvedMediaUrl = urlData.publicUrl;
+              content = msg.mediaCaption || msg.text || `[${msg.type}]`;
+              console.log(`📸 Media stored permanently: ${resolvedMediaUrl}`);
+            } else {
+              // Upload failed — fallback to temp URL (will expire but better than blank)
+              resolvedMediaUrl = tempUrl;
+              content = msg.mediaCaption || msg.text || `[${msg.type}]`;
+              console.warn(`⚠️ Media storage upload failed (${uploadErr?.message}), using temp URL`);
+            }
+          } else {
+            // Download from Meta failed
+            console.error(`❌ Media download from Meta failed: ${mediaResp.status}`);
+            resolvedMediaUrl = tempUrl; // still store temp URL as fallback
+            content = msg.text || `[${msg.type}]`;
+          }
+        }
+      } catch (mediaErr) {
+        console.error('❌ Media pipeline error:', (mediaErr as Error).message);
+        // Don't throw — process the message without media rather than failing entirely
+        content = msg.text || `[${msg.type}]`;
       }
     }
   }
@@ -242,27 +299,35 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // so we never miss an existing lead regardless of how it was originally created.
   const leadPhone = '+' + cleanPhone; // canonical form for lead storage
   // Fetch lead + conversation in parallel (independent queries)
+  // IMPORTANT: conversation lookup checks BOTH "+91..." and "91..." formats to prevent duplicates
+  // when the same phone was stored in different formats on different events.
   const [{ data: existingLead }, { data: existingConv }] = await Promise.all([
     supabaseAdmin.from('leads').select('*').eq('tenant_id', tenant.id).in('phone', [leadPhone, cleanPhone]).order('created_at', { ascending: false }).limit(1).maybeSingle(),
-    supabaseAdmin.from('conversations').select('*').eq('tenant_id', tenant.id).eq('sender_id', cleanPhone).eq('is_active', true).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+    supabaseAdmin.from('conversations').select('*').eq('tenant_id', tenant.id).in('sender_id', [cleanPhone, leadPhone, msg.fromPhone]).eq('is_active', true).order('last_message_at', { ascending: false }).limit(1).maybeSingle(),
   ]);
 
-  // Session expiry: if the last message in an active conversation was >24h ago, close it
-  // and start fresh. This allows the welcome message to trigger again for returning customers
-  // and prevents stale booking context from polluting new sessions.
+  // Session expiry: if the last message in an active conversation was >24h ago, the
+  // WhatsApp 24h messaging window has closed (need to send a template for the first message).
+  // CRITICAL FIX: We NO LONGER create a new conversation on session expiry. Creating a new
+  // conversation is the root cause of the duplicate-chats-for-same-contact bug.
+  // Instead, we re-activate the existing conversation so all messages stay in ONE thread.
+  // The sessionExpired flag is kept only to control isFirstMessage logic (welcome re-send).
   const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000;
   let sessionExpired = false;
   if (existingConv?.last_message_at) {
     const idleMs = Date.now() - new Date(existingConv.last_message_at as string).getTime();
     if (idleMs > SESSION_EXPIRY_MS) {
       sessionExpired = true;
-      void supabaseAdmin.from('conversations').update({ is_active: false }).eq('id', existingConv.id);
-      console.log(`⏰ Session expired for ${cleanPhone} (idle ${Math.round(idleMs / 3600000)}h) — starting fresh session`);
+      // Re-activate instead of deactivating → all messages stay in one thread
+      void supabaseAdmin.from('conversations')
+        .update({ is_active: true })
+        .eq('id', existingConv.id);
+      console.log(`⏰ Session was expired for ${cleanPhone} (idle ${Math.round(idleMs / 3600000)}h) — reactivating existing conversation ${existingConv.id}`);
     }
   }
-  // activeExistingConv is null when no session exists OR when the previous session expired.
-  // isFirstMessage and conversation creation both derive from this.
-  const activeExistingConv = sessionExpired ? null : existingConv;
+  // CRITICAL FIX: Always use the existing conversation — NEVER null it out.
+  // One contact = one conversation thread (exactly like WhatsApp, Intercom, Zendesk).
+  const activeExistingConv = existingConv;
 
   if (existingLead) {
     lead = existingLead;
@@ -462,9 +527,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     conversation = activeExistingConv;
     void supabaseAdmin
       .from('conversations')
-      .update({ last_message_at: new Date().toISOString() })
+      .update({ last_message_at: new Date().toISOString(), is_active: true })
       .eq('id', activeExistingConv.id);
   } else {
+    // No existing conversation found for this contact — create one.
+    // Use ON CONFLICT to handle the race condition where two concurrent webhooks
+    // from the same contact both try to create a new conversation simultaneously.
     const { data: newConv, error: convInsertErr } = await supabaseAdmin
       .from('conversations')
       .insert({
@@ -487,32 +555,39 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       .single();
 
     if (convInsertErr) {
+      // Unique constraint violation (23505) or other error — fetch the canonical row.
+      // This handles the race-condition where a parallel webhook created it first.
       const { data: reFetched } = await supabaseAdmin
         .from('conversations')
         .select('*')
         .eq('tenant_id', tenant.id)
-        .eq('sender_id', cleanPhone)
+        .in('sender_id', [cleanPhone, leadPhone])
         .eq('is_active', true)
-        .order('created_at', { ascending: true })
+        .order('last_message_at', { ascending: false })
         .limit(1)
         .maybeSingle();
       conversation = reFetched;
     } else {
       conversation = newConv;
-      
-      // Deduplicate parallel inserts
+
+      // Safety net: if parallel inserts somehow created two active conversations
+      // (before the unique partial index is applied), consolidate them.
+      // Unlike the old code, we REASSIGN messages before deactivating duplicates.
       const { data: allActive } = await supabaseAdmin
         .from('conversations')
         .select('id, created_at')
         .eq('tenant_id', tenant.id)
-        .eq('sender_id', cleanPhone)
+        .in('sender_id', [cleanPhone, leadPhone])
         .eq('is_active', true)
         .order('created_at', { ascending: true });
 
       if (allActive && allActive.length > 1) {
-        const keepId = allActive[0].id;
+        const keepId = allActive[0].id; // oldest conversation wins
         const dupeIds = allActive.slice(1).map(c => c.id);
-        await supabaseAdmin.from('conversations').delete().in('id', dupeIds);
+        // Reassign messages BEFORE deactivating to prevent orphaned messages
+        await supabaseAdmin.from('messages').update({ conversation_id: keepId }).in('conversation_id', dupeIds);
+        // Deactivate duplicates (not delete — preserves audit trail)
+        await supabaseAdmin.from('conversations').update({ is_active: false }).in('id', dupeIds);
         if (newConv && newConv.id !== keepId) {
           const { data: canonical } = await supabaseAdmin
             .from('conversations')
@@ -521,6 +596,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
             .single();
           conversation = canonical;
         }
+        console.log(`🔧 Consolidated ${dupeIds.length} duplicate conversation(s) for ${cleanPhone} → kept ${keepId}`);
       }
     }
   }
@@ -572,7 +648,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     ai_generated: false,
     wa_message_id: msg.messageId,
     ...(isMedia && {
-      media_url: content,
+      // Use the permanent Supabase Storage URL (resolvedMediaUrl) so the image
+      // never expires in the inbox. Falls back to content if storage upload failed.
+      media_url: resolvedMediaUrl || content || null,
       file_name: msg.mediaFilename || `${msg.type}_${msg.messageId}.${msg.mediaMimeType?.split('/')?.[1]?.split(';')?.[0] || 'bin'}`,
       mime_type: msg.mediaMimeType || (msg.type === 'image' ? 'image/jpeg' : msg.type === 'video' ? 'video/mp4' : msg.type === 'audio' || msg.type === 'voice' ? 'audio/ogg' : 'application/octet-stream'),
       media_caption: msg.mediaCaption || null,
@@ -777,12 +855,19 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       type ESRow = { keywords: string[]; reply: string; media_url?: string | null };
       let matchedEarly: ESRow | undefined;
       let bestEarlyLen = 0;
-      // Word-boundary match: "hi" must not match inside "bhi", "hain", "sahi", etc.
-      // Uses same regex as the flow engine's keywordMatches().
+      // Short keywords (≤4 chars) like "hi", "hey" are ambiguous in Hinglish —
+      // "hi" is a greeting but also an emphasis particle ("tum hi batao", "yahi").
+      // Rule: ≤4-char keywords only fire when the keyword is at the START of the
+      // message or IS the entire message. Longer keywords use word-boundary match.
       const scriptedKwMatch = (text: string, kw: string): boolean => {
         const k = kw.trim().toLowerCase();
         if (!k) return false;
         const escaped = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (k.length <= 4) {
+          // Must be the entire message, or appear at the very start (optional punctuation/space after)
+          return new RegExp(`^${escaped}([^a-z0-9]|$)`, 'i').test(text.trim());
+        }
+        // Longer keywords: word-boundary match anywhere in the message
         return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(text);
       };
       for (const r of earlyScriptedRows as ESRow[]) {
