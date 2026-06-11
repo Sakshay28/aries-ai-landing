@@ -887,14 +887,22 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
                 .catch((e: Error) => { console.error('❌ Scripted reply image send failed:', e.message); return null; })
             : await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, matchedEarly.reply)
                 .catch((e: Error) => { console.error('❌ Scripted reply send failed:', e.message); return null; });
-          void supabaseAdmin.from('messages').insert({
+          const { error: scriptedMsgErr } = await supabaseAdmin.from('messages').insert({
             tenant_id: tenant.id, conversation_id: conversation.id,
-            direction: 'outbound', content: matchedEarly.reply || matchedEarly.media_url || '',
+            direction: 'outbound',
+            content: matchedEarly.reply || matchedEarly.media_url || '',
             message_type: matchedEarly.media_url ? 'image' : 'text',
             channel: 'whatsapp', status: sendResult ? 'sent' : 'failed',
             ai_generated: false, wa_message_id: sendResult?.messageId ?? null,
-            ...(matchedEarly.media_url && { media_url: matchedEarly.media_url }),
+            ...(matchedEarly.media_url && {
+              media_url: matchedEarly.media_url,
+              mime_type: 'image/jpeg',
+              media_caption: matchedEarly.reply || null,
+            }),
           });
+          if (scriptedMsgErr) {
+            console.error('❌ Scripted reply message insert failed:', scriptedMsgErr.message);
+          }
         }
         // Scripted reply exits before step 18, so schedule follow-ups here.
         // Run for EVERY scripted reply (not just first message) so the 30-min
@@ -1440,7 +1448,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       ai_generated: true,
       wa_message_id: metaMsgId,
       error_message: sendFailureMsg,
-      failure_reason: sendFailureMsg ? sendFailureMsg.slice(0, 80) : null,
     }),
     supabaseAdmin.rpc('update_conversation_after_ai', {
       p_conv_id:             conversation.id,
