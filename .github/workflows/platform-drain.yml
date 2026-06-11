@@ -1,0 +1,41 @@
+name: Platform Drain
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  drain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Drain broadcast queue
+        continue-on-error: true
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 30 \
+            https://ariesai.in/api/broadcast/process-queue)
+          echo "broadcast/process-queue -> $code"
+          [ "$code" = "200" ] || exit 1
+
+      - name: Tick scheduled flows
+        continue-on-error: true
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 60 \
+            https://ariesai.in/api/cron/scheduled-flows)
+          echo "cron/scheduled-flows -> $code"
+          [ "$code" = "200" ] || exit 1
+
+      - name: Expire stale unpaid bookings
+        continue-on-error: true
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 30 \
+            https://ariesai.in/api/cron/expire-bookings)
+          echo "cron/expire-bookings -> $code"
+          [ "$code" = "200" ] || exit 1
