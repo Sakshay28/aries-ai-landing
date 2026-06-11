@@ -69,18 +69,22 @@ export class TestSendService {
         return { success: false, error: 'Meta Cloud API did not return a valid messageId' };
       }
 
-      // 5. Store delivery log in database flagged as is_test
-      await supabaseAdmin.from('broadcast_deliveries').insert({
-        tenant_id: tenantId,
-        campaign_id: '00000000-0000-0000-0000-000000000000', // Mock campaign ID for test sends
-        phone: testRecipientPhone,
-        message_id: result.messageId,
-        status: 'sent',
-        metadata: {
-          is_test: true,
-          resolved_variables: VariableEngineService.resolveAll(variables, testLead)
-        }
-      });
+      // 5. Log test send — skip broadcast_deliveries (FK requires a real campaign_id).
+      //    Store in broadcast_events instead which has a nullable campaign_id.
+      try {
+        await supabaseAdmin.from('broadcast_events').insert({
+          tenant_id: tenantId,
+          campaign_id: null,
+          event_type: 'test_send',
+          payload: {
+            is_test: true,
+            phone: testRecipientPhone,
+            template_name: templateName,
+            message_id: result.messageId,
+            resolved_variables: VariableEngineService.resolveAll(variables, testLead),
+          },
+        });
+      } catch { /* non-critical logging */ }
 
       return { success: true, messageId: result.messageId };
 

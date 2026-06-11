@@ -209,7 +209,7 @@ export class BroadcastRecipientService {
             source_label: recordSourceLabel,
             status: 'excluded',
             last_interaction_at: lastMsgAt,
-            normalized_number: leadPhone ? cleanPhone(leadPhone) : null,
+            normalized_number: (() => { try { return leadPhone ? cleanPhone(leadPhone) : null; } catch { return null; } })(),
           });
           continue;
         }
@@ -233,8 +233,27 @@ export class BroadcastRecipientService {
           continue;
         }
 
-        const phoneCleaned = cleanPhone(leadPhone);
-        if (!phoneCleaned || phoneCleaned.length < 10 || /\D/.test(phoneCleaned)) {
+        let phoneCleaned: string;
+        try {
+          phoneCleaned = cleanPhone(leadPhone);
+        } catch {
+          invalidNumbers++;
+          finalRecords.push({
+            campaign_id: campaignId,
+            tenant_id: tenantId,
+            contact_id: leadId.startsWith('csv-') ? null : leadId,
+            phone_number: leadPhone,
+            name: leadName,
+            email: leadEmail,
+            source_type: recordSourceType,
+            source_label: recordSourceLabel,
+            status: 'invalid',
+            last_interaction_at: lastMsgAt,
+            normalized_number: null,
+          });
+          continue;
+        }
+        if (!phoneCleaned || phoneCleaned.length < 10) {
           invalidNumbers++;
           finalRecords.push({
             campaign_id: campaignId,

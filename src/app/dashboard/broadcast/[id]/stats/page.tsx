@@ -72,16 +72,17 @@ export default function CampaignStatsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [campaignId]);
 
-  // Polling — separate effect, stable interval that does NOT recreate on stats changes
+  // Polling — stop when campaign reaches a terminal status
+  const isTerminal = stats?.status && ['completed', 'cancelled', 'failed'].includes(stats.status);
   useEffect(() => {
+    if (isTerminal) return;
     const interval = setInterval(() => {
-      // Read status from the ref captured at callback time via fetchStats
       fetchStats(false);
     }, 5000);
 
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignId]); // only recreate if campaignId changes
+  }, [campaignId, isTerminal]);
 
   if (loading) {
     return (

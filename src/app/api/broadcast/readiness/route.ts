@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'campaignId is required' }, { status: 400 });
     }
 
-    const readiness = await BroadcastReadinessService.calculateBroadcastReadiness(campaignId);
+    const readiness = await BroadcastReadinessService.calculateBroadcastReadiness(tenantId, campaignId);
     return NextResponse.json({ success: true, ...readiness });
   } catch (error) {
     console.error('API Readiness GET Error:', error);

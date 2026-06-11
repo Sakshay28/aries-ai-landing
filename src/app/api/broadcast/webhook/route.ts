@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { verifySignature } from '@/lib/meta/service';
+import { AutomationEngineService } from '@/lib/broadcast/services/automation-engine.service';
 
 // GET Handler for Meta Webhook Verification Handshake
 export async function GET(req: NextRequest) {
@@ -42,18 +43,34 @@ export async function POST(req: NextRequest) {
     const entries = payload?.entry || [];
     for (const entry of entries) {
       for (const change of entry.changes || []) {
-        // Track inbound replies to link them back to the originating broadcast campaign
+        // Track inbound replies to link them back to the originating broadcast campaign.
+        // Scope by the phone_number_id from the webhook metadata to isolate tenants —
+        // without this, a reply to phone X gets attributed to whichever tenant last sent to X.
+        const webhookPhoneNumberId = change.value?.metadata?.phone_number_id;
         const inboundMessages = change.value?.messages || [];
         for (const msg of inboundMessages) {
           if (!msg.from || !msg.id) continue;
-          // Look up if this sender has a recent broadcast delivery from this tenant
-          const { data: delivery } = await supabaseAdmin
+
+          let deliveryQuery = supabaseAdmin
             .from('broadcast_deliveries')
             .select('campaign_id, tenant_id')
             .eq('phone', msg.from)
             .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
+            .limit(1);
+
+          // Scope to the correct tenant via their phone_number_id
+          if (webhookPhoneNumberId) {
+            const { data: ownerTenant } = await supabaseAdmin
+              .from('tenants')
+              .select('id')
+              .eq('wa_phone_number_id', webhookPhoneNumberId)
+              .maybeSingle();
+            if (ownerTenant) {
+              deliveryQuery = deliveryQuery.eq('tenant_id', ownerTenant.id);
+            }
+          }
+
+          const { data: delivery } = await deliveryQuery.maybeSingle();
 
           if (delivery) {
             try {
@@ -62,6 +79,11 @@ export async function POST(req: NextRequest) {
                 col_name: 'reply_count'
               });
             } catch { /* non-critical */ }
+
+            // Fire automation rules for 'replied' trigger
+            AutomationEngineService.triggerRule(
+              delivery.tenant_id, delivery.campaign_id, '', msg.from, 'replied'
+            ).catch(() => {});
           }
         }
 
@@ -131,6 +153,13 @@ export async function POST(req: NextRequest) {
               event_type: `message_${ourStatus}`,
               payload: { waMessageId, waStatus, timestamp },
             });
+
+            // Fire automation rules for relevant status changes
+            if (ourStatus === 'failed') {
+              AutomationEngineService.triggerRule(
+                recipient.tenant_id, recipient.campaign_id, '', status.recipient_id || '', 'failed'
+              ).catch(() => {});
+            }
           }
         }
       }

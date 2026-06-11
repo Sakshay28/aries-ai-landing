@@ -173,9 +173,14 @@ export class AudienceEngineService {
           continue;
         }
 
-        const phoneCleaned = cleanPhone(lead.phone);
-        // E.164 verification: must be at least 10 numeric digits
-        if (!phoneCleaned || phoneCleaned.length < 10 || /\D/.test(phoneCleaned)) {
+        let phoneCleaned: string;
+        try {
+          phoneCleaned = cleanPhone(lead.phone);
+        } catch {
+          invalidRemoved++;
+          continue;
+        }
+        if (!phoneCleaned || phoneCleaned.length < 10) {
           invalidRemoved++;
           continue;
         }

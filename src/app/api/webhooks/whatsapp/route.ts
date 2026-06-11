@@ -709,8 +709,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // 'end', 'quit', 'join') were hijacking normal replies — e.g. answering "Yes" to
   // "Want a walkthrough?" was treated as a resubscribe command and the AI never ran;
   // a customer saying "cancel" (a booking) was being unsubscribed.
-  const STOP_KEYWORDS  = ['stop', 'unsubscribe', 'opt out', 'optout', 'remove me'];
-  const START_KEYWORDS = ['start', 'subscribe', 'opt in', 'optin', 'resume'];
+  const STOP_KEYWORDS  = ['stop', 'unsubscribe', 'opt out', 'optout', 'remove me', 'band karo', 'rokdo', 'nahi chahiye', 'hatao', 'ruk jao'];
+  const START_KEYWORDS = ['start', 'subscribe', 'opt in', 'optin', 'resume', 'shuru karo', 'chalu karo'];
 
   if (STOP_KEYWORDS.some(k => msgLower === k)) {
     // Upsert into optouts table — sets is_active=true

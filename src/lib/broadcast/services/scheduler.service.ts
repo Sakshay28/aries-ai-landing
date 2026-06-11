@@ -23,21 +23,30 @@ export class SchedulerService {
 
       for (const campaign of campaigns) {
         console.log(`⏰ Scheduler: dispatching campaign ${campaign.name} (${campaign.id})`);
-        
-        // Transition status to sending to prevent double-scheduler triggers
-        await supabaseAdmin
-          .from('broadcast_campaigns')
-          .update({ status: 'sending', updated_at: now })
-          .eq('id', campaign.id);
 
+        // Atomically claim this campaign so a parallel scheduler tick can't double-dispatch.
+        // Use a CAS (compare-and-swap): only update if status is still 'scheduled'.
+        const { data: claimed, error: claimErr } = await supabaseAdmin
+          .from('broadcast_campaigns')
+          .update({ status: 'launching', updated_at: now })
+          .eq('id', campaign.id)
+          .eq('status', 'scheduled')
+          .select('id')
+          .maybeSingle();
+
+        if (claimErr || !claimed) {
+          console.warn(`⏰ Scheduler: campaign ${campaign.id} already claimed or gone — skipping`);
+          continue;
+        }
+
+        // launchCampaign checks for 'draft' or 'scheduled' — patch it to also accept 'launching'
         const res = await BroadcastEngineService.launchCampaign(campaign.tenant_id, campaign.id);
-        
+
         if (res.success) {
           triggered++;
         } else {
           console.error(`❌ Scheduler: failed to launch campaign ${campaign.id}:`, res.error);
-          
-          // Revert to failed status
+
           await supabaseAdmin
             .from('broadcast_campaigns')
             .update({ status: 'failed', updated_at: now })

@@ -5,7 +5,9 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { BroadcastEngineService } from '@/lib/broadcast/services/broadcast-engine.service';
 import { AuditLogService } from '@/lib/broadcast/services/audit-log.service';
 import { ExecutionEventService } from '@/lib/broadcast/services/execution-event.service';
-import { checkBroadcastCap } from '@/lib/abuse/prevention';
+import { checkBroadcastCap, checkLaunchRateLimit } from '@/lib/abuse/prevention';
+
+export const maxDuration = 60;
 
 const LAUNCH_ROLES = new Set(['owner', 'admin', 'manager']);
 
@@ -22,6 +24,12 @@ export async function POST(req: NextRequest) {
     const launchUser = await getCurrentUser();
     if (!launchUser || !LAUNCH_ROLES.has(launchUser.role)) {
       return NextResponse.json({ success: false, error: 'Forbidden: insufficient permissions to launch broadcasts' }, { status: 403 });
+    }
+
+    // Rate limit — 5 launches per tenant per 10 min
+    const rl = await checkLaunchRateLimit(tenantId);
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many launch attempts. Please wait a few minutes.' }, { status: 429 });
     }
 
     const { campaignId } = await req.json();
@@ -47,7 +55,7 @@ export async function POST(req: NextRequest) {
     console.log('[BROADCAST_LAUNCH] Campaign:', campaign.name, 'status:', campaign.status);
 
     // 2. Guard against re-launching an already active or completed campaign (prevents duplicate sends)
-    if (!['draft', 'scheduled'].includes(campaign.status)) {
+    if (!['draft', 'scheduled', 'launching'].includes(campaign.status)) {
       return NextResponse.json({
         success: false,
         error: `Campaign is already "${campaign.status}" and cannot be re-launched. Duplicate sends prevented.`,
@@ -118,11 +126,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: result.error || 'Failed to queue campaign' }, { status: 500 });
     }
 
-    // 5. Transition campaign to sending
+    // 5. Set launch metadata — status is already 'sending' (set by BroadcastEngineService).
+    //    Only update supplementary fields to avoid a redundant status write.
     await supabaseAdmin
       .from('broadcast_campaigns')
       .update({
-        status:           'sending',
         is_ready:         true,
         total_recipients: result.queuedCount,
         launched_at:      new Date().toISOString(),
@@ -138,15 +146,17 @@ export async function POST(req: NextRequest) {
     await ExecutionEventService.logEvent(tenantId, campaignId, 'launch_requested', 'Launch requested', 'Campaign launch initiated.');
     await ExecutionEventService.logEvent(tenantId, campaignId, 'queue_created', 'Queue initialized', `${result.queuedCount} messages queued for dispatch.`);
 
-    // 7. Process first batch immediately in after() — direct call, no HTTP round-trip.
-    //    This guarantees processing even when CRON_SECRET is not set in Vercel.
+    // 7. Process the full queue immediately in after() — direct call, no HTTP round-trip.
+    //    With a 100-recipient cap, 100 items × ~600ms = ~60s is safe for Vercel's
+    //    after() budget. Process all to avoid reliance on fragile chaining.
     after(async () => {
       try {
-        const processed = await BroadcastEngineService.processQueue(50);
+        const processed = await BroadcastEngineService.processQueue(150);
         console.log(`[BROADCAST_LAUNCH] after() processed ${processed} items`);
 
-        // If there are more, chain via HTTP (belt-and-suspenders)
-        if (processed >= 50) {
+        // Belt-and-suspenders: if somehow more remain (retries, concurrent campaigns),
+        // chain via HTTP to mop up.
+        if (processed >= 150) {
           const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
           const cronSecret = process.env.CRON_SECRET;
           if (appUrl && cronSecret) {

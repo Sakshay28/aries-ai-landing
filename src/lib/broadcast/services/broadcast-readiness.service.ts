@@ -50,15 +50,16 @@ export class BroadcastReadinessService {
    * Dynamically calculates campaign launch readiness and preflight validation metrics
    * strictly from database state. No mock data, no static placeholders.
    */
-  static async calculateBroadcastReadiness(campaignId: string): Promise<ReadinessResult> {
+  static async calculateBroadcastReadiness(tenantId: string, campaignId: string): Promise<ReadinessResult> {
     const blockers: string[] = [];
     const warnings: string[] = [];
 
-    // 1. Fetch Campaign Core
+    // 1. Fetch Campaign Core — always scope by tenant_id to prevent cross-tenant access
     const { data: campaign } = await supabaseAdmin
       .from('broadcast_campaigns')
       .select('*')
       .eq('id', campaignId)
+      .eq('tenant_id', tenantId)
       .single();
 
     if (!campaign) {

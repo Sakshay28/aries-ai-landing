@@ -31,6 +31,14 @@ export async function checkSenderRateLimit(
   return { allowed: result.allowed };
 }
 
+// ─── Broadcast launch rate limit ─────────────────────────────
+// 5 launches per tenant per 10 minutes — prevents accidental double-tap and abuse
+export async function checkLaunchRateLimit(
+  tenantId: string
+): Promise<{ allowed: boolean; remaining: number }> {
+  return checkRedisRateLimit(`tenant:${tenantId}:broadcast_launch`, 5, 600);
+}
+
 // ─── Broadcast recipient cap ──────────────────────────────────
 export function checkBroadcastCap(
   plan: string,

@@ -6,6 +6,7 @@ import { MetaPayloadBuilderService } from './meta-payload-builder.service';
 import { TemplateParserService } from './template-parser.service';
 import { sleep } from '@/lib/utils/safety';
 import { ExecutionEventService } from './execution-event.service';
+import { notifyAdmin } from '@/lib/alerts/admin';
 
 const RETRY_BACKOFF_MINUTES = [1, 5, 15, 30, 60];
 
@@ -28,8 +29,9 @@ export class BroadcastEngineService {
         return { success: false, error: 'Campaign not found' };
       }
 
-      // Guard against re-launch: only draft/scheduled campaigns can be queued
-      if (!['draft', 'scheduled'].includes(campaign.status)) {
+      // Guard against re-launch: only draft/scheduled/launching campaigns can be queued.
+      // 'launching' is set by the scheduler's CAS claim to prevent double-dispatch.
+      if (!['draft', 'scheduled', 'launching'].includes(campaign.status)) {
         return { success: false, error: `Campaign is already "${campaign.status}". Cannot re-launch — duplicate sends prevented.` };
       }
 
@@ -68,19 +70,22 @@ export class BroadcastEngineService {
       // 4. Batch enqueuing leads into broadcast_queue
       const now = new Date().toISOString();
       const templateLanguage = campaign.template_language || 'en';
-      const queueEntries = resolved.contacts.map(contact => ({
-        tenant_id:       tenantId,
-        campaign_id:     campaignId,
-        contact_id:      contact.id,
-        phone:           contact.phone,
-        status:          'pending',
-        attempt_count:   0,
-        next_attempt_at: now,
-        language_code:   templateLanguage,
-        payload: {
-          name: contact.name,
-        },
-      }));
+      const queueEntries = resolved.contacts.map(contact => {
+        const isCsvContact = typeof contact.id === 'string' && contact.id.startsWith('csv-');
+        return {
+          tenant_id:       tenantId,
+          campaign_id:     campaignId,
+          contact_id:      isCsvContact ? null : contact.id,
+          phone:           contact.phone,
+          status:          'pending',
+          attempt_count:   0,
+          next_attempt_at: now,
+          language_code:   templateLanguage,
+          payload: {
+            name: contact.name,
+          },
+        };
+      });
 
       // Ingest in chunks of 500. Use upsert with onConflict to be idempotent:
       // if the unique constraint (campaign_id, contact_id) already exists (double-click/retry),
@@ -207,7 +212,6 @@ export class BroadcastEngineService {
           .single();
 
         if (!tenant?.wa_access_token || !tenant?.wa_phone_number_id) {
-          // Permanently fail all queue items for this tenant
           await supabaseAdmin
             .from('broadcast_queue')
             .update({
@@ -217,13 +221,25 @@ export class BroadcastEngineService {
               locked_at: null
             })
             .in('id', items.map(i => i.id));
+          notifyAdmin({
+            dedupeKey: `broadcast-no-creds-${tenantId}`,
+            subject: `Broadcast failed — tenant missing WhatsApp credentials`,
+            summary: `Tenant ${tenantId} has ${items.length} queued messages but no Meta access token or phone number ID. All messages permanently failed.`,
+            context: { tenantId, failedCount: items.length, campaignIds: [...new Set(items.map(i => i.campaign_id))] },
+          }).catch(() => {});
           continue;
         }
 
-        // B. Quiet hours — disabled by default; will be per-campaign opt-in via delivery settings UI.
-        // Previously hardcoded to 9 PM–8 AM which silently deferred messages with no retry path on Hobby plan.
-
         const accessToken = decryptToken(tenant.wa_access_token) as string;
+
+        // B. Pre-fetch opt-out list for just-in-time filtering at send time.
+        //    Contacts may opt out between audience resolution and message dispatch.
+        const { data: optoutRows } = await supabaseAdmin
+          .from('broadcast_optouts')
+          .select('phone')
+          .eq('tenant_id', tenantId)
+          .eq('is_active', true);
+        const optoutPhones = new Set((optoutRows || []).map((r: { phone: string }) => r.phone));
 
         // C. Pre-fetch campaign data, variable mappings, and template cache ONCE per
         //    unique campaign in this tenant batch — avoids N identical DB round-trips.
@@ -231,13 +247,18 @@ export class BroadcastEngineService {
         const campaignCache    = new Map<string, any>();
         const varIndicesCache  = new Map<string, string[]>();
         const varMapCache      = new Map<string, Record<string, any>>();
+        const deliverySettingsCache = new Map<string, any>();
 
-        // Step 1: fetch all campaigns in parallel
-        const campResults = await Promise.all(
-          uniqueCampaignIds.map(cid => supabaseAdmin.from('broadcast_campaigns').select('*').eq('id', cid).single())
-        );
+        // Step 1: fetch all campaigns + delivery settings in parallel
+        const [campResults, settingsResults] = await Promise.all([
+          Promise.all(uniqueCampaignIds.map(cid => supabaseAdmin.from('broadcast_campaigns').select('*').eq('id', cid).single())),
+          Promise.all(uniqueCampaignIds.map(cid => supabaseAdmin.from('broadcast_delivery_settings').select('*').eq('campaign_id', cid).maybeSingle())),
+        ]);
         campResults.forEach(({ data: camp }, i) => {
           if (camp) campaignCache.set(uniqueCampaignIds[i], camp);
+        });
+        settingsResults.forEach(({ data: settings }, i) => {
+          if (settings) deliverySettingsCache.set(uniqueCampaignIds[i], settings);
         });
 
         // Step 2: fetch variable mappings + template cache in parallel (now we know template names)
@@ -273,6 +294,8 @@ export class BroadcastEngineService {
         }));
 
         // D. Process enqueued messages using cached campaign data
+        const consecutiveFailures = new Map<string, number>();
+        const campaignLiveStatusCache = new Map<string, string>();
         for (const item of items) {
           try {
             const campaign          = campaignCache.get(item.campaign_id);
@@ -284,6 +307,121 @@ export class BroadcastEngineService {
                 .from('broadcast_queue')
                 .update({ status: 'failed', failure_reason: 'Campaign configuration missing', locked_at: null })
                 .eq('id', item.id);
+              continue;
+            }
+
+            // Pause-on-failure: if 5 consecutive sends to this campaign failed, pause it
+            const cid = item.campaign_id;
+            if ((consecutiveFailures.get(cid) ?? 0) >= 5) {
+              await supabaseAdmin
+                .from('broadcast_campaigns')
+                .update({ status: 'paused', updated_at: new Date().toISOString() })
+                .eq('id', cid)
+                .eq('status', 'sending');
+              await supabaseAdmin
+                .from('broadcast_queue')
+                .update({ status: 'pending', locked_at: null })
+                .eq('id', item.id);
+              console.warn(`[BROADCAST] Campaign ${cid} paused — 5 consecutive failures`);
+              notifyAdmin({
+                dedupeKey: `broadcast-paused-${cid}`,
+                subject: `Broadcast campaign auto-paused — 5 consecutive failures`,
+                summary: `Campaign ${cid} for tenant ${tenantId} was paused after 5 consecutive send failures. Likely cause: expired Meta token or template rejected.`,
+                context: { tenantId, campaignId: cid },
+              }).catch(() => {});
+              processed++;
+              continue;
+            }
+
+            // Quiet hours enforcement: skip sends between 9 PM and 9 AM in campaign timezone
+            const dSettings = deliverySettingsCache.get(item.campaign_id);
+            if (dSettings?.quiet_hours) {
+              const tz = dSettings.timezone || 'Asia/Kolkata';
+              const localHour = new Date().toLocaleString('en-US', { timeZone: tz, hour: 'numeric', hour12: false });
+              const h = parseInt(localHour, 10);
+              if (h >= 21 || h < 9) {
+                // Re-queue for later — don't cancel, just defer
+                await supabaseAdmin
+                  .from('broadcast_queue')
+                  .update({ status: 'pending', locked_at: null })
+                  .eq('id', item.id);
+                processed++;
+                continue;
+              }
+            }
+
+            // Check if campaign was cancelled/paused mid-send.
+            // Re-fetch live status once per campaign (not per item) to detect cancel API calls.
+            if (!campaignLiveStatusCache.has(item.campaign_id)) {
+              const { data: liveRow } = await supabaseAdmin
+                .from('broadcast_campaigns')
+                .select('status, updated_at, auto_resumed')
+                .eq('id', item.campaign_id)
+                .single();
+              const st = liveRow?.status || 'unknown';
+
+              // Auto-resume: if paused >30 min ago and never auto-resumed before,
+              // give it one more chance (handles temporary Meta outages).
+              if (st === 'paused' && liveRow?.updated_at && !liveRow?.auto_resumed) {
+                const pausedAgo = Date.now() - new Date(liveRow.updated_at).getTime();
+                if (pausedAgo > 30 * 60 * 1000) {
+                  await supabaseAdmin
+                    .from('broadcast_campaigns')
+                    .update({ status: 'sending', auto_resumed: true, updated_at: new Date().toISOString() })
+                    .eq('id', item.campaign_id);
+                  campaignLiveStatusCache.set(item.campaign_id, 'sending');
+                  console.log(`[BROADCAST] Auto-resumed campaign ${item.campaign_id} after 30-min cooldown`);
+                  notifyAdmin({
+                    dedupeKey: `broadcast-autoresume-${item.campaign_id}`,
+                    subject: `Broadcast campaign auto-resumed after 30-min cooldown`,
+                    summary: `Campaign ${item.campaign_id} (tenant ${tenantId}) was auto-resumed. If it pauses again, it will stay paused permanently — manual Retry Now required.`,
+                    context: { tenantId, campaignId: item.campaign_id },
+                  }).catch(() => {});
+                } else {
+                  campaignLiveStatusCache.set(item.campaign_id, st);
+                }
+              } else {
+                campaignLiveStatusCache.set(item.campaign_id, st);
+              }
+            }
+            const liveStatus = campaignLiveStatusCache.get(item.campaign_id);
+            if (liveStatus === 'cancelled' || liveStatus === 'paused') {
+              await supabaseAdmin
+                .from('broadcast_queue')
+                .update({
+                  status: liveStatus === 'cancelled' ? 'cancelled' : 'pending',
+                  locked_at: null,
+                  processed_at: liveStatus === 'cancelled' ? new Date().toISOString() : null,
+                })
+                .eq('id', item.id);
+              processed++;
+              continue;
+            }
+
+            // Just-in-time opt-out check — contact may have opted out after audience resolution
+            if (optoutPhones.has(item.phone)) {
+              await supabaseAdmin
+                .from('broadcast_queue')
+                .update({ status: 'cancelled', failure_reason: 'Recipient opted out', locked_at: null, processed_at: new Date().toISOString() })
+                .eq('id', item.id);
+              processed++;
+              continue;
+            }
+
+            // Per-contact frequency cap: max 3 broadcasts per phone per 24h per tenant
+            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+            const { count: recentSends } = await supabaseAdmin
+              .from('broadcast_contact_sends')
+              .select('id', { count: 'exact', head: true })
+              .eq('tenant_id', tenantId)
+              .eq('phone', item.phone)
+              .gte('sent_at', oneDayAgo);
+            if ((recentSends ?? 0) >= 3) {
+              await supabaseAdmin
+                .from('broadcast_queue')
+                .update({ status: 'cancelled', failure_reason: 'Frequency cap: 3 broadcasts/day exceeded', locked_at: null, processed_at: new Date().toISOString() })
+                .eq('id', item.id);
+              processed++;
               continue;
             }
 
@@ -324,9 +462,7 @@ export class BroadcastEngineService {
                 })
                 .eq('id', item.id);
 
-              // Ingest in broadcast_deliveries — this is the source of truth for status tracking.
-              // sent_count analytics are incremented ONLY via webhook status updates to prevent
-              // double-counting (engine + webhook both incrementing = 200% false analytics).
+              // Ingest in broadcast_deliveries — source of truth for per-message status.
               await supabaseAdmin
                 .from('broadcast_deliveries')
                 .upsert({
@@ -337,6 +473,22 @@ export class BroadcastEngineService {
                   message_id: waResult.messageId,
                   status: 'sent'
                 }, { onConflict: 'message_id', ignoreDuplicates: false });
+
+              // Increment sent_count HERE — the webhook 'sent' status won't trigger
+              // a change (delivery already 'sent'), so it would never be counted otherwise.
+              await supabaseAdmin.rpc('increment_campaign_counter', {
+                p_campaign_id: item.campaign_id,
+                p_status: 'sent',
+              });
+
+              // Record send for per-contact frequency cap
+              await supabaseAdmin.from('broadcast_contact_sends').insert({
+                tenant_id: tenantId,
+                phone: item.phone,
+                campaign_id: item.campaign_id,
+              });
+
+              consecutiveFailures.set(item.campaign_id, 0);
             } else {
               throw new Error('Missing outbound messageId');
             }
@@ -344,6 +496,7 @@ export class BroadcastEngineService {
           } catch (err) {
             const errorMsg = (err as Error).message || 'Unknown network error';
             console.error(`❌ Meta dispatch failure to ${item.phone}:`, errorMsg);
+            consecutiveFailures.set(item.campaign_id, (consecutiveFailures.get(item.campaign_id) ?? 0) + 1);
 
             const nextAttempt = (item.attempt_count || 0) + 1;
             
@@ -416,6 +569,26 @@ export class BroadcastEngineService {
               'All enqueued messages processed successfully.',
               'success'
             );
+
+            const { count: failedCount } = await supabaseAdmin
+              .from('broadcast_queue')
+              .select('*', { count: 'exact', head: true })
+              .eq('campaign_id', campaignId)
+              .eq('status', 'failed');
+            const { count: totalCount } = await supabaseAdmin
+              .from('broadcast_queue')
+              .select('*', { count: 'exact', head: true })
+              .eq('campaign_id', campaignId);
+            const total = totalCount ?? 0;
+            const failed = failedCount ?? 0;
+            if (total > 0 && failed / total > 0.2) {
+              notifyAdmin({
+                dedupeKey: `broadcast-high-fail-${campaignId}`,
+                subject: `Broadcast completed with ${Math.round(failed / total * 100)}% failure rate`,
+                summary: `Campaign ${campaignId} (tenant ${tenantId}) finished: ${failed}/${total} messages failed. Check Meta token validity and template approval status.`,
+                context: { tenantId, campaignId, total, failed, failureRate: `${Math.round(failed / total * 100)}%` },
+              }).catch(() => {});
+            }
           }
         }
       }

@@ -9,7 +9,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { data: campaigns, error } = await supabaseAdmin
+    const { searchParams } = new URL(req.url);
+    const cursor = searchParams.get('cursor');
+    const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10), 50);
+
+    let query = supabaseAdmin
       .from('broadcast_campaigns')
       .select(`
         id,
@@ -32,20 +36,29 @@ export async function GET(req: NextRequest) {
       `)
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
-      .limit(50);
+      .limit(limit + 1);
+
+    if (cursor) {
+      query = query.lt('created_at', cursor);
+    }
+
+    const { data: campaigns, error } = await query;
 
     if (error) {
       console.error('[broadcast] [campaigns] Database error fetching campaigns:', error);
       return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    // Map fields for frontend compatibility (e.g. audience_count to total_recipients if needed)
-    const formattedCampaigns = (campaigns || []).map((camp) => ({
+    const hasMore = (campaigns || []).length > limit;
+    const page = hasMore ? (campaigns || []).slice(0, limit) : (campaigns || []);
+    const nextCursor = hasMore ? page[page.length - 1]?.created_at : null;
+
+    const formattedCampaigns = page.map((camp) => ({
       ...camp,
       total_recipients: camp.audience_count || camp.recipient_count || 0,
     }));
 
-    return NextResponse.json({ success: true, campaigns: formattedCampaigns });
+    return NextResponse.json({ success: true, campaigns: formattedCampaigns, nextCursor });
 
   } catch (error: any) {
     console.error('[broadcast] [campaigns] GET API Exception:', error);

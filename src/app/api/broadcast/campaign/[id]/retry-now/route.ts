@@ -28,11 +28,20 @@ export async function POST(
       return NextResponse.json({ success: false, error: 'Campaign not found' }, { status: 404 });
     }
 
-    if (!['sending', 'draft'].includes(campaign.status)) {
+    if (!['sending', 'draft', 'paused'].includes(campaign.status)) {
       return NextResponse.json({
         success: false,
-        error: `Campaign is ${campaign.status} — only sending/draft campaigns can be retried`,
+        error: `Campaign is ${campaign.status} — only sending/draft/paused campaigns can be retried`,
       }, { status: 400 });
+    }
+
+    // Resume paused campaigns back to 'sending'
+    if (campaign.status === 'paused') {
+      await supabaseAdmin
+        .from('broadcast_campaigns')
+        .update({ status: 'sending', updated_at: new Date().toISOString() })
+        .eq('id', campaignId)
+        .eq('tenant_id', tenantId);
     }
 
     const { count } = await supabaseAdmin

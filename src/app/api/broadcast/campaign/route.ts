@@ -1,6 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { z } from 'zod';
+
+const campaignSaveSchema = z.object({
+  campaignId: z.string().uuid().nullable().optional(),
+  campaignName: z.string().trim().min(1).max(200),
+  templateName: z.string().max(200).optional(),
+  templateCategory: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']).optional(),
+  templateLanguage: z.string().max(10).optional(),
+  deliveryMode: z.enum(['now', 'scheduled', 'recurring']).optional(),
+  scheduledAt: z.string().nullable().optional(),
+  audience: z.object({
+    type: z.enum(['all', 'tags', 'custom', 'retarget', 'csv', 'manual']),
+    tags: z.array(z.string()).optional(),
+    customFilters: z.array(z.any()).optional(),
+    retargetCampaignId: z.string().nullable().optional(),
+    retargetCondition: z.string().optional(),
+    retargetDelayDays: z.number().optional(),
+    manualContactIds: z.array(z.string()).optional(),
+    csvFile: z.any().nullable().optional(),
+  }).optional(),
+  delivery: z.object({
+    mode: z.enum(['now', 'scheduled', 'recurring']),
+    throttleRate: z.number().min(1).max(5000).optional(),
+    quietHoursEnabled: z.boolean().optional(),
+    timezone: z.string().max(50).optional(),
+  }).optional(),
+  variables: z.record(z.string(), z.any()).optional(),
+  automationRules: z.array(z.any()).optional(),
+});
 
 export async function DELETE(req: NextRequest) {
   try {
@@ -28,7 +57,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Campaign not found' }, { status: 404 });
     }
 
-    if (campaign.status === 'sending' || campaign.status === 'scheduled') {
+    if (campaign.status === 'sending' || campaign.status === 'scheduled' || campaign.status === 'launching') {
       return NextResponse.json({
         success: false,
         error: `Cannot delete a campaign in "${campaign.status}" state. Cancel it first.`,
@@ -90,6 +119,10 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+    const parsed = campaignSaveSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ success: false, error: parsed.error.issues[0]?.message || 'Invalid request body' }, { status: 400 });
+    }
     const {
       campaignId,
       campaignName,
@@ -102,14 +135,9 @@ export async function POST(req: NextRequest) {
       delivery,
       variables,
       automationRules
-    } = body;
+    } = parsed.data;
 
     console.log('[BROADCAST_SAVE] Saving campaign:', { campaignId, campaignName, templateName });
-
-    if (!campaignName) {
-      console.warn('[BROADCAST_SAVE] Rejected: empty campaign name');
-      return NextResponse.json({ success: false, error: 'Campaign name required' }, { status: 400 });
-    }
 
     const campaignPayload = {
       tenant_id:         tenantId,

@@ -31,7 +31,11 @@ async function withMetaRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T
 
 // ── Clean phone numbers: remove +, spaces, dashes, brackets ──
 export function cleanPhone(phone: string): string {
-  return phone.replace(/[\s+\-()]/g, '');
+  const digits = phone.replace(/[\s+\-()]/g, '');
+  if (!/^\d{7,15}$/.test(digits)) {
+    throw new Error(`Invalid phone number: "${phone}" → "${digits}" is not 7-15 digits`);
+  }
+  return digits;
 }
 
 // ── Generate Request Headers ──
