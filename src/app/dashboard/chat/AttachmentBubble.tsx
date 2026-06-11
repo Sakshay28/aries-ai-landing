@@ -136,11 +136,11 @@ export default function AttachmentBubble({
 }: AttachmentBubbleProps) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
+  const [imgError, setImgError] = useState(false);
   const category = getMediaCategory(mimeType);
 
   // ── Image ──────────────────────────────────────────────────────────────────
   if (category === 'image') {
-    const [imgError, setImgError] = useState(false);
 
     return (
       <>
