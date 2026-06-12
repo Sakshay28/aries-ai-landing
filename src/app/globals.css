@@ -356,18 +356,39 @@
   animation: float 6s ease-in-out infinite;
 }
 
+/* Subtle, near-invisible scrollbars (WhatsApp/Telegram style).
+   Transparent track + translucent thumb inset by a transparent border so the
+   visible bar is only ~4px. The old styles used the landing page's dark navy
+   palette, which rendered as a thick dark column on the light dashboard. */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--bg-primary);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--bg-elevated);
-  border-radius: 4px;
+  background-color: rgba(11, 20, 26, 0.16);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--primary-dark);
+  background-color: rgba(11, 20, 26, 0.32);
+}
+.dark ::-webkit-scrollbar-thumb {
+  background-color: rgba(233, 237, 239, 0.14);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(233, 237, 239, 0.28);
+}
+/* Firefox — scrollbar-color inherits from the root */
+:root {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(11, 20, 26, 0.2) transparent;
+}
+.dark {
+  scrollbar-color: rgba(233, 237, 239, 0.18) transparent;
 }
 
 /* ── React Flow: Handle + Edge + Node Overrides ────────────────────────────── */
