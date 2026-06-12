@@ -873,21 +873,18 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     }
   };
 
+  // WhatsApp-style canvas: warm paper beige (light) / deep slate (dark) with a
+  // faint doodle lattice. Color comes from the className (dark-mode aware);
+  // only the repeating texture lives here.
   const chatBgStyle: React.CSSProperties = {
-    background: 'var(--background)',
     backgroundImage:
-      'radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.04), transparent 50%), ' +
-      'radial-gradient(circle at 0% 100%, rgba(139, 92, 246, 0.04), transparent 50%), ' +
-      'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'40\' height=\'40\' viewBox=\'0 0 40 40\'%3E%3Cg fill=\'%23888\' fill-opacity=\'0.015\'%3E%3Ccircle cx=\'20\' cy=\'20\' r=\'1.2\'/%3E%3Ccircle cx=\'0\' cy=\'0\' r=\'1.2\'/%3E%3Ccircle cx=\'40\' cy=\'0\' r=\'1.2\'/%3E%3Ccircle cx=\'0\' cy=\'40\' r=\'1.2\'/%3E%3Ccircle cx=\'40\' cy=\'40\' r=\'1.2\'/%3E%3C/g%3E%3C/svg%3E")',
-    backgroundSize: '40px 40px, 40px 40px',
+      'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 48 48\'%3E%3Cg fill=\'%23857d6f\' fill-opacity=\'0.055\'%3E%3Ccircle cx=\'24\' cy=\'24\' r=\'1.4\'/%3E%3Ccircle cx=\'0\' cy=\'0\' r=\'1.4\'/%3E%3Ccircle cx=\'48\' cy=\'0\' r=\'1.4\'/%3E%3Ccircle cx=\'0\' cy=\'48\' r=\'1.4\'/%3E%3Ccircle cx=\'48\' cy=\'48\' r=\'1.4\'/%3E%3Cpath d=\'M11 35h4M13 33v4M35 11h4M37 9v4\' stroke=\'%23857d6f\' stroke-opacity=\'0.05\' stroke-width=\'1.2\' stroke-linecap=\'round\' fill=\'none\'/%3E%3C/g%3E%3C/svg%3E")',
+    backgroundSize: '48px 48px',
   };
 
   if (!conversationId) {
     return (
-      <div
-        className="hidden lg:flex flex-1 flex-col items-center justify-center"
-        style={{ background: 'var(--chat-surface, #EAEDF0)' }}
-      >
+      <div className="hidden lg:flex flex-1 flex-col items-center justify-center bg-[#EFEAE2] dark:bg-[#0B141A]">
         <div className="flex flex-col items-center gap-2.5 text-center px-8">
           <div className="w-12 h-12 rounded-2xl bg-white/80 dark:bg-white/5 flex items-center justify-center mb-1 shadow-sm">
             <Bot className="w-5 h-5 text-muted-foreground/60" />
@@ -899,7 +896,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   }
 
   return (
-    <div className="flex-1 flex flex-col relative overflow-hidden" style={chatBgStyle}>
+    <div className="flex-1 flex flex-col relative overflow-hidden bg-[#EFEAE2] dark:bg-[#0B141A]" style={chatBgStyle}>
 
       {/* ── Header ── */}
       <div className="h-[60px] flex items-center justify-between px-5 bg-white dark:bg-[#1C2333] shadow-[0_1px_3px_rgba(0,0,0,0.06)] relative z-30 flex-shrink-0">
@@ -1262,21 +1259,21 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                   // pending → clock, sent → single grey tick, delivered → double grey tick, read → double BLUE tick, failed → red alert
                   const tickIcon = (() => {
                     if (msg.status === 'read')
-                      return <CheckCheck className="w-3.5 h-3.5 text-sky-300" />;
+                      return <CheckCheck className="w-3.5 h-3.5 text-[#53BDEB]" />;
                     if (msg.status === 'delivered')
-                      return <CheckCheck className="w-3.5 h-3.5 text-white/60" />;
+                      return <CheckCheck className="w-3.5 h-3.5 text-[#667781] dark:text-[#aebac1]" />;
                     if (msg.status === 'sent')
-                      return <Check className="w-3.5 h-3.5 text-white/60" />;
+                      return <Check className="w-3.5 h-3.5 text-[#667781] dark:text-[#aebac1]" />;
                     if (msg.status === 'pending' || isOptimistic)
-                      return <Clock className="w-3 h-3 text-white/40" />;
+                      return <Clock className="w-3 h-3 text-[#667781]/70 dark:text-[#aebac1]/70" />;
                     if (msg.status === 'failed')
                       return (
                         <button onClick={() => handleResend(msg)} title="Retry" className="flex items-center cursor-pointer hover:opacity-70 transition-opacity">
-                          <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+                          <AlertCircle className="w-3.5 h-3.5 text-red-500" />
                         </button>
                       );
                     // Default fallback: single tick
-                    return <Check className="w-3.5 h-3.5 text-white/60" />;
+                    return <Check className="w-3.5 h-3.5 text-[#667781] dark:text-[#aebac1]" />;
                   })();
 
                   const parentMsg = msg.reply_to_message_id 
@@ -1330,20 +1327,16 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                         <div 
                           id={`msg-${msg.id}`}
                           className={cn(
-                            'max-w-[65%] px-2.5 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150 relative break-words',
+                            'max-w-[65%] p-[5px] shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] transition-all duration-150 relative break-words',
                             isInbound
                               ? cn(
-                                  'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10',
-                                  isFirst ? 'rounded-2xl rounded-tl-sm' : 'rounded-2xl',
-                                  isLast && !isFirst ? 'rounded-bl-sm' : ''
+                                  'bg-white dark:bg-[#202C33] text-[#111B21] dark:text-[#E9EDEF]',
+                                  isFirst ? 'rounded-lg rounded-tl-none' : 'rounded-lg'
                                 )
                               : cn(
-                                  isOptimistic
-                                    ? 'bg-gradient-to-r from-indigo-400/70 to-violet-500/70 border-indigo-400/10'
-                                    : 'bg-gradient-to-r from-indigo-500/90 to-violet-600/90 border-indigo-400/20',
-                                  'shadow-[0_0_12px_rgba(99,102,241,0.15)]',
-                                  isFirst ? 'rounded-2xl rounded-tr-sm' : 'rounded-2xl',
-                                  isLast && !isFirst ? 'rounded-br-sm' : '',
+                                  'bg-[#D9FDD3] dark:bg-[#005C4B] text-[#111B21] dark:text-[#E9EDEF]',
+                                  isOptimistic && 'opacity-70',
+                                  isFirst ? 'rounded-lg rounded-tr-none' : 'rounded-lg',
                                   msg.status === 'failed' ? 'ring-1 ring-red-300 dark:ring-red-800 opacity-80' : ''
                                 )
                           )}
@@ -1367,11 +1360,8 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                             isOptimistic={isOptimistic}
                           />
                           {/* Timestamp + ticks */}
-                          <div className={cn('flex items-center gap-1 mt-1', isInbound ? 'justify-start' : 'justify-end')}>
-                            <span className={cn(
-                              'text-[10.5px]',
-                              isInbound ? 'text-black/30 dark:text-white/30' : 'text-white/60'
-                            )}>
+                          <div className={cn('flex items-center gap-1 mt-1 px-1 pb-0.5', isInbound ? 'justify-start' : 'justify-end')}>
+                            <span className="text-[10.5px] text-[#667781] dark:text-[#aebac1]">
                               {formatTime(msg.created_at)}
                             </span>
                             {!isInbound && tickIcon}
@@ -1404,20 +1394,17 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                         <div 
                           id={`msg-${msg.id}`}
                           className={cn(
-                            'max-w-[65%] px-3.5 py-2.5 text-[13px] leading-relaxed border transition-all duration-150 relative select-none flex items-center gap-2',
+                            'max-w-[65%] px-3.5 py-2.5 text-[13px] leading-relaxed transition-all duration-150 relative select-none flex items-center gap-2 shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] text-[#667781] dark:text-[#8696A0]',
                             isInbound
-                              ? 'bg-black/[0.03] dark:bg-white/[0.03] border-black/5 dark:border-white/5 text-muted-foreground/60 rounded-2xl rounded-tl-sm'
-                              : 'bg-black/[0.06] dark:bg-white/[0.06] border-black/5 dark:border-white/5 text-white/50 rounded-2xl rounded-tr-sm'
+                              ? 'bg-white dark:bg-[#202C33] rounded-lg rounded-tl-none'
+                              : 'bg-[#D9FDD3] dark:bg-[#005C4B] rounded-lg rounded-tr-none'
                           )}
                         >
                           <AlertCircle className="w-3.5 h-3.5 opacity-55 flex-shrink-0" />
                           <span className="italic font-medium">
                             {isInbound ? "This message was deleted" : "You deleted this message"}
                           </span>
-                          <span className={cn(
-                            'text-[9px] ml-1 self-end whitespace-nowrap opacity-60',
-                            isInbound ? 'text-black/30 dark:text-white/30' : 'text-white/40'
-                          )}>
+                          <span className="text-[9px] ml-1 self-end whitespace-nowrap opacity-70">
                             {formatTime(msg.created_at)}
                           </span>
                         </div>
@@ -1426,20 +1413,16 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                         <div 
                           id={`msg-${msg.id}`}
                           className={cn(
-                            'max-w-[65%] px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.08)] border transition-all duration-150 relative break-all',
+                            'max-w-[65%] px-3.5 py-2 text-[14px] leading-relaxed shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] transition-all duration-150 relative break-words',
                             isInbound
                               ? cn(
-                                  'bg-white dark:bg-white/5 dark:backdrop-blur-md border-black/5 dark:border-white/10 text-foreground',
-                                  isFirst ? 'rounded-2xl rounded-tl-sm' : 'rounded-2xl',
-                                  isLast && !isFirst ? 'rounded-bl-sm' : ''
+                                  'bg-white dark:bg-[#202C33] text-[#111B21] dark:text-[#E9EDEF]',
+                                  isFirst ? 'rounded-lg rounded-tl-none' : 'rounded-lg'
                                 )
                               : cn(
-                                  isOptimistic
-                                    ? 'bg-gradient-to-r from-indigo-400/70 to-violet-500/70 border-indigo-400/10'
-                                    : 'bg-gradient-to-r from-indigo-500/90 to-violet-600/90 border-indigo-400/20',
-                                  'text-white shadow-[0_0_12px_rgba(99,102,241,0.15)]',
-                                  isFirst ? 'rounded-2xl rounded-tr-sm' : 'rounded-2xl',
-                                  isLast && !isFirst ? 'rounded-br-sm' : '',
+                                  'bg-[#D9FDD3] dark:bg-[#005C4B] text-[#111B21] dark:text-[#E9EDEF]',
+                                  isOptimistic && 'opacity-70',
+                                  isFirst ? 'rounded-lg rounded-tr-none' : 'rounded-lg',
                                   msg.status === 'failed' ? 'ring-1 ring-red-300 dark:ring-red-800 opacity-80' : ''
                                 )
                           )}
@@ -1455,15 +1438,12 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                               </span>
                             </p>
                           ) : (
-                            <p className="whitespace-pre-wrap break-all">{msg.content}</p>
+                            <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                           )}
 
                           {/* Timestamp + ticks — shown on every bubble */}
                           <div className={cn('flex items-center gap-1 mt-0.5', isInbound ? 'justify-start' : 'justify-end')}>
-                            <span className={cn(
-                              'text-[10.5px]',
-                              isInbound ? 'text-black/30 dark:text-white/30' : 'text-white/60'
-                            )}>
+                            <span className="text-[10.5px] text-[#667781] dark:text-[#aebac1]">
                               {formatTime(msg.created_at)}
                             </span>
                             {/* Only show ticks for outbound messages — no bot icon, no extras */}

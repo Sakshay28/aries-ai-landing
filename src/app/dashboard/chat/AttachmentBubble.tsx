@@ -96,20 +96,16 @@ function AudioPlayer({ src, isOutbound }: { src: string; isOutbound: boolean }) 
         onClick={toggle}
         className={cn(
           "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-colors",
-          isOutbound
-            ? "bg-white/20 hover:bg-white/30 text-white"
-            : "bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 text-indigo-600 dark:text-indigo-400"
+          "bg-black/[0.07] hover:bg-black/[0.12] text-[#54656F] dark:bg-white/15 dark:hover:bg-white/25 dark:text-[#E9EDEF]",
+          isOutbound && "dark:bg-white/20"
         )}
       >
         {playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 ml-0.5" />}
       </button>
-      <div className={cn(
-        "flex-1 h-1 rounded-full",
-        isOutbound ? "bg-white/30" : "bg-black/10 dark:bg-white/10"
-      )}>
+      <div className="flex-1 h-1 rounded-full bg-black/10 dark:bg-white/15">
         <div className="h-full w-0 rounded-full bg-current transition-all" />
       </div>
-      <Music className={cn("w-3.5 h-3.5 flex-shrink-0", isOutbound ? "text-white/60" : "text-muted-foreground/50")} />
+      <Music className="w-3.5 h-3.5 flex-shrink-0 text-[#667781] dark:text-[#8696A0]" />
     </div>
   );
 }
@@ -157,20 +153,14 @@ export default function AttachmentBubble({
           >
             {/* Loading skeleton — shown until image loads or errors */}
             {!imgLoaded && !imgError && (
-              <div className={cn(
-                "w-full h-[200px] rounded-xl animate-pulse",
-                isOutbound ? "bg-white/20" : "bg-black/10 dark:bg-white/10"
-              )} />
+              <div className="w-full h-[200px] rounded-md animate-pulse bg-black/10 dark:bg-white/10" />
             )}
 
             {/* Error state — shown when image URL is broken/expired */}
             {imgError ? (
-              <div className={cn(
-                "w-full h-[140px] rounded-xl flex flex-col items-center justify-center gap-2",
-                isOutbound ? "bg-white/10" : "bg-black/[0.06] dark:bg-white/[0.06]"
-              )}>
-                <ImageOff className={cn("w-8 h-8", isOutbound ? "text-white/40" : "text-muted-foreground/40")} />
-                <span className={cn("text-[11px]", isOutbound ? "text-white/50" : "text-muted-foreground/50")}>
+              <div className="w-full h-[140px] rounded-md flex flex-col items-center justify-center gap-2 bg-black/[0.06] dark:bg-white/[0.08]">
+                <ImageOff className="w-8 h-8 text-[#667781]/50 dark:text-[#8696A0]/50" />
+                <span className="text-[11px] text-[#667781] dark:text-[#8696A0]">
                   Image unavailable
                 </span>
                 <a
@@ -178,10 +168,7 @@ export default function AttachmentBubble({
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
-                  className={cn(
-                    "text-[11px] hover:underline font-medium",
-                    isOutbound ? "text-white/70 hover:text-white" : "text-indigo-500 hover:text-indigo-600"
-                  )}
+                  className="text-[11px] hover:underline font-medium text-[#027EB5] dark:text-[#53BDEB]"
                 >
                   Open link ↗
                 </a>
@@ -199,25 +186,25 @@ export default function AttachmentBubble({
                     setImgLoaded(true); // stop the loading skeleton
                   }}
                   className={cn(
-                    "w-full max-h-[340px] rounded-xl object-cover transition-opacity duration-200",
+                    "w-full max-h-[340px] rounded-md object-cover transition-opacity duration-200",
                     imgLoaded ? "opacity-100" : "opacity-0 absolute inset-0"
                   )}
                 />
                 {/* Expand overlay */}
-                <div className="absolute inset-0 rounded-xl bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                <div className="absolute inset-0 rounded-md bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
                   <Maximize2 className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
               </>
             )}
 
             {isOptimistic && !imgError && (
-              <div className="absolute inset-0 rounded-xl bg-black/30 flex items-center justify-center">
+              <div className="absolute inset-0 rounded-md bg-black/30 flex items-center justify-center">
                 <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
               </div>
             )}
           </div>
           {caption && (
-            <p className="text-[13px] leading-relaxed mt-1.5 [word-break:normal] break-words">
+            <p className="text-[13px] leading-relaxed mt-1.5 px-1 [word-break:normal] break-words">
               {caption}
             </p>
           )}
@@ -235,17 +222,17 @@ export default function AttachmentBubble({
             src={mediaUrl}
             controls
             preload="metadata"
-            className="w-full max-h-[240px] rounded-xl object-cover"
+            className="w-full max-h-[240px] rounded-md object-cover"
             style={{ background: '#000' }}
           />
           {isOptimistic && (
-            <div className="absolute inset-0 rounded-xl bg-black/50 flex items-center justify-center">
+            <div className="absolute inset-0 rounded-md bg-black/50 flex items-center justify-center">
               <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
             </div>
           )}
         </div>
         {caption && (
-          <p className="text-[13px] leading-relaxed mt-1.5 [word-break:normal] break-words">
+          <p className="text-[13px] leading-relaxed mt-1.5 px-1 [word-break:normal] break-words">
             {caption}
           </p>
         )}
@@ -256,12 +243,9 @@ export default function AttachmentBubble({
   // ── Audio ──────────────────────────────────────────────────────────────────
   if (category === 'audio') {
     return (
-      <div className={cn("w-[200px]", isOptimistic && "opacity-60")}>
+      <div className={cn("w-[200px] px-1 py-0.5", isOptimistic && "opacity-60")}>
         <AudioPlayer src={mediaUrl} isOutbound={isOutbound} />
-        <p className={cn(
-          "text-[11px] mt-0.5 truncate",
-          isOutbound ? "text-white/60" : "text-muted-foreground/60"
-        )}>
+        <p className="text-[11px] mt-0.5 truncate text-[#667781] dark:text-[#8696A0]">
           {fileName}
           {fileSize ? ` · ${formatBytes(fileSize)}` : ''}
         </p>
@@ -271,18 +255,17 @@ export default function AttachmentBubble({
 
   // ── Document / Archive / Generic File ─────────────────────────────────────
   const DocIcon = docIcon(mimeType);
-  const iconColor = isOutbound ? 'text-white/80' : docColor(mimeType);
+  const iconColor = docColor(mimeType);
 
   return (
     <div className={cn(
-      "flex items-center gap-3 min-w-[180px] max-w-[240px]",
+      "flex items-center gap-3 min-w-[180px] max-w-[240px] rounded-md px-2 py-2",
+      // Subtle inset panel like WhatsApp's document card
+      isOutbound ? "bg-black/[0.04] dark:bg-black/[0.12]" : "bg-black/[0.03] dark:bg-white/[0.04]",
       isOptimistic && "opacity-60"
     )}>
       {/* Icon */}
-      <div className={cn(
-        "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
-        isOutbound ? "bg-white/15" : "bg-black/[0.05] dark:bg-white/[0.06]"
-      )}>
+      <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-white dark:bg-white/[0.08]">
         {isOptimistic
           ? <div className="w-4 h-4 border-2 border-current/40 border-t-current rounded-full animate-spin opacity-60" />
           : <DocIcon className={cn("w-5 h-5", iconColor)} />
@@ -291,17 +274,11 @@ export default function AttachmentBubble({
 
       {/* Meta */}
       <div className="flex-1 min-w-0">
-        <p className={cn(
-          "text-[12.5px] font-medium leading-tight truncate",
-          isOutbound ? "text-white" : "text-foreground"
-        )}>
+        <p className="text-[12.5px] font-medium leading-tight truncate text-[#111B21] dark:text-[#E9EDEF]">
           {fileName}
         </p>
         {fileSize && (
-          <p className={cn(
-            "text-[11px] mt-0.5",
-            isOutbound ? "text-white/55" : "text-muted-foreground/55"
-          )}>
+          <p className="text-[11px] mt-0.5 text-[#667781] dark:text-[#8696A0]">
             {formatBytes(fileSize)}
           </p>
         )}
@@ -315,12 +292,7 @@ export default function AttachmentBubble({
           rel="noopener noreferrer"
           download={fileName}
           onClick={e => e.stopPropagation()}
-          className={cn(
-            "w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 transition-colors",
-            isOutbound
-              ? "text-white/60 hover:text-white hover:bg-white/10"
-              : "text-muted-foreground/50 hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
-          )}
+          className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 transition-colors text-[#667781] dark:text-[#8696A0] hover:text-[#111B21] dark:hover:text-[#E9EDEF] hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
           title={`Open ${fileName}`}
         >
           {mimeType === 'application/pdf' || mimeType === 'text/plain'
