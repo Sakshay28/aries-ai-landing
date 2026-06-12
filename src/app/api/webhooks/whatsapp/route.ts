@@ -15,6 +15,7 @@ import { appendLeadRow, appendBookingRow } from '@/lib/integrations/google-sheet
 import { parseMetaWebhook, sendTextMessage, sendMediaMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator, sendStaffAlert } from '@/lib/meta/service';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 import { processMessageWithAI, isHumanHandoffRequest } from '@/lib/ai/engine';
+import { kwWordMatch, pickScriptedReply, allowStatusUpdate } from '@/lib/webhook/decisions';
 import { checkSenderRateLimit } from '@/lib/abuse/prevention';
 import { checkAICostLimit, checkDailyAICostLimit, AI_FALLBACK_MESSAGE } from '@/lib/billing/costProtection';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
@@ -857,34 +858,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       .eq('is_active', true);
 
     if (earlyScriptedRows && earlyScriptedRows.length > 0) {
-      const lowerMsgEarly = msg.text.toLowerCase();
       type ESRow = { keywords: string[]; reply: string; media_url?: string | null };
-      let matchedEarly: ESRow | undefined;
-      let bestEarlyLen = 0;
-      // Short keywords (≤4 chars) like "hi", "hey" are ambiguous in Hinglish —
-      // "hi" is a greeting but also an emphasis particle ("tum hi batao", "yahi").
-      // Rule: ≤4-char keywords only fire when the keyword is at the START of the
-      // message or IS the entire message. Longer keywords use word-boundary match.
-      const scriptedKwMatch = (text: string, kw: string): boolean => {
-        const k = kw.trim().toLowerCase();
-        if (!k) return false;
-        const escaped = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        if (k.length <= 4) {
-          // Must be the entire message, or appear at the very start (optional punctuation/space after)
-          return new RegExp(`^${escaped}([^a-z0-9]|$)`, 'i').test(text.trim());
-        }
-        // Longer keywords: word-boundary match anywhere in the message
-        return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(text);
-      };
-      for (const r of earlyScriptedRows as ESRow[]) {
-        if (!Array.isArray(r.keywords)) continue;
-        for (const kw of r.keywords) {
-          if (kw && scriptedKwMatch(lowerMsgEarly, kw) && kw.length > bestEarlyLen) {
-            bestEarlyLen = kw.length;
-            matchedEarly = r;
-          }
-        }
-      }
+      // Matching rules (short-keyword start anchor, longest-keyword-wins) live
+      // in @/lib/webhook/decisions — unit-tested in tests/webhook-decisions.test.ts
+      const matchedEarly = pickScriptedReply(earlyScriptedRows as ESRow[], msg.text);
       if (matchedEarly) {
         console.log(`⚡ Scripted reply (early) matched for tenant ${tenant.id}: "${matchedEarly.keywords.join(', ')}"`);
         if (decryptedAccessToken && tenant.wa_phone_number_id) {
@@ -1180,12 +1157,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // 1. Try keyword match first
   // 2. Fall back to a "default" agent — one with no routing keywords configured (catch-all)
   // This is how trained behavior flows even without keywords
-  const kwWordMatch = (text: string, kw: string) => {
-    const k = kw.trim().toLowerCase();
-    if (!k) return false;
-    const escaped = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(text);
-  };
   const matchedAgent =
     activeAgents.find(agent =>
       agent.routing_keywords?.length > 0 &&
@@ -1988,14 +1959,8 @@ async function handleStatusUpdate(msg: NonNullable<ReturnType<typeof parseMetaWe
   } else {
     const currentStatus = currentMsg.status;
 
-    let allowUpdate = true;
-    if (currentStatus === 'read') {
-      allowUpdate = false;
-    } else if (currentStatus === 'delivered') {
-      allowUpdate = (mappedStatus === 'read');
-    } else if (currentStatus === 'failed') {
-      allowUpdate = (mappedStatus === 'delivered' || mappedStatus === 'read');
-    }
+    // Monotonic ordering lives in @/lib/webhook/decisions (unit-tested)
+    const allowUpdate = allowStatusUpdate(currentStatus, mappedStatus);
 
     if (!allowUpdate) {
       console.log(`📬 Meta status update ignored: ${msg.messageId} is already "${currentStatus}", new is "${mappedStatus}"`);

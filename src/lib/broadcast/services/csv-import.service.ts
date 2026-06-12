@@ -61,8 +61,17 @@ export class CSVImportService {
         continue;
       }
 
-      // E.164 Clean & Format normalization
-      let phoneCleaned = cleanPhone(rawPhone);
+      // E.164 Clean & Format normalization. cleanPhone THROWS on garbage input
+      // (shape guard added 2026-06-09) — treat a throw as an invalid row instead
+      // of letting one bad number kill the whole import.
+      let phoneCleaned: string;
+      try {
+        phoneCleaned = cleanPhone(rawPhone);
+      } catch {
+        invalidRemoved++;
+        previewRows.push({ name: nameVal, phone: rawPhone, isValid: false, reason: 'Invalid phone number format' });
+        continue;
+      }
       
       // Auto-append country code if phone number is local (e.g. 10 digits in India / US)
       if (phoneCleaned.length === 10) {

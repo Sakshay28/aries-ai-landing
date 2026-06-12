@@ -158,7 +158,7 @@ export class BroadcastEngineService {
       // 1. Atomically fetch and lock items using FOR UPDATE SKIP LOCKED.
       //    This eliminates the race window between SELECT and UPDATE that caused
       //    duplicate sends when two cron invocations overlapped.
-      //    Requires the lock_broadcast_queue_batch() RPC from migrations/broadcast_production_hardening.sql.
+      //    Requires the lock_broadcast_queue_batch() RPC from supabase/migrations/20260611_broadcast_production_hardening.sql.
       let queueItems: any[] | null = null;
       const { data: atomicItems, error: lockErr } = await supabaseAdmin
         .rpc('lock_broadcast_queue_batch', { batch_limit: limit });
