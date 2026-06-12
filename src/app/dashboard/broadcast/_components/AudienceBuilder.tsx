@@ -36,6 +36,7 @@ interface EstimateResult {
   excluded: number;
   duplicates: number;
   invalid: number;
+  noConsent: number;
   spamRisk: 'LOW' | 'MEDIUM' | 'HIGH';
 }
 
@@ -744,7 +745,7 @@ function RetargetingPanel({
 
 function EstimationCard({ estimate }: { estimate: EstimateResult }) {
   const risk = SPAM_RISK_CONFIG[estimate.spamRisk];
-  const recipients = Math.max(0, estimate.total - estimate.excluded - estimate.duplicates - estimate.invalid);
+  const recipients = Math.max(0, estimate.total - estimate.excluded - estimate.duplicates - estimate.invalid - (estimate.noConsent || 0));
 
   return (
     <div className="rounded-2xl border border-border/30 bg-[#fbfcfd] dark:bg-card/40 overflow-hidden shadow-sm pt-4.5 pb-2">
@@ -776,7 +777,7 @@ function EstimationCard({ estimate }: { estimate: EstimateResult }) {
         <div className="flex flex-col justify-end text-right">
           <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/45 mb-1.5">Compliance</p>
           <p className="text-[11.5px] font-semibold text-emerald-600/90 flex items-center justify-end gap-1">
-            <ShieldCheck className="w-3.5 h-3.5" /> 100% Opted-In
+            <ShieldCheck className="w-3.5 h-3.5" /> 100% Consented
           </p>
         </div>
       </div>
@@ -785,6 +786,7 @@ function EstimationCard({ estimate }: { estimate: EstimateResult }) {
       <div className="px-5 py-3 space-y-2.5 text-[12px]">
         {[
           { label: 'CRM Contacts Excluded (Opted out)', value: estimate.excluded,   color: 'text-muted-foreground/75' },
+          { label: 'No Consent (Never messaged)',       value: estimate.noConsent || 0, color: (estimate.noConsent || 0) > 0 ? 'text-rose-600 font-semibold' : 'text-muted-foreground/75' },
           { label: 'Removed Duplicates',  value: estimate.duplicates, color: 'text-muted-foreground/75' },
           { label: 'Corrected / Flagged Invalid Numbers',     value: estimate.invalid,    color: estimate.invalid > 0 ? 'text-amber-600 font-semibold' : 'text-muted-foreground/75' },
         ].map(row => (
@@ -796,6 +798,15 @@ function EstimationCard({ estimate }: { estimate: EstimateResult }) {
           </div>
         ))}
       </div>
+
+      {(estimate.noConsent || 0) > 0 && (
+        <div className="mx-4 mb-2 mt-2 flex items-start gap-2.5 p-3 bg-rose-50 dark:bg-rose-500/5 border border-rose-200/60 dark:border-rose-500/15 rounded-xl">
+          <ShieldX className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5" />
+          <p className="text-[11.5px] text-rose-700 dark:text-rose-400 leading-relaxed font-medium">
+            <strong>{(estimate.noConsent || 0).toLocaleString()} contact{(estimate.noConsent || 0) !== 1 ? 's' : ''} blocked</strong> — they have never messaged your WhatsApp number. Per WhatsApp Business Policy, broadcasts require prior consent. These contacts must initiate a conversation first.
+          </p>
+        </div>
+      )}
 
       {estimate.spamRisk === 'HIGH' && (
         <div className="mx-4 mb-2 mt-2 flex items-start gap-2.5 p-3 bg-rose-50 border border-rose-100 rounded-xl">

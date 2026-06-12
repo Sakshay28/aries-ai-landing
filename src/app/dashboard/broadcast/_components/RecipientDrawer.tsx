@@ -317,6 +317,9 @@ export function RecipientDrawer({
       if (item.status === 'opted_out') {
         complianceLabel = 'Opted-Out';
         complianceClass = 'bg-rose-500/10 text-rose-600 border-rose-500/20';
+      } else if (item.status === 'no_consent') {
+        complianceLabel = 'No Consent';
+        complianceClass = 'bg-rose-500/10 text-rose-600 border-rose-500/20';
       } else if (item.status === 'duplicate_removed') {
         complianceLabel = 'Duplicate';
         complianceClass = 'bg-amber-500/10 text-amber-600 border-amber-500/20';

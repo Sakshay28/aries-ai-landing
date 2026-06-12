@@ -684,8 +684,30 @@ async function executeNode(
         return { nextId: getNextNode(node.id, 'success', edges) };
       }
 
-      // HTTP error response
+      // HTTP error response — read body so structured errors (e.g. slot_full) are accessible
+      let errBody: Record<string, unknown> | null = null;
+      try {
+        const ct = res.headers.get('content-type') || '';
+        if (ct.includes('application/json')) errBody = await res.json();
+      } catch { /* ignore parse failure */ }
+
       ctx.variables[`${node.id}_error`] = res.status;
+      if (errBody) {
+        Object.assign(ctx.variables, errBody);
+        ctx.variables[`${node.id}_error_body`] = errBody;
+      }
+
+      // slot_full (409) — auto-notify the customer so flows without an error branch still work
+      if (res.status === 409 && errBody?.error === 'slot_full') {
+        const customerMsg = typeof errBody.message === 'string'
+          ? errBody.message
+          : 'Sorry, that time slot is fully booked. Please choose a different time.';
+        if (ctx.accessToken && ctx.phoneNumberId && ctx.phone) {
+          await sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, customerMsg).catch(() => {});
+        }
+        console.warn(`⚠️ Flow engine: slot_full for ${ctx.phone} — sent alternative-slots message`);
+      }
+
       if (errorBehav === 'continue') return { nextId: getNextNode(node.id, 'success', edges) };
       return { nextId: getNextNode(node.id, 'error', edges) };
 

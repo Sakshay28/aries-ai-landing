@@ -107,5 +107,6 @@ export interface EstimateResult {
   excluded: number;
   duplicates: number;
   invalid: number;
+  noConsent: number;
   spamRisk: 'LOW' | 'MEDIUM' | 'HIGH';
 }

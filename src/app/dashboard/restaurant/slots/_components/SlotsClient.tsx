@@ -47,7 +47,8 @@ export function SlotsClient() {
   const fetchSlots = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/restaurant/slots');
+      const today = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const res = await fetch(`/api/restaurant/slots?date=${today}`);
       if (!res.ok) throw new Error('Failed to load slots');
       const { data } = await res.json();
       setSlots(data ?? []);
@@ -274,35 +275,65 @@ export function SlotsClient() {
                   </div>
                 ) : (
                   // Display mode
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-3">
-                      <span className="text-base font-semibold text-foreground">
-                        {formatSlotTime(slot.slot_time)}
-                      </span>
-                      <Badge variant="secondary">{DAY_TYPE_LABELS[slot.day_type]}</Badge>
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-3">
+                        <span className="text-base font-semibold text-foreground">
+                          {formatSlotTime(slot.slot_time)}
+                        </span>
+                        <Badge variant="secondary">{DAY_TYPE_LABELS[slot.day_type]}</Badge>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {slot.remaining_capacity !== undefined ? (
+                          <span className={`text-sm font-medium tabular-nums ${
+                            slot.remaining_capacity === 0
+                              ? 'text-destructive'
+                              : slot.remaining_capacity / slot.total_capacity < 0.2
+                                ? 'text-amber-600 dark:text-amber-400'
+                                : 'text-muted-foreground'
+                          }`}>
+                            {slot.remaining_capacity === 0
+                              ? 'FULL'
+                              : `${slot.remaining_capacity} / ${slot.total_capacity} left`}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">{slot.total_capacity} seats</span>
+                        )}
+                        <Button
+                          id={`edit-slot-${slot.id}`}
+                          size="icon"
+                          variant="ghost"
+                          className="size-8"
+                          onClick={() => startEdit(slot)}
+                        >
+                          <Pencil className="size-3.5" />
+                        </Button>
+                        <Button
+                          id={`delete-slot-${slot.id}`}
+                          size="icon"
+                          variant="ghost"
+                          className="size-8 text-destructive hover:text-destructive"
+                          disabled={deletingId === slot.id}
+                          onClick={() => deleteSlot(slot.id)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm text-muted-foreground">{slot.total_capacity} seats</span>
-                      <Button
-                        id={`edit-slot-${slot.id}`}
-                        size="icon"
-                        variant="ghost"
-                        className="size-8"
-                        onClick={() => startEdit(slot)}
-                      >
-                        <Pencil className="size-3.5" />
-                      </Button>
-                      <Button
-                        id={`delete-slot-${slot.id}`}
-                        size="icon"
-                        variant="ghost"
-                        className="size-8 text-destructive hover:text-destructive"
-                        disabled={deletingId === slot.id}
-                        onClick={() => deleteSlot(slot.id)}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </div>
+
+                    {/* Capacity progress bar */}
+                    {slot.remaining_capacity !== undefined && (() => {
+                      const booked = slot.total_capacity - slot.remaining_capacity;
+                      const pct    = slot.total_capacity > 0 ? Math.round((booked / slot.total_capacity) * 100) : 0;
+                      const bar    = slot.remaining_capacity === 0
+                        ? 'bg-destructive'
+                        : pct >= 80 ? 'bg-amber-500' : 'bg-emerald-500';
+                      return (
+                        <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                          <div className={`h-full rounded-full transition-all duration-500 ${bar}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </CardContent>

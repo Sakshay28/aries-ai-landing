@@ -5,6 +5,18 @@ import { createBookingPaymentLink, fireIntegrations } from '@/lib/integrations/r
 import { sendTextMessage } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 
+function timeToMins(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + (m || 0);
+}
+
+function formatSlotTime(slotTime: string): string {
+  const [h, m] = slotTime.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const hr12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  return `${hr12}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
 // ── Parse a free-form datetime string from an intake form ────────────────────
 // Handles inputs like:
 //   "Tomorrow 8 PM", "31 May 7:30 PM", "2026-05-31 20:00", "31st May 2026 8pm"
@@ -131,7 +143,77 @@ export async function POST(req: NextRequest) {
     const { bookingDate, slotTime } = parseDatetime(datetime);
     console.log(`   ↳ datetime parsed: "${datetime}" → date=${bookingDate} time=${slotTime}`);
 
-    // 5a. Booking commitment fee (Clock Tower model): ₹ per guest → Razorpay link over WhatsApp.
+    // 5a. Resolve the best-matching slot and enforce capacity BEFORE charging anyone.
+    const { data: allSlots } = await supabaseAdmin
+      .from('restaurant_slots')
+      .select('id, slot_time, total_capacity')
+      .eq('restaurant_id', tenantId)
+      .eq('is_active', true)
+      .order('slot_time', { ascending: true });
+
+    let chosenSlot: { id: string; slot_time: string } | null = null;
+
+    if (allSlots && allSlots.length > 0) {
+      const reqMins = timeToMins(slotTime);
+      chosenSlot = allSlots.reduce((best, s) =>
+        Math.abs(timeToMins(s.slot_time) - reqMins) < Math.abs(timeToMins(best.slot_time) - reqMins) ? s : best
+      );
+    } else {
+      // No slots configured — create a sensible default so the booking can land.
+      const { data: newSlot } = await supabaseAdmin
+        .from('restaurant_slots')
+        .insert({ restaurant_id: tenantId, slot_time: slotTime || '19:30:00', day_type: 'both', total_capacity: 50, is_active: true })
+        .select('id, slot_time')
+        .single();
+      if (newSlot) chosenSlot = newSlot;
+    }
+
+    if (!chosenSlot) {
+      return NextResponse.json({ success: false, error: 'No active slots configured for this restaurant.' }, { status: 422 });
+    }
+
+    // 5b. Availability gate — fail fast before creating a payment link or writing anything.
+    const { data: availData, error: availErr } = await supabaseAdmin.rpc('check_seat_availability', {
+      p_slot_id:      chosenSlot.id,
+      p_booking_date: bookingDate,
+      p_party_size:   guestCount,
+    });
+
+    if (availErr) {
+      console.error('❌ [SAVE BOOKING] availability RPC error:', availErr.message);
+      return NextResponse.json({ success: false, error: 'Could not verify availability. Please try again.' }, { status: 503 });
+    }
+
+    const avail = availData as { available: boolean; remaining_seats: number; error?: string } | null;
+
+    if (!avail?.available) {
+      // Find alternative slots with capacity for the same date.
+      const otherSlots = (allSlots || []).filter(s => s.id !== chosenSlot!.id);
+      const altResults = await Promise.all(
+        otherSlots.map(async s => {
+          const { data: a } = await supabaseAdmin.rpc('check_seat_availability', {
+            p_slot_id: s.id, p_booking_date: bookingDate, p_party_size: guestCount,
+          });
+          return { slot: s, available: (a as { available: boolean } | null)?.available ?? false };
+        })
+      );
+      const alternatives = altResults.filter(r => r.available).map(r => formatSlotTime(r.slot.slot_time));
+
+      console.warn(`⚠️ [SAVE BOOKING] Slot full: ${avail?.remaining_seats ?? 0} seats left, need ${guestCount}`);
+      return NextResponse.json({
+        success: false,
+        error: 'slot_full',
+        remaining_seats: avail?.remaining_seats ?? 0,
+        alternatives,
+        message: alternatives.length > 0
+          ? `That slot is fully booked. Available times on ${bookingDate}: ${alternatives.slice(0, 3).join(', ')}.`
+          : `Sorry, we are fully booked for ${bookingDate}. Please try another date.`,
+      }, { status: 409 });
+    }
+
+    console.log(`   ✅ Capacity OK — ${avail.remaining_seats} seats remaining after this booking.`);
+
+    // 5c. Booking commitment fee — only created after we know the slot has room.
     const feePerPerson = Number((tenant as any).booking_fee_per_person) || 0;
     const feeRupees = feePerPerson > 0 ? feePerPerson * guestCount : 0;
     let paymentLink: { id: string; short_url: string } | null = null;
@@ -152,7 +234,7 @@ export async function POST(req: NextRequest) {
       customer_name: name,
       customer_phone: cleanPhoneStr,
       party_size: guestCount,
-      slot_time: slotTime,
+      slot_time: chosenSlot.slot_time,
       booking_date: bookingDate,
       booking_status: 'confirmed',
       payment_status: payStatus,
@@ -166,58 +248,30 @@ export async function POST(req: NextRequest) {
     // 6. Direct Append to Google Sheets
     await appendBookingRow(tenantId, bookingPayload);
 
-    // 7. Insert into Supabase restaurant_bookings so it registers in the manager dashboard
+    // 7. Insert into Supabase restaurant_bookings so it registers in the manager dashboard.
     try {
-      // Find or create a default slot in the database first to comply with foreign key checks
-      const { data: slots } = await supabaseAdmin
-        .from('restaurant_slots')
-        .select('id')
-        .eq('restaurant_id', tenantId)
-        .eq('is_active', true)
-        .limit(1);
+      await supabaseAdmin.from('restaurant_bookings').insert({
+        restaurant_id: tenantId,
+        slot_id:       chosenSlot.id,
+        booking_date:  bookingDate,
+        customer_name: name,
+        customer_phone: cleanPhoneStr,
+        party_size:    guestCount,
+        payment_amount: isPrepaid ? Math.round(feeRupees * 100) : 0, // paise
+        payment_status: payStatus,
+        booking_status: 'confirmed',
+        reservation_id: reservationId,
+        ...(paymentLink && { payment_link_url: paymentLink.short_url, payment_link_id: paymentLink.id }),
+      });
+      console.log(`   ✓ Saved to restaurant_bookings (slot ${chosenSlot.slot_time}).`);
 
-      let slotId: string | null = slots?.[0]?.id || null;
-
-      if (!slotId) {
-        // Create a default slot dynamically if none exists
-        const { data: newSlot } = await supabaseAdmin
-          .from('restaurant_slots')
-          .insert({
-            restaurant_id: tenantId,
-            slot_time: '19:30:00',
-            day_type: 'both',
-            total_capacity: 50,
-            is_active: true
-          })
-          .select()
-          .single();
-        if (newSlot) slotId = newSlot.id;
-      }
-
-      if (slotId) {
-        await supabaseAdmin.from('restaurant_bookings').insert({
-          restaurant_id: tenantId,
-          slot_id: slotId,
-          booking_date: bookingDate,
-          customer_name: name,
-          customer_phone: cleanPhoneStr,
-          party_size: guestCount,
-          payment_amount: isPrepaid ? Math.round(feeRupees * 100) : 0, // paise
-          payment_status: payStatus,
-          booking_status: 'confirmed',
-          reservation_id: reservationId,
-          ...(paymentLink && { payment_link_url: paymentLink.short_url, payment_link_id: paymentLink.id }),
-        });
-        console.log(`   ✓ Saved successfully to restaurant_bookings table.`);
-
-        // Auto-create guest profile (so WhatsApp guests appear in the Guests CRM too)
-        await supabaseAdmin
-          .from('restaurant_guests')
-          .upsert(
-            { restaurant_id: tenantId, customer_phone: cleanPhoneStr, customer_name: name },
-            { onConflict: 'restaurant_id,customer_phone', ignoreDuplicates: true }
-          );
-      }
+      // Auto-create guest profile so WhatsApp guests appear in the Guests CRM.
+      await supabaseAdmin
+        .from('restaurant_guests')
+        .upsert(
+          { restaurant_id: tenantId, customer_phone: cleanPhoneStr, customer_name: name },
+          { onConflict: 'restaurant_id,customer_phone', ignoreDuplicates: true }
+        );
     } catch (dbErr: any) {
       console.warn('⚠️ [SAVE BOOKING] Supabase insertion warning (non-blocking):', dbErr.message);
     }

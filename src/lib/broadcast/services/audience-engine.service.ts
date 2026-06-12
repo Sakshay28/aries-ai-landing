@@ -7,6 +7,7 @@ interface ResolvedAudience {
   duplicatesRemoved: number;
   optedOutRemoved: number;
   invalidRemoved: number;
+  noConsentRemoved: number;
   spamRisk: 'LOW' | 'MEDIUM' | 'HIGH';
   contacts: Array<{ id: string; name: string; phone: string }>;
 }
@@ -24,7 +25,7 @@ export class AudienceEngineService {
       if (audience.type === 'all') {
         const { data } = await supabaseAdmin
           .from('leads')
-          .select('id, name, phone, tags, email, notes')
+          .select('id, name, phone, tags, email, notes, channel, last_message_at')
           .eq('tenant_id', tenantId)
           .not('phone', 'is', null);
         rawContacts = data || [];
@@ -33,7 +34,7 @@ export class AudienceEngineService {
         // Fetch contacts matching any of the selected tags (using overlap operator)
         const { data } = await supabaseAdmin
           .from('leads')
-          .select('id, name, phone, tags, email, notes')
+          .select('id, name, phone, tags, email, notes, channel, last_message_at')
           .eq('tenant_id', tenantId)
           .not('phone', 'is', null)
           .overlaps('tags', audience.tags);
@@ -43,7 +44,7 @@ export class AudienceEngineService {
         // Fetch all contacts first and filter them in memory to support complex nested AND/OR segment validations
         const { data } = await supabaseAdmin
           .from('leads')
-          .select('id, name, phone, tags, email, notes, lead_score')
+          .select('id, name, phone, tags, email, notes, channel, last_message_at, lead_score')
           .eq('tenant_id', tenantId)
           .not('phone', 'is', null);
         
@@ -108,7 +109,7 @@ export class AudienceEngineService {
         if (targetContactIds.length > 0) {
           const { data } = await supabaseAdmin
             .from('leads')
-            .select('id, name, phone, tags, email, notes')
+            .select('id, name, phone, tags, email, notes, channel, last_message_at')
             .eq('tenant_id', tenantId)
             .in('id', targetContactIds)
             .not('phone', 'is', null);
@@ -119,7 +120,7 @@ export class AudienceEngineService {
         // Particular contacts manually selected
         const { data } = await supabaseAdmin
           .from('leads')
-          .select('id, name, phone, tags, email, notes')
+          .select('id, name, phone, tags, email, notes, channel, last_message_at')
           .eq('tenant_id', tenantId)
           .in('id', audience.manualContactIds)
           .not('phone', 'is', null);
@@ -166,6 +167,7 @@ export class AudienceEngineService {
       let duplicatesRemoved = 0;
       let optedOutRemoved = 0;
       let invalidRemoved = 0;
+      let noConsentRemoved = 0;
 
       for (const lead of rawContacts) {
         if (!lead.phone) {
@@ -201,6 +203,14 @@ export class AudienceEngineService {
           continue;
         }
 
+        // Consent check: contact must have prior inbound interaction
+        const leadChannel = (lead.channel || '').toLowerCase();
+        const hasConsent = leadChannel === 'whatsapp' || !!lead.last_message_at;
+        if (!hasConsent) {
+          noConsentRemoved++;
+          continue;
+        }
+
         // Deduplication rules
         if (seenPhones.has(phoneCleaned) || seenContactIds.has(lead.id)) {
           duplicatesRemoved++;
@@ -225,6 +235,7 @@ export class AudienceEngineService {
         duplicatesRemoved,
         optedOutRemoved,
         invalidRemoved,
+        noConsentRemoved,
         spamRisk,
         contacts: filteredContacts,
       };
@@ -236,6 +247,7 @@ export class AudienceEngineService {
         duplicatesRemoved: 0,
         optedOutRemoved: 0,
         invalidRemoved: 0,
+        noConsentRemoved: 0,
         spamRisk: 'LOW',
         contacts: [],
       };

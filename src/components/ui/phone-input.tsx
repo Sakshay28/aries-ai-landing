@@ -43,7 +43,20 @@ export function PhoneInput({
   const digits10 = extract10Digit(value ?? '');
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value.replace(/\D/g, '').slice(0, 10);
+    // Strip all non-digits first
+    let raw = e.target.value.replace(/\D/g, '');
+
+    // If the user typed/pasted the full number including the 91 country code
+    // (e.g. "919876543210" or "919191919191"), strip the leading "91" so the
+    // displayed value is always the 10-digit subscriber number only.
+    if (raw.startsWith('91') && raw.length > 10) {
+      raw = raw.slice(2);
+    }
+
+    // Clamp to 10 digits (the local subscriber number)
+    raw = raw.slice(0, 10);
+
+    // Emit the canonical "91XXXXXXXXXX" form, or empty string when blank
     onChange(raw ? '91' + raw : '');
   };
 

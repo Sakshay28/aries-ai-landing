@@ -5,6 +5,7 @@ export const metadata: Metadata = {
   title: 'Campaign Details | Aries AI',
 };
 
-export default function CampaignDetailPage({ params }: { params: { id: string } }) {
-  return <CampaignDetailClient id={params.id} />;
+export default async function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  return <CampaignDetailClient id={id} />;
 }

@@ -75,7 +75,7 @@ export function comparePhones(a: string, b: string, defaultCountryCode: string =
  */
 export function extract10Digit(phone: string): string {
   const digits = phone.replace(/\D/g, '');
-  if (digits.startsWith('91') && digits.length === 12) return digits.slice(2);
+  if (digits.startsWith('91') && digits.length > 2) return digits.slice(2);
   if (digits.length === 10) return digits;
   if (digits.length > 10) return digits.slice(digits.length - 10);
   return digits;

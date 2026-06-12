@@ -202,9 +202,9 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   const [isLaunching,      setIsLaunching]      = useState(false);
   const [isTesting,        setIsTesting]        = useState(false);
   const [showTestModal,    setShowTestModal]    = useState(false);
-  const [estimate,         setEstimate]         = useState<EstimateResult>({ total: 0, excluded: 0, duplicates: 0, invalid: 0, spamRisk: 'LOW' });
+  const [estimate,         setEstimate]         = useState<EstimateResult>({ total: 0, excluded: 0, duplicates: 0, invalid: 0, noConsent: 0, spamRisk: 'LOW' });
   const [recipientsData,   setRecipientsData]   = useState<RecipientCacheResult>({
-    totalRecipients: 0, excluded: 0, duplicatesRemoved: 0, invalidNumbers: 0, normalizationCount: 0, recipients: [],
+    totalRecipients: 0, excluded: 0, duplicatesRemoved: 0, invalidNumbers: 0, noConsentRemoved: 0, normalizationCount: 0, recipients: [],
   });
   const [recipientsLoading, setRecipientsLoading] = useState(false);
   const [drawerOpen,        setDrawerOpen]        = useState(false);
@@ -653,6 +653,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
             excluded:         data.excluded,
             duplicatesRemoved: data.duplicatesRemoved,
             invalidNumbers:   data.invalidNumbers,
+            noConsentRemoved: data.noConsentRemoved ?? 0,
             normalizationCount: data.normalizationCount,
             recipients:       data.recipients,
           });
@@ -661,6 +662,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
             excluded:  data.excluded,
             duplicates: data.duplicatesRemoved,
             invalid:   data.invalidNumbers,
+            noConsent: data.noConsentRemoved ?? 0,
             spamRisk:  data.totalRecipients > 5000 ? 'HIGH' : data.totalRecipients > 2000 ? 'MEDIUM' : 'LOW',
           });
         }

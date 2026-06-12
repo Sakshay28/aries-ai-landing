@@ -11,7 +11,7 @@ export interface RecipientRecord {
   email: string | null;
   source_type: string;
   source_label: string;
-  status: 'eligible' | 'excluded' | 'duplicate_removed' | 'invalid' | 'opted_out';
+  status: 'eligible' | 'excluded' | 'duplicate_removed' | 'invalid' | 'opted_out' | 'no_consent';
   last_interaction_at: string | null;
   normalized_number: string | null;
 }
@@ -21,6 +21,7 @@ export interface RecipientCacheResult {
   excluded: number;
   duplicatesRemoved: number;
   invalidNumbers: number;
+  noConsentRemoved: number;
   normalizationCount: number;
   recipients: RecipientRecord[];
 }
@@ -43,7 +44,7 @@ export class BroadcastRecipientService {
       if (audience.type === 'all') {
         const { data } = await supabaseAdmin
           .from('leads')
-          .select('id, name, phone, tags, email, last_message_at')
+          .select('id, name, phone, tags, email, channel, last_message_at')
           .eq('tenant_id', tenantId)
           .not('phone', 'is', null);
         rawContacts = data || [];
@@ -52,7 +53,7 @@ export class BroadcastRecipientService {
       } else if (audience.type === 'tags' && audience.tags.length > 0) {
         const { data } = await supabaseAdmin
           .from('leads')
-          .select('id, name, phone, tags, email, last_message_at')
+          .select('id, name, phone, tags, email, channel, last_message_at')
           .eq('tenant_id', tenantId)
           .not('phone', 'is', null)
           .overlaps('tags', audience.tags);
@@ -62,7 +63,7 @@ export class BroadcastRecipientService {
       } else if (audience.type === 'custom' && audience.customFilters.length > 0) {
         const { data } = await supabaseAdmin
           .from('leads')
-          .select('id, name, phone, tags, email, last_message_at, lead_score')
+          .select('id, name, phone, tags, email, channel, last_message_at, lead_score')
           .eq('tenant_id', tenantId)
           .not('phone', 'is', null);
         
@@ -112,7 +113,7 @@ export class BroadcastRecipientService {
         if (targetContactIds.length > 0) {
           const { data } = await supabaseAdmin
             .from('leads')
-            .select('id, name, phone, tags, email, last_message_at')
+            .select('id, name, phone, tags, email, channel, last_message_at')
             .eq('tenant_id', tenantId)
             .in('id', targetContactIds)
             .not('phone', 'is', null);
@@ -123,7 +124,7 @@ export class BroadcastRecipientService {
       } else if (audience.type === 'manual' && audience.manualContactIds && audience.manualContactIds.length > 0) {
         const { data } = await supabaseAdmin
           .from('leads')
-          .select('id, name, phone, tags, email, last_message_at')
+          .select('id, name, phone, tags, email, channel, last_message_at')
           .eq('tenant_id', tenantId)
           .in('id', audience.manualContactIds)
           .not('phone', 'is', null);
@@ -148,7 +149,7 @@ export class BroadcastRecipientService {
       if (manualIds.length > 0) {
         const { data } = await supabaseAdmin
           .from('leads')
-          .select('id, name, phone, tags, email, last_message_at')
+          .select('id, name, phone, tags, email, channel, last_message_at')
           .eq('tenant_id', tenantId)
           .in('id', manualIds)
           .not('phone', 'is', null);
@@ -182,6 +183,7 @@ export class BroadcastRecipientService {
       let excluded = 0;
       let duplicatesRemoved = 0;
       let invalidNumbers = 0;
+      let noConsentRemoved = 0;
       let normalizationCount = 0;
 
       for (const lead of mergedContacts) {
@@ -303,6 +305,27 @@ export class BroadcastRecipientService {
           continue;
         }
 
+        // B2. Consent check: contact must have prior inbound interaction
+        const leadChannel = (lead.channel || '').toLowerCase();
+        const hasConsent = leadChannel === 'whatsapp' || !!lastMsgAt;
+        if (!hasConsent) {
+          noConsentRemoved++;
+          finalRecords.push({
+            campaign_id: campaignId,
+            tenant_id: tenantId,
+            contact_id: leadId.startsWith('csv-') ? null : leadId,
+            phone_number: phoneCleaned,
+            name: leadName,
+            email: leadEmail,
+            source_type: recordSourceType,
+            source_label: recordSourceLabel,
+            status: 'no_consent',
+            last_interaction_at: lastMsgAt,
+            normalized_number: phoneCleaned,
+          });
+          continue;
+        }
+
         // C. Deduplication check
         if (seenPhones.has(phoneCleaned) || seenContactIds.has(leadId)) {
           duplicatesRemoved++;
@@ -372,6 +395,7 @@ export class BroadcastRecipientService {
         excluded,
         duplicatesRemoved,
         invalidNumbers,
+        noConsentRemoved,
         normalizationCount,
         recipients: finalRecords,
       };
@@ -383,6 +407,7 @@ export class BroadcastRecipientService {
         excluded: 0,
         duplicatesRemoved: 0,
         invalidNumbers: 0,
+        noConsentRemoved: 0,
         normalizationCount: 0,
         recipients: [],
       };
@@ -412,7 +437,7 @@ export class BroadcastRecipientService {
           .maybeSingle();
 
         if (!campaignAudience) {
-          return { totalRecipients: 0, excluded: 0, duplicatesRemoved: 0, invalidNumbers: 0, normalizationCount: 0, recipients: [] };
+          return { totalRecipients: 0, excluded: 0, duplicatesRemoved: 0, invalidNumbers: 0, noConsentRemoved: 0, normalizationCount: 0, recipients: [] };
         }
 
         const audienceState: AudienceState = {
@@ -436,6 +461,7 @@ export class BroadcastRecipientService {
       const excluded = recipients.filter(r => r.status === 'opted_out' || r.status === 'excluded').length;
       const duplicatesRemoved = recipients.filter(r => r.status === 'duplicate_removed').length;
       const invalidNumbers = recipients.filter(r => r.status === 'invalid').length;
+      const noConsentRemoved = recipients.filter(r => r.status === 'no_consent').length;
       const normalizationCount = recipients.filter(r => r.status === 'eligible' && r.phone_number !== r.normalized_number).length;
 
       return {
@@ -443,13 +469,14 @@ export class BroadcastRecipientService {
         excluded,
         duplicatesRemoved,
         invalidNumbers,
+        noConsentRemoved,
         normalizationCount,
         recipients,
       };
 
     } catch (err) {
       console.error('Failed to get campaign recipients:', err);
-      return { totalRecipients: 0, excluded: 0, duplicatesRemoved: 0, invalidNumbers: 0, normalizationCount: 0, recipients: [] };
+      return { totalRecipients: 0, excluded: 0, duplicatesRemoved: 0, invalidNumbers: 0, noConsentRemoved: 0, normalizationCount: 0, recipients: [] };
     }
   }
 }

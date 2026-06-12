@@ -35,6 +35,7 @@ export function LaunchSafetyModal({
     .map(r => r.name || r.phone_number);
 
   const displayRecipientsCount = recipients.filter(r => r.status === 'eligible').length;
+  const noConsentCount = recipients.filter(r => r.status === 'no_consent').length;
 
   const formatScheduledTime = (iso: string | null): string => {
     if (!iso) return 'Immediate';
@@ -145,6 +146,16 @@ export function LaunchSafetyModal({
                   </span>
                 </div>
               </div>
+
+              {/* Consent info */}
+              {noConsentCount > 0 && (
+                <div className="p-3 bg-emerald-500/[0.04] border border-emerald-500/15 rounded-xl flex items-start gap-2.5 mt-1">
+                  <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-emerald-700/90 leading-relaxed font-medium">
+                    {noConsentCount.toLocaleString()} contact{noConsentCount !== 1 ? 's' : ''} without consent excluded. Only opted-in recipients who have messaged your business will receive this broadcast.
+                  </p>
+                </div>
+              )}
 
               {/* Warning Alert */}
               <div className="p-3 bg-amber-500/[0.04] border border-amber-500/15 rounded-xl flex items-start gap-2.5 mt-1 mb-5">

@@ -7,6 +7,7 @@ export interface EstimateResult {
   duplicatesRemoved: number;
   optOutsRemoved: number;
   invalidRemoved: number;
+  noConsentRemoved: number;
   spamRisk: 'LOW' | 'MEDIUM' | 'HIGH';
 }
 
@@ -16,13 +17,14 @@ export class AudienceEstimatorService {
    */
   static async estimateAudience(tenantId: string, audience: AudienceState): Promise<EstimateResult> {
     const resolved = await AudienceEngineService.resolveAudience(tenantId, audience);
-    
+
     return {
-      total: resolved.total + resolved.duplicatesRemoved + resolved.optedOutRemoved + resolved.invalidRemoved,
+      total: resolved.total + resolved.duplicatesRemoved + resolved.optedOutRemoved + resolved.invalidRemoved + resolved.noConsentRemoved,
       eligibleRecipients: resolved.total,
       duplicatesRemoved: resolved.duplicatesRemoved,
       optOutsRemoved: resolved.optedOutRemoved,
       invalidRemoved: resolved.invalidRemoved,
+      noConsentRemoved: resolved.noConsentRemoved,
       spamRisk: resolved.spamRisk
     };
   }

@@ -6,8 +6,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { Phone, MessageCircle, Wifi, Star, Clock, Users, CalendarClock, ArrowRight, RefreshCw } from 'lucide-react';
+import { Phone, MessageCircle, Wifi, Star, Clock, Users, CalendarClock, ArrowRight, RefreshCw, Layers } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
+import type { RestaurantSlot } from '@/lib/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface EnrichedBooking {
@@ -270,9 +271,70 @@ function Section({ title, icon, children, action }: {
   );
 }
 
+// ─── Live Capacity Bar ────────────────────────────────────────────────────────
+function LiveCapacitySection({ slots }: { slots: RestaurantSlot[] }) {
+  if (slots.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      {slots.map(slot => {
+        const total     = slot.total_capacity;
+        const remaining = slot.remaining_capacity ?? total;
+        const booked    = total - remaining;
+        const pct       = total > 0 ? Math.round((booked / total) * 100) : 0;
+        const isFull    = remaining === 0;
+        const isNearFull = pct >= 90 && !isFull;
+
+        const barColor = isFull
+          ? 'bg-destructive'
+          : isNearFull
+            ? 'bg-amber-500'
+            : pct >= 60
+              ? 'bg-amber-400'
+              : 'bg-emerald-500';
+
+        const textColor = isFull
+          ? 'text-destructive'
+          : isNearFull
+            ? 'text-amber-600 dark:text-amber-400'
+            : 'text-muted-foreground';
+
+        return (
+          <div key={slot.id} className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-foreground w-20 shrink-0 tabular-nums">
+              {fmt(slot.slot_time)}
+            </span>
+
+            {/* Progress bar */}
+            <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+                style={{ width: `${Math.min(pct, 100)}%` }}
+              />
+            </div>
+
+            {/* Counts */}
+            <div className={`flex items-center gap-1.5 shrink-0 text-xs tabular-nums ${textColor}`}>
+              {isFull ? (
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-destructive/10 text-destructive border border-destructive/20">
+                  FULL
+                </span>
+              ) : (
+                <span className="font-semibold">{remaining} left</span>
+              )}
+              <span className="text-muted-foreground/50">/ {total}</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export function RestaurantOverviewClient() {
   const [data, setData]         = useState<OverviewData | null>(null);
+  const [slots, setSlots]       = useState<RestaurantSlot[]>([]);
   const [loading, setLoading]   = useState(true);
   const [now, setNow]           = useState(getISTTimeStr());
   const [isLive, setIsLive]     = useState(false);
@@ -285,10 +347,16 @@ export function RestaurantOverviewClient() {
 
   const load = useCallback(async () => {
     try {
-      const res  = await fetch('/api/restaurant/overview');
-      if (!res.ok) throw new Error('Failed to load');
-      const json = await res.json();
+      const today = getISTDateStr();
+      const [overviewRes, slotsRes] = await Promise.all([
+        fetch('/api/restaurant/overview'),
+        fetch(`/api/restaurant/slots?date=${today}`),
+      ]);
+      if (!overviewRes.ok) throw new Error('Failed to load');
+      const json      = await overviewRes.json();
+      const slotsJson = slotsRes.ok ? await slotsRes.json() : { data: [] };
       setData(json);
+      setSlots(slotsJson.data ?? []);
       if (json.tenantId && !tenantId) setTenantId(json.tenantId);
     } catch (err) {
       toast.error((err as Error).message);
@@ -396,7 +464,23 @@ export function RestaurantOverviewClient() {
         )}
       </div>
 
-      {/* ── Section 2: Arriving Next ── */}
+      {/* ── Section 2: Live Capacity ── */}
+      {!loading && slots.length > 0 && (
+        <Section title="Live Capacity" icon={<Layers className="size-3.5" />}>
+          <Card className="bg-card border-border shadow-none rounded-xl">
+            <CardContent className="p-5">
+              <LiveCapacitySection slots={slots} />
+            </CardContent>
+          </Card>
+        </Section>
+      )}
+      {loading && (
+        <Section title="Live Capacity" icon={<Layers className="size-3.5" />}>
+          <Skeleton className="h-24 rounded-xl" />
+        </Section>
+      )}
+
+      {/* ── Section 3: Arriving Next ── */}
       <Section
         title="Arriving Next"
         icon={<Clock className="size-3.5" />}
@@ -411,7 +495,7 @@ export function RestaurantOverviewClient() {
         )}
       </Section>
 
-      {/* ── Section 3: Today's Timeline ── */}
+      {/* ── Section 4: Today's Timeline ── */}
       <Section
         title="Today's Timeline"
         icon={<CalendarClock className="size-3.5" />}
