@@ -318,8 +318,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     const idleMs = Date.now() - new Date(existingConv.last_message_at as string).getTime();
     if (idleMs > SESSION_EXPIRY_MS) {
       sessionExpired = true;
-      // Re-activate instead of deactivating → all messages stay in one thread
-      void supabaseAdmin.from('conversations')
+      // Re-activate instead of deactivating → all messages stay in one thread.
+      // Awaited: if this write dies, the conversation stays is_active=false and
+      // vanishes from the sidebar (it filters on is_active).
+      await supabaseAdmin.from('conversations')
         .update({ is_active: true })
         .eq('id', existingConv.id);
       console.log(`⏰ Session was expired for ${cleanPhone} (idle ${Math.round(idleMs / 3600000)}h) — reactivating existing conversation ${existingConv.id}`);
@@ -383,7 +385,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         const idx = counter % pool.length;
         assignedMember = pool[idx];
         assignedTo = pool[idx].id;
-        void supabaseAdmin
+        // Awaited: if the counter write dies, round-robin sticks on one agent
+        await supabaseAdmin
           .from('tenants')
           .update({ lead_assignment_counter: counter + 1 })
           .eq('id', tenant.id);
@@ -526,7 +529,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   if (activeExistingConv) {
     conversation = activeExistingConv;
-    void supabaseAdmin
+    await supabaseAdmin
       .from('conversations')
       .update({ last_message_at: new Date().toISOString(), is_active: true })
       .eq('id', activeExistingConv.id);
@@ -673,16 +676,16 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   console.log(`✅ Inbound message saved: "${content.slice(0, 100)}" from ${cleanPhone}`);
   perf('msg_inserted');
 
-  // Increment message counter (non-blocking — counter accuracy doesn't need to delay the reply)
-  void supabaseAdmin.rpc('increment_message_count_conv', { conv_id: conversation.id });
-
-  // Update conversation last_message_at for UI responsiveness.
-  // Awaited — `void` fire-and-forget dies when the serverless function freezes,
-  // which left the sidebar showing stale timestamps for hours.
-  await supabaseAdmin
-    .from('conversations')
-    .update({ last_message_at: new Date().toISOString() })
-    .eq('id', conversation.id);
+  // Message counter + last_message_at, in parallel. Both awaited — `void`
+  // fire-and-forget dies when the serverless function freezes, which left
+  // counters drifting and the sidebar showing stale timestamps for hours.
+  await Promise.all([
+    supabaseAdmin.rpc('increment_message_count_conv', { conv_id: conversation.id }),
+    supabaseAdmin
+      .from('conversations')
+      .update({ last_message_at: new Date().toISOString() })
+      .eq('id', conversation.id),
+  ]);
 
   // 9. Fire Outbound Integration Webhook
   // SSRF guard: only fire to public HTTPS hosts. Blocks cloud-metadata,
@@ -1268,8 +1271,11 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     return;
   }
 
-  // 13b. Increment AI conversation counter (non-blocking)
-  void supabaseAdmin.rpc('increment_ai_conversations', { p_tenant_id: tenant.id });
+  // 13b. Increment AI conversation counter. AWAITED — this counter feeds the
+  // AI cost cap (ai_conversations_this_month vs ai_conversation_limit). A
+  // fire-and-forget write that dies on serverless freeze undercounts usage
+  // and lets tenants blow past their AI budget.
+  await supabaseAdmin.rpc('increment_ai_conversations', { p_tenant_id: tenant.id });
 
   // 14. Payment Links Injection
   if (aiResponse.extractedData?.requestPayment === 'true') {
@@ -1585,7 +1591,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     const newScore = scoreMap[aiResponse.intent] ?? (lead.lead_score as number);
     const newStatus = newScore >= 80 ? 'hot' : newScore >= 50 ? 'warm' : 'cold';
 
-    void supabaseAdmin
+    // Awaited: if this dies, lead temperature (hot/warm/cold) silently never updates
+    await supabaseAdmin
       .from('leads')
       .update({ lead_score: newScore, lead_status: newStatus })
       .eq('id', lead.id);
@@ -2075,8 +2082,9 @@ async function handleIncomingReaction(msg: NonNullable<ReturnType<typeof parseMe
   } else {
     console.log(`👍 Meta Webhook reaction: successfully updated reaction for message ${updated[0].id}`);
     
-    // Update conversation last_message_at for UI responsiveness
-    void supabaseAdmin
+    // Update conversation last_message_at for UI responsiveness (awaited —
+    // void writes die on serverless freeze)
+    await supabaseAdmin
       .from('conversations')
       .update({ last_message_at: new Date().toISOString() })
       .eq('id', updated[0].conversation_id);
