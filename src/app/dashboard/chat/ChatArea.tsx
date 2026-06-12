@@ -1627,7 +1627,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.9, y: 4 }}
                   transition={{ duration: 0.12 }}
-                  className="absolute bottom-12 right-0 z-50 bg-card border border-border rounded-2xl shadow-2xl overflow-hidden w-[300px]"
+                  className="absolute bottom-12 right-0 z-50 bg-white dark:bg-[#1C2333] border border-black/10 dark:border-white/10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.18)] overflow-hidden w-[300px]"
                 >
                   {/* Header */}
                   <div className="px-3 pt-2.5 pb-1.5 border-b border-border">
@@ -1635,7 +1635,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                   </div>
 
                   {/* Category tabs */}
-                  <div className="flex border-b border-border bg-muted/30">
+                  <div className="flex border-b border-black/[0.06] dark:border-white/[0.06] bg-black/[0.03] dark:bg-white/[0.03]">
                     {EMOJI_CATEGORIES.map((cat, i) => (
                       <button
                         key={cat.name}
@@ -1644,8 +1644,8 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                         className={cn(
                           'flex-1 py-1.5 text-[15px] transition-colors',
                           i === emojiCategory
-                            ? 'bg-card border-b-2 border-indigo-500'
-                            : 'hover:bg-muted/60 text-muted-foreground/60'
+                            ? 'bg-white dark:bg-[#1C2333] border-b-2 border-[#00A884]'
+                            : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.05] opacity-60'
                         )}
                       >{cat.label}</button>
                     ))}
