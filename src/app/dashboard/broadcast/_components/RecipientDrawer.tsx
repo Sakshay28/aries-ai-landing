@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Search, Check, FileText, RotateCcw, AlertTriangle, Users } from 'lucide-react';
-import { List } from 'react-window';
+import { List, type RowComponentProps } from 'react-window';
 import { RecipientRecord } from '@/lib/broadcast/services/broadcast-recipient.service';
 import toast from 'react-hot-toast';
 
@@ -391,7 +391,7 @@ export function RecipientDrawer({
   };
 
   // Virtual Row wrapper
-  const VirtualRow = ({ index, style }: { index: number; style: React.CSSProperties }) => {
+  const VirtualRow = ({ index, style }: RowComponentProps) => {
     const item = allListItems[index];
     if (!item) return null;
     return (
@@ -538,15 +538,13 @@ export function RecipientDrawer({
                 </div>
               ) : shouldVirtualize ? (
                 <List
-                  height={500}
-                  itemCount={allListItems.length}
-                  itemSize={82}
-                  width="100%"
+                  rowComponent={VirtualRow}
+                  rowCount={allListItems.length}
+                  rowHeight={82}
+                  rowProps={{}}
                   className="custom-scrollbar"
                   style={{ height: '100%' }}
-                >
-                  {VirtualRow}
-                </List>
+                />
               ) : (
                 <div className="divide-y divide-border/30 overflow-y-auto h-full custom-scrollbar">
                   {allListItems.map(item => (

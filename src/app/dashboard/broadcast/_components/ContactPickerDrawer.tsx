@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, Check, Filter, User, Tag, Star, Users } from 'lucide-react';
-import { List } from 'react-window';
+import { List, type RowComponentProps } from 'react-window';
 import { useDebounceCallback } from '../hooks/useDebounce';
 
 interface Contact {
@@ -130,7 +130,7 @@ export function ContactPickerDrawer({
   };
 
   // React Window row renderer
-  const Row = ({ index, style }: { index: number; style: React.CSSProperties }) => {
+  const Row = ({ index, style }: RowComponentProps) => {
     const contact = contacts[index];
     const isChecked = tempSelected.has(contact.id);
 
@@ -306,15 +306,13 @@ export function ContactPickerDrawer({
                 </div>
               ) : (
                 <List
-                  height={500}
-                  itemCount={contacts.length}
-                  itemSize={54}
-                  width="100%"
+                  rowComponent={Row}
+                  rowCount={contacts.length}
+                  rowHeight={54}
+                  rowProps={{}}
                   className="custom-scrollbar"
                   style={{ height: '100%', outline: 'none' }}
-                >
-                  {Row}
-                </List>
+                />
               )}
             </div>
 

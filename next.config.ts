@@ -80,7 +80,9 @@ const csp = [
 ].join('; ') + ';';
 
 const nextConfig: NextConfig = {
-  typescript: { ignoreBuildErrors: true },
+  // Type errors BLOCK deploys. Do not re-enable ignoreBuildErrors — it shipped
+  // a broken contact picker (react-window v1 props on v2) and masked the
+  // failure_reason schema bug that silently dropped all AI replies for 3 days.
   async headers() {
     return [{
       source: '/(.*)',
