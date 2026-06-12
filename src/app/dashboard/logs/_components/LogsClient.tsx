@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Terminal, Activity, AlertCircle, CheckCircle2, Clock, Search, Filter } from 'lucide-react';
-import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 
 interface LogEvent {
   id: string;
@@ -17,23 +16,33 @@ interface LogEvent {
 export function LogsClient() {
   const [logs, setLogs] = useState<LogEvent[]>([]);
   const [loading, setLoading] = useState(true);
-  const supabase = createBrowserSupabaseClient();
 
   useEffect(() => {
     const fetchLogs = async () => {
-      // Fetch recent messages as logs
-      const { data } = await supabase
-        .from('messages')
-        .select('id, created_at, status, direction, content, error_message')
-        .order('created_at', { ascending: false })
-        .limit(100);
-        
-      setLogs(data || []);
-      setLoading(false);
+      // Fetch via the tenant-scoped API route (server enforces tenant_id).
+      // Never query `messages` directly from the browser — without it being
+      // scoped server-side, that would expose every tenant's messages.
+      try {
+        const res = await fetch('/api/dashboard/logs');
+        const json = await res.json();
+        const rows = (json?.data || []).map((r: any) => ({
+          id: r.id,
+          created_at: r.timestamp ?? r.created_at,
+          status: r.status,
+          direction: r.direction,
+          content: r.message ?? r.content,
+          error_message: r.error_message,
+        }));
+        setLogs(rows);
+      } catch {
+        setLogs([]);
+      } finally {
+        setLoading(false);
+      }
     };
-    
+
     fetchLogs();
-  }, [supabase]);
+  }, []);
 
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-hidden">
