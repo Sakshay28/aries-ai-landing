@@ -139,9 +139,26 @@ export async function cacheSet(key: string, value: string, ttlSeconds: number): 
 
 // ═══════════════════════════════════════
 // RATE LIMITING — Redis sliding window (INCR + EXPIRE)
-// Falls back to allow-all when Redis unavailable (Vercel dev / cold start)
+// Falls back to in-memory counters when Redis unavailable.
+// NOTE: In-memory fallback is per-instance on Vercel serverless — not globally
+// enforced across all instances, but still catches burst attacks on warm instances.
 // Key convention: tenant:{tenantId}:rl:{action}  or  rl:{action}:{identifier}
 // ═══════════════════════════════════════
+
+// In-memory fallback — per-instance only, populated when Redis is unavailable
+const _memRl = new Map<string, { count: number; resetAt: number }>();
+
+function _memRateLimit(key: string, maxRequests: number, windowSeconds: number): { allowed: boolean; remaining: number } {
+  const now = Date.now();
+  const entry = _memRl.get(key);
+  if (!entry || now > entry.resetAt) {
+    _memRl.set(key, { count: 1, resetAt: now + windowSeconds * 1000 });
+    return { allowed: true, remaining: maxRequests - 1 };
+  }
+  entry.count += 1;
+  const remaining = Math.max(0, maxRequests - entry.count);
+  return { allowed: entry.count <= maxRequests, remaining };
+}
 
 export async function checkRedisRateLimit(
   key: string,
@@ -150,8 +167,8 @@ export async function checkRedisRateLimit(
 ): Promise<{ allowed: boolean; remaining: number }> {
   const redis = getRedisClient();
   if (!redis) {
-    // Redis unavailable — fail open (do not block real traffic)
-    return { allowed: true, remaining: maxRequests };
+    // Redis unavailable — apply in-memory limit as a per-instance safeguard
+    return _memRateLimit(key, maxRequests, windowSeconds);
   }
   try {
     const redisKey = `rl:${key}`;
@@ -163,9 +180,9 @@ export async function checkRedisRateLimit(
     const remaining = Math.max(0, maxRequests - count);
     return { allowed: count <= maxRequests, remaining };
   } catch (err) {
-    // Redis error — fail open, log for visibility
-    console.warn('⚠️ Rate limit Redis error (failing open):', (err as Error).message);
-    return { allowed: true, remaining: maxRequests };
+    // Redis error — fall back to in-memory limit
+    console.warn('⚠️ Rate limit Redis error (using in-memory fallback):', (err as Error).message);
+    return _memRateLimit(key, maxRequests, windowSeconds);
   }
 }
 

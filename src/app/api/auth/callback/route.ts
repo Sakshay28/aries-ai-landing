@@ -134,7 +134,7 @@ export async function GET(req: NextRequest) {
       metadata: { email: user.email, source: 'google_oauth', plan: 'starter' },
     });
 
-    console.log(`🎉 New OAuth signup: ${businessName} (${user.email})`);
+    console.log(`🎉 New OAuth signup: ${businessName}`);
     // Send new users to onboarding wizard, not dashboard
     return applySessionCookies(NextResponse.redirect(`${origin}/onboard`));
   } catch (err) {

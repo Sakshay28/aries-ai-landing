@@ -1,14 +1,13 @@
 // ═══════════════════════════════════════════════════════════
 // 🔐 Auth API — Login
 // ═══════════════════════════════════════════════════════════
-// Auth via plain @supabase/supabase-js (returns tokens), then
-// the client uses setSession() to install cookies via the SSR
-// browser client. This avoids any cookie-propagation issues
-// across response boundaries.
+// Uses @supabase/ssr createServerClient so that the session
+// is written as httpOnly cookies, never exposed in the
+// response body. Tokens in JSON bodies are XSS-stealable.
 // ═══════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createServerClient } from '@supabase/ssr';
 import { env } from '@/lib/env';
 import { checkRedisRateLimit } from '@/lib/redis/client';
 
@@ -24,9 +23,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Brute-force protection: 10 attempts per IP per 15 minutes.
-    // Applied before the Supabase call so failed credential stuffing
-    // attacks don't rack up Supabase auth attempts or waste DB queries.
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+    const ip = req.headers.get('x-vercel-forwarded-for')?.split(',')[0]?.trim()
+             || req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+             || 'unknown';
     const ipLimit = await checkRedisRateLimit(`login:ip:${ip}`, 10, 900);
     if (!ipLimit.allowed) {
       return NextResponse.json(
@@ -35,8 +34,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Secondary per-email limit: 5 attempts per 15 min per email — catches
-    // distributed attacks from many IPs targeting one account.
+    // Secondary per-email limit: 5 attempts per 15 min per email.
     const emailKey = email.toLowerCase().replace(/[^a-z0-9@._-]/g, '');
     const emailLimit = await checkRedisRateLimit(`login:email:${emailKey}`, 5, 900);
     if (!emailLimit.allowed) {
@@ -46,10 +44,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supabase = createClient(
+    type CookieEntry = { name: string; value: string; options: Record<string, unknown> };
+    const pendingCookies: CookieEntry[] = [];
+
+    const supabase = createServerClient(
       env.NEXT_PUBLIC_SUPABASE_URL,
       env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      { auth: { persistSession: false } }
+      {
+        cookies: {
+          getAll() {
+            return req.cookies.getAll();
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              pendingCookies.push({ name, value, options: options as Record<string, unknown> });
+            });
+          },
+        },
+      }
     );
 
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -61,16 +73,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log(`✅ Login: ${email}`);
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       data: {
         userId: data.user.id,
         email: data.user.email,
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
       },
     });
+
+    // Write session as httpOnly cookies — tokens never appear in the response body
+    pendingCookies.forEach(({ name, value, options }) => {
+      response.cookies.set(name, value, {
+        ...options,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax' as const,
+        path: (options?.path as string) ?? '/',
+      });
+    });
+
+    return response;
   } catch (err) {
     console.error('❌ Login error:', err);
     return NextResponse.json(

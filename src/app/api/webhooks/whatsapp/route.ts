@@ -130,9 +130,14 @@ export async function POST(req: NextRequest) {
       return new Response('Unauthorized', { status: 401 });
     }
   } else {
-    // No secret configured — log once and continue processing.
-    // This is less secure but keeps the bot functional.
-    console.warn('⚠️ META_APP_SECRET not set and no per-tenant wa_app_secret found — skipping signature verification. Set META_APP_SECRET in Vercel env vars for security.');
+    // No secret configured at all.
+    // In production, reject unsigned requests — a missing secret is a misconfiguration,
+    // not an expected operating mode. In development, warn and continue.
+    if (process.env.NODE_ENV === 'production') {
+      console.error('❌ Meta Webhook: META_APP_SECRET not set and no per-tenant wa_app_secret found — rejecting unsigned request in production.');
+      return new Response('Unauthorized', { status: 401 });
+    }
+    console.warn('⚠️ META_APP_SECRET not set — skipping signature verification (development only). Set META_APP_SECRET in Vercel env vars.');
   }
 
   // Parse Meta Payload

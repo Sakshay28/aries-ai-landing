@@ -57,7 +57,8 @@ export async function POST(req: NextRequest) {
     const response = NextResponse.json({
       success: true,
       data: {
-        session: data.session,
+        userId: data.session.user.id,
+        email: data.session.user.email,
       },
     });
 
@@ -72,7 +73,7 @@ export async function POST(req: NextRequest) {
       });
     });
 
-    console.log(`✅ Server-side OTP login success: ${email}`);
+    console.log('✅ Server-side OTP login success');
     return response;
   } catch (err) {
     console.error('❌ verify-otp API error:', err);

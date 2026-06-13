@@ -29,7 +29,9 @@ const signupSchema = z.object({
 // ═══════════════════════════════════════
 export async function POST(req: NextRequest) {
   try {
-    const ip = req.headers.get('x-forwarded-for') || 'unknown-ip';
+    const ip = req.headers.get('x-vercel-forwarded-for')?.split(',')[0]?.trim()
+             || req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+             || 'unknown-ip';
     const rateLimit = await checkRedisRateLimit(`signup:${ip}`, 5, 3600); // 5 attempts per hour per IP
     if (!rateLimit.allowed) {
       return NextResponse.json({ success: false, error: 'Too many signup attempts. Try again later.' }, { status: 429 });
@@ -175,7 +177,7 @@ export async function POST(req: NextRequest) {
       metadata: { email, plan: selectedPlan, verificationSent },
     }).then(({ error: e }) => { if (e) console.warn('analytics_events insert failed (non-fatal):', e.message); });
 
-    console.log(`🎉 New signup: ${businessName} (${email}) — ${selectedPlan} plan — verification sent: ${verificationSent}`);
+    console.log(`🎉 New signup: ${businessName} — ${selectedPlan} plan — verification sent: ${verificationSent}`);
 
     return NextResponse.json({
       success: true,

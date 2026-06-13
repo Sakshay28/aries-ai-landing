@@ -58,8 +58,25 @@ const ALLOWED_MIME_TYPES = new Set([
   'text/plain', 'text/csv',
   // Archives
   'application/zip', 'application/x-rar-compressed', 'application/x-zip-compressed',
-  'application/octet-stream', // fallback for unknown
+  // Note: application/octet-stream is intentionally excluded — callers must send a real MIME type
 ]);
+
+// Byte sequences that always identify a dangerous file, regardless of claimed MIME type
+const DANGEROUS_SIGNATURES = [
+  [0x7F, 0x45, 0x4C, 0x46],  // ELF  (Linux/Unix executable)
+  [0x4D, 0x5A],               // MZ   (Windows PE/EXE/DLL)
+  [0xCE, 0xFA, 0xED, 0xFE],  // Mach-O 32-bit (macOS executable)
+  [0xCF, 0xFA, 0xED, 0xFE],  // Mach-O 64-bit (macOS executable)
+  [0x23, 0x21],               // #!   (shell script shebang)
+  [0x3C, 0x3F, 0x70, 0x68],  // <?ph (PHP script)
+  [0x3C, 0x73, 0x63, 0x72],  // <scr (HTML <script> tag)
+] as const;
+
+function hasDangerousSignature(bytes: Uint8Array): boolean {
+  return DANGEROUS_SIGNATURES.some(sig =>
+    sig.every((byte, i) => bytes[i] === byte)
+  );
+}
 
 // ── Upload handler ────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
@@ -85,10 +102,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: `File too large. Max size is 50 MB.` }, { status: 413 });
     }
 
-    // Determine MIME type (use detected type or file.type fallback)
-    const mimeType = file.type || 'application/octet-stream';
-    if (!ALLOWED_MIME_TYPES.has(mimeType)) {
-      console.warn(`[upload] Unrecognized mime type: ${mimeType}, allowing as octet-stream`);
+    // Validate claimed MIME type against the allowlist
+    const mimeType = file.type || '';
+    if (!mimeType || !ALLOWED_MIME_TYPES.has(mimeType)) {
+      return NextResponse.json({ success: false, error: `File type not allowed: ${mimeType || 'unknown'}` }, { status: 400 });
     }
 
     // Verify conversation belongs to this tenant and get recipient details
@@ -119,8 +136,15 @@ export async function POST(req: NextRequest) {
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const storagePath = `${tenantId}/${conversationId}/${timestamp}_${safeName}`;
 
-    // Upload to Supabase Storage
+    // Magic-byte verification — detect dangerous executables regardless of claimed MIME type
     const fileBuffer = await file.arrayBuffer();
+    const headerBytes = new Uint8Array(fileBuffer.slice(0, 16));
+    if (hasDangerousSignature(headerBytes)) {
+      console.warn(`[upload] Dangerous file blocked: ${file.name} (claimed: ${mimeType})`);
+      return NextResponse.json({ success: false, error: 'File type not allowed' }, { status: 400 });
+    }
+
+    // Upload to Supabase Storage
     const { data: uploadData, error: uploadErr } = await supabaseAdmin.storage
       .from('chat-attachments')
       .upload(storagePath, fileBuffer, {

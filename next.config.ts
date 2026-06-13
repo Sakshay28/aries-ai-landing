@@ -72,7 +72,7 @@ const scriptSrc = `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" :
 const csp = [
   "default-src 'self'",
   scriptSrc,
-  "connect-src 'self' https://api.razorpay.com https://*.supabase.co wss://*.supabase.co wss://* https://graph.facebook.com https://www.facebook.com",
+  "connect-src 'self' https://api.razorpay.com https://*.supabase.co wss://*.supabase.co https://graph.facebook.com https://www.facebook.com",
   "frame-src 'self' https://js.stripe.com https://checkout.razorpay.com https://www.facebook.com",
   "img-src 'self' data: https: blob:",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
@@ -91,6 +91,7 @@ const nextConfig: NextConfig = {
         { key: 'X-Content-Type-Options', value: 'nosniff' },
         { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+        { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
         { key: 'Content-Security-Policy', value: csp },
       ],
     }];

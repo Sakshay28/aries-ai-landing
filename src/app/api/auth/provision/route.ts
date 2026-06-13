@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
       metadata: { email, source: 'otp_provision', plan: 'starter' },
     });
 
-    console.log(`🎉 New OTP Signup Provisioned: ${finalBusinessName} (${email})`);
+    console.log(`🎉 New OTP Signup Provisioned: ${finalBusinessName}`);
 
     return NextResponse.json({ success: true, tenantId: tenant.id });
   } catch (err) {

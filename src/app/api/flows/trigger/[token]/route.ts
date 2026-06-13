@@ -42,15 +42,20 @@ export async function POST(
     return NextResponse.json({ error: 'Flow does not have a webhook_trigger node' }, { status: 400 });
   }
 
-  // 2. Optional secret validation
+  // 2. Secret validation — required. Flows without a configured secret are
+  // rejected to prevent unauthenticated callers from triggering flows.
   const expectedSecret = webhookNode.data?.secret as string | undefined;
-  if (expectedSecret) {
-    const providedSecret =
-      req.headers.get('x-aries-secret') ||
-      req.headers.get('authorization')?.replace('Bearer ', '');
-    if (providedSecret !== expectedSecret) {
-      return NextResponse.json({ error: 'Invalid secret' }, { status: 401 });
-    }
+  if (!expectedSecret) {
+    return NextResponse.json(
+      { error: 'This flow has no webhook secret configured. Add a secret to the webhook_trigger node before enabling external access.' },
+      { status: 403 }
+    );
+  }
+  const providedSecret =
+    req.headers.get('x-aries-secret') ||
+    req.headers.get('authorization')?.replace('Bearer ', '');
+  if (!providedSecret || providedSecret !== expectedSecret) {
+    return NextResponse.json({ error: 'Invalid or missing secret' }, { status: 401 });
   }
 
   // 3. Parse body — phone is required; variables are optional extra data
@@ -113,18 +118,5 @@ export async function POST(
   }
 }
 
-// Allow GET for testing / health check
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ token: string }> }
-) {
-  const { token: flowId } = await params;
-  const { data: flow } = await supabaseAdmin
-    .from('automation_flows')
-    .select('id, name, is_active')
-    .eq('id', flowId)
-    .single();
-
-  if (!flow) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  return NextResponse.json({ ok: true, flowName: flow.name, active: flow.is_active });
-}
+// GET is intentionally removed — exposing flow names and active status
+// to unauthenticated callers leaks internal automation topology.

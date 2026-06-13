@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log(`📧 OTP sent via Resend to ${email}`);
+    console.log('📧 OTP sent via Resend');
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('send-otp route error:', err);

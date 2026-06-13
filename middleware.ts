@@ -124,7 +124,7 @@ export async function middleware(request: NextRequest) {
     });
   };
 
-  if (isProtected && !user && !pathname.startsWith('/dashboard/restaurant')) {
+  if (isProtected && !user) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('redirect', pathname);
     const redirectResponse = NextResponse.redirect(loginUrl);

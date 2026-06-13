@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { sendWhatsAppMessage } from '@/lib/whatsapp/sendMessage';
+import { checkRedisRateLimit } from '@/lib/redis/client';
 import { z } from 'zod';
 
 const TestSchema = z.object({
@@ -28,6 +29,12 @@ export async function POST(req: NextRequest) {
     }
 
     const { campaignId, phoneNumber } = parsed.data;
+
+    // Rate-limit test sends: 10 per tenant per hour to prevent quota abuse
+    const rl = await checkRedisRateLimit(`broadcast:test:${tenantId}`, 10, 3600);
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Test send rate limit reached (10/hour). Try again later.' }, { status: 429 });
+    }
 
     // 2. Fetch campaign and verify tenant scope
     const { data: campaign, error: campaignErr } = await supabaseAdmin

@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getRedisClient } from '@/lib/redis/client';
 
@@ -60,7 +60,15 @@ async function checkDLQBacklog(): Promise<ServiceStatus> {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret) {
+    const auth = req.headers.get('authorization');
+    if (auth !== `Bearer ${cronSecret}`) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+  }
+
   const [db, redis, worker, dlq] = await Promise.all([
     checkDB(),
     checkRedis(),

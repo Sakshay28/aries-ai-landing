@@ -26,7 +26,11 @@ const COLUMNS = [
 
 function escapeCSV(val: unknown): string {
   if (val === null || val === undefined) return '';
-  const str = String(val);
+  let str = String(val);
+  // Strip formula injection prefixes — Excel/LibreOffice execute these as formulas
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
   // Wrap in quotes if contains comma, newline, or quote
   if (str.includes(',') || str.includes('\n') || str.includes('"')) {
     return `"${str.replace(/"/g, '""')}"`;

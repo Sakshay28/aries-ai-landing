@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAI } from '@/lib/ai/client';
+import { getTenantId } from '@/lib/auth/getTenantId';
 
 export async function POST(req: NextRequest) {
   try {
+    const tenantId = await getTenantId();
+    if (!tenantId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { text } = await req.json();
 
     if (!text?.trim()) {
