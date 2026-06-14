@@ -10,22 +10,41 @@ export async function GET(req: NextRequest) {
     }
     const tenantId = me.tenant_id;
 
-    const { data: convos, error: convErr } = await supabaseAdmin
+    // IMPORTANT: do NOT filter on is_active here.
+    // The nightly cron (/api/cron/timeout → processStaleConversations) flips every
+    // conversation with no message in the last 24h to is_active=false. Filtering the
+    // inbox on is_active therefore made entire chat histories vanish after one quiet
+    // day. We keep every conversation visible and de-duplicate by contact below so the
+    // empty merge-duplicate rows (0 messages) don't clutter the list.
+    const { data: rawConvos, error: convErr } = await supabaseAdmin
       .from('conversations')
       .select('id, last_message_at, is_active, bot_paused, sender_id, lead_id, escalated')
       .eq('tenant_id', tenantId)
-      .eq('is_active', true)  // Only show active conversations — hides old closed/duplicate threads
       .order('last_message_at', { ascending: false, nullsFirst: false })
-      .limit(100);  // Increased from 50 — businesses with many contacts need full visibility
+      .limit(300);  // fetch wide; collapsed to one thread per contact (≤100) below
 
     if (convErr) {
       console.error('Conversations fetch error:', convErr);
       return NextResponse.json({ success: false, error: convErr.message }, { status: 500 });
     }
 
-    if (!convos || convos.length === 0) {
-      return NextResponse.json({ success: true, conversations: [] });
+    if (!rawConvos || rawConvos.length === 0) {
+      return NextResponse.json({ success: true, conversations: [], tenantId, me: { id: me.id } });
     }
+
+    // ── Collapse to one thread per contact ────────────────────────────────────
+    // Rows are already sorted newest-first, so the first time we see a sender_id is
+    // its freshest (canonical) thread — which is also the row that carries the merged
+    // message history. Older empty duplicates for the same contact drop out.
+    const seenSender = new Set<string>();
+    const convos = rawConvos
+      .filter((c: any) => {
+        const key = c.sender_id || c.id;
+        if (seenSender.has(key)) return false;
+        seenSender.add(key);
+        return true;
+      })
+      .slice(0, 100);
 
     const convIds = convos.map((c: any) => c.id);
 
@@ -42,11 +61,10 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // ── Batch-fetch latest message per conversation ─────────────────────────
-    // Fetch with a hard cap so the query never returns 50k+ rows.
-    // The newest row per conversation also provides the authoritative timestamp —
-    // conversations.last_message_at can lag (it's updated separately in the
-    // webhook), so we self-heal stale values from the messages table here.
+    // ── Batch-fetch latest message per conversation (for previews) ────────────
+    // Scoped to the displayed conversations. The cap keeps the payload bounded; on a
+    // very high-volume tenant an old low-traffic thread may fall outside the window
+    // and show no preview, but it still appears in the list and opens with full history.
     const lastMsgMap: Record<string, { preview: string; at: string }> = {};
     const { data: previewMsgs } = await supabaseAdmin
       .from('messages')
@@ -54,7 +72,7 @@ export async function GET(req: NextRequest) {
       .in('conversation_id', convIds)
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
-      .limit(Math.min(convIds.length * 3, 300));
+      .limit(1000);
 
     const MEDIA_LABELS: Record<string, string> = {
       image: '📷 Photo', video: '🎥 Video', audio: '🎵 Audio',
