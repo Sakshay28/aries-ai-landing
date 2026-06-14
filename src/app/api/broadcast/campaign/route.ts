@@ -19,6 +19,7 @@ const campaignSaveSchema = z.object({
     retargetCondition: z.string().optional(),
     retargetDelayDays: z.number().optional(),
     manualContactIds: z.array(z.string()).optional(),
+    excludedContactIds: z.array(z.string()).optional(),
     csvFile: z.any().nullable().optional(),
   }).optional(),
   delivery: z.object({
@@ -211,6 +212,7 @@ export async function POST(req: NextRequest) {
           retargetCondition: audience.retargetCondition || 'unread',
           retargetDelayDays: audience.retargetDelayDays || 1,
           manualContactIds: audience.manualContactIds || [],
+          excludedContactIds: audience.excludedContactIds || [],
           csvFile: audience.csvFile || null
         }
       };

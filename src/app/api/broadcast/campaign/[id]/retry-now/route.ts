@@ -63,7 +63,8 @@ export async function POST(
     // even when CRON_SECRET is not configured in Vercel.
     after(async () => {
       try {
-        const processed = await BroadcastEngineService.processQueue(50);
+        // forceNow=true: operator explicitly asked to send now — bypass quiet-hours deferral.
+        const processed = await BroadcastEngineService.processQueue(50, true);
         console.log(`[RETRY_NOW] Processed ${processed} items`);
 
         // Chain more if needed

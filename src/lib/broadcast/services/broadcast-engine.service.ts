@@ -55,6 +55,7 @@ export class BroadcastEngineService {
         retargetCondition: audienceConfig.filters?.retargetCondition || 'unread',
         retargetDelayDays: audienceConfig.filters?.retargetDelayDays || 1,
         manualContactIds: audienceConfig.filters?.manualContactIds || [],
+        excludedContactIds: audienceConfig.filters?.excludedContactIds || [],
         csvFile: audienceConfig.filters?.csvFile || null,
       });
 
@@ -333,9 +334,10 @@ export class BroadcastEngineService {
               continue;
             }
 
-            // Quiet hours enforcement: skip sends between 9 PM and 9 AM in campaign timezone
+            // Quiet hours enforcement: skip sends between 9 PM and 9 AM in campaign timezone.
+            // forceNow (operator-initiated "Retry Now") is an explicit override — send immediately.
             const dSettings = deliverySettingsCache.get(item.campaign_id);
-            if (dSettings?.quiet_hours) {
+            if (dSettings?.quiet_hours && !forceNow) {
               const tz = dSettings.timezone || 'Asia/Kolkata';
               const localHour = new Date().toLocaleString('en-US', { timeZone: tz, hour: 'numeric', hour12: false });
               const h = parseInt(localHour, 10);

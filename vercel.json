@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/broadcast/process-queue",
-      "schedule": "0 0 * * *"
+      "schedule": "0 6 * * *"
     },
     {
       "path": "/api/cron/expire-bookings",

@@ -151,6 +151,29 @@ export class AudienceEngineService {
         rawContacts = [];
       }
 
+      // 1b. Additive manual selections + manual exclusions.
+      // The builder's live estimate (BroadcastRecipientService) treats manualContactIds
+      // as contacts ADDED on top of the base targeting type, and excludedContactIds as
+      // contacts removed from it. This resolver populates the real send queue, so it MUST
+      // apply the same rules — otherwise the count the user approves (e.g. 1) diverges from
+      // what actually gets sent (e.g. all 7).
+      const manualIds = audience.manualContactIds || [];
+      if (manualIds.length > 0) {
+        const existingIds = new Set(rawContacts.map(c => c.id));
+        const missingManualIds = manualIds.filter(id => !existingIds.has(id));
+        if (missingManualIds.length > 0) {
+          const { data: manualLeads } = await supabaseAdmin
+            .from('leads')
+            .select('id, name, phone, tags, email, notes, channel, last_message_at')
+            .eq('tenant_id', tenantId)
+            .in('id', missingManualIds)
+            .not('phone', 'is', null);
+          rawContacts = [...rawContacts, ...(manualLeads || [])];
+        }
+      }
+
+      const excludedIds = new Set(audience.excludedContactIds || []);
+
       // 2. Strict Deduplication, Opt-out Filtering, and Phone Verification
       // Pre-fetch all active optouts for this tenant in one query (O(1) per lead)
       const { data: optoutRows } = await supabaseAdmin
@@ -170,6 +193,11 @@ export class AudienceEngineService {
       let noConsentRemoved = 0;
 
       for (const lead of rawContacts) {
+        // Manual exclusion — contact deselected in the Recipients drawer
+        if (excludedIds.has(lead.id)) {
+          continue;
+        }
+
         if (!lead.phone) {
           invalidRemoved++;
           continue;
