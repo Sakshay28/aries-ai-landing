@@ -28,6 +28,7 @@ import {
   Radar,
   Target,
   ShieldCheck,
+  LayoutGrid,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -258,6 +259,12 @@ function SidebarBody({
               item={{ label: "Overview", icon: CalendarDays, href: "/dashboard/restaurant" }}
               isOpen={isOpen}
               isActive={isActive("/dashboard/restaurant")}
+              userPlan={plan}
+            />
+            <NavButton
+              item={{ label: "Tables", icon: LayoutGrid, href: "/dashboard/restaurant/tables" }}
+              isOpen={isOpen}
+              isActive={isActive("/dashboard/restaurant/tables")}
               userPlan={plan}
             />
             <NavButton

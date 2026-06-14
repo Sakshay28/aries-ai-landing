@@ -1819,7 +1819,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           // ── CAPACITY AVAILABLE — proceed with booking ─────────────────────
           console.log(`   ✅ Capacity OK: ${avail.remaining_seats} seats remaining after this booking`);
 
-          const { error: dbInsertErr } = await supabaseAdmin.from('restaurant_bookings').insert({
+          const { data: newBooking, error: dbInsertErr } = await supabaseAdmin.from('restaurant_bookings').insert({
             restaurant_id:    tenant.id,
             slot_id:          slotId,
             booking_date:     bookingDate,
@@ -1833,12 +1833,31 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
             source:           'ai_whatsapp',
             ...(contextObj.specialRequests && { special_request: String(contextObj.specialRequests) }),
             ...(paymentLink && { payment_link_url: paymentLink.short_url, payment_link_id: paymentLink.id }),
-          });
+          }).select('id').single();
           if (dbInsertErr) {
             console.error('❌ AI Auto-Book DB save failed:', dbInsertErr.message);
           } else {
             bookingWritten = true;
             console.log(`   ✅ Saved to restaurant_bookings (ID: ${reservationId}, payment: ${payStatus}).`);
+
+            // Auto-assign a physical table
+            const slotTimeDisplay = slotTime.slice(0, 5);
+            const { data: tableResult } = await supabaseAdmin.rpc('assign_best_table', {
+              p_restaurant_id:    tenant.id,
+              p_party_size:       guestCount,
+              p_booking_id:       newBooking.id,
+              p_guest_name:       customerName,
+              p_guest_phone:      customerPhone,
+              p_reservation_time: slotTimeDisplay,
+              p_notes:            contextObj.specialRequests ? String(contextObj.specialRequests) : null,
+              p_status:           'reserved',
+            });
+            const assignInfo = tableResult as { assigned: boolean; table_name?: string } | null;
+            if (assignInfo?.assigned) {
+              console.log(`   🪑 Auto-assigned table ${assignInfo.table_name} for ${guestCount} guests`);
+            } else {
+              console.log(`   ⚠️ No available table for ${guestCount} guests — booking saved without table assignment`);
+            }
           }
         }
       }
