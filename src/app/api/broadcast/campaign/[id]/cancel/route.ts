@@ -45,14 +45,9 @@ export async function POST(
     const previousStatus = campaign.status;
     const now = new Date().toISOString();
 
-    // 1. Transition campaign to cancelled
-    await supabaseAdmin
-      .from('broadcast_campaigns')
-      .update({ status: 'cancelled', updated_at: now })
-      .eq('id', campaignId)
-      .eq('tenant_id', tenantId);
-
-    // 2. Cancel all pending/retrying/processing queue items
+    // 1. Stop the sends FIRST — cancel all pending/retrying/processing queue items.
+    //    This is the safety-critical action and must happen even if the status
+    //    write below fails for any reason.
     const { data: cancelledRows } = await supabaseAdmin
       .from('broadcast_queue')
       .update({ status: 'cancelled', locked_at: null, processed_at: now })
@@ -60,6 +55,24 @@ export async function POST(
       .in('status', ['pending', 'retrying', 'processing'])
       .select('id');
     const cancelledCount = cancelledRows?.length ?? 0;
+
+    // 2. Transition campaign to cancelled. Error-check this write: a swallowed
+    //    error here (e.g. a status CHECK-constraint rejection) used to leave the
+    //    campaign stuck on 'sending' while still returning success to the client.
+    const { error: statusErr } = await supabaseAdmin
+      .from('broadcast_campaigns')
+      .update({ status: 'cancelled', updated_at: now })
+      .eq('id', campaignId)
+      .eq('tenant_id', tenantId);
+
+    if (statusErr) {
+      console.error(`[BROADCAST_CANCEL] Queue aborted (${cancelledCount} items) but status write failed:`, statusErr.message);
+      return NextResponse.json({
+        success: false,
+        cancelledMessages: cancelledCount,
+        error: `Sends were stopped (${cancelledCount} queued messages aborted), but the campaign status could not be updated: ${statusErr.message}`,
+      }, { status: 500 });
+    }
 
     // 3. Audit trail
     await AuditLogService.logChange(
