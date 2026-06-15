@@ -173,10 +173,14 @@ async function processFollowUpJob(data: FollowUpJobData): Promise<void> {
 
   let metaMsgId: string | null = null;
   let sentContent = message as string;
+  let sentMessageType = 'text';
 
   if (hoursSinceCreated > 24) {
-    await sendFollowUpWithTemplate(tenant, leadPhone, followUpType, leadName);
-    sentContent = `[follow_up_template:${followUpType}]`;
+    // P0 FIX: store the resolved body, never a "[follow_up_template:*]" placeholder.
+    const tpl = await sendFollowUpWithTemplate(tenant, leadPhone, followUpType, leadName, message);
+    metaMsgId = tpl.messageId;
+    sentContent = tpl.body;
+    sentMessageType = 'template';
   } else {
     const result = await sendTextMessage(
       decryptToken(tenant.wa_access_token as string) as string,
@@ -194,10 +198,10 @@ async function processFollowUpJob(data: FollowUpJobData): Promise<void> {
       conversation_id: data.conversationId,
       direction: 'outbound',
       content: sentContent,
-      message_type: 'text',
+      message_type: sentMessageType,
       channel: 'whatsapp',
       sender_id: null,
-      status: 'sent',
+      status: metaMsgId ? 'sent' : 'failed',
       ai_generated: true,
       wa_message_id: metaMsgId,
     });
@@ -343,9 +347,12 @@ export async function processPendingFollowUps(): Promise<number> {
       let sentMessageType = 'text';
 
       if (hoursSinceScheduled > 24) {
-        // Outside 24h window — must use approved Meta template
-        await sendFollowUpWithTemplate(tenant, lead.phone, followUp.follow_up_type, lead.name);
-        sentContent = `[follow_up_template:${followUp.follow_up_type}]`;
+        // Outside 24h window — must use approved Meta template.
+        // P0 FIX: persist the resolved, human-readable body (never a "[follow_up_template:*]"
+        // placeholder) and the real send status so the dashboard shows what was actually sent.
+        const tpl = await sendFollowUpWithTemplate(tenant, lead.phone, followUp.follow_up_type, lead.name, message);
+        metaMsgId = tpl.messageId;
+        sentContent = tpl.body;
         sentMessageType = 'template';
       } else if (mediaUrl) {
         const result = await sendMediaMessage(token, phoneNumberId, lead.phone, mediaType as any, mediaUrl, message || undefined);
@@ -367,7 +374,7 @@ export async function processPendingFollowUps(): Promise<number> {
         message_type: sentMessageType,
         channel: 'whatsapp',
         sender_id: null,
-        status: metaMsgId ? 'sent' : 'sent',
+        status: metaMsgId ? 'sent' : 'failed',
         ai_generated: true,
         wa_message_id: metaMsgId,
         ...(sentMediaUrl && {
@@ -528,14 +535,24 @@ function getHoursSince(dateStr: string): number {
   return (Date.now() - then) / (1000 * 60 * 60);
 }
 
+// Sends the approved Meta template for out-of-24h follow-ups and returns BOTH the
+// Meta message id AND a human-readable body to persist as the message content.
+//
+// P0 FIX: the caller must NEVER store a "[follow_up_template:...]" placeholder. Meta
+// renders the template body server-side so we can't read it back, but `fallbackBody`
+// (the resolved custom/AI follow-up copy) is the truthful, readable representation of
+// what the customer received — store that. messageId is null when the send fails so
+// the caller can persist status='failed' instead of a phantom 'sent'.
 async function sendFollowUpWithTemplate(
   tenant: Tenant,
   phone: string,
   followUpType: string,
-  name: string
-) {
+  name: string,
+  fallbackBody?: string | null,
+): Promise<{ messageId: string | null; body: string }> {
+  let messageId: string | null = null;
   try {
-    await sendTemplateMessage(
+    const result = await sendTemplateMessage(
       decryptToken(tenant.wa_access_token as string) as string,
       tenant.wa_phone_number_id as string,
       phone,
@@ -543,7 +560,12 @@ async function sendFollowUpWithTemplate(
       [name || 'there'],
       'en'
     );
+    messageId = result?.messageId || null;
   } catch {
     console.warn(`⚠️ [${tenant.business_name}] Template message failed for ${followUpType}, skipping`);
   }
+  const body = fallbackBody && fallbackBody.trim()
+    ? fallbackBody.trim()
+    : `Hi ${name || 'there'}, just following up from ${tenant.business_name || 'us'} — let us know if you'd like to continue. 🙏`;
+  return { messageId, body };
 }

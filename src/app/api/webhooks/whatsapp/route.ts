@@ -304,38 +304,64 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // delivers the sender phone without "+" (e.g. "918233451667"). Search both formats
   // so we never miss an existing lead regardless of how it was originally created.
   const leadPhone = '+' + cleanPhone; // canonical form for lead storage
-  // Fetch lead + conversation in parallel (independent queries)
-  // IMPORTANT: conversation lookup checks BOTH "+91..." and "91..." formats to prevent duplicates
-  // when the same phone was stored in different formats on different events.
-  const [{ data: existingLead }, { data: existingConv }] = await Promise.all([
+  // Fetch lead + ALL conversations for this contact in parallel (independent queries).
+  // IMPORTANT: conversation lookup checks BOTH "+91..." and "91..." formats to prevent
+  // duplicates when the same phone was stored in different formats on different events.
+  //
+  // P0 ROOT-CAUSE FIX (orphaned conversations / "messages missing in dashboard"):
+  // We DO NOT filter on is_active here. The nightly cron (processStaleConversations)
+  // flips every conversation idle >24h to is_active=false. The previous lookup required
+  // is_active=true, so the FIRST message after a quiet day found nothing → a brand-new
+  // empty conversation was created and the message was saved there, ORPHANED from the
+  // contact's real history (which stayed on the now-inactive canonical thread). The
+  // dashboard, viewing the canonical thread, never saw the new message.
+  //
+  // Now: find every thread for the contact, pick the oldest as canonical (matching the
+  // dedup migration's "oldest wins" invariant), and ALWAYS reuse + reactivate it.
+  const [{ data: existingLead }, { data: existingConvs }] = await Promise.all([
     supabaseAdmin.from('leads').select('*').eq('tenant_id', tenant.id).in('phone', [leadPhone, cleanPhone]).order('created_at', { ascending: false }).limit(1).maybeSingle(),
-    supabaseAdmin.from('conversations').select('*').eq('tenant_id', tenant.id).in('sender_id', [cleanPhone, leadPhone, msg.fromPhone]).eq('is_active', true).order('last_message_at', { ascending: false }).limit(1).maybeSingle(),
+    supabaseAdmin.from('conversations').select('*').eq('tenant_id', tenant.id).in('sender_id', [cleanPhone, leadPhone, msg.fromPhone]).order('created_at', { ascending: true }),
   ]);
 
-  // Session expiry: if the last message in an active conversation was >24h ago, the
-  // WhatsApp 24h messaging window has closed (need to send a template for the first message).
-  // CRITICAL FIX: We NO LONGER create a new conversation on session expiry. Creating a new
-  // conversation is the root cause of the duplicate-chats-for-same-contact bug.
-  // Instead, we re-activate the existing conversation so all messages stay in ONE thread.
-  // The sessionExpired flag is kept only to control isFirstMessage logic (welcome re-send).
   const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000;
   let sessionExpired = false;
-  if (existingConv?.last_message_at) {
-    const idleMs = Date.now() - new Date(existingConv.last_message_at as string).getTime();
-    if (idleMs > SESSION_EXPIRY_MS) {
-      sessionExpired = true;
-      // Re-activate instead of deactivating → all messages stay in one thread.
-      // Awaited: if this write dies, the conversation stays is_active=false and
-      // vanishes from the sidebar (it filters on is_active).
-      await supabaseAdmin.from('conversations')
-        .update({ is_active: true })
-        .eq('id', existingConv.id);
-      console.log(`⏰ Session was expired for ${cleanPhone} (idle ${Math.round(idleMs / 3600000)}h) — reactivating existing conversation ${existingConv.id}`);
+  // Canonical = oldest thread for this contact (carries the merged history). One
+  // contact = one conversation thread forever (exactly like WhatsApp / Intercom).
+  const canonicalConv: Record<string, any> | null =
+    existingConvs && existingConvs.length > 0 ? existingConvs[0] : null;
+
+  if (canonicalConv) {
+    // Session-expiry flag only controls welcome re-send logic; it NO LONGER spawns a
+    // new conversation. The 24h WhatsApp window is enforced at send time, not here.
+    if (canonicalConv.last_message_at) {
+      const idleMs = Date.now() - new Date(canonicalConv.last_message_at as string).getTime();
+      if (idleMs > SESSION_EXPIRY_MS) sessionExpired = true;
+    }
+
+    // Consolidate any stray duplicate threads for this contact into the canonical one
+    // BEFORE we (re)activate it — this keeps the unique partial index
+    // (tenant_id, sender_id) WHERE is_active=true satisfied and guarantees the canonical
+    // thread owns every message.
+    const dupeIds = (existingConvs ?? [])
+      .filter((c: Record<string, any>) => c.id !== canonicalConv.id)
+      .map((c: Record<string, any>) => c.id);
+    if (dupeIds.length > 0) {
+      // Reassign any messages off the duplicates FIRST so none are orphaned, then
+      // deactivate the duplicates (preserve audit trail — never delete).
+      await supabaseAdmin.from('messages').update({ conversation_id: canonicalConv.id }).in('conversation_id', dupeIds);
+      await supabaseAdmin.from('conversations').update({ is_active: false }).in('id', dupeIds);
+    }
+
+    // Reactivate the canonical thread if the cron (or a prior session expiry) put it to
+    // sleep. Awaited: a dropped write would leave new inbound messages orphaned again.
+    if (!canonicalConv.is_active) {
+      await supabaseAdmin.from('conversations').update({ is_active: true }).eq('id', canonicalConv.id);
+      canonicalConv.is_active = true;
+      console.log(`⏰ Reactivated canonical conversation ${canonicalConv.id} for ${cleanPhone}${sessionExpired ? ' (session was expired)' : ''}`);
     }
   }
-  // CRITICAL FIX: Always use the existing conversation — NEVER null it out.
-  // One contact = one conversation thread (exactly like WhatsApp, Intercom, Zendesk).
-  const activeExistingConv = existingConv;
+  // Always use the canonical conversation — NEVER null it out.
+  const activeExistingConv = canonicalConv;
 
   if (existingLead) {
     lead = existingLead;

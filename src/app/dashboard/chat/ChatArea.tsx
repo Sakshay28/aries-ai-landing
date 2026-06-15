@@ -1428,7 +1428,11 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                           )}
                         >
                           {replyPreviewCard}
-                          {/^\[[a-z_]+\]$/i.test(msg.content || '') ? (
+                          {/^\[follow_up_template:.+\]$/i.test(msg.content || '') ? (
+                            // Legacy safety net: older rows stored a raw placeholder token
+                            // instead of the delivered copy. Never show the token to users.
+                            <p className="whitespace-pre-wrap break-words italic opacity-80">Follow-up reminder sent</p>
+                          ) : /^\[[a-z_]+\]$/i.test(msg.content || '') ? (
                             <p className="italic text-[12.5px] flex items-center gap-1.5 opacity-60">
                               <span>🚫</span>
                               <span>

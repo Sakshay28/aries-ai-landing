@@ -32,21 +32,63 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, conversations: [], tenantId, me: { id: me.id } });
     }
 
-    // ── Collapse to one thread per contact ────────────────────────────────────
-    // Rows are already sorted newest-first, so the first time we see a sender_id is
-    // its freshest (canonical) thread — which is also the row that carries the merged
-    // message history. Older empty duplicates for the same contact drop out.
-    const seenSender = new Set<string>();
-    const convos = rawConvos
-      .filter((c: any) => {
-        const key = c.sender_id || c.id;
-        if (seenSender.has(key)) return false;
-        seenSender.add(key);
-        return true;
-      })
-      .slice(0, 100);
+    // ── Batch-fetch latest message per RAW conversation (for previews) ────────
+    // Fetched BEFORE collapsing so the collapse can prefer the thread that actually
+    // carries history. The cap keeps the payload bounded; on a very high-volume tenant
+    // an old low-traffic thread may fall outside the window and show no preview, but it
+    // still appears in the list and opens with full history.
+    const rawConvIds = rawConvos.map((c: any) => c.id);
+    const lastMsgMap: Record<string, { preview: string; at: string }> = {};
+    const { data: previewMsgs } = await supabaseAdmin
+      .from('messages')
+      .select('conversation_id, content, created_at, message_type, media_caption')
+      .in('conversation_id', rawConvIds)
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(2000);
 
-    const convIds = convos.map((c: any) => c.id);
+    const MEDIA_LABELS: Record<string, string> = {
+      image: '📷 Photo', video: '🎥 Video', audio: '🎵 Audio',
+      voice: '🎵 Voice message', document: '📄 Document', sticker: '💟 Sticker',
+    };
+    // Legacy rows stored a raw placeholder token instead of the delivered copy —
+    // never surface it in the inbox preview.
+    const sanitizePreview = (content: string | null): string => {
+      if (content && /^\[follow_up_template:.+\]$/i.test(content)) return 'Follow-up reminder sent';
+      return content ?? '';
+    };
+    for (const msg of previewMsgs ?? []) {
+      if (!lastMsgMap[msg.conversation_id]) {
+        const mediaLabel = MEDIA_LABELS[msg.message_type as string];
+        const preview = mediaLabel
+          ? (msg.media_caption ? `${mediaLabel} · ${msg.media_caption}` : mediaLabel)
+          : sanitizePreview(msg.content);
+        lastMsgMap[msg.conversation_id] = { preview, at: msg.created_at };
+      }
+    }
+
+    // ── Collapse to one thread per contact ────────────────────────────────────
+    // Key on the DIGITS-ONLY phone so "+91…" and "91…" variants of the same contact
+    // never split into two inbox rows. Within a contact group, prefer the thread that
+    // actually has messages (most-recent real message wins) so an empty husk created by
+    // a past race can never hide the canonical history. Falls back to last_message_at
+    // when no thread has messages yet.
+    const normKey = (c: any) => (c.sender_id || '').replace(/\D/g, '') || c.id;
+    const bestByContact = new Map<string, any>();
+    for (const c of rawConvos as any[]) {
+      const key = normKey(c);
+      const incumbent = bestByContact.get(key);
+      if (!incumbent) { bestByContact.set(key, c); continue; }
+      const cAt = lastMsgMap[c.id]?.at;
+      const iAt = lastMsgMap[incumbent.id]?.at;
+      // A thread with messages always beats one without; otherwise newest activity wins.
+      const cRank = cAt ?? c.last_message_at ?? '';
+      const iRank = iAt ?? incumbent.last_message_at ?? '';
+      const cHasMsgs = !!cAt, iHasMsgs = !!iAt;
+      const cWins = (cHasMsgs !== iHasMsgs) ? cHasMsgs : cRank > iRank;
+      if (cWins) bestByContact.set(key, c);
+    }
+    const convos = Array.from(bestByContact.values()).slice(0, 100);
 
     // ── Batch-fetch leads (single query) ────────────────────────────────────
     const leadIds = convos.map((c: any) => c.lead_id).filter(Boolean);
@@ -59,33 +101,6 @@ export async function GET(req: NextRequest) {
       (leads ?? []).forEach((l: any) => {
         leadsMap[l.id] = { name: l.name, phone: l.phone, assigned_to: l.assigned_to ?? null };
       });
-    }
-
-    // ── Batch-fetch latest message per conversation (for previews) ────────────
-    // Scoped to the displayed conversations. The cap keeps the payload bounded; on a
-    // very high-volume tenant an old low-traffic thread may fall outside the window
-    // and show no preview, but it still appears in the list and opens with full history.
-    const lastMsgMap: Record<string, { preview: string; at: string }> = {};
-    const { data: previewMsgs } = await supabaseAdmin
-      .from('messages')
-      .select('conversation_id, content, created_at, message_type, media_caption')
-      .in('conversation_id', convIds)
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false })
-      .limit(1000);
-
-    const MEDIA_LABELS: Record<string, string> = {
-      image: '📷 Photo', video: '🎥 Video', audio: '🎵 Audio',
-      voice: '🎵 Voice message', document: '📄 Document', sticker: '💟 Sticker',
-    };
-    for (const msg of previewMsgs ?? []) {
-      if (!lastMsgMap[msg.conversation_id]) {
-        const mediaLabel = MEDIA_LABELS[msg.message_type as string];
-        const preview = mediaLabel
-          ? (msg.media_caption ? `${mediaLabel} · ${msg.media_caption}` : mediaLabel)
-          : msg.content;
-        lastMsgMap[msg.conversation_id] = { preview, at: msg.created_at };
-      }
     }
 
     // ── Assemble final response ──────────────────────────────────────────────

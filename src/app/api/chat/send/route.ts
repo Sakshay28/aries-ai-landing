@@ -130,10 +130,12 @@ export async function POST(req: NextRequest) {
           .eq('id', insertedMsg.id);
       }
 
-      // Keep conversation.last_message_at fresh
+      // Keep conversation.last_message_at fresh and reactivate the thread — an agent
+      // replying to a thread the nightly cron put to sleep must keep it active so the
+      // webhook routes the customer's next message back into THIS same thread.
       await supabaseAdmin
         .from('conversations')
-        .update({ last_message_at: new Date().toISOString() })
+        .update({ last_message_at: new Date().toISOString(), is_active: true })
         .eq('id', conversationId);
     });
 
