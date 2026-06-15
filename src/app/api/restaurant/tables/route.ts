@@ -10,9 +10,14 @@ export async function GET(req: NextRequest) {
   const date = req.nextUrl.searchParams.get('date') || new Date().toISOString().split('T')[0];
   const status = req.nextUrl.searchParams.get('status');
 
+  // NOTE: do NOT embed restaurant_bookings here. There are two FKs between
+  // restaurant_tables and restaurant_bookings (tables.current_booking_id and
+  // bookings.table_id), so PostgREST can't auto-resolve the relationship and
+  // throws "more than one relationship was found". The per-date bookings are
+  // fetched separately below, so this embed was unused anyway.
   let query = supabaseAdmin
     .from('restaurant_tables')
-    .select('*, restaurant_bookings(id, reservation_id, customer_name, customer_phone, party_size, booking_date, booking_status, restaurant_slots(slot_time))')
+    .select('*')
     .eq('restaurant_id', tenantId)
     .eq('is_active', true)
     .order('sort_order', { ascending: true })
