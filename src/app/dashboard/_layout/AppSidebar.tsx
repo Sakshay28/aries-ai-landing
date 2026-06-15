@@ -28,6 +28,7 @@ import {
   Radar,
   Target,
   ShieldCheck,
+  UserPlus,
   LayoutGrid,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -305,12 +306,20 @@ function SidebarBody({
       {/* Bottom nav */}
       <div className="space-y-1 border-t border-sidebar-border p-3">
         {isPlatformAdmin && (
-          <NavButton
-            item={{ label: "Approvals", icon: ShieldCheck, href: "/dashboard/admin/approvals" }}
-            isOpen={isOpen}
-            isActive={isActive("/dashboard/admin/approvals")}
-            userPlan={plan}
-          />
+          <>
+            <NavButton
+              item={{ label: "Approvals", icon: ShieldCheck, href: "/dashboard/admin/approvals" }}
+              isOpen={isOpen}
+              isActive={isActive("/dashboard/admin/approvals")}
+              userPlan={plan}
+            />
+            <NavButton
+              item={{ label: "Onboard Client", icon: UserPlus, href: "/dashboard/admin/onboard" }}
+              isOpen={isOpen}
+              isActive={isActive("/dashboard/admin/onboard")}
+              userPlan={plan}
+            />
+          </>
         )}
         {bottomItems.map((item) => (
           <NavButton key={item.label} item={item} isOpen={isOpen} isActive={isActive(item.href)} userPlan={plan} />
