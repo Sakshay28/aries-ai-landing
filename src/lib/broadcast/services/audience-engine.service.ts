@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { AudienceState, EstimateResult } from '@/app/dashboard/broadcast/types';
 import { cleanPhone } from '@/lib/meta/service';
+import { fetchLeadsByFilter, fetchLeadsByIds } from '@/lib/broadcast/fetch-leads';
 
 interface ResolvedAudience {
   total: number;
@@ -23,32 +24,15 @@ export class AudienceEngineService {
 
       // 1. Fetch contacts based on targeting type
       if (audience.type === 'all') {
-        const { data } = await supabaseAdmin
-          .from('leads')
-          .select('id, name, phone, tags, email, notes, channel, last_message_at')
-          .eq('tenant_id', tenantId)
-          .not('phone', 'is', null);
-        rawContacts = data || [];
+        rawContacts = await fetchLeadsByFilter(tenantId, 'id, name, phone, tags, email, notes, channel, last_message_at');
 
       } else if (audience.type === 'tags' && audience.tags.length > 0) {
         // Fetch contacts matching any of the selected tags (using overlap operator)
-        const { data } = await supabaseAdmin
-          .from('leads')
-          .select('id, name, phone, tags, email, notes, channel, last_message_at')
-          .eq('tenant_id', tenantId)
-          .not('phone', 'is', null)
-          .overlaps('tags', audience.tags);
-        rawContacts = data || [];
+        rawContacts = await fetchLeadsByFilter(tenantId, 'id, name, phone, tags, email, notes, channel, last_message_at', { tags: audience.tags });
 
       } else if (audience.type === 'custom' && audience.customFilters.length > 0) {
         // Fetch all contacts first and filter them in memory to support complex nested AND/OR segment validations
-        const { data } = await supabaseAdmin
-          .from('leads')
-          .select('id, name, phone, tags, email, notes, channel, last_message_at, lead_score')
-          .eq('tenant_id', tenantId)
-          .not('phone', 'is', null);
-        
-        const allLeads = data || [];
+        const allLeads = await fetchLeadsByFilter(tenantId, 'id, name, phone, tags, email, notes, channel, last_message_at, lead_score');
 
         // Apply filters (AND connection)
         rawContacts = allLeads.filter(lead => {
@@ -107,24 +91,12 @@ export class AudienceEngineService {
         }
 
         if (targetContactIds.length > 0) {
-          const { data } = await supabaseAdmin
-            .from('leads')
-            .select('id, name, phone, tags, email, notes, channel, last_message_at')
-            .eq('tenant_id', tenantId)
-            .in('id', targetContactIds)
-            .not('phone', 'is', null);
-          rawContacts = data || [];
+          rawContacts = await fetchLeadsByIds(tenantId, 'id, name, phone, tags, email, notes, channel, last_message_at', targetContactIds);
         }
 
       } else if (audience.type === 'manual' && audience.manualContactIds && audience.manualContactIds.length > 0) {
         // Particular contacts manually selected
-        const { data } = await supabaseAdmin
-          .from('leads')
-          .select('id, name, phone, tags, email, notes, channel, last_message_at')
-          .eq('tenant_id', tenantId)
-          .in('id', audience.manualContactIds)
-          .not('phone', 'is', null);
-        rawContacts = data || [];
+        rawContacts = await fetchLeadsByIds(tenantId, 'id, name, phone, tags, email, notes, channel, last_message_at', audience.manualContactIds);
 
       } else if (audience.type === 'csv' && audience.csvFile && Array.isArray(audience.csvFile.contacts)) {
         // Custom spreadsheet imported contacts
@@ -162,13 +134,8 @@ export class AudienceEngineService {
         const existingIds = new Set(rawContacts.map(c => c.id));
         const missingManualIds = manualIds.filter(id => !existingIds.has(id));
         if (missingManualIds.length > 0) {
-          const { data: manualLeads } = await supabaseAdmin
-            .from('leads')
-            .select('id, name, phone, tags, email, notes, channel, last_message_at')
-            .eq('tenant_id', tenantId)
-            .in('id', missingManualIds)
-            .not('phone', 'is', null);
-          rawContacts = [...rawContacts, ...(manualLeads || [])];
+          const manualLeads = await fetchLeadsByIds(tenantId, 'id, name, phone, tags, email, notes, channel, last_message_at', missingManualIds);
+          rawContacts = [...rawContacts, ...manualLeads];
         }
       }
 

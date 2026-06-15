@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { AudienceState } from '@/app/dashboard/broadcast/types';
 import { cleanPhone } from '@/lib/meta/service';
+import { fetchLeadsByFilter, fetchLeadsByIds } from '@/lib/broadcast/fetch-leads';
 
 export interface RecipientRecord {
   campaign_id: string;
@@ -42,32 +43,15 @@ export class BroadcastRecipientService {
 
       // 1. Fetch raw contacts based on targeting type
       if (audience.type === 'all') {
-        const { data } = await supabaseAdmin
-          .from('leads')
-          .select('id, name, phone, tags, email, channel, last_message_at')
-          .eq('tenant_id', tenantId)
-          .not('phone', 'is', null);
-        rawContacts = data || [];
+        rawContacts = await fetchLeadsByFilter(tenantId, 'id, name, phone, tags, email, channel, last_message_at');
         sourceLabel = 'All Contacts';
 
       } else if (audience.type === 'tags' && audience.tags.length > 0) {
-        const { data } = await supabaseAdmin
-          .from('leads')
-          .select('id, name, phone, tags, email, channel, last_message_at')
-          .eq('tenant_id', tenantId)
-          .not('phone', 'is', null)
-          .overlaps('tags', audience.tags);
-        rawContacts = data || [];
+        rawContacts = await fetchLeadsByFilter(tenantId, 'id, name, phone, tags, email, channel, last_message_at', { tags: audience.tags });
         sourceLabel = `Tag → ${audience.tags.join(', ')}`;
 
       } else if (audience.type === 'custom' && audience.customFilters.length > 0) {
-        const { data } = await supabaseAdmin
-          .from('leads')
-          .select('id, name, phone, tags, email, channel, last_message_at, lead_score')
-          .eq('tenant_id', tenantId)
-          .not('phone', 'is', null);
-        
-        const allLeads = data || [];
+        const allLeads = await fetchLeadsByFilter(tenantId, 'id, name, phone, tags, email, channel, last_message_at, lead_score');
         rawContacts = allLeads.filter(lead => {
           return audience.customFilters.every(filter => {
             if (!filter.field || !filter.value) return true;
@@ -111,24 +95,12 @@ export class BroadcastRecipientService {
         }
 
         if (targetContactIds.length > 0) {
-          const { data } = await supabaseAdmin
-            .from('leads')
-            .select('id, name, phone, tags, email, channel, last_message_at')
-            .eq('tenant_id', tenantId)
-            .in('id', targetContactIds)
-            .not('phone', 'is', null);
-          rawContacts = data || [];
+          rawContacts = await fetchLeadsByIds(tenantId, 'id, name, phone, tags, email, channel, last_message_at', targetContactIds);
         }
         sourceLabel = `Retargeting → ${audience.retargetCondition}`;
 
       } else if (audience.type === 'manual' && audience.manualContactIds && audience.manualContactIds.length > 0) {
-        const { data } = await supabaseAdmin
-          .from('leads')
-          .select('id, name, phone, tags, email, channel, last_message_at')
-          .eq('tenant_id', tenantId)
-          .in('id', audience.manualContactIds)
-          .not('phone', 'is', null);
-        rawContacts = data || [];
+        rawContacts = await fetchLeadsByIds(tenantId, 'id, name, phone, tags, email, channel, last_message_at', audience.manualContactIds);
         sourceLabel = 'Manual Selection';
 
       } else if (audience.type === 'csv' && audience.csvFile && Array.isArray(audience.csvFile.contacts)) {
@@ -147,13 +119,7 @@ export class BroadcastRecipientService {
       let manualLeads: any[] = [];
       const manualIds = audience.manualContactIds || [];
       if (manualIds.length > 0) {
-        const { data } = await supabaseAdmin
-          .from('leads')
-          .select('id, name, phone, tags, email, channel, last_message_at')
-          .eq('tenant_id', tenantId)
-          .in('id', manualIds)
-          .not('phone', 'is', null);
-        manualLeads = data || [];
+        manualLeads = await fetchLeadsByIds(tenantId, 'id, name, phone, tags, email, channel, last_message_at', manualIds);
       }
 
       // Merge targeted contacts and manual additions

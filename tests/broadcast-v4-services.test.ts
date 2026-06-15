@@ -150,11 +150,13 @@ describe('AudienceEngineService — Segmentation Filter & Opt-out Deduplication'
   });
 
   it('filters out unsubscribed / opt-out tags strictly', async () => {
+    // channel:'whatsapp' grants consent so the opt-out gate is the only reason
+    // l2-l4 get removed (the resolver also drops leads with no prior interaction).
     const mockLeads = [
-      { id: 'l1', name: 'Sakshay', phone: '919876543210', tags: ['active'] },
-      { id: 'l2', name: 'Opted Out User', phone: '912233445566', tags: ['Opt-Out'] },
-      { id: 'l3', name: 'Unsub User', phone: '919988776655', tags: ['Unsubscribe'] },
-      { id: 'l4', name: 'Stop User', phone: '915566778899', tags: ['stop'] }
+      { id: 'l1', name: 'Sakshay', phone: '919876543210', tags: ['active'], channel: 'whatsapp' },
+      { id: 'l2', name: 'Opted Out User', phone: '912233445566', tags: ['Opt-Out'], channel: 'whatsapp' },
+      { id: 'l3', name: 'Unsub User', phone: '919988776655', tags: ['Unsubscribe'], channel: 'whatsapp' },
+      { id: 'l4', name: 'Stop User', phone: '915566778899', tags: ['stop'], channel: 'whatsapp' }
     ];
 
     const makeChain = (data: any) => {
@@ -163,6 +165,10 @@ describe('AudienceEngineService — Segmentation Filter & Opt-out Deduplication'
       chain.eq = vi.fn().mockReturnValue(chain);
       chain.not = vi.fn().mockReturnValue(chain);
       chain.overlaps = vi.fn().mockReturnValue(chain);
+      chain.order = vi.fn().mockReturnValue(chain);
+      chain.limit = vi.fn().mockReturnValue(chain);
+      chain.gt = vi.fn().mockReturnValue(chain);
+      chain.in = vi.fn().mockReturnValue(chain);
       chain.then = (resolve: any) => resolve({ data, error: null });
       return chain;
     };
@@ -188,9 +194,10 @@ describe('AudienceEngineService — Segmentation Filter & Opt-out Deduplication'
   });
 
   it('performs strict duplicate check on contacts phone numbers', async () => {
+    // channel:'whatsapp' grants consent so dedup is the only reason l2 is removed.
     const duplicateLeads = [
-      { id: 'l1', name: 'Sakshay', phone: '919876543210' },
-      { id: 'l2', name: 'Duplicate Sakshay', phone: '919876543210' }
+      { id: 'l1', name: 'Sakshay', phone: '919876543210', channel: 'whatsapp' },
+      { id: 'l2', name: 'Duplicate Sakshay', phone: '919876543210', channel: 'whatsapp' }
     ];
 
     const makeChain = (data: any) => {
@@ -199,6 +206,10 @@ describe('AudienceEngineService — Segmentation Filter & Opt-out Deduplication'
       chain.eq = vi.fn().mockReturnValue(chain);
       chain.not = vi.fn().mockReturnValue(chain);
       chain.overlaps = vi.fn().mockReturnValue(chain);
+      chain.order = vi.fn().mockReturnValue(chain);
+      chain.limit = vi.fn().mockReturnValue(chain);
+      chain.gt = vi.fn().mockReturnValue(chain);
+      chain.in = vi.fn().mockReturnValue(chain);
       chain.then = (resolve: any) => resolve({ data, error: null });
       return chain;
     };
