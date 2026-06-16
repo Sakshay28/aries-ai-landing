@@ -708,16 +708,16 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   console.log(`✅ Inbound message saved: "${content.slice(0, 100)}" from ${cleanPhone}`);
   perf('msg_inserted');
 
-  // Message counter + last_message_at, in parallel. Both awaited — `void`
-  // fire-and-forget dies when the serverless function freezes, which left
-  // counters drifting and the sidebar showing stale timestamps for hours.
-  await Promise.all([
-    supabaseAdmin.rpc('increment_message_count_conv', { conv_id: conversation.id }),
-    supabaseAdmin
-      .from('conversations')
-      .update({ last_message_at: new Date().toISOString() })
-      .eq('id', conversation.id),
-  ]);
+  // Bump last_message_at so the inbox re-sorts. Awaited — `void` fire-and-forget
+  // dies when the serverless function freezes, leaving the sidebar stale.
+  // NOTE: message_count is NO LONGER incremented here. It is maintained by the
+  // trg_sync_conv_message_count DB trigger (20260616_chat_realtime_and_count_trigger.sql)
+  // so EVERY write path (AI replies, follow-ups, manual sends, reassignment) stays
+  // accurate. Incrementing here too would double-count inbound messages.
+  await supabaseAdmin
+    .from('conversations')
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', conversation.id);
 
   // 9. Fire Outbound Integration Webhook
   // SSRF guard: only fire to public HTTPS hosts. Blocks cloud-metadata,
