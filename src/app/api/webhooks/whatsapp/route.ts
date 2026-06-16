@@ -1690,15 +1690,14 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         booking_date: bookingDate,
         booking_status: 'confirmed',
         payment_status: payStatus,
-        payment_amount: isPrepaid ? feeRupees : 0, // rupees for Sheets
+        payment_amount: payAmount, // paise — Sheets renders as ₹
         created_at: new Date().toISOString(),
         special_request: contextObj.specialRequests || '',
       };
 
-      // 1. Sync to Google Sheets (non-blocking — don't delay WhatsApp reply)
-      appendBookingRow(tenant.id, bookingPayload)
-        .then(() => console.log(`   ✅ Google Sheets booking row saved successfully.`))
-        .catch((sheetsErr: any) => console.error(`   ❌ Google Sheets booking save FAILED: ${sheetsErr.message}`));
+      // NOTE: Google Sheets sync moved to AFTER the booking is actually saved +
+      // a table is assigned (see the success branch below). Writing it here meant
+      // full-slot/aborted or failed bookings still created phantom Sheet rows.
 
       // 2. Find best matching slot by time — pick the slot whose slot_time is
       //    closest to the requested slotTime. Fall back to creating a default.
@@ -1884,6 +1883,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
             } else {
               console.log(`   ⚠️ No available table for ${guestCount} guests — booking saved without table assignment`);
             }
+
+            // Sync to Google Sheets ONLY now that the booking is persisted — and
+            // include the assigned table. Non-blocking so the WhatsApp reply isn't delayed.
+            appendBookingRow(tenant.id, { ...bookingPayload, table_name: assignInfo?.table_name })
+              .then(() => console.log(`   ✅ Google Sheets booking row saved (table: ${assignInfo?.table_name ?? '—'}).`))
+              .catch((sheetsErr: any) => console.error(`   ❌ Google Sheets booking save FAILED: ${sheetsErr.message}`));
           }
         }
       }

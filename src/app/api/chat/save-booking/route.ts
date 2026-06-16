@@ -238,7 +238,7 @@ export async function POST(req: NextRequest) {
       booking_date: bookingDate,
       booking_status: 'confirmed',
       payment_status: payStatus,
-      payment_amount: isPrepaid ? feeRupees : 0,
+      payment_amount: isPrepaid ? Math.round(feeRupees * 100) : 0, // paise — Sheets renders as ₹
       created_at: new Date().toISOString(),
       special_request,
     };

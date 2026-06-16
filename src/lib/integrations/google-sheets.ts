@@ -351,10 +351,14 @@ export interface BookingRow {
   created_at:      string;
   special_request?: string;
   discount?:       string;
+  table_name?:     string;   // assigned physical table (e.g. 'T5'), if any
 }
 
+// NOTE: 'Table' is appended LAST (column J) on purpose — adding it at the end
+// keeps every pre-existing row (written under the old 9-column A:I layout)
+// aligned with its headers. Do not reorder.
 const BOOKING_HEADERS = [
-  'Customer', 'Phone', 'Guests', 'Date', 'Time', 'Status', 'Deposit (₹)', 'Special Request', 'Discount',
+  'Customer', 'Phone', 'Guests', 'Date', 'Time', 'Status', 'Deposit (₹)', 'Special Request', 'Discount', 'Table',
 ];
 
 async function ensureBookingHeaders(
@@ -364,14 +368,19 @@ async function ensureBookingHeaders(
 ): Promise<void> {
   await ensureSheetExists(token, spreadsheetId, sheetName);
 
-  const range = `${sheetName}!A1:I1`;
+  const range = `${sheetName}!A1:J1`;
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
   if (!res.ok) return;
   const data = await res.json() as { values?: string[][] };
-  if (data.values && data.values[0]?.length > 0) return;
+  const existing = data.values?.[0] ?? [];
+  // Write headers when the sheet is empty OR when an older, shorter header row
+  // is present (e.g. the pre-'Table' 9-column layout) — this upgrades it in
+  // place. Because every column kept its position, existing data rows stay
+  // aligned and only the new trailing 'Table' header is added.
+  if (existing.length >= BOOKING_HEADERS.length) return;
 
   await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
@@ -440,12 +449,13 @@ export async function appendBookingRow(tenantId: string, booking: BookingRow): P
     formattedDate,
     formattedTime,
     booking.booking_status,
-    String(Math.round(booking.payment_amount / 100)),
+    String(Math.round((booking.payment_amount || 0) / 100)), // payment_amount is paise → ₹
     booking.special_request ?? '',
     booking.discount ?? '',
+    booking.table_name ?? '',
   ]];
 
-  const range = `${bookingSheetName}!A:I`;
+  const range = `${bookingSheetName}!A:J`;
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheet_id}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     {
