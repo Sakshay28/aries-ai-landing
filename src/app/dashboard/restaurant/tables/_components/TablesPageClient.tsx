@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { Toaster } from 'sonner';
 
 const TablesClient = dynamic(
   () => import('./TablesClient').then(m => m.TablesClient),
@@ -8,5 +9,10 @@ const TablesClient = dynamic(
 );
 
 export function TablesPageClient() {
-  return <TablesClient />;
+  return (
+    <>
+      <TablesClient />
+      <Toaster richColors position="top-center" />
+    </>
+  );
 }

@@ -2,17 +2,25 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-export type TableStatus = 'available' | 'reserved' | 'occupied';
+export type TableStatus = 'available' | 'reserved' | 'occupied' | 'cleaning' | 'blocked';
+export type ReservationType = 'guest' | 'internal';
 
 export interface TableData {
   id: string;
   name: string;
   capacity: number;
   status: TableStatus;
+  reservation_type?: ReservationType | null;
+  reservation_label?: string | null;
   guest_name?: string | null;
   guest_phone?: string | null;
   guest_count?: number | null;
   reservation_time?: string | null;
+  reserved_for?: string | null;
+  reserved_duration_min?: number | null;
+  server_name?: string | null;
+  section?: string | null;
+  blocked_reason?: string | null;
   notes?: string | null;
   seated_at?: string | null;
   reserved_at?: string | null;
@@ -34,14 +42,6 @@ export interface BookingData {
   restaurant_slots?: { slot_time: string } | null;
 }
 
-export interface WalkInData {
-  id: string;
-  name: string;
-  guest_name?: string | null;
-  guest_count?: number | null;
-  seated_at?: string | null;
-}
-
 export interface GuestMemory {
   customer_phone: string;
   customer_name?: string | null;
@@ -56,37 +56,87 @@ export interface GuestMemory {
   avg_spend?: number;
 }
 
-interface UseTablesAPIReturn {
-  tables: TableData[];
-  bookings: BookingData[];
-  walkIns: WalkInData[];
-  guestMemory: Record<string, GuestMemory>;
-  loading: boolean;
-  error: string | null;
-  searchQuery: string;
-  setSearchQuery: (q: string) => void;
-  cycleTable: (tableId: string) => Promise<void>;
-  walkIn: (guestCount: number) => Promise<string | null>;
-  reserve: (data: {
-    guestName: string;
-    guestPhone: string;
-    guestCount: number;
-    time: string;
-    notes: string;
-  }) => Promise<string | null>;
-  refetch: () => Promise<void>;
+export interface ActivityItem {
+  id: string;
+  table_id: string | null;
+  table_name: string | null;
+  action: string;
+  actor: string | null;
+  guest_name: string | null;
+  guest_phone: string | null;
+  guest_count: number | null;
+  from_status: string | null;
+  to_status: string | null;
+  detail: string | null;
+  created_at: string;
 }
+
+export interface TableSettings {
+  open_time: string;
+  close_time: string;
+  slot_interval: number;
+  table_count: number;
+}
+
+export interface ActionResult {
+  ok: boolean;
+  error?: string;
+  reason?: string;
+  tableName?: string | null;
+}
+
+export interface ReservePayload {
+  reservationType: ReservationType;
+  guestName?: string;
+  guestPhone?: string;
+  reservationLabel?: string;
+  guestCount: number;
+  time: string;
+  notes?: string;
+  tableId?: string;
+  durationMin?: number;
+  date?: string;
+}
+
+export interface SeatPayload {
+  guestCount: number;
+  guestName?: string;
+  guestPhone?: string;
+  notes?: string;
+  tableId?: string;
+}
+
+export type StatusAction = 'free' | 'free_to_cleaning' | 'available' | 'cleaning' | 'block' | 'unblock' | 'cancel';
 
 const POLL_INTERVAL = 10_000;
 
-export function useTablesAPI(): UseTablesAPIReturn {
+async function postJSON(url: string, body: unknown): Promise<ActionResult> {
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.success) {
+      return { ok: false, error: json.error || `HTTP ${res.status}`, reason: json.reason };
+    }
+    return { ok: true, tableName: json.data?.tableName ?? null };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Network error' };
+  }
+}
+
+export function useTablesAPI() {
   const [tables, setTables] = useState<TableData[]>([]);
   const [bookings, setBookings] = useState<BookingData[]>([]);
-  const [walkIns, setWalkIns] = useState<WalkInData[]>([]);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [guestMemory, setGuestMemory] = useState<Record<string, GuestMemory>>({});
+  const [settings, setSettings] = useState<TableSettings>({
+    open_time: '11:00:00', close_time: '23:00:00', slot_interval: 30, table_count: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
   const mountedRef = useRef(true);
 
   const fetchTables = useCallback(async (showLoading = false) => {
@@ -102,108 +152,98 @@ export function useTablesAPI(): UseTablesAPIReturn {
       if (json.success) {
         setTables(json.data.tables || []);
         setBookings(json.data.bookings || []);
-        setWalkIns(json.data.walkIns || []);
+        setActivity(json.data.activity || []);
         setGuestMemory(json.data.guestMemory || {});
+        if (json.data.settings) setSettings(json.data.settings);
         setError(null);
       }
-    } catch (err: any) {
+    } catch (err) {
       if (!mountedRef.current) return;
-      setError(err.message);
+      setError(err instanceof Error ? err.message : 'Failed to load tables');
     } finally {
       if (mountedRef.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    // Fetch-on-mount: state updates happen after the awaited fetch resolves,
+    // not synchronously, so this does not cause cascading renders.
     mountedRef.current = true;
-    fetchTables(true);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchTables(false);
     const interval = setInterval(() => fetchTables(false), POLL_INTERVAL);
-    return () => {
-      mountedRef.current = false;
-      clearInterval(interval);
+    return () => { mountedRef.current = false; clearInterval(interval); };
+  }, [fetchTables]);
+
+  const reserveTable = useCallback(async (payload: ReservePayload): Promise<ActionResult> => {
+    const r = await postJSON('/api/restaurant/tables/reserve', payload);
+    if (r.ok) await fetchTables(false);
+    return r;
+  }, [fetchTables]);
+
+  const editReservation = useCallback(async (payload: ReservePayload & { bookingId?: string | null }): Promise<ActionResult> => {
+    const r = await postJSON('/api/restaurant/tables/reserve', { ...payload, mode: 'edit' });
+    if (r.ok) await fetchTables(false);
+    return r;
+  }, [fetchTables]);
+
+  const seatTable = useCallback(async (payload: SeatPayload): Promise<ActionResult> => {
+    const r = await postJSON('/api/restaurant/tables/seat', payload);
+    if (r.ok) await fetchTables(false);
+    return r;
+  }, [fetchTables]);
+
+  const setTableStatus = useCallback(async (tableId: string, action: StatusAction, reason?: string): Promise<ActionResult> => {
+    // Optimistic: reflect terminal statuses immediately for snappy feedback
+    const optimistic: Partial<Record<StatusAction, TableStatus>> = {
+      free: 'available', free_to_cleaning: 'cleaning', available: 'available',
+      cleaning: 'cleaning', block: 'blocked', unblock: 'available', cancel: 'available',
     };
+    const next = optimistic[action];
+    if (next) {
+      setTables((prev) => prev.map((t) => t.id === tableId ? { ...t, status: next } : t));
+    }
+    const r = await postJSON('/api/restaurant/tables/status', { tableId, action, reason });
+    await fetchTables(false); // reconcile regardless
+    return r;
   }, [fetchTables]);
 
-  const cycleTable = useCallback(async (tableId: string) => {
-    // Optimistic update
-    setTables((prev) =>
-      prev.map((t) => {
-        if (t.id !== tableId) return t;
-        const cycle: Record<string, TableStatus> = { available: 'reserved', reserved: 'occupied', occupied: 'available' };
-        const next = cycle[t.status] || 'available';
-        if (next === 'available') {
-          return { ...t, status: next, guest_name: null, guest_phone: null, guest_count: null, reservation_time: null, notes: null, seated_at: null, reserved_at: null, current_booking_id: null };
-        }
-        if (next === 'occupied') {
-          return { ...t, status: next, seated_at: new Date().toISOString() };
-        }
-        return { ...t, status: next, reserved_at: new Date().toISOString() };
-      })
-    );
-
-    try {
-      const res = await fetch('/api/restaurant/tables/cycle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tableId }),
-      });
-      if (!res.ok) throw new Error('Cycle failed');
-      await fetchTables(false);
-    } catch {
-      await fetchTables(false);
-    }
+  const generateTables = useCallback(async (payload: { count: number; mix?: { capacity: number; count: number }[]; defaultCapacity?: number }): Promise<ActionResult> => {
+    const r = await postJSON('/api/restaurant/tables', { action: 'generate', ...payload });
+    if (r.ok) await fetchTables(true);
+    return r;
   }, [fetchTables]);
 
-  const walkIn = useCallback(async (guestCount: number): Promise<string | null> => {
-    try {
-      const res = await fetch('/api/restaurant/tables/walk-in', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ guestCount }),
-      });
-      const json = await res.json();
-      if (!json.success) return null;
-      await fetchTables(false);
-      return json.data.tableName;
-    } catch {
-      return null;
-    }
+  const createTable = useCallback(async (name: string, capacity: number): Promise<ActionResult> => {
+    const r = await postJSON('/api/restaurant/tables', { action: 'create', name, capacity });
+    if (r.ok) await fetchTables(false);
+    return r;
   }, [fetchTables]);
 
-  const reserve = useCallback(async (data: {
-    guestName: string;
-    guestPhone: string;
-    guestCount: number;
-    time: string;
-    notes: string;
-  }): Promise<string | null> => {
-    try {
-      const res = await fetch('/api/restaurant/tables/reserve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      const json = await res.json();
-      if (!json.success) return null;
-      await fetchTables(false);
-      return json.data.tableName;
-    } catch {
-      return null;
-    }
+  const updateTable = useCallback(async (id: string, fields: { name?: string; capacity?: number; section?: string; server_name?: string }): Promise<ActionResult> => {
+    const r = await postJSON('/api/restaurant/tables', { action: 'update', id, ...fields });
+    if (r.ok) await fetchTables(false);
+    return r;
+  }, [fetchTables]);
+
+  const deactivateTable = useCallback(async (id: string): Promise<ActionResult> => {
+    const r = await postJSON('/api/restaurant/tables', { action: 'deactivate', id });
+    if (r.ok) await fetchTables(false);
+    return r;
+  }, [fetchTables]);
+
+  const updateSettings = useCallback(async (fields: { open_time?: string; close_time?: string; slot_interval?: number }): Promise<ActionResult> => {
+    const r = await postJSON('/api/restaurant/tables', { action: 'settings', ...fields });
+    if (r.ok) await fetchTables(false);
+    return r;
   }, [fetchTables]);
 
   return {
-    tables,
-    bookings,
-    walkIns,
-    guestMemory,
-    loading,
-    error,
-    searchQuery,
-    setSearchQuery,
-    cycleTable,
-    walkIn,
-    reserve,
+    tables, bookings, activity, guestMemory, settings, loading, error,
     refetch: () => fetchTables(false),
+    reserveTable, editReservation, seatTable, setTableStatus,
+    generateTables, createTable, updateTable, deactivateTable, updateSettings,
   };
 }
+
+export type TablesAPI = ReturnType<typeof useTablesAPI>;
