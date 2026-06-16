@@ -51,9 +51,10 @@ export async function GET(req: NextRequest) {
       image: '📷 Photo', video: '🎥 Video', audio: '🎵 Audio',
       voice: '🎵 Voice message', document: '📄 Document', sticker: '💟 Sticker',
     };
-    // Legacy rows stored a raw placeholder token instead of the delivered copy —
-    // never surface it in the inbox preview.
+    // Internal tokens must never leak into the inbox preview — map them to copy
+    // that mirrors what the chat bubble renders.
     const sanitizePreview = (content: string | null): string => {
+      if (content === '__DELETED__') return 'You deleted this message';
       if (content && /^\[follow_up_template:.+\]$/i.test(content)) return 'Follow-up reminder sent';
       return content ?? '';
     };

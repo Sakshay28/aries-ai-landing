@@ -44,10 +44,16 @@ export async function GET(req: NextRequest) {
         .in('conversation_id', convIds)
         .order('created_at', { ascending: false });
 
-      const lastMsgMap: Record<string, string> = {};
+      // Internal tokens must never leak into the preview text.
+      const sanitize = (content: string | null): string | null => {
+        if (content === '__DELETED__') return 'You deleted this message';
+        if (content && /^\[follow_up_template:.+\]$/i.test(content)) return 'Follow-up reminder sent';
+        return content;
+      };
+      const lastMsgMap: Record<string, string | null> = {};
       for (const msg of (msgs || [])) {
-        if (!lastMsgMap[msg.conversation_id]) {
-          lastMsgMap[msg.conversation_id] = msg.content;
+        if (!(msg.conversation_id in lastMsgMap)) {
+          lastMsgMap[msg.conversation_id] = sanitize(msg.content);
         }
       }
 
