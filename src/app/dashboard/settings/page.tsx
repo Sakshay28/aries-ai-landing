@@ -6,7 +6,7 @@ import {
   Building2, Clock, Phone, Mail, Globe, MapPin,
   Users, Zap, Save, CheckCircle2, AlertCircle, Plus, X,
   MessageSquare, BrainCircuit, Bell, Copy, Eye, EyeOff, Key, HelpCircle, ExternalLink, RefreshCw, Star,
-  ChevronDown, ChevronUp, Image as ImageIcon, Smartphone
+  ChevronDown, ChevronUp, Image as ImageIcon
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PhoneInput } from '@/components/ui/phone-input';
@@ -52,10 +52,6 @@ interface SettingsData {
   wa_access_token: string;
   wa_app_secret: string;
   wa_verify_token: string;
-  // Coexistence (Business app + Cloud API on the same number)
-  wa_mode: 'cloud_api' | 'coexistence';
-  coexistence_auto_pause: boolean;
-  coexistence_connected_at: string | null;
 
 }
 
@@ -75,9 +71,6 @@ const DEFAULT_SETTINGS: SettingsData = {
   wa_access_token: '',
   wa_app_secret: '',
   wa_verify_token: '',
-  wa_mode: 'cloud_api',
-  coexistence_auto_pause: true,
-  coexistence_connected_at: null,
 };
 
 const TABS = [
@@ -352,11 +345,6 @@ export default function SettingsPage() {
   const [showToken, setShowToken] = useState(false);
   const [showAppSecret, setShowAppSecret] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState('');
-  const [coexStatus, setCoexStatus] = useState<{
-    wa_mode: string;
-    history: { status: string; progress: number; messages_imported: number; chunks_received: number };
-  } | null>(null);
-  const [connectingCoex, setConnectingCoex] = useState(false);
 
   const update = useCallback(<K extends keyof SettingsData>(key: K, value: SettingsData[K]) => {
     setSettings(s => ({ ...s, [key]: value }));
@@ -380,34 +368,6 @@ export default function SettingsPage() {
       }
     }
   }, []);
-
-  // Coexistence status (wa_mode + history-import progress) — only on the WA tab.
-  useEffect(() => {
-    if (activeTab !== 'whatsapp') return;
-    fetch('/api/whatsapp/coexistence/status')
-      .then(r => r.json())
-      .then(d => { if (d && d.wa_mode) setCoexStatus(d); })
-      .catch(() => {});
-  }, [activeTab]);
-
-  // Launch the WhatsApp Business app (Coexistence) Embedded Signup flow. The
-  // owner keeps WhatsApp on their phone; the API mirrors the same number.
-  const handleConnectCoexistence = async () => {
-    setConnectingCoex(true);
-    try {
-      const res = await fetch('/api/whatsapp/embedded-signup/start?mode=coexistence');
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        toast.error(data.error || 'Could not start Coexistence connect');
-        setConnectingCoex(false);
-      }
-    } catch {
-      toast.error('Could not start Coexistence connect');
-      setConnectingCoex(false);
-    }
-  };
 
   useEffect(() => {
     Promise.all([
@@ -657,15 +617,6 @@ export default function SettingsPage() {
                 <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                   Phone ID: <span className="font-mono font-bold">{settings.wa_phone_number_id}</span>
                 </div>
-                {(coexStatus?.wa_mode === 'coexistence' || settings.wa_mode === 'coexistence') && (
-                  <div
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
-                    style={{ background: 'rgba(37,211,102,0.12)', color: '#1FAE54', border: '1px solid rgba(37,211,102,0.25)' }}
-                  >
-                    <Smartphone className="w-3.5 h-3.5" />
-                    Coexistence — phone + API
-                  </div>
-                )}
               </div>
             ) : (
               <div className="flex items-center gap-3 py-2">
@@ -679,62 +630,6 @@ export default function SettingsPage() {
                 <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                   Provide your Meta credentials below to activate your automated WhatsApp chatbot.
                 </span>
-              </div>
-            )}
-          </SectionCard>
-
-          {/* Coexistence Card — Business app (phone) + Cloud API on one number */}
-          <SectionCard title="Use WhatsApp on Your Phone Too (Coexistence)" icon={Smartphone}>
-            <p className="text-xs -mt-1" style={{ color: 'var(--muted-foreground)' }}>
-              Keep replying from the WhatsApp Business app on your phone <strong>and</strong> let Aries
-              handle the same number — AI auto-replies, broadcasts, the team inbox, and CRM. When you
-              reply from your phone, the AI steps back for that chat so customers never get a double reply.
-            </p>
-
-            {coexStatus?.wa_mode === 'coexistence' || settings.wa_mode === 'coexistence' ? (
-              <div className="space-y-4 mt-1">
-                {/* History import progress */}
-                {coexStatus?.history && coexStatus.history.status !== 'pending' && (
-                  <div className="rounded-xl p-4" style={{ background: 'var(--secondary)', border: '1px solid var(--border)' }}>
-                    <div className="flex items-center justify-between text-xs font-medium mb-2" style={{ color: 'var(--foreground)' }}>
-                      <span>
-                        {coexStatus.history.status === 'completed'
-                          ? `Chat history imported (${coexStatus.history.messages_imported.toLocaleString()} messages)`
-                          : `Importing your last 6 months of chats…`}
-                      </span>
-                      <span style={{ color: 'var(--muted-foreground)' }}>{coexStatus.history.progress}%</span>
-                    </div>
-                    <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--muted)' }}>
-                      <div
-                        className="h-full rounded-full transition-all"
-                        style={{ width: `${Math.min(100, coexStatus.history.progress)}%`, background: '#25D366' }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <Toggle
-                  checked={settings.coexistence_auto_pause}
-                  onChange={v => update('coexistence_auto_pause', v)}
-                  label="Pause the AI when I reply from my phone"
-                  description={`Recommended. When you answer a customer from the WhatsApp app, the bot stands down for that chat and resumes automatically after ${settings.escalation_timeout_mins || 5} min.`}
-                />
-              </div>
-            ) : (
-              <div className="mt-1">
-                <button
-                  onClick={handleConnectCoexistence}
-                  disabled={connectingCoex}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-60"
-                  style={{ background: '#25D366' }}
-                >
-                  {connectingCoex ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Smartphone className="w-4 h-4" />}
-                  {connectingCoex ? 'Opening Meta…' : 'Connect via Coexistence'}
-                </button>
-                <p className="text-[11px] mt-2" style={{ color: 'var(--muted-foreground)' }}>
-                  Requires the WhatsApp <strong>Business</strong> app (v2.24.17+) on the phone holding the
-                  number, active for at least 7 days. You&apos;ll scan a QR code from your phone during setup.
-                </p>
               </div>
             )}
           </SectionCard>
