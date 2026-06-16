@@ -16,9 +16,7 @@ export async function GET() {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { data, error } = await supabaseAdmin
-    .from('tenants')
-    .select(`
+  const BASE_COLS = `
       business_name, business_type, business_phone, business_address,
       business_website, business_email, bot_name, bot_personality,
       welcome_message, welcome_offer, usps, working_hours,
@@ -29,10 +27,25 @@ export async function GET() {
       custom_faqs, off_hours_enabled, off_hours_message, off_hours_capture_lead,
       google_review_url, review_automation_enabled,
       wa_phone_number_id, wa_business_account_id, wa_access_token, wa_app_secret, wa_verify_token,
-      outbound_webhook_url, system_prompt
-    `)
+      outbound_webhook_url, system_prompt`;
+  // Coexistence columns only exist after migration 20260616. Select them when
+  // present; if the migration hasn't run yet, fall back to the base columns so
+  // the Settings page never 500s during the deploy → migration window.
+  const COEX_COLS = `wa_mode, coexistence_auto_pause, coexistence_connected_at`;
+
+  let { data, error } = await supabaseAdmin
+    .from('tenants')
+    .select(`${BASE_COLS}, ${COEX_COLS}`)
     .eq('id', tenantId)
     .single();
+
+  if (error && /column|does not exist|wa_mode|coexistence/i.test(error.message || '')) {
+    ({ data, error } = await supabaseAdmin
+      .from('tenants')
+      .select(BASE_COLS)
+      .eq('id', tenantId)
+      .single());
+  }
 
   if (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -101,6 +114,9 @@ export async function PATCH(req: NextRequest) {
     'custom_faqs', 'off_hours_enabled', 'off_hours_message', 'off_hours_capture_lead',
     'google_review_url', 'review_automation_enabled',
     'wa_phone_number_id', 'wa_business_account_id', 'wa_verify_token',
+    // wa_mode is set by onboarding (not user-editable here); the auto-pause
+    // behaviour for coexistence echoes IS toggleable.
+    'coexistence_auto_pause',
     'outbound_webhook_url', 'system_prompt'
   ];
 

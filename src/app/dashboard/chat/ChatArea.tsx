@@ -3,7 +3,7 @@
 import {
   Send, Bot, User, Check, CheckCheck, Clock, AlertCircle, ArrowDown, Paperclip, Smile,
   Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal, X, Loader2, Trash2, HelpCircle,
-  ArrowLeft,
+  ArrowLeft, Smartphone,
 } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from "framer-motion";
 import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
@@ -1447,6 +1447,12 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
                           {/* Timestamp + ticks — shown on every bubble */}
                           <div className={cn('flex items-center gap-1 mt-0.5', isInbound ? 'justify-start' : 'justify-end')}>
+                            {/* Coexistence: the owner sent this from the WhatsApp app on their phone */}
+                            {!isInbound && msg.sent_via === 'whatsapp_app' && (
+                              <span className="flex items-center gap-0.5 text-[10.5px] text-[#667781] dark:text-[#aebac1]">
+                                <Smartphone className="w-2.5 h-2.5" /> Phone
+                              </span>
+                            )}
                             <span className="text-[10.5px] text-[#667781] dark:text-[#aebac1]">
                               {formatTime(msg.created_at)}
                             </span>

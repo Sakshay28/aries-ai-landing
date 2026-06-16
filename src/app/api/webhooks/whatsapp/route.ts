@@ -28,6 +28,7 @@ import { randomUUID } from 'crypto';
 import { triggerCapiEvent } from '@/lib/integrations/capi-trigger';
 import { processCtwaLead, getCampaignContextForAI } from '@/lib/meta-ads/attribution';
 import { notifyAdmin } from '@/lib/alerts/admin';
+import { isCoexistenceChange, handleCoexistenceWebhook } from '@/lib/webhook/coexistence';
 import * as Sentry from '@/lib/sentry-stub';
 
 // ── GET: Webhook Verification Handshake ──
@@ -138,6 +139,24 @@ export async function POST(req: NextRequest) {
       return new Response('Unauthorized', { status: 401 });
     }
     console.warn('⚠️ META_APP_SECRET not set — skipping signature verification (development only). Set META_APP_SECRET in Vercel env vars.');
+  }
+
+  // ── Coexistence events (smb_message_echoes / history / smb_app_state_sync) ──
+  // These are only emitted for numbers onboarded via Coexistence. The normal
+  // parser returns null for them, so they were silently dropped before. Route
+  // them to their dedicated handlers and return 200 immediately. The live
+  // inbound/status/reaction path below is left completely untouched.
+  const change = body?.entry?.[0]?.changes?.[0];
+  if (isCoexistenceChange(change?.field, change?.value)) {
+    after(async () => {
+      try {
+        await handleCoexistenceWebhook(change?.field, change?.value);
+      } catch (err) {
+        console.error('❌ Coexistence webhook processing error:', err);
+        Sentry.captureException(err);
+      }
+    });
+    return NextResponse.json({ ok: true });
   }
 
   // Parse Meta Payload

@@ -25,10 +25,17 @@ export interface Tenant {
   wa_phone_number_id: string | null;
   wa_access_token: string | null;
   wa_business_account_id: string | null;
+  wa_waba_id: string | null;
   wa_app_secret: string | null;
   wa_verify_token: string;
   wa_webhook_verified: boolean;
   wa_token_expired: boolean;
+  // Coexistence: run the WhatsApp Business app (phone) AND the Cloud API on the
+  // same number. 'cloud_api' (default) = number lives on the API only.
+  wa_mode: 'cloud_api' | 'coexistence';
+  // When true, an owner reply from the phone soft-pauses the AI for that chat.
+  coexistence_auto_pause: boolean;
+  coexistence_connected_at: string | null;
 
   // Instagram
   ig_access_token: string | null;
@@ -212,6 +219,11 @@ export interface Message {
   media_caption?: string | null;
   reply_to_message_id?: string | null;
   reaction?: string | null;
+  // Coexistence: 'whatsapp_app' = the owner sent this from the WhatsApp Business
+  // app on their phone (echo); NULL/'api' = sent via the Cloud API (AriesAI).
+  sent_via?: string | null;
+  // True for messages backfilled by the coexistence `history` webhook.
+  is_historical?: boolean | null;
 }
 
 // Mirrors what the webhook actually stores: msg.type passes through for all media
