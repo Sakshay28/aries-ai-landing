@@ -10,6 +10,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { verifyWebhookSignature, handleRazorpayWebhook } from '@/lib/billing/razorpay';
 import { fireIntegrations } from '@/lib/integrations/runner';
+import { sendTextMessage } from '@/lib/meta/service';
+import { decryptToken } from '@/lib/utils/crypto';
 
 export async function POST(req: NextRequest) {
   // Read raw body first — signature verification requires the unmodified bytes.
@@ -75,9 +77,10 @@ export async function POST(req: NextRequest) {
           .select('restaurant_id, customer_name, customer_phone, party_size, booking_date')
           .single();
         if (booking) {
+          const tenantIdVal = booking.restaurant_id as string;
           fireIntegrations({
             type: 'booking_confirmed',
-            tenantId: booking.restaurant_id as string,
+            tenantId: tenantIdVal,
             lead: { name: (booking.customer_name as string) || '', phone: (booking.customer_phone as string) || '' },
             details: {
               reservation_id: reservationId,
@@ -85,6 +88,33 @@ export async function POST(req: NextRequest) {
               date: String(booking.booking_date ?? ''),
             },
           }).catch(() => {});
+
+          // Notify manager that payment is confirmed
+          const { data: tenant } = await supabaseAdmin
+            .from('tenants')
+            .select('wa_access_token, wa_phone_number_id, manager_phone, business_name')
+            .eq('id', tenantIdVal)
+            .single();
+
+          const mgrPhone = (tenant as any)?.manager_phone as string | null;
+          const waToken = (tenant as any)?.wa_access_token
+            ? (decryptToken((tenant as any).wa_access_token as string) as string)
+            : null;
+          const waPhoneId = (tenant as any)?.wa_phone_number_id as string | null;
+
+          if (mgrPhone && waToken && waPhoneId) {
+            const pSize = booking.party_size ?? '';
+            const bDate = booking.booking_date ?? '';
+            const mgrMsg =
+              `✅ Payment Confirmed!\n\n` +
+              `👤 ${booking.customer_name}, ${pSize} guest${Number(pSize) !== 1 ? 's' : ''}\n` +
+              `📅 ${bDate}\n` +
+              `📋 Reservation: ${reservationId}\n` +
+              `📞 Phone: ${booking.customer_phone}`;
+            sendTextMessage(waToken, waPhoneId, mgrPhone, mgrMsg).catch(e =>
+              console.error('❌ [RAZORPAY] Manager notification failed:', (e as Error).message));
+          }
+
           console.log(`✅ Booking ${reservationId} marked paid + confirmed`);
         }
       }

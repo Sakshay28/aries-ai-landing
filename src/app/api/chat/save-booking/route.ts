@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
     // 3. Fetch Tenant details for Short Code generating Reservation ID
     const { data: tenant, error: tenantErr } = await supabaseAdmin
       .from('tenants')
-      .select('short_code, business_name, booking_fee_per_person, wa_access_token, wa_phone_number_id')
+      .select('short_code, business_name, booking_fee_per_person, wa_access_token, wa_phone_number_id, manager_phone')
       .eq('id', tenantId)
       .single();
 
@@ -276,10 +276,11 @@ export async function POST(req: NextRequest) {
       console.warn('⚠️ [SAVE BOOKING] Supabase insertion warning (non-blocking):', dbErr.message);
     }
 
-    // 8. Fee due → send the payment link to the guest on WhatsApp + fire integrations.
+    // 8. Send WhatsApp messages + fire integrations.
+    const accessToken = (tenant as any).wa_access_token ? (decryptToken((tenant as any).wa_access_token) as string) : '';
+    const phoneNumberId = (tenant as any).wa_phone_number_id as string;
+
     if (paymentLink) {
-      const accessToken = (tenant as any).wa_access_token ? (decryptToken((tenant as any).wa_access_token) as string) : '';
-      const phoneNumberId = (tenant as any).wa_phone_number_id as string;
       if (accessToken && phoneNumberId) {
         const payMsg = `Almost done! 🎉\nTo confirm your table for ${guestCount} on ${bookingDate}, please pay the ₹${feeRupees} booking fee here:\n${paymentLink.short_url}\n\nReservation: ${reservationId}`;
         sendTextMessage(accessToken, phoneNumberId, cleanPhoneStr, payMsg).catch(e =>
@@ -293,7 +294,6 @@ export async function POST(req: NextRequest) {
         description: `Booking ${reservationId}`,
       }).catch(() => {});
     } else {
-      // Free booking → confirmed immediately. Propagate to Pabbly / Google Calendar / CRM.
       fireIntegrations({
         type: 'booking_confirmed',
         tenantId,
@@ -305,6 +305,23 @@ export async function POST(req: NextRequest) {
           time: slotTime,
         },
       }).catch(() => {});
+    }
+
+    // Always notify manager immediately — paid or free.
+    const managerPhone = (tenant as any).manager_phone as string | null;
+    if (accessToken && phoneNumberId && managerPhone) {
+      const displayTime = formatSlotTime(chosenSlot!.slot_time);
+      const paymentNote = isPrepaid ? `\n💳 Payment: ₹${feeRupees} pending` : '';
+      const managerMsg =
+        `🔔 New Booking!\n\n` +
+        `👤 ${name}, ${guestCount} guest${guestCount !== 1 ? 's' : ''}\n` +
+        `⏰ ${displayTime} on ${bookingDate}\n` +
+        `📋 Reservation ID: ${reservationId}\n` +
+        `📞 Phone: ${cleanPhoneStr}` +
+        paymentNote +
+        (special_request ? `\n📝 Note: ${special_request}` : '');
+      sendTextMessage(accessToken, phoneNumberId, managerPhone, managerMsg).catch(e =>
+        console.error('❌ [SAVE BOOKING] Manager notification failed:', (e as Error).message));
     }
 
     return NextResponse.json({

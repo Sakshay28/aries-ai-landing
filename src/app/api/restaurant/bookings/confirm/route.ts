@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
   const { data: tenant, error: tenantErr } = await supabaseAdmin
     .from('tenants')
     .select(
-      'id, business_name, razorpay_customer_id, wa_phone_number_id, wa_access_token, notify_phone, short_code, modules'
+      'id, business_name, razorpay_customer_id, wa_phone_number_id, wa_access_token, manager_phone, short_code, modules'
     )
     .eq('id', restaurant_id)
     .single();
@@ -183,7 +183,7 @@ export async function POST(req: NextRequest) {
     const displayTime = formatSlotTime(slot_time);
     const displayDate = formatBookingDate(booking_date);
     const businessName = tenant.business_name;
-    const notifyPhone = tenant.notify_phone as string | null;
+    const notifyPhone = (tenant as any).manager_phone as string | null;
     const waPhoneId = tenant.wa_phone_number_id as string | null;
     const waToken = tenant.wa_access_token
       ? (decryptToken(tenant.wa_access_token as string) as string)
