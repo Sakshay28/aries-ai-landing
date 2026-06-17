@@ -118,10 +118,9 @@ Please verify your production environment variables in your deployment dashboard
         }),
       });
       const verifyData = await res.json();
-      if (!verifyData.success || !verifyData.data?.session) {
+      if (!verifyData.success || !verifyData.data?.userId) {
         throw new Error(verifyData.error || "Verification failed");
       }
-      const sessionUser = verifyData.data.session.user;
 
       // Provision user and tenant in our public database
       const provisionRes = await fetch("/api/auth/provision", {
@@ -131,7 +130,7 @@ Please verify your production environment variables in your deployment dashboard
           email,
           fullName,
           businessName,
-          authId: sessionUser.id,
+          authId: verifyData.data.userId,
         }),
       });
 
