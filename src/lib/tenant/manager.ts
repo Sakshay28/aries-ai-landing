@@ -467,6 +467,7 @@ export function getTenantConfig(tenant: Tenant) {
     address: tenant.business_address || '',
     website: tenant.business_website || '',
     welcomeMessage: tenant.welcome_message || '',
+    welcomeImageUrl: tenant.welcome_image_url || '',
     welcomeOffer: tenant.welcome_offer || '',
     usps: tenant.usps || [],
     staffName: tenant.staff_name || 'our team',
@@ -483,5 +484,13 @@ export function getTenantConfig(tenant: Tenant) {
     offHoursCaptureLead: tenant.off_hours_capture_lead ?? true,
     // Unified Staff Guidelines
     systemPrompt: tenant.system_prompt || '',
+    // AI Behavior Controls (migration 20260618) — default to current behavior
+    // when the columns are absent (migration not yet run) or unset.
+    languageMode: (tenant.bot_language_mode as 'auto' | 'english' | 'hindi') || 'auto',
+    responseLength: (tenant.response_length as 'short' | 'medium' | 'detailed') || 'short',
+    prohibitedTopics: tenant.prohibited_topics || [],
+    alwaysMentionRules: tenant.always_mention_rules || [],
+    competitors: tenant.competitors || [],
+    competitorDeflectionReply: tenant.competitor_deflection_reply || '',
   };
 }

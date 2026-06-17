@@ -1360,6 +1360,19 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     console.error(`❌ Meta: ${sendFailureMsg} for tenant ${tenant.id}`);
   } else {
     try {
+      // Send welcome image before the text on first contact
+      if (isFirstMessage && tenantConfig.welcomeImageUrl) {
+        await sendMediaMessage(
+          decryptedAccessToken,
+          tenant.wa_phone_number_id,
+          cleanPhone,
+          'image',
+          tenantConfig.welcomeImageUrl
+        ).catch(imgErr => {
+          console.error('⚠️ Meta: welcome image send failed (non-fatal):', (imgErr as Error).message);
+        });
+      }
+
       const result = await sendTextMessage(
         decryptedAccessToken,
         tenant.wa_phone_number_id,

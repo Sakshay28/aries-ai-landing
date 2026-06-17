@@ -30,7 +30,7 @@ export async function GET() {
       outbound_webhook_url, system_prompt`;
   // Optional columns added by later migrations. Select them when present;
   // fall back to BASE_COLS if the migration hasn't run yet.
-  const OPT_COLS = `wa_mode, coexistence_auto_pause, coexistence_connected_at, welcome_image_url`;
+  const OPT_COLS = `wa_mode, coexistence_auto_pause, coexistence_connected_at, welcome_image_url, bot_language_mode, response_length, prohibited_topics, always_mention_rules, competitors, competitor_deflection_reply`;
 
   let { data, error } = await supabaseAdmin
     .from('tenants')
@@ -88,6 +88,44 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
+  // AI Behavior Controls: validate enums and cap array/string sizes so a
+  // malformed payload can't poison the prompt or bloat the row.
+  if (body.bot_language_mode !== undefined && body.bot_language_mode !== null &&
+      !['auto', 'english', 'hindi'].includes(String(body.bot_language_mode))) {
+    return NextResponse.json({ success: false, error: 'bot_language_mode must be auto, english, or hindi.' }, { status: 400 });
+  }
+  if (body.response_length !== undefined && body.response_length !== null &&
+      !['short', 'medium', 'detailed'].includes(String(body.response_length))) {
+    return NextResponse.json({ success: false, error: 'response_length must be short, medium, or detailed.' }, { status: 400 });
+  }
+  if (body.prohibited_topics !== undefined && body.prohibited_topics !== null) {
+    if (!Array.isArray(body.prohibited_topics) || body.prohibited_topics.length > 50 ||
+        body.prohibited_topics.some((t: unknown) => typeof t !== 'string' || t.length > 120)) {
+      return NextResponse.json({ success: false, error: 'prohibited_topics must be up to 50 strings of 120 chars each.' }, { status: 400 });
+    }
+  }
+  if (body.competitors !== undefined && body.competitors !== null) {
+    if (!Array.isArray(body.competitors) || body.competitors.length > 50 ||
+        body.competitors.some((t: unknown) => typeof t !== 'string' || t.length > 120)) {
+      return NextResponse.json({ success: false, error: 'competitors must be up to 50 strings of 120 chars each.' }, { status: 400 });
+    }
+  }
+  if (body.competitor_deflection_reply !== undefined && body.competitor_deflection_reply !== null &&
+      String(body.competitor_deflection_reply).length > 500) {
+    return NextResponse.json({ success: false, error: 'competitor_deflection_reply exceeds the 500-character limit.' }, { status: 400 });
+  }
+  if (body.always_mention_rules !== undefined && body.always_mention_rules !== null) {
+    const rules = body.always_mention_rules;
+    const valid = Array.isArray(rules) && rules.length <= 30 && rules.every((r: unknown) =>
+      r && typeof r === 'object' &&
+      typeof (r as { topic?: unknown }).topic === 'string' && (r as { topic: string }).topic.length <= 200 &&
+      typeof (r as { mention?: unknown }).mention === 'string' && (r as { mention: string }).mention.length <= 400
+    );
+    if (!valid) {
+      return NextResponse.json({ success: false, error: 'always_mention_rules must be up to 30 {topic, mention} objects.' }, { status: 400 });
+    }
+  }
+
   // SSRF guard: reject an unsafe outbound_webhook_url before persisting it.
   if (
     body.outbound_webhook_url !== undefined &&
@@ -116,7 +154,10 @@ export async function PATCH(req: NextRequest) {
     // wa_mode is set by onboarding (not user-editable here); the auto-pause
     // behaviour for coexistence echoes IS toggleable.
     'coexistence_auto_pause',
-    'outbound_webhook_url', 'system_prompt'
+    'outbound_webhook_url', 'system_prompt',
+    // AI Behavior Controls (migration 20260618)
+    'bot_language_mode', 'response_length', 'prohibited_topics',
+    'always_mention_rules', 'competitors', 'competitor_deflection_reply',
   ];
 
   const updates: Record<string, unknown> = {};
@@ -153,12 +194,27 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'No valid fields to update' }, { status: 400 });
   }
 
-  const { data, error } = await supabaseAdmin
+  // Optional columns added by later migrations — strip them on "column does not exist"
+  // so the rest of the save still succeeds during the deploy → migration window.
+  const OPTIONAL_COLS = ['welcome_image_url', 'coexistence_auto_pause'];
+
+  let { data, error } = await supabaseAdmin
     .from('tenants')
     .update(updates)
     .eq('id', tenantId)
     .select()
     .single();
+
+  if (error && /column.*does not exist/i.test(error.message || '')) {
+    const stripped = { ...updates };
+    for (const col of OPTIONAL_COLS) delete stripped[col];
+    ({ data, error } = await supabaseAdmin
+      .from('tenants')
+      .update(stripped)
+      .eq('id', tenantId)
+      .select()
+      .single());
+  }
 
   if (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

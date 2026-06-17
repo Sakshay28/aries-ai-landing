@@ -17,6 +17,7 @@ export interface Tenant {
   bot_name: string;
   bot_personality: string;
   welcome_message: string | null;
+  welcome_image_url: string | null;
   welcome_offer: string | null;
   usps: string[];
   working_hours: Record<string, string>;
@@ -88,6 +89,14 @@ export interface Tenant {
 
   // Custom Prompt (Staff Guidelines)
   system_prompt?: string | null;
+
+  // AI Behavior Controls (migration 20260618)
+  bot_language_mode?: 'auto' | 'english' | 'hindi' | null;
+  response_length?: 'short' | 'medium' | 'detailed' | null;
+  prohibited_topics?: string[] | null;
+  always_mention_rules?: Array<{ topic: string; mention: string }> | null;
+  competitors?: string[] | null;
+  competitor_deflection_reply?: string | null;
 
   // Off-Hours Config (Fix #8)
   off_hours_enabled: boolean;        // master on/off switch for the automatic off-hours reply
