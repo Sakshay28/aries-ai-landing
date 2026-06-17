@@ -28,18 +28,17 @@ export async function GET() {
       google_review_url, review_automation_enabled,
       wa_phone_number_id, wa_business_account_id, wa_access_token, wa_app_secret, wa_verify_token,
       outbound_webhook_url, system_prompt`;
-  // Coexistence columns only exist after migration 20260616. Select them when
-  // present; if the migration hasn't run yet, fall back to the base columns so
-  // the Settings page never 500s during the deploy → migration window.
-  const COEX_COLS = `wa_mode, coexistence_auto_pause, coexistence_connected_at`;
+  // Optional columns added by later migrations. Select them when present;
+  // fall back to BASE_COLS if the migration hasn't run yet.
+  const OPT_COLS = `wa_mode, coexistence_auto_pause, coexistence_connected_at, welcome_image_url`;
 
   let { data, error } = await supabaseAdmin
     .from('tenants')
-    .select(`${BASE_COLS}, ${COEX_COLS}`)
+    .select(`${BASE_COLS}, ${OPT_COLS}`)
     .eq('id', tenantId)
     .single();
 
-  if (error && /column|does not exist|wa_mode|coexistence/i.test(error.message || '')) {
+  if (error && /column|does not exist/i.test(error.message || '')) {
     ({ data, error } = await supabaseAdmin
       .from('tenants')
       .select(BASE_COLS)
@@ -106,7 +105,7 @@ export async function PATCH(req: NextRequest) {
   const allowedFields = [
     'business_name', 'business_type', 'business_phone', 'business_address',
     'business_website', 'business_email', 'bot_name', 'bot_personality',
-    'welcome_message', 'welcome_offer', 'usps', 'working_hours',
+    'welcome_message', 'welcome_image_url', 'welcome_offer', 'usps', 'working_hours',
     'staff_phone', 'staff_name', 'manager_phone', 'escalation_alert_template',
     'escalation_enabled', 'escalation_keywords', 'escalation_reply',
     'followup_30min', 'followup_3hr', 'followup_24hr', 'followup_7day',

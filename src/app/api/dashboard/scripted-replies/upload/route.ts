@@ -18,9 +18,10 @@ const ALLOWED: Record<string, string> = {
   'image/png':  'png',
   'image/webp': 'webp',
   'image/gif':  'gif',
+  'application/pdf': 'pdf',
 };
 
-const MAX_MB = 5;
+const MAX_MB = 10;
 
 async function ensureBucket() {
   try {
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
 
   const ext = ALLOWED[file.type];
-  if (!ext) return NextResponse.json({ error: 'Only JPEG, PNG, WEBP or GIF allowed' }, { status: 400 });
+  if (!ext) return NextResponse.json({ error: 'Only JPEG, PNG, WEBP, GIF or PDF allowed' }, { status: 400 });
 
   const sizeMB = file.size / (1024 * 1024);
   if (sizeMB > MAX_MB) return NextResponse.json({ error: `Max size is ${MAX_MB} MB` }, { status: 400 });
