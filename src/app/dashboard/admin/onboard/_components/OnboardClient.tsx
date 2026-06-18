@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { UserPlus, Building2, Search, Save, CheckCircle2, AlertCircle } from 'lucide-react';
+import { UserPlus, Building2, Search, Save, CheckCircle2, AlertCircle, LogIn } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 type TenantRow = {
@@ -72,6 +72,7 @@ export function OnboardClient() {
   const [ownerEmail, setOwnerEmail] = useState('');
   const [loadingTenant, setLoadingTenant] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [impersonating, setImpersonating] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -154,6 +155,32 @@ export function OnboardClient() {
     }
   };
 
+  const loginAsClient = async () => {
+    if (!ownerEmail) return;
+    const confirmed = window.confirm(
+      `Log in as ${ownerEmail}?\n\nThis will replace your current session. Log out and sign back in as yourself when done.`
+    );
+    if (!confirmed) return;
+    setImpersonating(true);
+    try {
+      const res = await fetch('/api/admin/impersonate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: ownerEmail }),
+      });
+      const data = await res.json();
+      if (data.success && data.url) {
+        window.location.href = data.url;
+      } else {
+        toast.error(data.error || 'Failed to generate login link');
+        setImpersonating(false);
+      }
+    } catch {
+      toast.error('Failed to impersonate client');
+      setImpersonating(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-hidden">
       <header className="px-6 lg:px-8 pt-6 pb-4 border-b border-border shrink-0">
@@ -228,8 +255,18 @@ export function OnboardClient() {
           ) : (
             <div className="max-w-[680px] mx-auto w-full space-y-8">
               {ownerEmail && (
-                <div className="text-xs text-muted-foreground">
-                  Editing tenant owned by <span className="font-medium text-foreground">{ownerEmail}</span>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-xs text-muted-foreground">
+                    Editing tenant owned by <span className="font-medium text-foreground">{ownerEmail}</span>
+                  </div>
+                  <button
+                    onClick={loginAsClient}
+                    disabled={impersonating}
+                    className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 shrink-0"
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    {impersonating ? 'Redirecting…' : 'Login as client'}
+                  </button>
                 </div>
               )}
               {SECTIONS.map(section => (
