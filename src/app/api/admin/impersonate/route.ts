@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   const { data, error } = await supabaseAdmin.auth.admin.generateLink({
     type: 'magiclink',
     email,
-    options: { redirectTo: 'https://ariesai.in/dashboard' },
+    options: { redirectTo: 'https://ariesai.in/impersonate' },
   });
 
   if (error || !data?.properties?.action_link) {
