@@ -1,35 +1,23 @@
 "use client";
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 
 export default function ImpersonatePage() {
-  const router = useRouter();
-
   useEffect(() => {
     const hash = window.location.hash.slice(1);
     const params = new URLSearchParams(hash);
-    const accessToken = params.get('access_token');
-    const refreshToken = params.get('refresh_token');
+    const at = params.get('access_token');
+    const rt = params.get('refresh_token');
 
-    if (!accessToken || !refreshToken) {
-      router.replace('/login?error=auth_failed');
+    if (!at || !rt) {
+      window.location.href = '/login?error=auth_failed';
       return;
     }
 
-    const supabase = createBrowserSupabaseClient();
-    supabase.auth
-      .setSession({ access_token: accessToken, refresh_token: refreshToken })
-      .then(({ error }) => {
-        if (error) {
-          console.error('[impersonate] setSession failed:', error.message);
-          router.replace('/login?error=auth_failed');
-        } else {
-          router.replace('/dashboard');
-        }
-      });
-  }, [router]);
+    // Hand tokens to the server route which writes httpOnly cookies
+    // and redirects to /dashboard with the client's session active.
+    window.location.href = `/api/auth/impersonate-session?at=${encodeURIComponent(at)}&rt=${encodeURIComponent(rt)}`;
+  }, []);
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-background">
