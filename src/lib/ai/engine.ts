@@ -310,7 +310,7 @@ ${tenantConfig.knowledgeDocs.map(d => `--- ${d.filename} ---\n${d.content_text}`
 
 RULES:
 - NEVER make up information you don't have
-- NEVER start with a greeting if this is not the first message in the conversation
+- NEVER start with a greeting if this is not the first message in the conversation — no "Hello", "Hi", "Hey", "Welcome" or any greeting opener. Jump straight to helping.
 ${isHospitality ? `- NEVER say "our team will contact you" or "someone will reach out" for standard bookings — the booking is confirmed instantly. (For large groups of 8+ guests or manager confirmation rules, you may state you will confirm shortly).
 ` : ''}- HUMAN HANDOFF: If the customer is angry/frustrated, or asks to talk to a human/agent/real person/the team, or asks to book/schedule a demo or call with the team — do NOT try to handle it or pitch to them yourself. Say you're connecting them to the team and set shouldEscalate=true${tenantConfig.escalationReply ? ` using this exact message: "${tenantConfig.escalationReply}"` : ''}
 - ${lengthInstruction}
@@ -462,6 +462,30 @@ export async function processMessageWithAI(
       shouldEscalate: false,
       nextStep: 'ask_intent',
       confidence: 1.0,
+    };
+  }
+
+  // ── Ongoing-conversation greeting intercept ──
+  // When a returning customer sends a bare greeting ("hi", "hello", etc.),
+  // Gemini ignores the ONGOING system-prompt instruction and generates a
+  // fresh "Hello! How can I assist you today?" — identical to the first-contact
+  // reply. Short-circuit these here just like the first-message case.
+  const lowerSafe = safeMessage.toLowerCase().trim();
+  const SIMPLE_GREETINGS = ['hi', 'hello', 'hey', 'hii', 'helo', 'namaste', 'yo', 'sup', 'howdy', 'good morning', 'good evening', 'good afternoon', 'good night'];
+  const isSimpleGreeting = SIMPLE_GREETINGS.some(w => lowerSafe === w || lowerSafe === w + '!' || lowerSafe === w + '.' || lowerSafe === w + ' 🙏' || lowerSafe.startsWith(w + ' '));
+  if (!tenantConfig.isFirstMessage && isSimpleGreeting) {
+    const prevUserMsgs = conversationHistory.filter(m => m.role === 'user').map(m => m.content).join(' ').toLowerCase();
+    const isHinglish = /(kaise|kya|hai|bhai|yaar|batao|chahiye|mujhe|aap|hum|theek|accha|bilkul|zaroor|bol|kar|karo)/.test(prevUserMsgs);
+    return {
+      reply: isHinglish
+        ? `Haan batao! 😊 Kaise help karun ${tenantConfig.businessName} ke liye?`
+        : `Hey! 😊 How can I help you with ${tenantConfig.businessName} today?`,
+      extractedData: {},
+      intent: 'greeting',
+      sentiment: 'positive',
+      shouldEscalate: false,
+      nextStep: 'ask_intent',
+      confidence: 0.95,
     };
   }
 
