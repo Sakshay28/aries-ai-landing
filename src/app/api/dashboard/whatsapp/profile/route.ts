@@ -60,8 +60,17 @@ export async function PUT(req: NextRequest) {
     const payload: Record<string, unknown> = { messaging_product: 'whatsapp' };
     const allowed = ['about', 'address', 'description', 'email', 'websites', 'vertical'];
     for (const key of allowed) {
-      if (key in body) payload[key] = body[key];
+      if (!(key in body)) continue;
+      const val = body[key];
+      if (val === null || val === undefined) continue;
+      // Skip empty arrays — Meta rejects { websites: [] } with a 400
+      if (Array.isArray(val) && val.length === 0) continue;
+      // Skip the UI placeholder for vertical — sending 'UNDEFINED' causes a Meta 400
+      if (key === 'vertical' && val === 'UNDEFINED') continue;
+      payload[key] = val;
     }
+
+    console.log(`[wa/profile PUT] tenant=${tenantId} fields:`, Object.keys(payload).filter(k => k !== 'messaging_product'));
 
     const res = await fetch(`${META_BASE}/${phoneNumberId}/whatsapp_business_profile`, {
       method: 'POST',
@@ -70,10 +79,20 @@ export async function PUT(req: NextRequest) {
     });
 
     const json = await res.json();
+    console.log(`[wa/profile PUT] Meta status=${res.status} body=`, JSON.stringify(json));
+
     if (!res.ok) {
       return NextResponse.json(
-        { error: json.error?.message ?? 'Meta API error' },
+        { error: json.error?.message ?? `Meta API error (${res.status})` },
         { status: res.status }
+      );
+    }
+
+    // Meta returns { "success": true } — a 200 with success:false is still a failure
+    if (json.success === false) {
+      return NextResponse.json(
+        { error: json.error?.message ?? 'Meta rejected the update' },
+        { status: 400 }
       );
     }
 

@@ -263,8 +263,13 @@ export default function WaProfileTab() {
         body: JSON.stringify(payload),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
-      toast.success('WhatsApp Business Profile updated');
+      if (!res.ok) throw new Error(json.error || 'Save failed');
+
+      // Re-fetch from Meta to confirm the data actually persisted.
+      // Without this, the UI shows local state and the user can't tell if
+      // Meta actually saved it until they manually refresh.
+      await fetchProfile();
+      toast.success('Saved and verified on WhatsApp ✓');
       setDirty(false);
     } catch (e) {
       toast.error((e as Error).message);
