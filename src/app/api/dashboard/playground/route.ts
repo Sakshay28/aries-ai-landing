@@ -60,6 +60,13 @@ export async function POST(req: NextRequest) {
       customFaqs: draftConfig.custom_faqs || [],
       knowledgeDocs: (ragDocs || []) as Array<{ filename: string; content_text: string }>,
       systemPrompt: draftConfig.system_prompt || '',
+      // AI Behavior Controls — mirror the live webhook so the simulator matches.
+      languageMode: (draftConfig.bot_language_mode || tenant.bot_language_mode || 'auto') as 'auto' | 'english' | 'hindi',
+      responseLength: (draftConfig.response_length || tenant.response_length || 'short') as 'short' | 'medium' | 'detailed',
+      prohibitedTopics: draftConfig.prohibited_topics || tenant.prohibited_topics || [],
+      alwaysMentionRules: draftConfig.always_mention_rules || tenant.always_mention_rules || [],
+      competitors: draftConfig.competitors || tenant.competitors || [],
+      competitorDeflectionReply: draftConfig.competitor_deflection_reply || tenant.competitor_deflection_reply || '',
     };
 
     // 3b. Check scripted replies — exact keyword intercepts that bypass AI.

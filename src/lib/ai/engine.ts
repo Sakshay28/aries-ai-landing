@@ -200,14 +200,57 @@ function buildSystemPrompt(tenantConfig: TenantAIConfig): string {
   const isHospitality = isHospitalityBusiness(tenantConfig.businessType);
   const personaInstruction = getPersonaInstruction(tenantConfig.botPersonality, isHospitality);
 
-  return `You are ${tenantConfig.botName}, the WhatsApp assistant for ${tenantConfig.businessName} (${tenantConfig.businessType}).
-
-LANGUAGE (HIGHEST PRIORITY — always follow):
+  // ── AI Behavior Controls (owner-configurable) ──
+  const languageMode = tenantConfig.languageMode || 'auto';
+  const languageBlock =
+    languageMode === 'english'
+      ? `LANGUAGE (HIGHEST PRIORITY — always follow):
+- ALWAYS reply in English, no matter what language the customer writes in. This is NON-NEGOTIABLE.
+- Even if the customer writes in Hindi or Hinglish, your reply MUST be in clear, natural English.`
+      : languageMode === 'hindi'
+      ? `LANGUAGE (HIGHEST PRIORITY — always follow):
+- ALWAYS reply in Hindi using Devanagari script, no matter what language the customer writes in. This is NON-NEGOTIABLE.
+- Even if the customer writes in English or Hinglish, your reply MUST be in natural Hindi (Devanagari).`
+      : `LANGUAGE (HIGHEST PRIORITY — always follow):
 - Reply in the SAME language AND script the customer uses IN THEIR CURRENT MESSAGE. Re-evaluate language for every message.
 - If they write Hinglish (Hindi in Roman letters like "kaise ho", "kya chahiye", "baat kro") → reply in Hinglish Roman script.
 - If they write Hindi in Devanagari → reply in Devanagari.
 - If they write English → reply in English. Do NOT reply in Hinglish if the customer wrote in English.
-- If the customer switches language mid-conversation, you MUST switch too — immediately.
+- If the customer switches language mid-conversation, you MUST switch too — immediately.`;
+
+  const responseLength = tenantConfig.responseLength || 'short';
+  const lengthInstruction =
+    responseLength === 'medium'
+      ? 'Keep responses concise — up to 3-4 short lines.'
+      : responseLength === 'detailed'
+      ? 'You may give thorough, detailed answers when it helps the customer, but stay focused and avoid rambling (roughly up to 6-8 lines).'
+      : 'Keep responses SHORT — max 1-2 lines.';
+
+  const prohibitedTopics = (tenantConfig.prohibitedTopics || []).filter(t => t && t.trim());
+  const alwaysMentionRules = (tenantConfig.alwaysMentionRules || []).filter(r => r && r.topic?.trim() && r.mention?.trim());
+  const competitors = (tenantConfig.competitors || []).filter(c => c && c.trim());
+  const competitorDeflection = (tenantConfig.competitorDeflectionReply || '').trim();
+
+  const behaviorBlocks = [
+    prohibitedTopics.length > 0
+      ? `PROHIBITED TOPICS (HARD BLOCK — never break this):
+- You must NEVER discuss, debate, give opinions on, or answer questions about: ${prohibitedTopics.join(', ')}.
+- If a customer raises any of these, politely decline in one short line and steer the conversation back to how you can help with ${tenantConfig.businessName}. Do not engage with the topic.`
+      : '',
+    alwaysMentionRules.length > 0
+      ? `ALWAYS-MENTION RULES (weave in naturally when the topic is relevant — do NOT force it into unrelated replies):
+${alwaysMentionRules.map(r => `- When "${r.topic}" comes up, always mention: ${r.mention}`).join('\n')}`
+      : '',
+    competitors.length > 0
+      ? `COMPETITOR HANDLING:
+- If the customer mentions, asks about, or wants you to compare with: ${competitors.join(', ')} — do NOT criticise them, discuss their pricing, or engage in a comparison.
+- Stay positive and redirect to what makes ${tenantConfig.businessName} a great choice.${competitorDeflection ? ` You may use this line: "${competitorDeflection}"` : ''}`
+      : '',
+  ].filter(Boolean).join('\n\n');
+
+  return `You are ${tenantConfig.botName}, the WhatsApp assistant for ${tenantConfig.businessName} (${tenantConfig.businessType}).
+
+${languageBlock}
 
 IDENTITY & TONE (HARD RULE — never break this):
 - You are ${tenantConfig.botName}, a helpful WhatsApp assistant. That is your ONLY identity.
@@ -216,7 +259,7 @@ IDENTITY & TONE (HARD RULE — never break this):
 - Be natural and conversational like a friendly person texting on WhatsApp, NOT a corporate bot.
 
 PERSONALITY: ${tenantConfig.botPersonality}.
-BEHAVIORAL STYLE: ${personaInstruction}. Keep responses SHORT — max 1-2 lines. Use emojis sparingly. Get to the point.
+BEHAVIORAL STYLE: ${personaInstruction}. ${lengthInstruction} Use emojis sparingly. Get to the point.
 
 BUSINESS INFO:
 - Name: ${tenantConfig.businessName}
@@ -270,10 +313,11 @@ RULES:
 - NEVER start with a greeting if this is not the first message in the conversation
 ${isHospitality ? `- NEVER say "our team will contact you" or "someone will reach out" for standard bookings — the booking is confirmed instantly. (For large groups of 8+ guests or manager confirmation rules, you may state you will confirm shortly).
 ` : ''}- HUMAN HANDOFF: If the customer is angry/frustrated, or asks to talk to a human/agent/real person/the team, or asks to book/schedule a demo or call with the team — do NOT try to handle it or pitch to them yourself. Say you're connecting them to the team and set shouldEscalate=true${tenantConfig.escalationReply ? ` using this exact message: "${tenantConfig.escalationReply}"` : ''}
-- Keep responses EXTREMELY direct and short (max 1-2 lines). No essays.
+- ${lengthInstruction}
 - Be helpful but don't be pushy
-- LANGUAGE REMINDER: Match the language of the customer's CURRENT message. If they just wrote in English, reply in English — even if earlier messages were in Hinglish.
+- LANGUAGE REMINDER: ${languageMode === 'english' ? 'Always reply in English, even if the customer writes in Hindi or Hinglish.' : languageMode === 'hindi' ? 'Always reply in Hindi (Devanagari), even if the customer writes in English or Hinglish.' : "Match the language of the customer's CURRENT message. If they just wrote in English, reply in English — even if earlier messages were in Hinglish."}
 - NEVER say "As an AI...", "I don't have feelings", or identify as artificial. Just be helpful like a human would.
+${behaviorBlocks ? `\n${behaviorBlocks}` : ''}
 
 ${(tenantConfig.visitCount ?? 0) >= 2 ? `
 RETURNING CUSTOMER: This guest has visited ${tenantConfig.visitCount} times before${tenantConfig.lastVisitDate ? ` (last visit ${tenantConfig.lastVisitDate})` : ''}. Acknowledge them warmly as a valued regular (e.g. "Great to have you back!"). Do NOT overdo it — one short warm line is enough.
@@ -348,6 +392,13 @@ export interface TenantAIConfig {
   customFaqs?: Array<{ question: string; answer: string }>;
   knowledgeDocs?: Array<{ filename: string; content_text: string }>;
   systemPrompt?: string;
+  // AI Behavior Controls (migration 20260618)
+  languageMode?: 'auto' | 'english' | 'hindi';
+  responseLength?: 'short' | 'medium' | 'detailed';
+  prohibitedTopics?: string[];
+  alwaysMentionRules?: Array<{ topic: string; mention: string }>;
+  competitors?: string[];
+  competitorDeflectionReply?: string;
   // Existing booking for this customer (for cancel/modify flows)
   existingBooking?: {
     reservationId: string;
@@ -394,6 +445,23 @@ export async function processMessageWithAI(
     };
   }
   const safeMessage = guard.safeResponse; // may be truncated
+
+  // ── First-message short-circuit: send the configured welcome message exactly ──
+  // Passing welcome_message to Gemini as a system instruction doesn't guarantee
+  // it will be used verbatim — the model may paraphrase or ignore it. When a
+  // welcome message is set and this is the first message in the conversation,
+  // skip the AI call entirely and return the owner-configured text directly.
+  if (tenantConfig.isFirstMessage && tenantConfig.welcomeMessage?.trim()) {
+    return {
+      reply: tenantConfig.welcomeMessage.trim(),
+      extractedData: {},
+      intent: 'greeting',
+      sentiment: 'positive',
+      shouldEscalate: false,
+      nextStep: 'ask_intent',
+      confidence: 1.0,
+    };
+  }
 
   // ── Circuit breaker: skip Gemini if it's been failing fleet-wide ──
   if (await isCircuitOpen()) {

@@ -52,6 +52,13 @@ interface SettingsData {
   wa_access_token: string;
   wa_app_secret: string;
   wa_verify_token: string;
+  // AI Behavior Controls
+  bot_language_mode: 'auto' | 'english' | 'hindi';
+  response_length: 'short' | 'medium' | 'detailed';
+  prohibited_topics: string[];
+  always_mention_rules: Array<{ topic: string; mention: string }>;
+  competitors: string[];
+  competitor_deflection_reply: string;
 
 }
 
@@ -71,11 +78,18 @@ const DEFAULT_SETTINGS: SettingsData = {
   wa_access_token: '',
   wa_app_secret: '',
   wa_verify_token: '',
+  bot_language_mode: 'auto',
+  response_length: 'short',
+  prohibited_topics: [],
+  always_mention_rules: [],
+  competitors: [],
+  competitor_deflection_reply: '',
 };
 
 const TABS = [
   { id: 'business', label: 'Business', icon: Building2 },
   { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
+  { id: 'aibehavior', label: 'AI Behavior', icon: BrainCircuit },
   { id: 'staff', label: 'Staff & Alerts', icon: Users },
   { id: 'followup', label: 'Follow-ups', icon: Bell },
   { id: 'offhours', label: 'Off-Hours', icon: Clock },
@@ -839,6 +853,130 @@ export default function SettingsPage() {
                 <li>Under Webhook fields, click <strong>Manage</strong> and subscribe to the <strong>messages</strong> field (Crucial for receiving chat replies).</li>
               </ol>
             </div>
+          </SectionCard>
+
+        </motion.div>
+      )}
+
+      {/* Tab: AI Behavior */}
+      {activeTab === 'aibehavior' && (
+        <motion.div key="aibehavior" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+
+          {/* Language & length */}
+          <SectionCard title="Language & Response Style" icon={MessageSquare}>
+            <Field label="Reply Language">
+              <select
+                value={settings.bot_language_mode || 'auto'}
+                onChange={e => update('bot_language_mode', e.target.value as SettingsData['bot_language_mode'])}
+                className="w-full h-10 px-3 rounded-xl text-sm outline-none transition-all"
+                style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+              >
+                <option value="auto">Auto — match the customer (English→English, Hindi→Hindi, Hinglish→Hinglish)</option>
+                <option value="english">English only — always reply in English</option>
+                <option value="hindi">Hindi only — always reply in Hindi</option>
+              </select>
+              <p className="text-xs mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                Auto is recommended — the bot mirrors whatever language each customer writes in. Lock it to English or Hindi only if you want one fixed language regardless of the customer.
+              </p>
+            </Field>
+            <Field label="Response Length">
+              <select
+                value={settings.response_length || 'short'}
+                onChange={e => update('response_length', e.target.value as SettingsData['response_length'])}
+                className="w-full h-10 px-3 rounded-xl text-sm outline-none transition-all"
+                style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+              >
+                <option value="short">Short — 1-2 lines (snappy, WhatsApp-style)</option>
+                <option value="medium">Medium — 3-4 lines (a bit more detail)</option>
+                <option value="detailed">Detailed — thorough answers (up to ~6-8 lines)</option>
+              </select>
+              <p className="text-xs mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                Controls how long the bot&apos;s replies are. Detailed suits info-heavy businesses (clinics, travel); short suits quick bookings.
+              </p>
+            </Field>
+          </SectionCard>
+
+          {/* Prohibited topics */}
+          <SectionCard title="Prohibited Topics" icon={AlertCircle}>
+            <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+              The bot will refuse to discuss these and politely steer back to your business. Add one topic at a time (e.g. &quot;politics&quot;, &quot;competitor pricing&quot;, &quot;medical advice&quot;).
+            </p>
+            <TagInput
+              tags={settings.prohibited_topics || []}
+              onChange={v => update('prohibited_topics', v)}
+              placeholder="Type a topic and press Enter"
+            />
+          </SectionCard>
+
+          {/* Always-mention rules */}
+          <SectionCard title="Always-Mention Rules" icon={Star}>
+            <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+              When a topic comes up, the bot will naturally weave in your note. Example: when &quot;dinner&quot; comes up → mention &quot;our Saturday live music&quot;.
+            </p>
+            <div className="space-y-3">
+              {(settings.always_mention_rules || []).map((rule, i) => (
+                <div key={i} className="flex flex-col sm:flex-row gap-2 items-start">
+                  <div className="flex-1 w-full">
+                    <Input
+                      value={rule.topic}
+                      onChange={v => {
+                        const next = [...settings.always_mention_rules];
+                        next[i] = { ...next[i], topic: v };
+                        update('always_mention_rules', next);
+                      }}
+                      placeholder="When this topic comes up…"
+                    />
+                  </div>
+                  <div className="flex-1 w-full">
+                    <Input
+                      value={rule.mention}
+                      onChange={v => {
+                        const next = [...settings.always_mention_rules];
+                        next[i] = { ...next[i], mention: v };
+                        update('always_mention_rules', next);
+                      }}
+                      placeholder="…always mention this"
+                    />
+                  </div>
+                  <button
+                    onClick={() => update('always_mention_rules', settings.always_mention_rules.filter((_, j) => j !== i))}
+                    className="h-10 px-3 rounded-xl shrink-0 flex items-center"
+                    style={{ background: 'var(--secondary)', border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => update('always_mention_rules', [...(settings.always_mention_rules || []), { topic: '', mention: '' }])}
+                className="h-9 px-3 rounded-xl text-sm font-medium flex items-center gap-1.5 transition-colors"
+                style={{ background: 'var(--secondary)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+              >
+                <Plus className="w-3.5 h-3.5" /> Add rule
+              </button>
+            </div>
+          </SectionCard>
+
+          {/* Competitor deflection */}
+          <SectionCard title="Competitor Handling" icon={Zap}>
+            <Field label="Competitor Names">
+              <TagInput
+                tags={settings.competitors || []}
+                onChange={v => update('competitors', v)}
+                placeholder="Add a competitor name and press Enter"
+              />
+            </Field>
+            <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+              If a customer mentions or asks to compare with these, the bot won&apos;t criticise them or discuss their prices — it redirects to why you&apos;re a great choice.
+            </p>
+            <Field label="Custom Deflection Line (optional)">
+              <Textarea
+                value={settings.competitor_deflection_reply || ''}
+                onChange={v => update('competitor_deflection_reply', v)}
+                placeholder="e.g. I can only speak for us — we'd love to show you what makes our food special!"
+                rows={2}
+              />
+            </Field>
           </SectionCard>
 
         </motion.div>
