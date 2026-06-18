@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   FileText, FileArchive, File, Music, Video, Download,
   Play, Pause, ExternalLink, Maximize2, X, ImageOff,
@@ -72,23 +72,35 @@ function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClos
 // ─── Audio Player ─────────────────────────────────────────────────────────────
 function AudioPlayer({ src, isOutbound }: { src: string; isOutbound: boolean }) {
   const [playing, setPlaying] = useState(false);
-  const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null);
+  const [progress, setProgress] = useState(0); // 0–100, drives the seek bar fill
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const ensureAudio = () => {
+    if (audioRef.current) return audioRef.current;
+    const a = new Audio(src);
+    a.onended = () => { setPlaying(false); setProgress(0); };
+    a.ontimeupdate = () => {
+      if (a.duration > 0) setProgress((a.currentTime / a.duration) * 100);
+    };
+    audioRef.current = a;
+    return a;
+  };
 
   const toggle = () => {
-    if (!audioEl) {
-      const a = new Audio(src);
-      a.onended = () => setPlaying(false);
-      a.play();
-      setAudioEl(a);
-      setPlaying(true);
-    } else if (playing) {
-      audioEl.pause();
+    const a = ensureAudio();
+    if (playing) {
+      a.pause();
       setPlaying(false);
     } else {
-      audioEl.play();
+      a.play();
       setPlaying(true);
     }
   };
+
+  // Stop playback if the bubble unmounts (e.g. switching conversations).
+  useEffect(() => {
+    return () => { audioRef.current?.pause(); audioRef.current = null; };
+  }, []);
 
   return (
     <div className="flex items-center gap-2 py-1">
@@ -103,7 +115,10 @@ function AudioPlayer({ src, isOutbound }: { src: string; isOutbound: boolean }) 
         {playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 ml-0.5" />}
       </button>
       <div className="flex-1 h-1 rounded-full bg-black/10 dark:bg-white/15">
-        <div className="h-full w-0 rounded-full bg-current transition-all" />
+        <div
+          className="h-full rounded-full bg-current transition-all"
+          style={{ width: `${progress}%` }}
+        />
       </div>
       <Music className="w-3.5 h-3.5 flex-shrink-0 text-[#667781] dark:text-[#8696A0]" />
     </div>

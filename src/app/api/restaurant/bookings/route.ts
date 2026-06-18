@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withTenantGuard } from '@/lib/auth/tenantGuard';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
+import { sendTextMessage } from '@/lib/meta/service';
+import { decryptToken } from '@/lib/utils/crypto';
 
 export async function GET(req: NextRequest) {
   const guard = await withTenantGuard(req);
@@ -105,7 +107,7 @@ export async function POST(req: NextRequest) {
 
   const { data: tenant } = await supabaseAdmin
     .from('tenants')
-    .select('short_code')
+    .select('short_code, wa_access_token, wa_phone_number_id, manager_phone')
     .eq('id', tenantId)
     .single();
 
@@ -173,6 +175,28 @@ export async function POST(req: NextRequest) {
     payment_amount: 0,
     created_at: new Date().toISOString(),
   }).catch(() => {});
+
+  // Notify manager on WhatsApp (non-blocking)
+  const managerPhone = (tenant as any)?.manager_phone as string | null;
+  const waToken = (tenant as any)?.wa_access_token
+    ? (decryptToken((tenant as any).wa_access_token as string) as string)
+    : null;
+  const waPhoneId = (tenant as any)?.wa_phone_number_id as string | null;
+  if (managerPhone && waToken && waPhoneId) {
+    const [hh, mm] = slot.slot_time.split(':').map(Number);
+    const ampm = hh >= 12 ? 'PM' : 'AM';
+    const hr12 = hh > 12 ? hh - 12 : hh === 0 ? 12 : hh;
+    const displayTime = `${hr12}:${String(mm).padStart(2, '0')} ${ampm}`;
+    const managerMsg =
+      `🔔 New Booking (staff added)!\n\n` +
+      `👤 ${customer_name.trim()}, ${guestCount} guest${guestCount !== 1 ? 's' : ''}\n` +
+      `⏰ ${displayTime} on ${booking_date}\n` +
+      `📋 Reservation ID: ${reservation_id}\n` +
+      `📞 Phone: ${cleanPhone}` +
+      (special_request?.trim() ? `\n📝 Note: ${special_request.trim()}` : '');
+    sendTextMessage(waToken, waPhoneId, managerPhone, managerMsg).catch(e =>
+      console.error('❌ [BOOKINGS] Manager notification failed:', (e as Error).message));
+  }
 
   return NextResponse.json({ success: true, data: { ...booking, slot_time: slot.slot_time } });
 }

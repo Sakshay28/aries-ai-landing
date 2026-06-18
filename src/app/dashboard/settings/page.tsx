@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PhoneInput } from '@/components/ui/phone-input';
+import WaProfileTab from '@/components/settings/WaProfileTab';
 
 interface SettingsData {
   business_name: string;
@@ -89,6 +90,7 @@ const DEFAULT_SETTINGS: SettingsData = {
 const TABS = [
   { id: 'business', label: 'Business', icon: Building2 },
   { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
+  { id: 'wabizprofile', label: 'WA Profile', icon: ImageIcon },
   { id: 'aibehavior', label: 'AI Behavior', icon: BrainCircuit },
   { id: 'staff', label: 'Staff & Alerts', icon: Users },
   { id: 'followup', label: 'Follow-ups', icon: Bell },
@@ -857,6 +859,9 @@ export default function SettingsPage() {
 
         </motion.div>
       )}
+
+      {/* Tab: WA Profile */}
+      {activeTab === 'wabizprofile' && <WaProfileTab />}
 
       {/* Tab: AI Behavior */}
       {activeTab === 'aibehavior' && (
