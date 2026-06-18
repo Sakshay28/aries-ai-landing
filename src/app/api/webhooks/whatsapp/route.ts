@@ -1366,26 +1366,34 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     console.error(`❌ Meta: ${sendFailureMsg} for tenant ${tenant.id}`);
   } else {
     try {
-      // Send welcome image before the text on first contact
+      // On first contact: send image + welcome text as ONE message (image with caption)
+      // so WhatsApp delivers them atomically — no ordering race between two requests.
       if (isFirstMessage && tenantConfig.welcomeImageUrl) {
+        let imgSent = false;
         await sendMediaMessage(
           decryptedAccessToken,
           tenant.wa_phone_number_id,
           cleanPhone,
           'image',
-          tenantConfig.welcomeImageUrl
-        ).catch(imgErr => {
-          console.error('⚠️ Meta: welcome image send failed (non-fatal):', (imgErr as Error).message);
+          tenantConfig.welcomeImageUrl,
+          aiResponse.reply
+        ).then(() => { imgSent = true; }).catch(imgErr => {
+          console.error('⚠️ Meta: welcome image send failed, falling back to text only:', (imgErr as Error).message);
         });
+        // Caption delivered with the image — skip the standalone text send.
+        // If image failed, imgSent=false and we fall through to send text only.
+        if (imgSent) metaMsgId = 'welcome-image-with-caption';
       }
 
-      const result = await sendTextMessage(
-        decryptedAccessToken,
-        tenant.wa_phone_number_id,
-        cleanPhone,
-        aiResponse.reply
-      );
-      metaMsgId = result.messageId;
+      if (!metaMsgId) {
+        const result = await sendTextMessage(
+          decryptedAccessToken,
+          tenant.wa_phone_number_id,
+          cleanPhone,
+          aiResponse.reply
+        );
+        metaMsgId = result.messageId;
+      }
     } catch (sendErr) {
       sendFailureMsg = (sendErr as Error).message;
       console.error('❌ Meta: failed to send AI reply:', sendFailureMsg);
