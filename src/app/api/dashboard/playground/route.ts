@@ -73,13 +73,13 @@ export async function POST(req: NextRequest) {
     // Must mirror the webhook behaviour exactly (simulator parity).
     const { data: scriptedRepliesRows } = await supabaseAdmin
       .from('scripted_replies')
-      .select('keywords, reply')
+      .select('keywords, reply, media_url')
       .eq('tenant_id', tenantId)
       .eq('is_active', true);
 
     if (scriptedRepliesRows && scriptedRepliesRows.length > 0) {
       const lowerMsgForScript = message.toLowerCase();
-      type ScriptedRow = { keywords: string[]; reply: string };
+      type ScriptedRow = { keywords: string[]; reply: string; media_url?: string | null };
       // Longest-keyword-match wins — more specific keywords beat broad single words
       let matchedScript: ScriptedRow | undefined;
       let bestMatchLen = 0;
@@ -95,7 +95,13 @@ export async function POST(req: NextRequest) {
       if (matchedScript) {
         return NextResponse.json({
           success: true,
-          data: { reply: matchedScript.reply, intent: 'scripted', sentiment: 'neutral', nextStep: null },
+          data: {
+            reply: matchedScript.reply,
+            mediaUrl: matchedScript.media_url || null,
+            intent: 'scripted',
+            sentiment: 'neutral',
+            nextStep: null,
+          },
           activeAgent: null,
           scriptedReply: true,
           providerStatus: { available: true, consecutiveFailures: 0, lastError: null },

@@ -61,6 +61,7 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  imageUrl?: string | null;
   timestamp: Date;
 }
 
@@ -814,6 +815,7 @@ export default function AISettingsPage() {
             id: `a-${Date.now()}-${Math.random().toString(36).slice(2)}`,
             role: 'assistant',
             content: json.data.reply,
+            imageUrl: json.data.mediaUrl || null,
             timestamp: new Date()
           };
           setChatHistory(prev => [...prev, replyMsg]);
@@ -2017,16 +2019,32 @@ export default function AISettingsPage() {
                 */}
                 {chatHistory.map((m) => (
                   <div key={m.id} className={cn("flex", m.role === 'user' ? "justify-end" : "justify-start")}>
-                    <div
-                      className={cn(
-                        "max-w-[80%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-sm",
-                        m.role === 'user'
-                          ? "bg-emerald-600 text-white rounded-tr-sm"
-                          : "bg-white text-gray-800 rounded-tl-sm border border-gray-100"
+                    <div className="max-w-[80%] flex flex-col gap-1">
+                      {/* Image bubble (scripted replies with attached image) */}
+                      {m.imageUrl && m.role === 'assistant' && (
+                        <div className="rounded-2xl rounded-tl-sm overflow-hidden shadow-sm border border-gray-100 bg-white">
+                          <img
+                            src={m.imageUrl}
+                            alt="scripted reply image"
+                            className="w-full max-h-48 object-cover"
+                            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                          />
+                        </div>
                       )}
-                      style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}
-                    >
-                      {m.content}
+                      {/* Text bubble */}
+                      {m.content && (
+                        <div
+                          className={cn(
+                            "rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-sm",
+                            m.role === 'user'
+                              ? "bg-emerald-600 text-white rounded-tr-sm"
+                              : "bg-white text-gray-800 rounded-tl-sm border border-gray-100"
+                          )}
+                          style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}
+                        >
+                          {m.content}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
