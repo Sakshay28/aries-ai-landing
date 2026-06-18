@@ -93,11 +93,18 @@ export async function POST(req: NextRequest) {
         }
       }
       if (matchedScript) {
+        const mUrl = matchedScript.media_url || null;
+        const mType = mUrl
+          ? /\.(mp4|mov|webm|m4v|avi)$/i.test(mUrl.split('?')[0]) ? 'video'
+          : /\.(pdf|doc|docx|xls|xlsx|ppt|pptx)$/i.test(mUrl.split('?')[0]) ? 'document'
+          : 'image'
+          : null;
         return NextResponse.json({
           success: true,
           data: {
             reply: matchedScript.reply,
-            mediaUrl: matchedScript.media_url || null,
+            mediaUrl: mUrl,
+            mediaType: mType,
             intent: 'scripted',
             sentiment: 'neutral',
             nextStep: null,

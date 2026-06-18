@@ -61,8 +61,16 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  imageUrl?: string | null;
+  mediaUrl?: string | null;
+  mediaType?: 'image' | 'video' | 'document' | null;
   timestamp: Date;
+}
+
+function mediaTypeFromUrl(url: string): 'image' | 'video' | 'document' {
+  const lower = url.toLowerCase().split('?')[0];
+  if (/\.(mp4|mov|webm|m4v|avi)$/.test(lower)) return 'video';
+  if (/\.(pdf|doc|docx|xls|xlsx|ppt|pptx)$/.test(lower)) return 'document';
+  return 'image';
 }
 
 // ────────────────────────────────────────────────────────────
@@ -229,9 +237,10 @@ export default function AISettingsPage() {
   const [newSrKeywords, setNewSrKeywords] = useState('');
   const [newSrReply, setNewSrReply] = useState('');
   const [newSrMediaUrl, setNewSrMediaUrl] = useState('');
-  const [uploadingSrImage, setUploadingSrImage] = useState(false);
+  const [newSrMediaType, setNewSrMediaType] = useState<'image' | 'video' | 'document' | null>(null);
+  const [uploadingSrMedia, setUploadingSrMedia] = useState(false);
   const [addingSr, setAddingSr] = useState(false);
-  const srImageInputRef = useRef<HTMLInputElement>(null);
+  const srMediaInputRef = useRef<HTMLInputElement>(null);
   
   // Playground Chat Simulator States
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -506,6 +515,7 @@ export default function AISettingsPage() {
         setNewSrKeywords('');
         setNewSrReply('');
         setNewSrMediaUrl('');
+        setNewSrMediaType(null);
         toast.success('Scripted reply added!');
       } else {
         toast.error(json.error || 'Failed to add');
@@ -529,10 +539,10 @@ export default function AISettingsPage() {
     toast.success('Scripted reply deleted');
   };
 
-  const handleSrImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSrMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploadingSrImage(true);
+    setUploadingSrMedia(true);
     try {
       const fd = new FormData();
       fd.append('file', file);
@@ -540,18 +550,19 @@ export default function AISettingsPage() {
       const json = await res.json();
       if (json.url) {
         setNewSrMediaUrl(json.url);
-        toast.success('Image uploaded!');
+        setNewSrMediaType(json.mediaType || mediaTypeFromUrl(json.url));
+        toast.success(`${json.mediaType === 'video' ? 'Video' : json.mediaType === 'document' ? 'Document' : 'Image'} uploaded!`);
       } else {
         toast.error(json.error || 'Upload failed');
       }
     } catch {
       toast.error('Upload error');
     }
-    setUploadingSrImage(false);
-    if (srImageInputRef.current) srImageInputRef.current.value = '';
+    setUploadingSrMedia(false);
+    if (srMediaInputRef.current) srMediaInputRef.current.value = '';
   };
 
-  // ── Welcome Image Upload ──
+  // ── Welcome Media Upload (image or video) ──
   const handleWelcomeImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -563,7 +574,7 @@ export default function AISettingsPage() {
       const json = await res.json();
       if (json.url) {
         update('welcome_image_url', json.url);
-        toast.success('Welcome image uploaded!');
+        toast.success(`Welcome ${json.mediaType === 'video' ? 'video' : 'image'} uploaded!`);
       } else {
         toast.error(json.error || 'Upload failed');
       }
@@ -815,7 +826,8 @@ export default function AISettingsPage() {
             id: `a-${Date.now()}-${Math.random().toString(36).slice(2)}`,
             role: 'assistant',
             content: json.data.reply,
-            imageUrl: json.data.mediaUrl || null,
+            mediaUrl: json.data.mediaUrl || null,
+            mediaType: json.data.mediaType || null,
             timestamp: new Date()
           };
           setChatHistory(prev => [...prev, replyMsg]);
@@ -1139,17 +1151,24 @@ export default function AISettingsPage() {
                   <div className="space-y-3">
                     <label className="text-[11px] font-bold tracking-wider uppercase text-muted-foreground">Welcome Message</label>
 
-                    {/* Welcome Image Upload */}
+                    {/* Welcome Media Upload (image or video) */}
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
                         <Image className="w-3.5 h-3.5 text-muted-foreground" />
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Welcome Image <span className="normal-case font-normal text-muted-foreground/50">(optional — sends before the text)</span></span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Welcome Media <span className="normal-case font-normal text-muted-foreground/50">(optional — sends before the text)</span></span>
                       </div>
                       {draft.welcome_image_url ? (
                         <div className="flex items-start gap-3 p-3 rounded-xl border border-border bg-background/50">
-                          <img src={draft.welcome_image_url} alt="Welcome" className="h-20 w-28 object-cover rounded-lg border border-border" />
+                          {mediaTypeFromUrl(draft.welcome_image_url) === 'video' ? (
+                            <video src={draft.welcome_image_url} className="h-20 w-28 object-cover rounded-lg border border-border" muted />
+                          ) : (
+                            <img src={draft.welcome_image_url} alt="Welcome" className="h-20 w-28 object-cover rounded-lg border border-border" />
+                          )}
                           <div className="flex flex-col gap-1.5 pt-1">
-                            <span className="text-[11px] text-emerald-600 font-bold flex items-center gap-1"><Check className="w-3 h-3" /> Image ready — sends first</span>
+                            <span className="text-[11px] text-emerald-600 font-bold flex items-center gap-1">
+                              <Check className="w-3 h-3" />
+                              {mediaTypeFromUrl(draft.welcome_image_url) === 'video' ? 'Video ready — sends first' : 'Image ready — sends first'}
+                            </span>
                             <button
                               type="button"
                               onClick={() => update('welcome_image_url', '')}
@@ -1168,12 +1187,12 @@ export default function AISettingsPage() {
                         >
                           {uploadingWelcomeImage
                             ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading…</>
-                            : <><UploadCloud className="w-3.5 h-3.5" /> Upload Welcome Image</>
+                            : <><UploadCloud className="w-3.5 h-3.5" /> Upload Image or Video</>
                           }
                         </button>
                       )}
-                      <input ref={welcomeImageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={handleWelcomeImageUpload} />
-                      <p className="text-[10px] text-muted-foreground/50">JPEG, PNG or WebP · Max 5 MB · Image sends first, then the text message below</p>
+                      <input ref={welcomeImageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm" className="hidden" onChange={handleWelcomeImageUpload} />
+                      <p className="text-[10px] text-muted-foreground/50">Image: JPEG/PNG/WebP · max <strong>5 MB</strong> · Video: MP4/MOV/WebM · max <strong>16 MB</strong> · Sends before the text</p>
                     </div>
 
                     {/* Welcome Text Message */}
@@ -1589,12 +1608,26 @@ export default function AISettingsPage() {
                                   </span>
                                 ))}
                               </div>
-                              {sr.media_url && (
-                                <div className="flex items-center gap-2">
-                                  <img src={sr.media_url} alt="scripted reply image" className="h-16 w-24 object-cover rounded-lg border border-border" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                                  <span className="text-[10px] text-muted-foreground/60 font-medium">📷 Image attached</span>
-                                </div>
-                              )}
+                              {sr.media_url && (() => {
+                                const mt = mediaTypeFromUrl(sr.media_url);
+                                return (
+                                  <div className="flex items-center gap-2">
+                                    {mt === 'video' ? (
+                                      <video src={sr.media_url} className="h-16 w-24 object-cover rounded-lg border border-border" muted />
+                                    ) : mt === 'document' ? (
+                                      <div className="h-16 w-24 rounded-lg border border-border bg-secondary/40 flex flex-col items-center justify-center gap-1">
+                                        <span className="text-xl">📄</span>
+                                        <span className="text-[9px] text-muted-foreground font-medium uppercase">{sr.media_url.split('.').pop()?.slice(0, 4)}</span>
+                                      </div>
+                                    ) : (
+                                      <img src={sr.media_url} alt="scripted reply" className="h-16 w-24 object-cover rounded-lg border border-border" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                    )}
+                                    <span className="text-[10px] text-muted-foreground/60 font-medium">
+                                      {mt === 'video' ? '🎬 Video attached' : mt === 'document' ? '📄 Document attached' : '📷 Image attached'}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
                               {sr.reply && (
                                 <div className="text-muted-foreground bg-emerald-500/[0.03] px-2.5 py-1.5 rounded-lg border border-emerald-500/10 break-words">
                                   "{sr.reply.length > 120 ? sr.reply.slice(0, 120) + '…' : sr.reply}"
@@ -1660,16 +1693,27 @@ export default function AISettingsPage() {
                       </div>
                       <div>
                         <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
-                          Image <span className="normal-case font-normal text-muted-foreground/50">(optional)</span>
+                          Attachment <span className="normal-case font-normal text-muted-foreground/50">(optional — image, video, or document)</span>
                         </label>
                         {newSrMediaUrl ? (
                           <div className="flex items-start gap-3">
-                            <img src={newSrMediaUrl} alt="preview" className="h-20 w-28 object-cover rounded-xl border border-border" />
+                            {newSrMediaType === 'video' ? (
+                              <video src={newSrMediaUrl} className="h-20 w-28 object-cover rounded-xl border border-border" muted />
+                            ) : newSrMediaType === 'document' ? (
+                              <div className="h-20 w-28 rounded-xl border border-border bg-secondary/40 flex flex-col items-center justify-center gap-1">
+                                <span className="text-2xl">📄</span>
+                                <span className="text-[9px] text-muted-foreground font-medium uppercase">{newSrMediaUrl.split('.').pop()?.slice(0, 4)}</span>
+                              </div>
+                            ) : (
+                              <img src={newSrMediaUrl} alt="preview" className="h-20 w-28 object-cover rounded-xl border border-border" />
+                            )}
                             <div className="flex flex-col gap-1.5 pt-1">
-                              <span className="text-[11px] text-emerald-600 font-bold">✓ Image ready</span>
+                              <span className="text-[11px] text-emerald-600 font-bold">
+                                ✓ {newSrMediaType === 'video' ? 'Video' : newSrMediaType === 'document' ? 'Document' : 'Image'} ready
+                              </span>
                               <button
                                 type="button"
-                                onClick={() => setNewSrMediaUrl('')}
+                                onClick={() => { setNewSrMediaUrl(''); setNewSrMediaType(null); }}
                                 className="text-[10px] text-muted-foreground hover:text-red-500 flex items-center gap-1"
                               >
                                 <X className="w-3 h-3" /> Remove
@@ -1679,22 +1723,32 @@ export default function AISettingsPage() {
                         ) : (
                           <button
                             type="button"
-                            onClick={() => srImageInputRef.current?.click()}
-                            disabled={uploadingSrImage}
+                            onClick={() => srMediaInputRef.current?.click()}
+                            disabled={uploadingSrMedia}
                             className="flex items-center gap-2 h-9 px-4 rounded-xl text-xs font-bold border border-dashed border-border bg-secondary/30 hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-all disabled:opacity-50"
                           >
-                            {uploadingSrImage
+                            {uploadingSrMedia
                               ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading…</>
-                              : <><UploadCloud className="w-3.5 h-3.5" /> Upload Image</>
+                              : <><UploadCloud className="w-3.5 h-3.5" /> Upload Image / Video / Document</>
                             }
                           </button>
                         )}
-                        <input ref={srImageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={handleSrImageUpload} />
-                        <p className="text-[10px] text-muted-foreground/50 mt-1">JPEG, PNG or WebP · Max 5 MB · Image sends first, text as caption below</p>
+                        <input
+                          ref={srMediaInputRef}
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                          className="hidden"
+                          onChange={handleSrMediaUpload}
+                        />
+                        <div className="text-[10px] text-muted-foreground/50 mt-1.5 space-y-0.5">
+                          <p>📷 Images (JPEG/PNG/WebP/GIF) · max <strong>5 MB</strong></p>
+                          <p>🎬 Videos (MP4/MOV/WebM) · max <strong>16 MB</strong></p>
+                          <p>📄 Documents (PDF/DOC/DOCX/XLS/XLSX/PPT) · max <strong>100 MB</strong></p>
+                        </div>
                       </div>
                       <button
                         onClick={handleAddScriptedReply}
-                        disabled={addingSr || !newSrKeywords.trim() || !newSrReply.trim()}
+                        disabled={addingSr || !newSrKeywords.trim() || (!newSrReply.trim() && !newSrMediaUrl)}
                         className="flex items-center gap-1.5 h-8 px-4 rounded-lg text-xs font-bold bg-foreground text-background hover:opacity-90 disabled:opacity-40 transition-all ml-auto"
                       >
                         {addingSr ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
@@ -1993,11 +2047,15 @@ export default function AISettingsPage() {
               {/* Inner column: natural vertical flow, no position tricks */}
               <div className="flex flex-col gap-3 px-4 py-4">
 
-                {/* Welcome image — always assistant-side, before text */}
+                {/* Welcome media — always assistant-side, before text */}
                 {draft.welcome_image_url && (
                   <div className="flex justify-start">
                     <div className="max-w-[80%] rounded-2xl rounded-tl-sm overflow-hidden shadow-sm border border-gray-100 bg-white">
-                      <img src={draft.welcome_image_url} alt="Welcome" className="w-full max-h-40 object-cover" />
+                      {mediaTypeFromUrl(draft.welcome_image_url) === 'video' ? (
+                        <video src={draft.welcome_image_url} controls className="w-full max-h-40 object-cover" />
+                      ) : (
+                        <img src={draft.welcome_image_url} alt="Welcome" className="w-full max-h-40 object-cover" />
+                      )}
                     </div>
                   </div>
                 )}
@@ -2020,15 +2078,36 @@ export default function AISettingsPage() {
                 {chatHistory.map((m) => (
                   <div key={m.id} className={cn("flex", m.role === 'user' ? "justify-end" : "justify-start")}>
                     <div className="max-w-[80%] flex flex-col gap-1">
-                      {/* Image bubble (scripted replies with attached image) */}
-                      {m.imageUrl && m.role === 'assistant' && (
+                      {/* Media bubble for assistant scripted replies */}
+                      {m.mediaUrl && m.role === 'assistant' && (
                         <div className="rounded-2xl rounded-tl-sm overflow-hidden shadow-sm border border-gray-100 bg-white">
-                          <img
-                            src={m.imageUrl}
-                            alt="scripted reply image"
-                            className="w-full max-h-48 object-cover"
-                            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                          />
+                          {m.mediaType === 'video' ? (
+                            <video
+                              src={m.mediaUrl}
+                              controls
+                              className="w-full max-h-48 object-cover"
+                            />
+                          ) : m.mediaType === 'document' ? (
+                            <a
+                              href={m.mediaUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-3 p-3 hover:bg-gray-50 transition-colors"
+                            >
+                              <span className="text-2xl">📄</span>
+                              <div>
+                                <div className="text-xs font-semibold text-gray-800">Document</div>
+                                <div className="text-[10px] text-blue-500 truncate max-w-[160px]">{m.mediaUrl.split('/').pop()?.slice(0, 30)}</div>
+                              </div>
+                            </a>
+                          ) : (
+                            <img
+                              src={m.mediaUrl}
+                              alt="scripted reply"
+                              className="w-full max-h-48 object-cover"
+                              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                            />
+                          )}
                         </div>
                       )}
                       {/* Text bubble */}

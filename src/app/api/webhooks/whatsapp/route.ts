@@ -31,6 +31,16 @@ import { notifyAdmin } from '@/lib/alerts/admin';
 import { isCoexistenceChange, handleCoexistenceWebhook } from '@/lib/webhook/coexistence';
 import * as Sentry from '@/lib/sentry-stub';
 
+// Infer WhatsApp media type from a stored URL's file extension.
+// Used so scripted replies and the welcome media can carry videos/docs
+// without needing a separate media_type column in the DB.
+function mediaTypeFromUrl(url: string): 'image' | 'video' | 'document' {
+  const lower = url.toLowerCase().split('?')[0];
+  if (/\.(mp4|mov|webm|m4v|avi)$/.test(lower)) return 'video';
+  if (/\.(pdf|doc|docx|xls|xlsx|ppt|pptx)$/.test(lower)) return 'document';
+  return 'image';
+}
+
 // ── GET: Webhook Verification Handshake ──
 export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get('hub.mode');
@@ -915,21 +925,21 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       if (matchedEarly) {
         console.log(`⚡ Scripted reply (early) matched for tenant ${tenant.id}: "${matchedEarly.keywords.join(', ')}"`);
         if (decryptedAccessToken && tenant.wa_phone_number_id) {
+          const srMediaType = matchedEarly.media_url ? mediaTypeFromUrl(matchedEarly.media_url) : null;
           const sendResult = matchedEarly.media_url
-            ? await sendMediaMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, 'image', matchedEarly.media_url, matchedEarly.reply || undefined)
-                .catch((e: Error) => { console.error('❌ Scripted reply image send failed:', e.message); return null; })
+            ? await sendMediaMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, srMediaType!, matchedEarly.media_url, matchedEarly.reply || undefined)
+                .catch((e: Error) => { console.error(`❌ Scripted reply ${srMediaType} send failed:`, e.message); return null; })
             : await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, matchedEarly.reply)
                 .catch((e: Error) => { console.error('❌ Scripted reply send failed:', e.message); return null; });
           const { error: scriptedMsgErr } = await supabaseAdmin.from('messages').insert({
             tenant_id: tenant.id, conversation_id: conversation.id,
             direction: 'outbound',
             content: matchedEarly.reply || matchedEarly.media_url || '',
-            message_type: matchedEarly.media_url ? 'image' : 'text',
+            message_type: srMediaType ?? 'text',
             channel: 'whatsapp', status: sendResult ? 'sent' : 'failed',
             ai_generated: false, wa_message_id: sendResult?.messageId ?? null,
             ...(matchedEarly.media_url && {
               media_url: matchedEarly.media_url,
-              mime_type: 'image/jpeg',
               media_caption: matchedEarly.reply || null,
             }),
           });
@@ -1378,23 +1388,26 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     console.error(`❌ Meta: ${sendFailureMsg} for tenant ${tenant.id}`);
   } else {
     try {
-      // On first contact: send image + welcome text as ONE message (image with caption)
+      // On first contact: send welcome media + text as ONE message (media with caption)
       // so WhatsApp delivers them atomically — no ordering race between two requests.
+      // Supports images, videos, and documents stored in welcome_image_url.
       if (isFirstMessageForAI && tenantConfig.welcomeImageUrl) {
-        let imgSent = false;
+        const welcomeMediaType = mediaTypeFromUrl(tenantConfig.welcomeImageUrl);
+        let mediaSent = false;
         await sendMediaMessage(
           decryptedAccessToken,
           tenant.wa_phone_number_id,
           cleanPhone,
-          'image',
+          welcomeMediaType,
           tenantConfig.welcomeImageUrl,
-          aiResponse.reply
-        ).then(() => { imgSent = true; }).catch(imgErr => {
-          console.error('⚠️ Meta: welcome image send failed, falling back to text only:', (imgErr as Error).message);
+          // Videos/documents don't support captions on WhatsApp — send text separately
+          welcomeMediaType === 'image' ? aiResponse.reply : undefined
+        ).then(() => { mediaSent = true; }).catch(mediaErr => {
+          console.error(`⚠️ Meta: welcome ${welcomeMediaType} send failed, falling back to text only:`, (mediaErr as Error).message);
         });
-        // Caption delivered with the image — skip the standalone text send.
-        // If image failed, imgSent=false and we fall through to send text only.
-        if (imgSent) metaMsgId = 'welcome-image-with-caption';
+        // For images: caption delivered with media — skip standalone text.
+        // For video/document: caption not supported, fall through to send text too.
+        if (mediaSent && welcomeMediaType === 'image') metaMsgId = 'welcome-image-with-caption';
       }
 
       if (!metaMsgId) {

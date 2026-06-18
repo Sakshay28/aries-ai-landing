@@ -1,27 +1,31 @@
-// ═══════════════════════════════════════════════════════════
-// 🖼️ Scripted Replies — Image Upload
-// ═══════════════════════════════════════════════════════════
-// Uploads an image to Supabase Storage (template-media bucket)
-// and returns a permanent public URL ready to use in a
-// scripted reply. Reuses the same bucket as template media.
-// ═══════════════════════════════════════════════════════════
-
 import { NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
 const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'template-media';
 
-const ALLOWED: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/jpg':  'jpg',
-  'image/png':  'png',
-  'image/webp': 'webp',
-  'image/gif':  'gif',
-  'application/pdf': 'pdf',
+// WhatsApp limits (enforced here so users get a clear error before uploading):
+//   Images   → 5 MB   (JPEG, PNG, WebP, GIF)
+//   Videos   → 16 MB  (MP4, MOV, WebM)
+//   Documents → 100 MB (PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX)
+const ALLOWED: Record<string, { ext: string; mediaType: 'image' | 'video' | 'document'; maxMB: number }> = {
+  'image/jpeg':       { ext: 'jpg',  mediaType: 'image',    maxMB: 5   },
+  'image/jpg':        { ext: 'jpg',  mediaType: 'image',    maxMB: 5   },
+  'image/png':        { ext: 'png',  mediaType: 'image',    maxMB: 5   },
+  'image/webp':       { ext: 'webp', mediaType: 'image',    maxMB: 5   },
+  'image/gif':        { ext: 'gif',  mediaType: 'image',    maxMB: 5   },
+  'video/mp4':        { ext: 'mp4',  mediaType: 'video',    maxMB: 16  },
+  'video/quicktime':  { ext: 'mov',  mediaType: 'video',    maxMB: 16  },
+  'video/webm':       { ext: 'webm', mediaType: 'video',    maxMB: 16  },
+  'video/x-m4v':      { ext: 'm4v',  mediaType: 'video',    maxMB: 16  },
+  'application/pdf':  { ext: 'pdf',  mediaType: 'document', maxMB: 100 },
+  'application/msword': { ext: 'doc', mediaType: 'document', maxMB: 100 },
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { ext: 'docx', mediaType: 'document', maxMB: 100 },
+  'application/vnd.ms-excel': { ext: 'xls', mediaType: 'document', maxMB: 100 },
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { ext: 'xlsx', mediaType: 'document', maxMB: 100 },
+  'application/vnd.ms-powerpoint': { ext: 'ppt', mediaType: 'document', maxMB: 100 },
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': { ext: 'pptx', mediaType: 'document', maxMB: 100 },
 };
-
-const MAX_MB = 10;
 
 async function ensureBucket() {
   try {
@@ -40,15 +44,26 @@ export async function POST(request: Request) {
   const file = formData?.get('file') as File | null;
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
 
-  const ext = ALLOWED[file.type];
-  if (!ext) return NextResponse.json({ error: 'Only JPEG, PNG, WEBP, GIF or PDF allowed' }, { status: 400 });
+  const meta = ALLOWED[file.type];
+  if (!meta) {
+    return NextResponse.json(
+      { error: 'Unsupported file type. Allowed: JPEG/PNG/WebP/GIF (images), MP4/MOV/WebM (videos), PDF/DOC/DOCX/XLS/XLSX/PPT/PPTX (documents)' },
+      { status: 400 }
+    );
+  }
 
   const sizeMB = file.size / (1024 * 1024);
-  if (sizeMB > MAX_MB) return NextResponse.json({ error: `Max size is ${MAX_MB} MB` }, { status: 400 });
+  if (sizeMB > meta.maxMB) {
+    return NextResponse.json(
+      { error: `${meta.mediaType === 'image' ? 'Images' : meta.mediaType === 'video' ? 'Videos' : 'Documents'} must be under ${meta.maxMB} MB (this file is ${sizeMB.toFixed(1)} MB)` },
+      { status: 400 }
+    );
+  }
 
   await ensureBucket();
 
-  const path = `${tenantId}/scripted-replies/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const folder = meta.mediaType === 'video' ? 'videos' : meta.mediaType === 'document' ? 'documents' : 'images';
+  const path = `${tenantId}/scripted-replies/${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${meta.ext}`;
   const buffer = Buffer.from(await file.arrayBuffer());
 
   const { error: uploadErr } = await supabaseAdmin.storage
@@ -58,5 +73,5 @@ export async function POST(request: Request) {
   if (uploadErr) return NextResponse.json({ error: uploadErr.message }, { status: 500 });
 
   const { data: urlData } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path);
-  return NextResponse.json({ url: urlData.publicUrl, path });
+  return NextResponse.json({ url: urlData.publicUrl, path, mediaType: meta.mediaType });
 }
