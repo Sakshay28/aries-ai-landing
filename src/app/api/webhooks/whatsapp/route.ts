@@ -1041,13 +1041,17 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     return;
   }
 
-  // isFirstMessage = truly the first message in this conversation session.
+  // isFirstMessage = brand-new contact OR returning after a 24h idle gap (session
+  // expired). Both cases re-send the welcome message. sessionExpired was previously
+  // calculated but never wired into this flag, so returning customers always fell
+  // through to the "ongoing conversation" path and got a generic AI reply instead
+  // of their configured welcome message.
   // Race-condition guard: when a user sends multiple messages rapidly, several
   // concurrent webhook calls may all see activeExistingConv === null (the first
   // call's conversation insert hasn't committed yet). Without a gate, ALL of them
   // would fire the welcome message/flow. We use Redis SET NX to let exactly ONE
   // concurrent call claim "first message" ownership — the rest proceed as non-first.
-  let isFirstMessage = activeExistingConv === null;
+  let isFirstMessage = activeExistingConv === null || sessionExpired;
   if (isFirstMessage) {
     const redis = getRedisClient();
     if (redis) {
@@ -1156,7 +1160,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // storedMsgCount is stale (non-blocking update) so we use the actual fetched history.
   // Also honour the Redis welcome gate: if another concurrent call already claimed
   // first-message for this sender, this call must NOT trigger the welcome prompt.
-  const isFirstMessageForAI = isFirstMessage && history.filter(h => h.role === 'assistant').length === 0;
+  // When session expired, bypass the history check — we want the welcome even for
+  // returning customers who have prior assistant messages in the thread.
+  const isFirstMessageForAI = isFirstMessage && (sessionExpired || history.filter(h => h.role === 'assistant').length === 0);
 
   perf('parallel_fetch_done');
 
