@@ -4,24 +4,31 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 
-// Landing page for admin impersonation magic links.
-// The link arrives as /impersonate#access_token=...&refresh_token=...
-// createBrowserClient auto-detects the hash, fires SIGNED_IN, and
-// writes the new session into cookies so SSR middleware picks it up.
 export default function ImpersonatePage() {
   const router = useRouter();
 
   useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    const params = new URLSearchParams(hash);
+    const accessToken = params.get('access_token');
+    const refreshToken = params.get('refresh_token');
+
+    if (!accessToken || !refreshToken) {
+      router.replace('/login?error=auth_failed');
+      return;
+    }
+
     const supabase = createBrowserSupabaseClient();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN') {
-        subscription.unsubscribe();
-        router.replace('/dashboard');
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    supabase.auth
+      .setSession({ access_token: accessToken, refresh_token: refreshToken })
+      .then(({ error }) => {
+        if (error) {
+          console.error('[impersonate] setSession failed:', error.message);
+          router.replace('/login?error=auth_failed');
+        } else {
+          router.replace('/dashboard');
+        }
+      });
   }, [router]);
 
   return (
