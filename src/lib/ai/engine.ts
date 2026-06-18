@@ -446,14 +446,16 @@ export async function processMessageWithAI(
   }
   const safeMessage = guard.safeResponse; // may be truncated
 
-  // ── First-message short-circuit: send the configured welcome message exactly ──
-  // Passing welcome_message to Gemini as a system instruction doesn't guarantee
-  // it will be used verbatim — the model may paraphrase or ignore it. When a
-  // welcome message is set and this is the first message in the conversation,
-  // skip the AI call entirely and return the owner-configured text directly.
-  if (tenantConfig.isFirstMessage && tenantConfig.welcomeMessage?.trim()) {
+  // ── First-message short-circuit: always bypass AI on first contact ──
+  // Gemini paraphrases or ignores the welcome_message system instruction.
+  // Return the owner-set text directly; fall back to a business-name greeting
+  // so the AI never generates a generic "Hello! How may I assist you today?".
+  if (tenantConfig.isFirstMessage) {
+    const welcomeReply =
+      tenantConfig.welcomeMessage?.trim() ||
+      `Hi! 👋 Welcome to ${tenantConfig.businessName}. How can I help you today?`;
     return {
-      reply: tenantConfig.welcomeMessage.trim(),
+      reply: welcomeReply,
       extractedData: {},
       intent: 'greeting',
       sentiment: 'positive',

@@ -1052,7 +1052,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // would fire the welcome message/flow. We use Redis SET NX to let exactly ONE
   // concurrent call claim "first message" ownership — the rest proceed as non-first.
   let isFirstMessage = activeExistingConv === null || sessionExpired;
-  if (isFirstMessage) {
+  // Redis dedup only for truly new contacts: concurrent bursts from the same new
+  // sender can all see activeExistingConv===null before the first insert commits.
+  // Session-expired returning customers are a single sequential message — no burst.
+  if (isFirstMessage && activeExistingConv === null) {
     const redis = getRedisClient();
     if (redis) {
       try {
