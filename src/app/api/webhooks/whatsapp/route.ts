@@ -1081,7 +1081,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const _aiBatchPromise = Promise.all([
     supabaseAdmin
       .from('messages')
-      .select('direction, content')
+      .select('direction, content, ai_generated')
       .eq('conversation_id', conversation.id)
       // Defence-in-depth: also filter by tenant_id so a race-condition that assigns
       // a conversation to the wrong tenant never bleeds another tenant's history into
@@ -1157,15 +1157,24 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     .map(m => ({
       role: m.direction === 'inbound' ? 'user' as const : 'assistant' as const,
       content: m.content,
+      ai_generated: m.ai_generated,
     }));
 
-  // Reliable first-message check: look for any prior outbound (assistant) messages.
-  // storedMsgCount is stale (non-blocking update) so we use the actual fetched history.
-  // Also honour the Redis welcome gate: if another concurrent call already claimed
-  // first-message for this sender, this call must NOT trigger the welcome prompt.
-  // When session expired, bypass the history check — we want the welcome even for
-  // returning customers who have prior assistant messages in the thread.
-  const isFirstMessageForAI = isFirstMessage && (sessionExpired || history.filter(h => h.role === 'assistant').length === 0);
+  // True if the bot has NEVER sent an AI reply in this conversation.
+  // Off-hours notices are outbound but NOT ai_generated — they must not count
+  // as "already greeted". A customer who got only an off-hours notice should
+  // still receive the configured welcome message on their next message.
+  const hasAIReplies = (recentMsgs || []).some(
+    m => m.direction === 'outbound' && m.ai_generated
+  );
+
+  // Fire the welcome message when:
+  //   (a) no AI reply has ever been sent in this conversation (covers new contacts
+  //       AND contacts whose only prior reply was an off-hours notice), OR
+  //   (b) the session has expired (24h idle) — re-greeting returning customers.
+  // The Redis welcome-dedup gate (isFirstMessage guard above) still prevents
+  // concurrent bursts from a brand-new contact sending multiple messages at once.
+  const isFirstMessageForAI = !hasAIReplies || sessionExpired;
 
   perf('parallel_fetch_done');
 
@@ -1371,7 +1380,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     try {
       // On first contact: send image + welcome text as ONE message (image with caption)
       // so WhatsApp delivers them atomically — no ordering race between two requests.
-      if (isFirstMessage && tenantConfig.welcomeImageUrl) {
+      if (isFirstMessageForAI && tenantConfig.welcomeImageUrl) {
         let imgSent = false;
         await sendMediaMessage(
           decryptedAccessToken,
