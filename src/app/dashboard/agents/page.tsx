@@ -6,7 +6,7 @@ import {
   Bot, Sparkles, MessageSquare, Loader2, AlertCircle, Save, CheckCircle2,
   X, RefreshCw, UploadCloud, Library, Plus, Trash2, HelpCircle,
   Clock, HardDrive, FileText, Check, AlertTriangle, Send, ShieldAlert,
-  ArrowRight, Sparkle, UserCheck, Play, RotateCcw, Image, UtensilsCrossed, FileImage
+  ArrowRight, Sparkle, UserCheck, Play, RotateCcw, Image
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -48,13 +48,6 @@ interface DraftConfig {
   usps: string[];
   system_prompt: string;
   custom_faqs: FAQ[];
-}
-
-interface MenuAttachment {
-  id: string;
-  label: string;
-  file_url: string;
-  file_type: 'image' | 'document';
 }
 
 interface ChatMessage {
@@ -224,13 +217,6 @@ export default function AISettingsPage() {
   // Welcome image upload state
   const [uploadingWelcomeImage, setUploadingWelcomeImage] = useState(false);
   const welcomeImageInputRef = useRef<HTMLInputElement>(null);
-
-  // Menu attachments state
-  const [menuAttachments, setMenuAttachments] = useState<MenuAttachment[]>([]);
-  const [menuKeywords, setMenuKeywords] = useState('menu, card, food menu, menu card');
-  const [uploadingMenu, setUploadingMenu] = useState(false);
-  const [addingMenuReply, setAddingMenuReply] = useState(false);
-  const menuFileInputRef = useRef<HTMLInputElement>(null);
 
   // Scripted replies state
   const [scriptedReplies, setScriptedReplies] = useState<ScriptedReply[]>([]);
@@ -583,81 +569,6 @@ export default function AISettingsPage() {
     }
     setUploadingWelcomeImage(false);
     if (welcomeImageInputRef.current) welcomeImageInputRef.current.value = '';
-  };
-
-  // ── Menu Attachment Handlers ──
-  const handleMenuFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const ext = file.name.split('.').pop()?.toLowerCase();
-    const isImage = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext || '');
-    const isDoc = ext === 'pdf';
-    if (!isImage && !isDoc) {
-      toast.error('Only PNG, JPG, WEBP, GIF or PDF files are accepted');
-      return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error('File must be under 10 MB');
-      return;
-    }
-    setUploadingMenu(true);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('/api/dashboard/scripted-replies/upload', { method: 'POST', body: fd });
-      const json = await res.json();
-      if (json.url) {
-        const newAtt: MenuAttachment = {
-          id: `menu-${Date.now()}`,
-          label: file.name,
-          file_url: json.url,
-          file_type: isImage ? 'image' : 'document',
-        };
-        setMenuAttachments(prev => [...prev, newAtt]);
-        toast.success('Menu file uploaded!');
-      } else {
-        toast.error(json.error || 'Upload failed');
-      }
-    } catch {
-      toast.error('Upload error');
-    }
-    setUploadingMenu(false);
-    if (menuFileInputRef.current) menuFileInputRef.current.value = '';
-  };
-
-  const handleSaveMenuAsScriptedReply = async () => {
-    if (menuAttachments.length === 0) {
-      toast.error('Upload at least one menu file');
-      return;
-    }
-    const keywords = menuKeywords.split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
-    if (keywords.length === 0) {
-      toast.error('Add at least one trigger keyword');
-      return;
-    }
-    setAddingMenuReply(true);
-    try {
-      for (const att of menuAttachments) {
-        const res = await fetch('/api/dashboard/scripted-replies', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            keywords,
-            reply: att.file_type === 'document' ? `Here's our menu 📋` : '',
-            media_url: att.file_url,
-          }),
-        });
-        const json = await res.json();
-        if (json.data) {
-          setScriptedReplies(prev => [...prev, json.data]);
-        }
-      }
-      setMenuAttachments([]);
-      toast.success('Menu reply saved! Customers who type these keywords will receive the menu.');
-    } catch {
-      toast.error('Failed to save menu reply');
-    }
-    setAddingMenuReply(false);
   };
 
   // ── RAG Knowledge File Uploader ──
@@ -1328,120 +1239,6 @@ export default function AISettingsPage() {
                       <Plus className="w-3.5 h-3.5" /> Add
                     </button>
                   </div>
-                </div>
-              </div>
-
-              {/* SECTION: MENU ATTACHMENTS */}
-              <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
-                <div className="flex items-center gap-3 px-6 py-4 border-b border-border bg-secondary/30">
-                  <UtensilsCrossed className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm font-bold text-foreground uppercase tracking-wider">Menu Attachments</span>
-                </div>
-
-                <div className="p-6 space-y-5">
-                  <div>
-                    <h3 className="text-xs font-bold text-foreground uppercase tracking-wider mb-1">
-                      Send your menu when customers ask for it
-                    </h3>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      Upload your menu as PNG, JPG or PDF. When a customer's message contains any trigger keyword below, the menu files are sent automatically — AI is bypassed.
-                    </p>
-                  </div>
-
-                  {/* Trigger keywords */}
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
-                      Trigger Keywords <span className="normal-case font-normal text-muted-foreground/50">(comma-separated)</span>
-                    </label>
-                    <input
-                      value={menuKeywords}
-                      onChange={e => setMenuKeywords(e.target.value)}
-                      placeholder="menu, card, food menu, menu card, food list"
-                      className="w-full h-9 px-3 rounded-xl text-xs border border-border bg-background outline-none focus:border-foreground/30 transition-all"
-                    />
-                    <p className="text-[10px] text-muted-foreground/50">Menu sends when the customer's message contains ANY of these words</p>
-                  </div>
-
-                  {/* Existing menu scripted replies (from loaded scripted replies with menu-like keywords) */}
-                  {scriptedReplies.filter(sr => sr.media_url && sr.keywords.some(k => ['menu', 'card', 'food menu', 'menu card', 'food list'].includes(k))).length > 0 && (
-                    <div className="space-y-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Active Menu Replies</span>
-                      <div className="space-y-2">
-                        {scriptedReplies.filter(sr => sr.media_url && sr.keywords.some(k => ['menu', 'card', 'food menu', 'menu card', 'food list'].includes(k))).map(sr => (
-                          <div key={sr.id} className="flex items-center justify-between p-3 rounded-xl border border-border bg-background/50 text-xs group">
-                            <div className="flex items-center gap-3 min-w-0">
-                              {sr.media_url && (
-                                sr.media_url.toLowerCase().endsWith('.pdf')
-                                  ? <div className="w-12 h-12 rounded-lg bg-red-500/10 flex items-center justify-center shrink-0"><FileText className="w-5 h-5 text-red-500" /></div>
-                                  : <img src={sr.media_url} alt="menu" className="w-12 h-12 object-cover rounded-lg border border-border shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                              )}
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap gap-1 mb-1">
-                                  {sr.keywords.map((kw, ki) => (
-                                    <span key={ki} className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary border border-primary/20">{kw}</span>
-                                  ))}
-                                </div>
-                                {sr.reply && <p className="text-muted-foreground truncate">{sr.reply}</p>}
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => handleDeleteScriptedReply(sr.id)}
-                              className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/5 transition-all opacity-0 group-hover:opacity-100 shrink-0"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Upload new menu files */}
-                  <div className="space-y-3">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Upload Menu Files</span>
-                    <div className="flex flex-wrap gap-2">
-                      {menuAttachments.map((att) => (
-                        <div key={att.id} className="flex items-center gap-2 p-2 rounded-xl border border-border bg-background/50 text-xs">
-                          {att.file_type === 'image'
-                            ? <img src={att.file_url} alt={att.label} className="w-10 h-10 object-cover rounded-lg border border-border" />
-                            : <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center"><FileText className="w-4 h-4 text-red-500" /></div>
-                          }
-                          <span className="text-foreground font-medium truncate max-w-[120px]">{att.label}</span>
-                          <button
-                            type="button"
-                            onClick={() => setMenuAttachments(prev => prev.filter(a => a.id !== att.id))}
-                            className="p-1 hover:text-red-500 text-muted-foreground transition-colors"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => menuFileInputRef.current?.click()}
-                      disabled={uploadingMenu}
-                      className="flex items-center gap-2 h-9 px-4 rounded-xl text-xs font-bold border border-dashed border-border bg-secondary/30 hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-all disabled:opacity-50"
-                    >
-                      {uploadingMenu
-                        ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading…</>
-                        : <><FileImage className="w-3.5 h-3.5" /> Add Menu File (PNG, JPG, PDF)</>
-                      }
-                    </button>
-                    <input ref={menuFileInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" className="hidden" onChange={handleMenuFileUpload} />
-                  </div>
-
-                  {/* Save menu as scripted reply */}
-                  {menuAttachments.length > 0 && (
-                    <button
-                      onClick={handleSaveMenuAsScriptedReply}
-                      disabled={addingMenuReply}
-                      className="flex items-center gap-1.5 h-9 px-5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-all disabled:opacity-50 ml-auto shadow-sm"
-                    >
-                      {addingMenuReply ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                      {addingMenuReply ? 'Saving…' : 'Save Menu Reply'}
-                    </button>
-                  )}
                 </div>
               </div>
 
