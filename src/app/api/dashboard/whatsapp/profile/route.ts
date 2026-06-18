@@ -63,6 +63,9 @@ export async function PUT(req: NextRequest) {
       if (!(key in body)) continue;
       const val = body[key];
       if (val === null || val === undefined) continue;
+      // Skip empty strings — Meta may reject or silently ignore them, and sending
+      // an empty about/description would overwrite any existing value on Meta's side.
+      if (typeof val === 'string' && val.trim() === '') continue;
       // Skip empty arrays — Meta rejects { websites: [] } with a 400
       if (Array.isArray(val) && val.length === 0) continue;
       // Skip the UI placeholder for vertical — sending 'UNDEFINED' causes a Meta 400

@@ -265,11 +265,22 @@ export default function WaProfileTab() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Save failed');
 
-      // Re-fetch from Meta to confirm the data actually persisted.
-      // Without this, the UI shows local state and the user can't tell if
-      // Meta actually saved it until they manually refresh.
-      await fetchProfile();
-      toast.success('Saved and verified on WhatsApp ✓');
+      // Optimistic update: reflect the saved values immediately in the UI.
+      // Meta's GET API has a propagation delay (can take 30-60 seconds), so
+      // re-fetching right after save consistently returns stale data and makes
+      // the address/fields appear to "disappear". We trust Meta's { success:true }
+      // and update local state from the payload we just sent. The Refresh button
+      // is there for the user to verify once Meta propagates.
+      setProfile(prev => ({
+        ...prev,
+        about: payload.about ?? prev.about,
+        description: payload.description ?? prev.description,
+        address: payload.address ?? prev.address,
+        email: payload.email ?? prev.email,
+        websites: [payload.websites[0] ?? '', payload.websites[1] ?? ''],
+        vertical: payload.vertical ?? prev.vertical,
+      }));
+      toast.success('Saved to WhatsApp ✓  (tap Refresh in ~1 min to verify)');
       setDirty(false);
     } catch (e) {
       toast.error((e as Error).message);
