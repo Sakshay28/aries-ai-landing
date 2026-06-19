@@ -525,47 +525,60 @@ export default function AISettingsPage() {
     toast.success('Scripted reply deleted');
   };
 
+  const uploadViaPresignedUrl = async (file: File): Promise<{ url: string; mediaType: 'image' | 'video' | 'document' } | null> => {
+    const presignRes = await fetch('/api/dashboard/scripted-replies/upload/presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: file.name, contentType: file.type, size: file.size }),
+    });
+    const presignJson = await presignRes.json();
+    if (!presignRes.ok || !presignJson.signedUrl) {
+      throw new Error(presignJson.error || 'Failed to get upload URL');
+    }
+
+    const uploadRes = await fetch(presignJson.signedUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': presignJson.contentType },
+      body: file,
+    });
+    if (!uploadRes.ok) {
+      throw new Error(`Storage upload failed (${uploadRes.status})`);
+    }
+
+    return { url: presignJson.publicUrl, mediaType: presignJson.mediaType };
+  };
+
   const handleSrMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadingSrMedia(true);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('/api/dashboard/scripted-replies/upload', { method: 'POST', body: fd });
-      const json = await res.json();
-      if (json.url) {
-        setNewSrMediaUrl(json.url);
-        setNewSrMediaType(json.mediaType || mediaTypeFromUrl(json.url));
-        toast.success(`${json.mediaType === 'video' ? 'Video' : json.mediaType === 'document' ? 'Document' : 'Image'} uploaded!`);
-      } else {
-        toast.error(json.error || 'Upload failed');
+      const result = await uploadViaPresignedUrl(file);
+      if (result) {
+        setNewSrMediaUrl(result.url);
+        setNewSrMediaType(result.mediaType);
+        const label = result.mediaType === 'video' ? 'Video' : result.mediaType === 'document' ? 'Document' : 'Image';
+        toast.success(`${label} uploaded!`);
       }
-    } catch {
-      toast.error('Upload error');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Upload failed');
     }
     setUploadingSrMedia(false);
     if (srMediaInputRef.current) srMediaInputRef.current.value = '';
   };
 
-  // ── Welcome Media Upload (image or video) ──
   const handleWelcomeImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadingWelcomeImage(true);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('/api/dashboard/scripted-replies/upload', { method: 'POST', body: fd });
-      const json = await res.json();
-      if (json.url) {
-        update('welcome_image_url', json.url);
-        toast.success(`Welcome ${json.mediaType === 'video' ? 'video' : 'image'} uploaded!`);
-      } else {
-        toast.error(json.error || 'Upload failed');
+      const result = await uploadViaPresignedUrl(file);
+      if (result) {
+        update('welcome_image_url', result.url);
+        toast.success(`Welcome ${result.mediaType === 'video' ? 'video' : 'image'} uploaded!`);
       }
-    } catch {
-      toast.error('Upload error');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Upload failed');
     }
     setUploadingWelcomeImage(false);
     if (welcomeImageInputRef.current) welcomeImageInputRef.current.value = '';
@@ -1533,7 +1546,7 @@ export default function AISettingsPage() {
                         <input
                           ref={srMediaInputRef}
                           type="file"
-                          accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                          accept=".jpg,.jpeg,.png,.webp,.gif,.mp4,.mov,.webm,.m4v,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm,application/pdf"
                           className="hidden"
                           onChange={handleSrMediaUpload}
                         />

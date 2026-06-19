@@ -4,10 +4,6 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 
 const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'template-media';
 
-// WhatsApp limits (enforced here so users get a clear error before uploading):
-//   Images   → 5 MB   (JPEG, PNG, WebP, GIF)
-//   Videos   → 16 MB  (MP4, MOV, WebM)
-//   Documents → 100 MB (PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX)
 const ALLOWED: Record<string, { ext: string; mediaType: 'image' | 'video' | 'document'; maxMB: number }> = {
   'image/jpeg':       { ext: 'jpg',  mediaType: 'image',    maxMB: 5   },
   'image/jpg':        { ext: 'jpg',  mediaType: 'image',    maxMB: 5   },
@@ -27,6 +23,17 @@ const ALLOWED: Record<string, { ext: string; mediaType: 'image' | 'video' | 'doc
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': { ext: 'pptx', mediaType: 'document', maxMB: 100 },
 };
 
+const EXT_TO_MIME: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
+  mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', m4v: 'video/x-m4v',
+  pdf: 'application/pdf', doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
+
 async function ensureBucket() {
   try {
     const { data: buckets } = await supabaseAdmin.storage.listBuckets();
@@ -40,38 +47,32 @@ export async function POST(request: Request) {
   const tenantId = await getTenantId();
   if (!tenantId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const formData = await request.formData().catch(() => null);
-  const file = formData?.get('file') as File | null;
-  if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+  const body = await request.json().catch(() => null);
+  if (!body?.filename || body.size == null) {
+    return NextResponse.json({ error: 'filename and size are required' }, { status: 400 });
+  }
 
-  let contentType = file.type;
+  const { filename, size } = body;
+  let contentType: string = body.contentType || '';
+
+  const ext = filename.split('.').pop()?.toLowerCase() || '';
   if (!contentType || contentType === 'application/octet-stream') {
-    const ext = file.name.split('.').pop()?.toLowerCase() || '';
-    const EXT_TO_MIME: Record<string, string> = {
-      jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
-      mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', m4v: 'video/x-m4v',
-      pdf: 'application/pdf', doc: 'application/msword',
-      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      xls: 'application/vnd.ms-excel',
-      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      ppt: 'application/vnd.ms-powerpoint',
-      pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    };
-    contentType = EXT_TO_MIME[ext] || file.type;
+    contentType = EXT_TO_MIME[ext] || '';
   }
 
   const meta = ALLOWED[contentType];
   if (!meta) {
     return NextResponse.json(
-      { error: 'Unsupported file type. Allowed: JPEG/PNG/WebP/GIF (images), MP4/MOV/WebM (videos), PDF/DOC/DOCX/XLS/XLSX/PPT/PPTX (documents)' },
+      { error: `Unsupported file type "${ext}". Allowed: JPEG/PNG/WebP/GIF, MP4/MOV/WebM, PDF/DOC/DOCX/XLS/XLSX/PPT/PPTX` },
       { status: 400 }
     );
   }
 
-  const sizeMB = file.size / (1024 * 1024);
+  const sizeMB = size / (1024 * 1024);
   if (sizeMB > meta.maxMB) {
+    const label = meta.mediaType === 'image' ? 'Images' : meta.mediaType === 'video' ? 'Videos' : 'Documents';
     return NextResponse.json(
-      { error: `${meta.mediaType === 'image' ? 'Images' : meta.mediaType === 'video' ? 'Videos' : 'Documents'} must be under ${meta.maxMB} MB (this file is ${sizeMB.toFixed(1)} MB)` },
+      { error: `${label} must be under ${meta.maxMB} MB (this file is ${sizeMB.toFixed(1)} MB)` },
       { status: 400 }
     );
   }
@@ -79,15 +80,24 @@ export async function POST(request: Request) {
   await ensureBucket();
 
   const folder = meta.mediaType === 'video' ? 'videos' : meta.mediaType === 'document' ? 'documents' : 'images';
-  const path = `${tenantId}/scripted-replies/${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${meta.ext}`;
-  const buffer = Buffer.from(await file.arrayBuffer());
+  const storagePath = `${tenantId}/scripted-replies/${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${meta.ext}`;
 
-  const { error: uploadErr } = await supabaseAdmin.storage
+  const { data, error } = await supabaseAdmin.storage
     .from(BUCKET)
-    .upload(path, buffer, { contentType, upsert: false });
+    .createSignedUploadUrl(storagePath);
 
-  if (uploadErr) return NextResponse.json({ error: uploadErr.message }, { status: 500 });
+  if (error || !data) {
+    return NextResponse.json({ error: error?.message || 'Failed to create upload URL' }, { status: 500 });
+  }
 
-  const { data: urlData } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path);
-  return NextResponse.json({ url: urlData.publicUrl, path, mediaType: meta.mediaType });
+  const { data: urlData } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(storagePath);
+
+  return NextResponse.json({
+    signedUrl: data.signedUrl,
+    token: data.token,
+    path: storagePath,
+    publicUrl: urlData.publicUrl,
+    contentType,
+    mediaType: meta.mediaType,
+  });
 }
