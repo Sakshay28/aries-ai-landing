@@ -29,7 +29,6 @@ import { triggerCapiEvent } from '@/lib/integrations/capi-trigger';
 import { processCtwaLead, getCampaignContextForAI } from '@/lib/meta-ads/attribution';
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { isCoexistenceChange, handleCoexistenceWebhook } from '@/lib/webhook/coexistence';
-import { addToBatch, tryFlushBatch, forceFlushBatch, formatBatchForAI, type BatchedMedia } from '@/lib/webhook/media-batch';
 import * as Sentry from '@/lib/sentry-stub';
 
 // Infer WhatsApp media type from a stored URL's file extension.
@@ -870,46 +869,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   }
 
 
-  // ── 10.1 Media Batch Collector ──────────────────────────────────────────────
-  // When a customer sends 4-5 photos/videos in a row, each arrives as a
-  // separate webhook hit. Without batching the bot replies to each one
-  // individually. Instead, collect media into a Redis batch, wait 4 seconds
-  // for the burst to finish, then send ONE AI reply.
-  const BATCHABLE_MEDIA = ['image', 'video', 'document'];
-  if (BATCHABLE_MEDIA.includes(msg.type)) {
-    const batched = await addToBatch(conversation.id, {
-      url: resolvedMediaUrl || '',
-      type: msg.type,
-      caption: msg.mediaCaption || null,
-      mimeType: msg.mediaMimeType || null,
-      messageId: msg.messageId,
-      timestamp: Date.now(),
-    });
-
-    if (batched) {
-      console.log(`📦 Media batched (${msg.type}) → conversation ${conversation.id}`);
-      await new Promise(resolve => setTimeout(resolve, 4000));
-      const batch = await tryFlushBatch(conversation.id);
-      if (batch) {
-        console.log(`📦 Flushing batch: ${batch.length} item(s) for ${conversation.id}`);
-        await processMediaBatch(batch, tenant, conversation, lead, cleanPhone, decryptedAccessToken || '');
-      }
-      return;
-    }
-  }
-
-  // ── 10.2 Text + Pending Media Batch ────────────────────────────────────────
-  // If a text message arrives right after a photo burst, force-flush the
-  // pending batch so the AI sees photos + text together in one context.
-  let mediaBatchPrefix = '';
-  if (msg.type === 'text' || msg.type === 'interactive' || msg.type === 'button') {
-    const pendingBatch = await forceFlushBatch(conversation.id);
-    if (pendingBatch) {
-      mediaBatchPrefix = formatBatchForAI(pendingBatch) + '\n';
-      console.log(`📦 Force-flushed ${pendingBatch.length} media item(s) before text for ${conversation.id}`);
-    }
-  }
-
   // 10.5. Business hours — compute ONCE, reused by both the off-hours guard and the AI prompt.
   // Hoisted outside the try-catch so both sections share the same computed values.
   let isBusinessOpen: boolean | undefined;
@@ -1327,7 +1286,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   let aiResponse;
   try {
     aiResponse = await processMessageWithAI(
-      mediaBatchPrefix + msg.text,
+      msg.text,
       history,
       context,
       tenantConfig,
@@ -2083,101 +2042,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   console.log(`✅ Meta: processed message from ${cleanPhone}, AI intent: ${aiResponse.intent}`);
 }
 
-// ── Media Batch Processor ──
-// Called when the 4-second debounce window closes and all collected
-// photos/videos are ready. Sends ONE AI reply for the entire batch.
-async function processMediaBatch(
-  batch: BatchedMedia[],
-  tenant: Record<string, any>,
-  conversation: Record<string, any>,
-  lead: Record<string, any> | null,
-  cleanPhone: string,
-  decryptedAccessToken: string,
-) {
-  const batchText = formatBatchForAI(batch);
-
-  const floodCheck = await checkSenderRateLimit(cleanPhone);
-  if (!floodCheck.allowed) return;
-
-  const plan = (tenant.plan as string) || 'starter';
-  const [dailyOk, monthly] = await Promise.all([
-    checkDailyAICostLimit(tenant.id, plan),
-    checkAICostLimit(tenant.id, plan),
-  ]);
-  if (!dailyOk || !monthly.allowed) return;
-
-  const { data: recentMsgs } = await supabaseAdmin
-    .from('messages')
-    .select('direction, content, ai_generated')
-    .eq('conversation_id', conversation.id)
-    .eq('tenant_id', tenant.id)
-    .order('created_at', { ascending: false })
-    .limit(10);
-
-  const history = (recentMsgs || [])
-    .reverse()
-    .map((m: any) => ({
-      role: m.direction === 'inbound' ? 'user' as const : 'assistant' as const,
-      content: m.content,
-      ai_generated: m.ai_generated,
-    }));
-
-  const tenantConfig = {
-    ...getTenantConfig(tenant as any),
-    isFirstMessage: false,
-  };
-
-  if (decryptedAccessToken && tenant.wa_phone_number_id) {
-    sendTypingIndicator(decryptedAccessToken, tenant.wa_phone_number_id, batch[batch.length - 1].messageId).catch(() => {});
-  }
-
-  let aiResponse;
-  try {
-    aiResponse = await processMessageWithAI(
-      batchText,
-      history,
-      (conversation.context as Record<string, any>) || {},
-      tenantConfig,
-      tenant.id,
-    );
-  } catch (err) {
-    console.error('❌ Media batch AI error:', (err as Error).message);
-    Sentry.captureException(err);
-    return;
-  }
-
-  if (!aiResponse?.reply || !decryptedAccessToken || !tenant.wa_phone_number_id) return;
-
-  await supabaseAdmin.rpc('increment_ai_conversations', { p_tenant_id: tenant.id });
-
-  let metaMsgId: string | null = null;
-  try {
-    const result = await sendTextMessage(
-      decryptedAccessToken,
-      tenant.wa_phone_number_id,
-      cleanPhone,
-      aiResponse.reply,
-    );
-    metaMsgId = result.messageId;
-  } catch (err) {
-    console.error('❌ Media batch send failed:', (err as Error).message);
-    Sentry.captureException(err);
-  }
-
-  await supabaseAdmin.from('messages').insert({
-    tenant_id: tenant.id,
-    conversation_id: conversation.id,
-    direction: 'outbound',
-    content: aiResponse.reply,
-    message_type: 'text',
-    channel: 'whatsapp',
-    status: metaMsgId ? 'sent' : 'failed',
-    ai_generated: true,
-    wa_message_id: metaMsgId,
-  });
-
-  console.log(`📦 Media batch processed: ${batch.length} item(s) → AI reply sent for ${conversation.id}`);
-}
 
 // ── Message Status Update Parser ──
 async function handleStatusUpdate(msg: NonNullable<ReturnType<typeof parseMetaWebhook>>) {

@@ -509,6 +509,10 @@ function ContentTab({
     );
   }
 
+  if (nodeType === "send_gallery") {
+    return <GalleryConfig localData={localData} commitField={commitField} flushField={flushField} />;
+  }
+
   if (nodeType === "interruption") {
     return (
       <>
@@ -1598,6 +1602,74 @@ function WebhookAdvancedConfig({
           </div>
         )}
       </div>
+    </>
+  );
+}
+
+// ─── GALLERY CONFIG ──────────────────────────────────────────────────────────
+function GalleryConfig({ localData, commitField }: { localData: Record<string, any>; commitField: (f: string, v: any) => void; flushField: (f: string, v: any) => void }) {
+  type GalleryItem = { url: string; type: string; caption: string };
+  const items: GalleryItem[] = Array.isArray(localData.items) ? localData.items : [];
+  const MAX_ITEMS = 10;
+
+  const addItem = () => {
+    if (items.length >= MAX_ITEMS) return;
+    commitField("items", [...items, { url: "", type: "image", caption: "" }]);
+  };
+  const updateItem = (idx: number, key: string, val: string) => {
+    commitField("items", items.map((item, i) => (i === idx ? { ...item, [key]: val } : item)));
+  };
+  const removeItem = (idx: number) => {
+    commitField("items", items.filter((_, i) => i !== idx));
+  };
+  const moveItem = (idx: number, dir: -1 | 1) => {
+    const target = idx + dir;
+    if (target < 0 || target >= items.length) return;
+    const next = [...items];
+    [next[idx], next[target]] = [next[target], next[idx]];
+    commitField("items", next);
+  };
+
+  return (
+    <>
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-[10.5px] font-semibold tracking-[0.08em] uppercase" style={{ color: "rgba(255,255,255,0.3)" }}>
+            Media Items <span style={{ color: items.length >= MAX_ITEMS ? "#ef4444" : "rgba(255,255,255,0.2)" }}>({items.length}/{MAX_ITEMS})</span>
+          </label>
+          <button onClick={addItem} disabled={items.length >= MAX_ITEMS} style={{ ...BTN_STYLE, opacity: items.length >= MAX_ITEMS ? 0.3 : 1 }}>+ Add Media</button>
+        </div>
+        <p className="text-[10px] mb-3" style={{ color: "rgba(255,255,255,0.25)" }}>
+          Photos and videos are sent in order, one after another.
+        </p>
+        <div className="space-y-2">
+          {items.map((item, i) => (
+            <div key={i} className="rounded-[12px] p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium" style={{ color: "rgba(255,255,255,0.55)" }}>
+                  {i + 1}. {item.type === "video" ? "Video" : item.type === "document" ? "Document" : "Image"}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => moveItem(i, -1)} disabled={i === 0} style={{ ...BTN_STYLE, fontSize: 10, padding: "3px 6px", opacity: i === 0 ? 0.3 : 0.8 }}>↑</button>
+                  <button onClick={() => moveItem(i, 1)} disabled={i === items.length - 1} style={{ ...BTN_STYLE, fontSize: 10, padding: "3px 6px", opacity: i === items.length - 1 ? 0.3 : 0.8 }}>↓</button>
+                  <button onClick={() => removeItem(i)} style={{ ...BTN_STYLE, fontSize: 10, padding: "3px 8px", opacity: 0.8 }}>Remove</button>
+                </div>
+              </div>
+              <select value={item.type || "image"} onChange={e => updateItem(i, "type", e.target.value)} className={SELECT_CLS} style={INP_STYLE}>
+                <option value="image">Image (JPG / PNG / WebP)</option>
+                <option value="video">Video (MP4)</option>
+                <option value="document">Document (PDF)</option>
+              </select>
+              <input type="url" value={item.url || ""} onChange={e => updateItem(i, "url", e.target.value)} placeholder="https://cdn.example.com/photo.jpg" className={INPUT_CLS} style={INP_STYLE} />
+              <input type="text" value={item.caption || ""} onChange={e => updateItem(i, "caption", e.target.value)} placeholder="Optional caption..." className={INPUT_CLS} style={INP_STYLE} />
+            </div>
+          ))}
+          {items.length === 0 && <p className="text-[11px] py-2" style={{ color: "rgba(255,255,255,0.3)" }}>No media. Click + Add Media.</p>}
+        </div>
+      </div>
+      <Field label="Delay between sends (ms)">
+        <input type="number" value={(localData.delayMs as number) || 1000} onChange={e => commitField("delayMs", parseInt(e.target.value) || 1000)} min={500} max={5000} step={500} className={INPUT_CLS} style={INP_STYLE} />
+      </Field>
     </>
   );
 }

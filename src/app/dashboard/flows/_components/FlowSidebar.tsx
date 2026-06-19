@@ -26,6 +26,7 @@ export const nodeCategories = [
     nodes: [
       { id: "standard", type: "standard", icon: MessageSquare, label: "Send Message", desc: "WhatsApp text" },
       { id: "send_media", type: "standard", icon: ImageIcon, label: "Send Media", desc: "Image / video / file" },
+      { id: "send_gallery", type: "send_gallery", icon: LayoutGrid, label: "Send Gallery", desc: "Multiple photos / videos" },
       { id: "send_audio", type: "standard", icon: Mic, label: "Send Audio", desc: "Voice message" },
       { id: "send_buttons", type: "send_buttons", icon: LayoutGrid, label: "Interactive Buttons", desc: "Tap to reply" },
       { id: "send_list", type: "standard", icon: List, label: "List Menu", desc: "Scrollable options" },
@@ -141,6 +142,13 @@ export const getDefaultNodeData = (id: string) => {
       assignments: [{ key: "my_var", value: "" }],
     },
     update_tag: { label: "Update Tag", tag: "hot_lead" },
+    send_gallery: {
+      label: "Send Gallery",
+      items: [
+        { url: "", type: "image", caption: "" },
+      ],
+      delayMs: 1000,
+    },
     send_buttons: {
       label: "Interactive Buttons",
       message: "Choose an option:",

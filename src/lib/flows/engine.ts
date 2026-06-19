@@ -428,6 +428,64 @@ async function executeNode(
     }
   }
 
+  // ── Send Gallery (multiple photos/videos in order) ────────
+  if (type === 'send_gallery') {
+    type GalleryItem = { url: string; type: string; caption: string };
+    const items: GalleryItem[] = Array.isArray(node.data?.items) ? (node.data.items as GalleryItem[]) : [];
+    const delayMs = Math.min(Math.max(Number(node.data?.delayMs) || 1000, 200), 5000);
+
+    if (items.length === 0) {
+      return { nextId: getNextNode(node.id, null, edges) };
+    }
+
+    if (ctx.dryRun) {
+      ctx.trace?.push({
+        nodeId: node.id, nodeType: type, action: 'send_gallery',
+        payload: `${items.length} media items`,
+        variables: { ...ctx.variables },
+        nextId: getNextNode(node.id, null, edges),
+      });
+      return { nextId: getNextNode(node.id, null, edges), sent: true };
+    }
+
+    let sentCount = 0;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const mediaUrl = interpolate(item.url || '', ctx);
+      const caption  = interpolate(item.caption || '', ctx);
+      if (!mediaUrl.trim()) continue;
+
+      const metaType = item.type === 'document' ? 'document'
+        : item.type === 'video' ? 'video'
+        : 'image' as MetaMediaType;
+
+      try {
+        await sendMediaMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, metaType, mediaUrl, caption || undefined);
+        await supabaseAdmin.from('messages').insert({
+          tenant_id: ctx.tenantId,
+          conversation_id: ctx.conversationId,
+          direction: 'outbound',
+          content: caption || `[${item.type}]`,
+          message_type: item.type || 'image',
+          channel: 'whatsapp',
+          status: 'sent',
+          ai_generated: false,
+          media_url: mediaUrl,
+          media_caption: caption || null,
+        });
+        sentCount++;
+      } catch (e) {
+        console.error(`Flow engine: gallery item ${i + 1}/${items.length} failed:`, (e as Error).message);
+      }
+
+      if (i < items.length - 1 && delayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+
+    return { nextId: getNextNode(node.id, null, edges), sent: sentCount > 0 };
+  }
+
   // ── Send Text Message ─────────────────────────────────────
   if (
     type === 'standard' ||

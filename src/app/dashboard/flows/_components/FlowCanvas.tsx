@@ -81,6 +81,7 @@ const NODE_TYPES: NodeTypes = {
   book_appointment:   BookAppointmentNode as unknown as NodeTypes[string],
   ai_reply:           AIReplyNode as unknown as NodeTypes[string],
   wait_for_reply:     WaitForReplyNode as unknown as NodeTypes[string],
+  send_gallery:       StandardNode as unknown as NodeTypes[string],
   send_email:         SendEmailNode as unknown as NodeTypes[string],
   set_variable:       SetVariableNode as unknown as NodeTypes[string],
   update_tag:         UpdateTagNode as unknown as NodeTypes[string],

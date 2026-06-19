@@ -42,6 +42,7 @@ export const NODE_CATEGORY: Record<string, { color: string; label: string }> = {
   resume:        { color: '#22C55E', label: 'RESUME' },
   resume_parser: { color: '#10B981', label: 'PARSER' },
   collect_data:  { color: '#F59E0B', label: 'COLLECT' },
+  send_gallery:    { color: '#10B981', label: 'GALLERY' },
   send_buttons:    { color: '#10B981', label: 'BUTTONS' },
   button_trigger:  { color: '#3B82F6', label: 'BUTTON CLICK' },
   intent_routing:  { color: '#8B5CF6', label: 'INTENT ROUTING' },
