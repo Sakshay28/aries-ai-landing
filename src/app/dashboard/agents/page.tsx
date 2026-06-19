@@ -57,6 +57,7 @@ interface ChatMessage {
   mediaUrl?: string | null;
   mediaType?: 'image' | 'video' | 'document' | null;
   timestamp: Date;
+  isError?: boolean;
 }
 
 function mediaTypeFromUrl(url: string): 'image' | 'video' | 'document' {
@@ -746,6 +747,7 @@ export default function AISettingsPage() {
 
       setTimeout(() => {
         if (json.success && json.data) {
+          const newMessages: ChatMessage[] = [];
           const replyMsg: ChatMessage = {
             id: `a-${Date.now()}-${Math.random().toString(36).slice(2)}`,
             role: 'assistant',
@@ -754,14 +756,44 @@ export default function AISettingsPage() {
             mediaType: json.data.mediaType || null,
             timestamp: new Date()
           };
-          setChatHistory(prev => [...prev, replyMsg]);
+          newMessages.push(replyMsg);
+
+          // If the AI provider is down, display the warning/error in the chat as well
+          if (json.providerStatus && !json.providerStatus.available && json.providerStatus.lastError) {
+            const providerErr: ChatMessage = {
+              id: `prov-err-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              role: 'assistant',
+              content: `AI Provider Down: ${json.providerStatus.lastError}`,
+              isError: true,
+              timestamp: new Date()
+            };
+            newMessages.push(providerErr);
+          }
+
+          setChatHistory(prev => [...prev, ...newMessages]);
         } else {
+          const errorMsg: ChatMessage = {
+            id: `err-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            role: 'assistant',
+            content: json.error || 'Failed to simulate response',
+            isError: true,
+            timestamp: new Date()
+          };
+          setChatHistory(prev => [...prev, errorMsg]);
           toast.error(json.error || 'Failed to simulate response');
         }
         setSendingMsg(false);
       }, delay);
 
-    } catch {
+    } catch (err: any) {
+      const errorMsg: ChatMessage = {
+        id: `err-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        role: 'assistant',
+        content: err?.message || 'Network error contacting playground',
+        isError: true,
+        timestamp: new Date()
+      };
+      setChatHistory(prev => [...prev, errorMsg]);
       toast.error('Network error contacting playground');
       setSendingMsg(false);
     }
@@ -1920,8 +1952,18 @@ export default function AISettingsPage() {
                           )}
                         </div>
                       )}
-                      {/* Text bubble */}
-                      {m.content && (
+                      {/* Error bubble or Text bubble */}
+                      {m.isError ? (
+                        <div className="rounded-2xl rounded-tl-sm px-3.5 py-2.5 text-xs bg-red-50 text-red-700 border border-red-100 flex items-start gap-2 shadow-sm">
+                          <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5 animate-pulse" />
+                          <div className="flex flex-col gap-1">
+                            <span className="font-extrabold uppercase tracking-wider text-[9px] text-red-600 block">Simulation Error</span>
+                            <span style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
+                              {m.content}
+                            </span>
+                          </div>
+                        </div>
+                      ) : m.content && (
                         <div
                           className={cn(
                             "rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-sm",
