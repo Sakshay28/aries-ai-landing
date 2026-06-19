@@ -167,6 +167,14 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
+  // Normalize keyword arrays — split comma-separated strings pasted as single entries
+  for (const arrField of ['escalation_keywords', 'hot_keywords', 'warm_keywords'] as const) {
+    if (Array.isArray(updates[arrField])) {
+      updates[arrField] = (updates[arrField] as string[])
+        .flatMap((s: string) => s.split(/,|\s{2,}/).map((k: string) => k.trim()).filter(Boolean));
+    }
+  }
+
   // Handle encrypted access token specifically
   if (body.wa_access_token !== undefined) {
     if (body.wa_access_token === '••••••••') {

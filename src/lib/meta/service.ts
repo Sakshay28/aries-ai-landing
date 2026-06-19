@@ -613,10 +613,16 @@ export async function sendStaffAlert(
   },
   text: string
 ): Promise<StaffAlertResult[]> {
-  if (!tenant.wa_phone_number_id || !tenant.wa_access_token) return [];
+  if (!tenant.wa_phone_number_id || !tenant.wa_access_token) {
+    console.error(`❌ sendStaffAlert: skipped — missing ${!tenant.wa_phone_number_id ? 'wa_phone_number_id' : 'wa_access_token'}`);
+    return [];
+  }
 
   const rawPhones = [tenant.staff_phone, tenant.manager_phone].filter(Boolean) as string[];
-  if (rawPhones.length === 0) return [];
+  if (rawPhones.length === 0) {
+    console.error(`❌ sendStaffAlert: skipped — no staff/manager phones configured (staff_phone=${tenant.staff_phone}, manager_phone=${tenant.manager_phone})`);
+    return [];
+  }
 
   const phones = [...new Set(rawPhones.map(normalizePhone))];
   const token = decryptToken(tenant.wa_access_token) as string;
