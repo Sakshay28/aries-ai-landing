@@ -41,8 +41,38 @@ export interface ScriptedReplyRow {
   media_url?: string | null;
 }
 
+/** Context-check: is the scripted reply actually relevant to what the
+ *  customer is saying, or is the keyword incidental to a complaint / action
+ *  request / complex question?  Short messages (keyword + a few filler words
+ *  like "show menu" or "timings batao") always pass.  Longer messages are
+ *  checked for negative-sentiment and action-request signals that mean the
+ *  canned reply would be wrong — those fall through to the AI engine. */
+export function isScriptedReplyRelevant(messageText: string, matchedKeyword: string): boolean {
+  const msgWords = messageText.trim().split(/\s+/).length;
+  const kwWords  = matchedKeyword.trim().split(/\s+/).length;
+
+  // Short messages: "menu", "send menu", "menu dikhao" → always relevant
+  if (msgWords <= kwWords + 3) return true;
+
+  const lower = messageText.toLowerCase();
+
+  // Complaint / negative-sentiment → canned reply is wrong
+  const NEGATIVE = /\b(don'?t|didn'?t|won'?t|can'?t|couldn'?t|not|never|bad|terrible|awful|worst|poor|horrible|problem|issue|wrong|complaint|complain|disappointed|disappointing|frustrat|annoy|angry|upset|nahi|nhi|mat|galat|kharab|bekar|bakwas|bura|ghatiya)\b/i;
+  if (NEGATIVE.test(lower)) return false;
+
+  // Action / modification requests → customer wants to DO something, not just info
+  const ACTION = /\b(change|cancel|remove|stop|update|modify|fix|refund|return|exchange|badlo|hatao|rok|band karo)\b/i;
+  if (ACTION.test(lower)) return false;
+
+  // Very long messages (9+ words beyond keyword) → likely a complex query
+  if (msgWords > kwWords + 8) return false;
+
+  return true;
+}
+
 /** Pick the scripted reply whose matching keyword is LONGEST (most specific
- *  keyword beats broad single words). Returns undefined when nothing fires. */
+ *  keyword beats broad single words). Returns undefined when nothing fires
+ *  or when the match isn't contextually relevant (falls through to AI). */
 export function pickScriptedReply<T extends ScriptedReplyRow>(
   rows: T[],
   messageText: string,
@@ -50,14 +80,19 @@ export function pickScriptedReply<T extends ScriptedReplyRow>(
   const lower = messageText.toLowerCase();
   let matched: T | undefined;
   let bestLen = 0;
+  let bestKw = '';
   for (const r of rows) {
     if (!Array.isArray(r.keywords)) continue;
     for (const kw of r.keywords) {
       if (kw && scriptedKeywordMatch(lower, kw) && kw.length > bestLen) {
         bestLen = kw.length;
+        bestKw = kw;
         matched = r;
       }
     }
+  }
+  if (matched && !isScriptedReplyRelevant(messageText, bestKw)) {
+    return undefined;
   }
   return matched;
 }

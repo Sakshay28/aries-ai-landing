@@ -202,9 +202,19 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'No valid fields to update' }, { status: 400 });
   }
 
-  // Optional columns added by later migrations — strip them on "column does not exist"
-  // so the rest of the save still succeeds during the deploy → migration window.
-  const OPTIONAL_COLS = ['welcome_image_url', 'coexistence_auto_pause'];
+  // Optional columns added by later migrations — strip them when Supabase/PostgREST
+  // reports a missing column so the rest of the save still succeeds during the
+  // deploy → migration window.
+  // PostgREST error format: "Could not find the 'col' column of 'tenants' in the
+  // schema cache" — note "column" appears but "does not exist" does NOT, so we
+  // must use an OR pattern, same as the GET handler above.
+  const OPTIONAL_COLS = [
+    'welcome_image_url',
+    'coexistence_auto_pause',
+    // AI Behavior Controls (migration 20260618)
+    'bot_language_mode', 'response_length', 'prohibited_topics',
+    'always_mention_rules', 'competitors', 'competitor_deflection_reply',
+  ];
 
   let { data, error } = await supabaseAdmin
     .from('tenants')
@@ -213,7 +223,7 @@ export async function PATCH(req: NextRequest) {
     .select()
     .single();
 
-  if (error && /column.*does not exist/i.test(error.message || '')) {
+  if (error && /column|does not exist|schema cache/i.test(error.message || '')) {
     const stripped = { ...updates };
     for (const col of OPTIONAL_COLS) delete stripped[col];
     ({ data, error } = await supabaseAdmin

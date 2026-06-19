@@ -3,6 +3,7 @@ import {
   kwWordMatch,
   scriptedKeywordMatch,
   pickScriptedReply,
+  isScriptedReplyRelevant,
   allowStatusUpdate,
 } from '@/lib/webhook/decisions';
 import { isHumanHandoffRequest } from '@/lib/ai/engine';
@@ -74,6 +75,61 @@ describe('pickScriptedReply', () => {
   it('tolerates malformed rows without keywords arrays', () => {
     const malformed = [{ keywords: null as unknown as string[], reply: 'X' }, ...rows];
     expect(pickScriptedReply(malformed, 'hello ji')?.reply).toBe('GREETING');
+  });
+
+  it('skips scripted reply when keyword is in a complaint context', () => {
+    expect(pickScriptedReply(rows, 'I have a problem with your menu items being stale')).toBeUndefined();
+    expect(pickScriptedReply(rows, 'the menu was terrible and the food was cold')).toBeUndefined();
+  });
+
+  it('skips scripted reply when keyword is in an action/change request', () => {
+    expect(pickScriptedReply(rows, 'can you change the menu for my booking please')).toBeUndefined();
+    expect(pickScriptedReply(rows, 'I want to cancel my menu order that was placed')).toBeUndefined();
+  });
+
+  it('still fires for simple requests containing the keyword', () => {
+    expect(pickScriptedReply(rows, 'menu please')?.reply).toBe('MENU');
+    expect(pickScriptedReply(rows, 'menu dikhao')?.reply).toBe('MENU');
+    // "show me the menu" — "menu" is ≤4 chars so only fires at message start
+    expect(pickScriptedReply(rows, 'show me the menu')).toBeUndefined();
+  });
+});
+
+// ─── Scripted reply relevance check ─────────────────────────────────────────
+
+describe('isScriptedReplyRelevant', () => {
+  it('short messages are always relevant', () => {
+    expect(isScriptedReplyRelevant('menu', 'menu')).toBe(true);
+    expect(isScriptedReplyRelevant('send menu', 'menu')).toBe(true);
+    expect(isScriptedReplyRelevant('menu dikhao', 'menu')).toBe(true);
+    expect(isScriptedReplyRelevant('menu please send', 'menu')).toBe(true);
+    expect(isScriptedReplyRelevant('menu card bhejo', 'menu card')).toBe(true);
+  });
+
+  it('rejects complaint/negative context', () => {
+    expect(isScriptedReplyRelevant('the menu was terrible and the food was cold', 'menu')).toBe(false);
+    expect(isScriptedReplyRelevant('I am disappointed with the menu quality here', 'menu')).toBe(false);
+    expect(isScriptedReplyRelevant('menu mein kuch galat hai', 'menu')).toBe(false);
+    expect(isScriptedReplyRelevant('timing bahut kharab thi aaj ki', 'timing')).toBe(false);
+  });
+
+  it('rejects action/modification requests', () => {
+    expect(isScriptedReplyRelevant('can you change the menu for my event', 'menu')).toBe(false);
+    expect(isScriptedReplyRelevant('I want to cancel my reservation at your location', 'location')).toBe(false);
+    expect(isScriptedReplyRelevant('please update the menu with new prices for us', 'menu')).toBe(false);
+  });
+
+  it('rejects very long messages where keyword is incidental', () => {
+    expect(isScriptedReplyRelevant(
+      'I was at your restaurant yesterday and the waiter showed me the menu but I left early because of the crowd',
+      'menu'
+    )).toBe(false);
+  });
+
+  it('allows medium-length simple requests', () => {
+    expect(isScriptedReplyRelevant('can you send me the menu', 'menu')).toBe(true);
+    expect(isScriptedReplyRelevant('what are your timings today', 'timings')).toBe(true);
+    expect(isScriptedReplyRelevant('share your location please', 'location')).toBe(true);
   });
 });
 

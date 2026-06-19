@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { processMessageWithAI, getProviderStatus } from '@/lib/ai/engine';
 import { getTenantById } from '@/lib/tenant/manager';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
+import { pickScriptedReply } from '@/lib/webhook/decisions';
 
 export async function POST(req: NextRequest) {
   const tenantId = await getTenantId();
@@ -78,20 +79,8 @@ export async function POST(req: NextRequest) {
       .eq('is_active', true);
 
     if (scriptedRepliesRows && scriptedRepliesRows.length > 0) {
-      const lowerMsgForScript = message.toLowerCase();
       type ScriptedRow = { keywords: string[]; reply: string; media_url?: string | null };
-      // Longest-keyword-match wins — more specific keywords beat broad single words
-      let matchedScript: ScriptedRow | undefined;
-      let bestMatchLen = 0;
-      for (const r of scriptedRepliesRows as ScriptedRow[]) {
-        if (!Array.isArray(r.keywords)) continue;
-        for (const kw of r.keywords) {
-          if (kw && lowerMsgForScript.includes(kw.toLowerCase()) && kw.length > bestMatchLen) {
-            bestMatchLen = kw.length;
-            matchedScript = r;
-          }
-        }
-      }
+      const matchedScript = pickScriptedReply(scriptedRepliesRows as ScriptedRow[], message);
       if (matchedScript) {
         const mUrl = matchedScript.media_url || null;
         const mType = mUrl
