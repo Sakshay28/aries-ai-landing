@@ -80,9 +80,9 @@ export async function PATCH(req: NextRequest) {
   // Guard: limit system_prompt length to prevent prompt-flooding attacks
   if (body.system_prompt !== undefined && body.system_prompt !== null) {
     const promptStr = String(body.system_prompt);
-    if (promptStr.length > 4000) {
+    if (promptStr.length > 100000) {
       return NextResponse.json(
-        { success: false, error: 'system_prompt exceeds the 4,000-character limit.' },
+        { success: false, error: 'system_prompt exceeds the 100,000-character limit.' },
         { status: 400 }
       );
     }
