@@ -857,8 +857,29 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           .eq('id', conversation.id);
         conversation.escalated = false;
       } else {
-        // Still within timeout window — bot paused, human should handle
+        // Still within timeout window — bot paused, human should handle.
+        // Send a brief "hold on" acknowledgment so the customer isn't left in silence.
+        // Rate-limited to one per 5 minutes per conversation via Redis.
         console.log(`🔇 Meta: conversation ${conversation.id} escalated (${Math.round((Date.now() - escalatedAt) / 60000)}/${tenant.escalation_timeout_mins || 30} mins), skipping AI`);
+        if (decryptedAccessToken && tenant.wa_phone_number_id) {
+          const redis = getRedisClient();
+          let shouldAck = true;
+          if (redis) {
+            try {
+              const claimed = await redis.set(`esc-ack:${conversation.id}`, '1', 'EX', 300, 'NX');
+              if (!claimed) shouldAck = false;
+            } catch {}
+          }
+          if (shouldAck) {
+            const staffLabel = tenant.staff_name || 'our team';
+            sendTextMessage(
+              decryptedAccessToken,
+              tenant.wa_phone_number_id as string,
+              cleanPhone,
+              `${staffLabel} has been notified and will get back to you shortly. Please hold on! 🙏`
+            ).catch(() => {});
+          }
+        }
         return;
       }
     } else {
@@ -1182,9 +1203,22 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   //   (a) no AI reply has ever been sent in this conversation (covers new contacts
   //       AND contacts whose only prior reply was an off-hours notice), OR
   //   (b) the session has expired (24h idle) — re-greeting returning customers.
-  // The Redis welcome-dedup gate (isFirstMessage guard above) still prevents
-  // concurrent bursts from a brand-new contact sending multiple messages at once.
-  const isFirstMessageForAI = !hasAIReplies || sessionExpired;
+  //
+  // Race-condition guard: when a customer replies quickly to the welcome message,
+  // the speculative recentMsgs query may run before the first call's outbound AI
+  // message has been committed — making hasAIReplies falsely false and triggering
+  // a SECOND welcome. The Redis welcome key (set with 120s TTL by the isFirstMessage
+  // guard above) disambiguates: if it exists, a welcome was already sent recently.
+  let isFirstMessageForAI = !hasAIReplies || sessionExpired;
+  if (isFirstMessageForAI && !isFirstMessage) {
+    const redis = getRedisClient();
+    if (redis) {
+      try {
+        const welcomeSent = await redis.get(`welcome:${tenant.id}:${cleanPhone}`);
+        if (welcomeSent) isFirstMessageForAI = false;
+      } catch {}
+    }
+  }
 
   perf('parallel_fetch_done');
 

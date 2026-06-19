@@ -101,6 +101,9 @@ describe('isHumanHandoffRequest', () => {
   it('detects explicit human requests (English)', () => {
     expect(isHumanHandoffRequest('Connect me to a human')).toBe(true);
     expect(isHumanHandoffRequest('can I talk to a representative?')).toBe(true);
+    expect(isHumanHandoffRequest('Please connect with your team')).toBe(true);
+    expect(isHumanHandoffRequest('connect me with the team please')).toBe(true);
+    expect(isHumanHandoffRequest('can i speak to someone?')).toBe(true);
   });
 
   it('detects Hinglish human requests', () => {

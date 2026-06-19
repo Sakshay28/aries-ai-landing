@@ -1065,8 +1065,12 @@ const HUMAN_HANDOFF_PHRASES = [
   'real person', 'real human', 'human agent', 'live agent', 'human team',
   'talk to your team', 'talk to the team', 'talk to staff', 'speak to staff',
   'connect me to', 'connect with a human', 'want to speak to', 'want to talk to',
+  'connect with your team', 'connect with the team', 'connect me with',
+  'connect to your team', 'connect to the team', 'connect to a human',
+  'can i speak', 'can i talk',
   'book a demo', 'schedule a demo', 'arrange a demo', 'request a demo', 'demo with the',
   'insaan se baat', 'kisi insaan', 'aadmi se baat', 'bande se baat',
+  'team se baat', 'team se connect',
 ];
 const HUMAN_HANDOFF_WORDS = ['human', 'representative', 'insaan'];
 
