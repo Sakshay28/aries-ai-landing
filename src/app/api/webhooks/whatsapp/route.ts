@@ -41,6 +41,36 @@ function mediaTypeFromUrl(url: string): 'image' | 'video' | 'document' {
   return 'image';
 }
 
+// Convert any Supabase storage URL (public or path) to a fresh signed URL.
+// WhatsApp Cloud API often can't fetch Supabase public URLs (redirects/CDN issues)
+// but signed URLs work reliably.
+async function toSignedMediaUrl(url: string): Promise<string> {
+  if (!url) return url;
+
+  // Storage path (not a full URL) — sign from knowledge-docs bucket
+  if (!url.startsWith('http')) {
+    const { data } = await supabaseAdmin.storage
+      .from('knowledge-docs')
+      .createSignedUrl(url, 600);
+    return data?.signedUrl || url;
+  }
+
+  // Already a signed URL — return as-is
+  if (url.includes('/storage/v1/object/sign/')) return url;
+
+  // Supabase public URL — parse bucket+path and create signed URL
+  const publicMatch = url.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+?)(\?.*)?$/);
+  if (publicMatch) {
+    const [, bucket, path] = publicMatch;
+    const { data } = await supabaseAdmin.storage
+      .from(bucket)
+      .createSignedUrl(decodeURIComponent(path), 600);
+    return data?.signedUrl || url;
+  }
+
+  return url;
+}
+
 // ── GET: Webhook Verification Handshake ──
 export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get('hub.mode');
@@ -947,8 +977,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         console.log(`⚡ Scripted reply (early) matched for tenant ${tenant.id}: "${matchedEarly.keywords.join(', ')}"`);
         if (decryptedAccessToken && tenant.wa_phone_number_id) {
           const srMediaType = matchedEarly.media_url ? mediaTypeFromUrl(matchedEarly.media_url) : null;
-          const sendResult = matchedEarly.media_url
-            ? await sendMediaMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, srMediaType!, matchedEarly.media_url, matchedEarly.reply || undefined)
+          const srMediaUrl = matchedEarly.media_url ? await toSignedMediaUrl(matchedEarly.media_url) : null;
+          const sendResult = srMediaUrl
+            ? await sendMediaMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, srMediaType!, srMediaUrl, matchedEarly.reply || undefined)
                 .catch((e: Error) => { console.error(`❌ Scripted reply ${srMediaType} send failed:`, e.message); return null; })
             : await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, matchedEarly.reply)
                 .catch((e: Error) => { console.error('❌ Scripted reply send failed:', e.message); return null; });
@@ -1442,13 +1473,14 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       // Supports images, videos, and documents stored in welcome_image_url.
       if (isFirstMessageForAI && tenantConfig.welcomeImageUrl) {
         const welcomeMediaType = mediaTypeFromUrl(tenantConfig.welcomeImageUrl);
+        const welcomeSignedUrl = await toSignedMediaUrl(tenantConfig.welcomeImageUrl);
         let mediaSent = false;
         await sendMediaMessage(
           decryptedAccessToken,
           tenant.wa_phone_number_id,
           cleanPhone,
           welcomeMediaType,
-          tenantConfig.welcomeImageUrl,
+          welcomeSignedUrl,
           // Videos/documents don't support captions on WhatsApp — send text separately
           welcomeMediaType === 'image' ? aiResponse.reply : undefined
         ).then(() => { mediaSent = true; }).catch(mediaErr => {
@@ -1481,13 +1513,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         .find(f => f.filename === mediaFilename);
       if (matchedMedia?.file_url) {
         try {
-          let mediaUrl = matchedMedia.file_url;
-          if (!mediaUrl.startsWith('http')) {
-            const { data: signed } = await supabaseAdmin.storage
-              .from('knowledge-docs')
-              .createSignedUrl(mediaUrl, 300);
-            mediaUrl = signed?.signedUrl || '';
-          }
+          const mediaUrl = await toSignedMediaUrl(matchedMedia.file_url);
           if (mediaUrl) {
             const mType = mediaTypeFromUrl(matchedMedia.filename);
             const mediaResult = await sendMediaMessage(
