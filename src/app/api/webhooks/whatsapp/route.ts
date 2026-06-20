@@ -1154,6 +1154,13 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       .eq('tenant_id', tenant.id)
       .not('embedding', 'is', null)
       .limit(1),
+    // Fetch sendable media files (videos, images, PDFs with file_url)
+    supabaseAdmin
+      .from('knowledge_docs')
+      .select('filename, file_type, file_url')
+      .eq('tenant_id', tenant.id)
+      .not('file_url', 'is', null)
+      .limit(20),
   ]);
 
   // 12. Flow Engine Execution (runs concurrently with _aiBatchPromise above)
@@ -1180,7 +1187,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const storedMsgCount = conversation.message_count ?? 0;
 
   // 13. Await the speculative batch (started before flows — likely already resolved)
-  const [{ data: recentMsgs }, { data: smartRulesRows }, { data: agentRows }, { data: existingBookingRow }, { data: kbDocs }, { data: kbEmbedCheck }] = await _aiBatchPromise;
+  const [{ data: recentMsgs }, { data: smartRulesRows }, { data: agentRows }, { data: existingBookingRow }, { data: kbDocs }, { data: kbEmbedCheck }, { data: kbMediaFiles }] = await _aiBatchPromise;
 
   const history = (recentMsgs || [])
     .reverse()
@@ -1303,6 +1310,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     } : {}),
     smartRules: (smartRulesRows || []) as Array<{ name: string; trigger_source: string; ai_summary: string }>,
     knowledgeDocs: knowledgeRows,
+    mediaFiles: ((kbMediaFiles || []) as Array<{ filename: string; file_type: string; file_url: string }>)
+      .map(f => ({ filename: f.filename, file_type: f.file_type })),
     // Inject existing booking so AI can handle cancel/modify requests
     existingBooking: existingBookingRow ? {
       reservationId:  (existingBookingRow as any).reservation_id,
@@ -1473,6 +1482,39 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       sendFailureMsg = (sendErr as Error).message;
       console.error('❌ Meta: failed to send AI reply:', sendFailureMsg);
       Sentry.captureException(sendErr);
+    }
+
+    // 15b. Send media attachment if AI requested one
+    const mediaFilename = aiResponse.extractedData?.mediaToSend;
+    if (mediaFilename && decryptedAccessToken && tenant.wa_phone_number_id) {
+      const matchedMedia = ((kbMediaFiles || []) as Array<{ filename: string; file_type: string; file_url: string }>)
+        .find(f => f.filename === mediaFilename);
+      if (matchedMedia?.file_url) {
+        try {
+          let mediaUrl = matchedMedia.file_url;
+          // Storage paths need a signed URL; full URLs (legacy) are used as-is
+          if (!mediaUrl.startsWith('http')) {
+            const { data: signed } = await supabaseAdmin.storage
+              .from('knowledge-docs')
+              .createSignedUrl(mediaUrl, 300);
+            mediaUrl = signed?.signedUrl || '';
+          }
+          if (mediaUrl) {
+            const mType = mediaTypeFromUrl(matchedMedia.filename);
+            await sendMediaMessage(
+              decryptedAccessToken,
+              tenant.wa_phone_number_id,
+              cleanPhone,
+              mType,
+              mediaUrl,
+              mType === 'document' ? matchedMedia.filename : undefined
+            );
+            console.log(`✅ Sent media attachment "${matchedMedia.filename}" to ${cleanPhone}`);
+          }
+        } catch (mediaErr) {
+          console.error(`⚠️ Failed to send media "${mediaFilename}":`, (mediaErr as Error).message);
+        }
+      }
     }
   }
   if (sendFailureMsg) {

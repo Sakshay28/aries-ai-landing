@@ -7,9 +7,11 @@ import { invalidateTenantAllCaches } from '@/lib/tenant/manager';
 import { getAI } from '@/lib/ai/client';
 
 const TEXT_TYPES = new Set(['txt', 'md', 'csv', 'json', 'html', 'xml']);
-const ALLOWED_EXTS = new Set([...TEXT_TYPES, 'pdf']);
+const MEDIA_TYPES = new Set(['mp4', 'mov', 'webm', 'jpg', 'jpeg', 'png', 'webp']);
+const ALLOWED_EXTS = new Set([...TEXT_TYPES, 'pdf', ...MEDIA_TYPES]);
 const MAX_BYTES = 500_000;          // 500 KB text cap before truncation
-const MAX_UPLOAD_BYTES = 5_000_000; // 5 MB hard cap on the uploaded file itself
+const MAX_UPLOAD_BYTES_TEXT = 5_000_000;  // 5 MB for text/PDF
+const MAX_UPLOAD_BYTES_MEDIA = 16_000_000; // 16 MB for video/images (WhatsApp limit)
 const MAX_UPLOADS_PER_DAY = 20;     // per-tenant upload cap (Gemini cost abuse guard)
 
 // ── GET: list all knowledge docs for the tenant ──────────────
@@ -73,10 +75,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Hard size cap BEFORE we read the buffer or send anything to Gemini.
-  if (file.size > MAX_UPLOAD_BYTES) {
+  const isMedia = MEDIA_TYPES.has(ext);
+  const maxBytes = isMedia ? MAX_UPLOAD_BYTES_MEDIA : MAX_UPLOAD_BYTES_TEXT;
+
+  if (file.size > maxBytes) {
     return NextResponse.json(
-      { error: `File too large. Maximum size is ${Math.floor(MAX_UPLOAD_BYTES / 1_000_000)} MB.` },
+      { error: `File too large. Maximum size is ${Math.floor(maxBytes / 1_000_000)} MB.` },
       { status: 413 }
     );
   }
@@ -105,8 +109,10 @@ export async function POST(req: NextRequest) {
     fileUrl = storagePath;
   }
 
-  // ── Extract text for supported types ────────────────────
-  if (isText) {
+  // ── Extract text for supported types (skip media — no text to extract) ──
+  if (isMedia) {
+    // Videos/images have no extractable text — stored as sendable media only
+  } else if (isText) {
     const raw = buffer.toString('utf-8');
     contentText = raw.length > MAX_BYTES ? raw.slice(0, MAX_BYTES) + '\n...[truncated]' : raw;
   } else if (ext === 'pdf') {

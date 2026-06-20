@@ -276,6 +276,9 @@ export async function sendMediaMessage(
   if (caption && (mediaType === 'image' || mediaType === 'document')) {
     mediaPayload.caption = caption;
   }
+  if (mediaType === 'document') {
+    mediaPayload.filename = caption || url.split('/').pop()?.split('?')[0] || 'document';
+  }
 
   const payload: any = {
     messaging_product: 'whatsapp',

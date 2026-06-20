@@ -621,13 +621,16 @@ export default function AISettingsPage() {
 
   const handleFileUpload = async (file: File) => {
     const ext = file.name.split('.').pop()?.toLowerCase();
-    const accepted = ['txt', 'md', 'csv', 'json', 'pdf'];
+    const accepted = ['txt', 'md', 'csv', 'json', 'pdf', 'mp4', 'mov', 'webm', 'jpg', 'jpeg', 'png', 'webp'];
+    const mediaExts = ['mp4', 'mov', 'webm', 'jpg', 'jpeg', 'png', 'webp'];
     if (!ext || !accepted.includes(ext)) {
       toast.error(`Unsupported file type. Accepted: ${accepted.map(a => `.${a}`).join(', ')}`);
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error('File must be under 10 MB');
+    const isMedia = ext ? mediaExts.includes(ext) : false;
+    const maxSize = isMedia ? 16 * 1024 * 1024 : 10 * 1024 * 1024;
+    if (file.size > maxSize) {
+      toast.error(`File must be under ${isMedia ? '16' : '10'} MB`);
       return;
     }
 
@@ -646,7 +649,8 @@ export default function AISettingsPage() {
     // Prepend optimistic doc to document list immediately
     setDocs(prev => [optimisticDoc, ...prev]);
 
-    const uploadToastId = toast.loading("Uploading knowledge...");
+    const uploadLabel = isMedia ? 'media' : 'knowledge';
+    const uploadToastId = toast.loading(`Uploading ${uploadLabel}...`);
     const formData = new FormData();
     formData.append('file', file);
     setUploading(true);
@@ -654,9 +658,9 @@ export default function AISettingsPage() {
     try {
       const res = await fetch('/api/dashboard/knowledge', { method: 'POST', body: formData });
       const json = await res.json();
-      
+
       if (json.success && json.data) {
-        toast.success("Knowledge uploaded successfully", { id: uploadToastId });
+        toast.success(`${isMedia ? 'Media' : 'Knowledge'} uploaded successfully`, { id: uploadToastId });
         
         // Replace optimistic doc with real uploaded doc from DB
         setDocs(prev => prev.map(d => d.id === tempId ? json.data : d));
@@ -1620,7 +1624,7 @@ export default function AISettingsPage() {
                         type="file"
                         className="hidden"
                         onChange={e => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
-                        accept=".txt,.md,.csv,.json,.pdf"
+                        accept=".txt,.md,.csv,.json,.pdf,.mp4,.mov,.webm,.jpg,.jpeg,.png,.webp"
                       />
                     </div>
 
