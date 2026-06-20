@@ -1492,7 +1492,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       if (matchedMedia?.file_url) {
         try {
           let mediaUrl = matchedMedia.file_url;
-          // Storage paths need a signed URL; full URLs (legacy) are used as-is
           if (!mediaUrl.startsWith('http')) {
             const { data: signed } = await supabaseAdmin.storage
               .from('knowledge-docs')
@@ -1501,7 +1500,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           }
           if (mediaUrl) {
             const mType = mediaTypeFromUrl(matchedMedia.filename);
-            await sendMediaMessage(
+            const mediaResult = await sendMediaMessage(
               decryptedAccessToken,
               tenant.wa_phone_number_id,
               cleanPhone,
@@ -1509,6 +1508,22 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
               mediaUrl,
               mType === 'document' ? matchedMedia.filename : undefined
             );
+            // Store the media message in DB so it appears in the dashboard chat
+            const { error: mediaInsertErr } = await supabaseAdmin.from('messages').insert({
+              tenant_id: tenant.id,
+              conversation_id: conversation.id,
+              direction: 'outbound',
+              content: matchedMedia.filename,
+              message_type: mType,
+              channel: 'whatsapp',
+              status: 'sent',
+              ai_generated: true,
+              media_url: mediaUrl,
+              file_name: matchedMedia.filename,
+              mime_type: mType === 'video' ? 'video/mp4' : mType === 'document' ? 'application/pdf' : 'image/jpeg',
+              wa_message_id: mediaResult.messageId,
+            });
+            if (mediaInsertErr) console.error('Failed to store media message:', mediaInsertErr);
             console.log(`✅ Sent media attachment "${matchedMedia.filename}" to ${cleanPhone}`);
           }
         } catch (mediaErr) {

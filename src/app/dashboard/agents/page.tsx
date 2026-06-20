@@ -621,19 +621,24 @@ export default function AISettingsPage() {
 
   const handleFileUpload = async (file: File) => {
     const ext = file.name.split('.').pop()?.toLowerCase();
-    const accepted = ['txt', 'md', 'csv', 'json', 'pdf', 'mp4', 'mov', 'webm', 'jpg', 'jpeg', 'png', 'webp'];
-    const mediaExts = ['mp4', 'mov', 'webm', 'jpg', 'jpeg', 'png', 'webp'];
+    const textExts = ['txt', 'md', 'csv', 'json'];
+    const presignExts = ['pdf', 'mp4', 'mov', 'webm', 'jpg', 'jpeg', 'png', 'webp'];
+    const accepted = [...textExts, ...presignExts];
     if (!ext || !accepted.includes(ext)) {
       toast.error(`Unsupported file type. Accepted: ${accepted.map(a => `.${a}`).join(', ')}`);
       return;
     }
-    const isMedia = ext ? mediaExts.includes(ext) : false;
-    const maxSize = isMedia ? 16 * 1024 * 1024 : 10 * 1024 * 1024;
-    if (file.size > maxSize) {
-      toast.error(`File must be under ${isMedia ? '16' : '10'} MB`);
+
+    const usePresign = presignExts.includes(ext);
+    const videoExts = ['mp4', 'mov', 'webm'];
+    const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
+    const maxMB = videoExts.includes(ext) ? 16 : imageExts.includes(ext) ? 5 : ext === 'pdf' ? 100 : 5;
+    if (file.size > maxMB * 1024 * 1024) {
+      toast.error(`File must be under ${maxMB} MB`);
       return;
     }
 
+    const isMedia = videoExts.includes(ext) || imageExts.includes(ext);
     const tempId = `temp-${Date.now()}`;
     const optimisticDoc = {
       id: tempId,
@@ -642,37 +647,59 @@ export default function AISettingsPage() {
       file_url: null,
       content_text: '',
       created_at: new Date().toISOString(),
-      embedding: null, // processing state
+      embedding: null,
       isOptimistic: true
     };
 
-    // Prepend optimistic doc to document list immediately
     setDocs(prev => [optimisticDoc, ...prev]);
 
-    const uploadLabel = isMedia ? 'media' : 'knowledge';
+    const uploadLabel = isMedia ? 'media' : ext === 'pdf' ? 'document' : 'knowledge';
     const uploadToastId = toast.loading(`Uploading ${uploadLabel}...`);
-    const formData = new FormData();
-    formData.append('file', file);
     setUploading(true);
 
     try {
-      const res = await fetch('/api/dashboard/knowledge', { method: 'POST', body: formData });
-      const json = await res.json();
+      let resultData: any;
 
-      if (json.success && json.data) {
-        toast.success(`${isMedia ? 'Media' : 'Knowledge'} uploaded successfully`, { id: uploadToastId });
-        
-        // Replace optimistic doc with real uploaded doc from DB
-        setDocs(prev => prev.map(d => d.id === tempId ? json.data : d));
-        
-        // Start polling for real-time indexing status transition!
-        pollDocStatus(json.data.id);
+      if (usePresign) {
+        // Presigned URL upload: browser → Supabase Storage directly (bypasses Vercel body limit)
+        const presignRes = await fetch('/api/dashboard/knowledge/presign', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: file.name, size: file.size, contentType: file.type }),
+        });
+        const presignJson = await presignRes.json();
+        if (!presignRes.ok) throw new Error(presignJson.error || 'Failed to get upload URL');
+
+        const uploadRes = await fetch(presignJson.signedUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': presignJson.contentType },
+          body: file,
+        });
+        if (!uploadRes.ok) throw new Error(`Storage upload failed (${uploadRes.status})`);
+
+        const regRes = await fetch('/api/dashboard/knowledge/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ storagePath: presignJson.storagePath, filename: file.name, ext: presignJson.ext }),
+        });
+        const regJson = await regRes.json();
+        if (!regRes.ok) throw new Error(regJson.error || 'Failed to register file');
+        resultData = regJson.data;
       } else {
-        throw new Error(json.error || 'Upload failed');
+        // Direct upload for small text files
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('/api/dashboard/knowledge', { method: 'POST', body: formData });
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error || 'Upload failed');
+        resultData = json.data;
       }
+
+      toast.success(`${isMedia ? 'Media' : ext === 'pdf' ? 'Document' : 'Knowledge'} uploaded successfully`, { id: uploadToastId });
+      setDocs(prev => prev.map(d => d.id === tempId ? resultData : d));
+      if (!isMedia) pollDocStatus(resultData.id);
     } catch (e) {
-      toast.error("Upload failed. Please try again.", { id: uploadToastId });
-      // Remove optimistic doc on failure
+      toast.error(e instanceof Error ? e.message : 'Upload failed. Please try again.', { id: uploadToastId });
       setDocs(prev => prev.filter(d => d.id !== tempId));
       console.error('Upload error:', e);
     } finally {
