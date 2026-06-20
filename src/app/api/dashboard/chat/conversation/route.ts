@@ -93,9 +93,16 @@ export async function PATCH(req: NextRequest) {
 
     if (typeof body.bot_paused === 'boolean') {
       updateData.bot_paused = body.bot_paused;
+      if (!body.bot_paused) {
+        updateData.escalated = false;
+        updateData.escalation_reason = null;
+      }
     }
     if (typeof body.escalated === 'boolean') {
       updateData.escalated = body.escalated;
+      if (!body.escalated) {
+        updateData.escalation_reason = null;
+      }
     }
 
     if (Object.keys(updateData).length === 0) {

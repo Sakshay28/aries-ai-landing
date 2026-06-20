@@ -46,10 +46,16 @@ export async function POST(
       return NextResponse.json({ success: false, error: 'Conversation not found' }, { status: 404 });
     }
 
-    // Update the bot_paused flag
+    // Update the bot_paused flag — when resuming AI, also clear escalation
+    // so the webhook doesn't keep suppressing AI replies.
+    const updateData: Record<string, any> = { bot_paused };
+    if (!bot_paused) {
+      updateData.escalated = false;
+      updateData.escalation_reason = null;
+    }
     await supabaseAdmin
       .from('conversations')
-      .update({ bot_paused })
+      .update(updateData)
       .eq('id', id);
 
     return NextResponse.json({ success: true });

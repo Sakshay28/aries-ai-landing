@@ -1119,7 +1119,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       // this AI context. The admin client bypasses RLS so we enforce it explicitly.
       .eq('tenant_id', tenant.id)
       .order('created_at', { ascending: false })
-      .limit(10),
+      .limit(20),
     supabaseAdmin
       .from('smart_rules')
       .select('name, trigger_source, ai_summary')
@@ -1199,17 +1199,30 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     m => m.direction === 'outbound' && m.ai_generated
   );
 
+  // Detect human-handoff history: if the conversation was ever assigned to a
+  // human agent, outbound messages include real agent replies — the customer has
+  // been interacted with and must NOT be re-greeted with the welcome message.
+  // handoff_assigned_at persists after release so we can detect past handoffs.
+  // Also check storedMsgCount: a conversation with many messages is clearly not
+  // a first contact, even if the last 20 messages are all human-sent.
+  const wasRecentlyHandedOff = !!conversation.handoff_assigned_at &&
+    (Date.now() - new Date(conversation.handoff_assigned_at as string).getTime()) < SESSION_EXPIRY_MS;
+  const hasSubstantialHistory = storedMsgCount > 3;
+
   // Fire the welcome message when:
-  //   (a) no AI reply has ever been sent in this conversation (covers new contacts
-  //       AND contacts whose only prior reply was an off-hours notice), OR
-  //   (b) the session has expired (24h idle) — re-greeting returning customers.
+  //   (a) no AI reply has ever been sent AND no recent human handoff AND no
+  //       substantial message history (covers new contacts AND contacts whose
+  //       only prior reply was an off-hours notice), OR
+  //   (b) the session has expired (24h idle) AND not recently handed off —
+  //       re-greeting returning customers but not post-handoff switchbacks.
   //
   // Race-condition guard: when a customer replies quickly to the welcome message,
   // the speculative recentMsgs query may run before the first call's outbound AI
   // message has been committed — making hasAIReplies falsely false and triggering
   // a SECOND welcome. The Redis welcome key (set with 120s TTL by the isFirstMessage
   // guard above) disambiguates: if it exists, a welcome was already sent recently.
-  let isFirstMessageForAI = !hasAIReplies || sessionExpired;
+  let isFirstMessageForAI = (!hasAIReplies && !wasRecentlyHandedOff && !hasSubstantialHistory) ||
+    (sessionExpired && !wasRecentlyHandedOff);
   if (isFirstMessageForAI && !isFirstMessage) {
     const redis = getRedisClient();
     if (redis) {
@@ -1307,6 +1320,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       botPersonality: matchedAgent.bot_personality || baseConfig.botPersonality,
       systemPrompt: matchedAgent.system_prompt || baseConfig.systemPrompt,
     } : {}),
+    // Post-handoff context: tell the AI that a human agent was just handling
+    // this conversation so it continues naturally instead of restarting.
+    resumingFromHandoff: wasRecentlyHandedOff && !isFirstMessageForAI,
   };
   const context = (conversation.context as Record<string, any>) || {};
 

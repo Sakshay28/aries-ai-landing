@@ -65,7 +65,12 @@ export async function releaseAgentLock(conversationId: string): Promise<void> {
   try {
     await supabaseAdmin
       .from('conversations')
-      .update({ handoff_owner_id: null, bot_paused: false })
+      .update({
+        handoff_owner_id: null,
+        bot_paused: false,
+        escalated: false,
+        escalation_reason: null,
+      })
       .eq('id', conversationId);
   } catch (err) {
     console.error('❌ releaseAgentLock DB update failed:', err);

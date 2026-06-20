@@ -193,9 +193,12 @@ function getPersonaInstruction(personality: string, isHospitality: boolean): str
 
 function buildSystemPrompt(tenantConfig: TenantAIConfig): string {
   const isFirst = tenantConfig.isFirstMessage ?? true;
+  const handoffResume = tenantConfig.resumingFromHandoff
+    ? ' A human agent was just handling this conversation and has now handed it back to you. The chat history includes messages from the human agent (marked as "assistant"). Pick up EXACTLY where the human agent left off — read the recent messages carefully, understand what was already discussed, and continue naturally. Do NOT restart the conversation, re-introduce yourself, or ask questions that were already answered.'
+    : '';
   const conversationState = isFirst
     ? `This is the FIRST message from this customer. Greet them warmly.${tenantConfig.welcomeMessage ? ` Use this as your opening: "${tenantConfig.welcomeMessage}"` : ''}`
-    : 'This is an ONGOING conversation. The customer has already been greeted. DO NOT say Hi/Hello/Welcome again — respond directly to what they just said.';
+    : `This is an ONGOING conversation. The customer has already been greeted. DO NOT say Hi/Hello/Welcome again — respond directly to what they just said.${handoffResume}`;
 
   const isHospitality = isHospitalityBusiness(tenantConfig.businessType);
   const personaInstruction = getPersonaInstruction(tenantConfig.botPersonality, isHospitality);
@@ -417,6 +420,8 @@ export interface TenantAIConfig {
   businessIsOpen?: boolean;
   businessCurrentTime?: string;
   businessHours?: string;
+  // Set when the conversation was just handed back from a human agent to AI
+  resumingFromHandoff?: boolean;
 }
 
 // ═══════════════════════════════════════
