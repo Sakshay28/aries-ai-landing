@@ -1206,30 +1206,20 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     m => m.direction === 'outbound' && m.ai_generated
   );
 
-  // Detect human-handoff history: if the conversation was ever assigned to a
-  // human agent, outbound messages include real agent replies — the customer has
-  // been interacted with and must NOT be re-greeted with the welcome message.
-  // handoff_assigned_at persists after release so we can detect past handoffs.
-  // Also check storedMsgCount: a conversation with many messages is clearly not
-  // a first contact, even if the last 20 messages are all human-sent.
   const wasRecentlyHandedOff = !!conversation.handoff_assigned_at &&
     (Date.now() - new Date(conversation.handoff_assigned_at as string).getTime()) < SESSION_EXPIRY_MS;
   const hasSubstantialHistory = storedMsgCount > 3;
 
-  // Fire the welcome message when:
-  //   (a) no AI reply has ever been sent AND no recent human handoff AND no
-  //       substantial message history (covers new contacts AND contacts whose
-  //       only prior reply was an off-hours notice), OR
-  //   (b) the session has expired (24h idle) AND not recently handed off —
-  //       re-greeting returning customers but not post-handoff switchbacks.
-  //
-  // Race-condition guard: when a customer replies quickly to the welcome message,
-  // the speculative recentMsgs query may run before the first call's outbound AI
-  // message has been committed — making hasAIReplies falsely false and triggering
-  // a SECOND welcome. The Redis welcome key (set with 120s TTL by the isFirstMessage
-  // guard above) disambiguates: if it exists, a welcome was already sent recently.
-  let isFirstMessageForAI = (!hasAIReplies && !wasRecentlyHandedOff && !hasSubstantialHistory) ||
-    (sessionExpired && !wasRecentlyHandedOff);
+  // Definitive 24h guard: if ANY message was exchanged within 24 hours, this is
+  // NOT a first contact — never re-greet. This is more reliable than message_count
+  // (requires a DB trigger) or hasAIReplies (only checks last 20 messages).
+  const lastMsgAt = conversation.last_message_at as string | null;
+  const hasRecentActivity = !!lastMsgAt &&
+    (Date.now() - new Date(lastMsgAt).getTime()) < SESSION_EXPIRY_MS;
+
+  let isFirstMessageForAI = (
+    !hasAIReplies && !wasRecentlyHandedOff && !hasSubstantialHistory && !hasRecentActivity
+  ) || (sessionExpired && !wasRecentlyHandedOff);
   if (isFirstMessageForAI && !isFirstMessage) {
     const redis = getRedisClient();
     if (redis) {
