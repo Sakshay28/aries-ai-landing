@@ -230,9 +230,41 @@ export async function runFlowsForMessage(
   );
 
   for (const flow of sorted) {
+    // Session dedup for all_messages / catch-all flows: once they fire and send
+    // a message in a conversation, don't fire again for 24h — the AI handles
+    // follow-up questions. Without this, "all_messages" flows override EVERY
+    // message with the same canned response (e.g. customer asks "which hotel?"
+    // and gets the generic package info instead of a specific answer).
+    const isEffectivelyAllMessages =
+      flow.trigger_type === 'all_messages' ||
+      (flow.trigger_type !== 'first_message' &&
+       flow.trigger_type !== 'new_lead' &&
+       (!flow.trigger_keywords || flow.trigger_keywords.length === 0));
+    if (isEffectivelyAllMessages) {
+      const firedKey = `all_msg_flow_fired_${flow.id}`;
+      const firedAt = convCtx[firedKey] as string | undefined;
+      if (firedAt) {
+        const age = Date.now() - new Date(firedAt).getTime();
+        if (age < 24 * 60 * 60 * 1000) {
+          console.log(`🛡️ Flow engine: skipping all_messages flow "${flow.name}" — already fired ${Math.round(age / 60000)}min ago`);
+          continue;
+        }
+      }
+    }
+
     if (triggerMatches(flow, lowerMsg, isFirstMessage, messageType, buttonId, hasActiveWorkflow)) {
       const handled = await executeFlow(flow, ctx);
-      if (handled) return true;
+      if (handled) {
+        // Mark all_messages flows as fired so they don't repeat in this session
+        if (isEffectivelyAllMessages) {
+          const firedKey = `all_msg_flow_fired_${flow.id}`;
+          await supabaseAdmin
+            .from('conversations')
+            .update({ context: { ...convCtx, [firedKey]: new Date().toISOString() } })
+            .eq('id', conversationId);
+        }
+        return true;
+      }
     }
   }
 

@@ -106,6 +106,28 @@ describe('isScriptedReplyRelevant', () => {
     expect(isScriptedReplyRelevant('menu card bhejo', 'menu card')).toBe(true);
   });
 
+  it('rejects follow-up questions asking ABOUT the keyword', () => {
+    // Customer asks "which hotel?" — canned reply dumps generic info, AI should answer specifically
+    expect(isScriptedReplyRelevant('Which hotel?', 'hotel')).toBe(false);
+    expect(isScriptedReplyRelevant('What kind of meals??', 'meals')).toBe(false);
+    expect(isScriptedReplyRelevant('What is the name of the hotel?', 'hotel')).toBe(false);
+    expect(isScriptedReplyRelevant('Where is the hotel located?', 'hotel')).toBe(false);
+    expect(isScriptedReplyRelevant('How much does the rafting cost?', 'rafting')).toBe(false);
+    expect(isScriptedReplyRelevant('When does the expedition start?', 'expedition')).toBe(false);
+    // Hindi question words
+    expect(isScriptedReplyRelevant('kaunsa hotel hai?', 'hotel')).toBe(false);
+    expect(isScriptedReplyRelevant('kya meals milenge?', 'meals')).toBe(false);
+    expect(isScriptedReplyRelevant('kahan pe hotel hai?', 'hotel')).toBe(false);
+  });
+
+  it('still fires when keyword is at message start (request, not question)', () => {
+    // "menu" at start → requesting the menu, not asking about it
+    expect(isScriptedReplyRelevant('menu', 'menu')).toBe(true);
+    expect(isScriptedReplyRelevant('hotel details', 'hotel')).toBe(true);
+    expect(isScriptedReplyRelevant('rafting info', 'rafting')).toBe(true);
+    expect(isScriptedReplyRelevant('meals included?', 'meals')).toBe(true);
+  });
+
   it('rejects complaint/negative context', () => {
     expect(isScriptedReplyRelevant('the menu was terrible and the food was cold', 'menu')).toBe(false);
     expect(isScriptedReplyRelevant('I am disappointed with the menu quality here', 'menu')).toBe(false);
@@ -126,9 +148,8 @@ describe('isScriptedReplyRelevant', () => {
     )).toBe(false);
   });
 
-  it('allows medium-length simple requests', () => {
+  it('allows medium-length simple requests (no question word before keyword)', () => {
     expect(isScriptedReplyRelevant('can you send me the menu', 'menu')).toBe(true);
-    expect(isScriptedReplyRelevant('what are your timings today', 'timings')).toBe(true);
     expect(isScriptedReplyRelevant('share your location please', 'location')).toBe(true);
   });
 });

@@ -50,11 +50,24 @@ export interface ScriptedReplyRow {
 export function isScriptedReplyRelevant(messageText: string, matchedKeyword: string): boolean {
   const msgWords = messageText.trim().split(/\s+/).length;
   const kwWords  = matchedKeyword.trim().split(/\s+/).length;
+  const lower = messageText.toLowerCase();
+
+  // Follow-up question: customer asks ABOUT the keyword, not requesting it.
+  // "Which hotel?" → "which" before "hotel" → canned reply is a generic dump
+  // that won't answer the specific question → fall through to AI.
+  // Must run BEFORE the short-message check: "Which hotel?" is only 2 words
+  // but the scripted reply is still wrong.
+  const kwLower = matchedKeyword.toLowerCase().trim();
+  const kwIdx = lower.indexOf(kwLower);
+  if (kwIdx > 0) {
+    const beforeKw = lower.slice(0, kwIdx).trim();
+    if (/\b(which|what|how|where|when|who|why|whose|whom|kaunsa|kaun|kahan|kab|kaise|konsa|kya|batao|bata)\b/i.test(beforeKw)) {
+      return false;
+    }
+  }
 
   // Short messages: "menu", "send menu", "menu dikhao" → always relevant
   if (msgWords <= kwWords + 3) return true;
-
-  const lower = messageText.toLowerCase();
 
   // Complaint / negative-sentiment → canned reply is wrong
   const NEGATIVE = /\b(don'?t|didn'?t|won'?t|can'?t|couldn'?t|not|never|bad|terrible|awful|worst|poor|horrible|problem|issue|wrong|complaint|complain|disappointed|disappointing|frustrat|annoy|angry|upset|nahi|nhi|mat|galat|kharab|bekar|bakwas|bura|ghatiya)\b/i;
