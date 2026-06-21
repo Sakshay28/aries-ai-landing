@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
+import { triggerAutomations } from '@/lib/automations/engine';
 
 export async function GET(req: NextRequest) {
   try {
@@ -117,6 +118,20 @@ export async function PATCH(req: NextRequest) {
 
     if (error) {
       return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
+
+    if (updateData.escalated === false) {
+      const { data: conv } = await supabaseAdmin
+        .from('conversations')
+        .select('lead_id')
+        .eq('id', id)
+        .single();
+      if (conv?.lead_id) {
+        triggerAutomations({
+          tenantId, event: 'escalation_resolved', leadId: conv.lead_id,
+          conversationId: id,
+        }).catch(e => console.error('Automations (escalation_resolved):', e.message));
+      }
     }
 
     return NextResponse.json({ success: true, ...updateData });

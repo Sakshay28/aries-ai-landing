@@ -1,92 +1,102 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { 
-  Plus, Activity, ArrowRight, Play, Pause, BarChart2, Edit2, X, Save, Trash2, Loader2
+import {
+  Plus, Play, Pause, Edit2, X, Save, Trash2, Loader2,
+  Zap, Clock, Upload, Users, MessageSquare, AlertTriangle
 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 import { cn } from "@/lib/utils";
 
-interface Rule {
+interface Automation {
   id: string;
   name: string;
-  trigger_source: string;
-  ai_summary: string;
-  status: 'active' | 'learning' | 'paused';
+  trigger_event: string;
+  delay_value: number;
+  delay_unit: string;
+  message_text: string;
+  media_url: string | null;
+  media_type: string | null;
+  status: 'active' | 'paused';
+  cancel_on_reply: boolean;
   customers_reached: number;
-  actions_taken: number;
+  messages_sent: number;
+  created_at: string;
 }
 
-// ── Suggestions (rotate daily) ──────────────────────────────
+const TRIGGER_LABELS: Record<string, { label: string; desc: string }> = {
+  booking_confirmed:     { label: 'Booking Confirmed',     desc: 'When a customer confirms a booking or reservation' },
+  new_lead:              { label: 'New Lead',               desc: 'When a new customer messages for the first time' },
+  escalation_triggered:  { label: 'Escalation Started',     desc: 'When a conversation is escalated to staff' },
+  escalation_resolved:   { label: 'Escalation Resolved',    desc: 'When staff resolves an escalated conversation' },
+  payment_received:      { label: 'Payment Received',       desc: 'When a payment is confirmed via Razorpay' },
+};
+
+const UNIT_LABELS: Record<string, string> = { minutes: 'Minutes', hours: 'Hours', days: 'Days' };
+
+const VARIABLES = [
+  { key: '{{customer_name}}', label: 'Customer Name' },
+  { key: '{{business_name}}', label: 'Business Name' },
+  { key: '{{reservation_id}}', label: 'Reservation ID' },
+  { key: '{{booking_date}}', label: 'Booking Date' },
+  { key: '{{booking_time}}', label: 'Booking Time' },
+  { key: '{{party_size}}', label: 'Party Size' },
+];
+
 const SUGGESTIONS = [
   {
-    title: 'Turn on "Smart Review Collection"',
-    description: 'Ask for a Google review 2 days after a chat, only when the AI detects the customer was happy.',
-    template: { name: 'Smart Review Collection', trigger_source: 'When customer sentiment is deeply positive after a resolved chat', ai_summary: 'Wait 48 hours, then send a polite request with a link to the Google My Business page.' },
+    title: 'Send Instagram after booking',
+    description: 'Share your Instagram page right after a customer confirms their reservation.',
+    template: { name: 'Share Instagram', trigger_event: 'booking_confirmed', delay_value: 0, delay_unit: 'minutes', message_text: 'Thanks for booking with us, {{customer_name}}! Follow us on Instagram for updates 📸\nhttps://instagram.com/yourbusiness', cancel_on_reply: false },
   },
   {
-    title: 'Create an "Abandoned Enquiry" Rule',
-    description: 'If a customer asks about pricing but goes silent for 24 hours, gently remind them.',
-    template: { name: 'Abandoned Enquiry Follow-up', trigger_source: 'When a customer asks about pricing or products but does not reply for 24 hours', ai_summary: 'Send a gentle follow-up asking if they need more information or help deciding.' },
+    title: 'Follow up new leads after 2 hours',
+    description: 'Nudge first-time customers who haven\'t replied in 2 hours.',
+    template: { name: 'New Lead Follow-up', trigger_event: 'new_lead', delay_value: 2, delay_unit: 'hours', message_text: 'Hi {{customer_name}}! Just checking in — do you have any questions about {{business_name}}? We\'re happy to help! 😊', cancel_on_reply: true },
   },
   {
-    title: 'Enable "VIP Customer Recognition"',
-    description: 'Send a personalised welcome-back message to any returning customer automatically.',
-    template: { name: 'VIP Customer Recognition', trigger_source: 'When a recognised returning customer sends a new message', ai_summary: 'Acknowledge that they are a returning customer and prioritise their message.' },
+    title: 'Send packing list after booking',
+    description: 'Auto-send preparation details 1 day after a booking is confirmed.',
+    template: { name: 'Post-Booking Prep', trigger_event: 'booking_confirmed', delay_value: 1, delay_unit: 'days', message_text: 'Hi {{customer_name}}! Your booking is confirmed. Here\'s a quick checklist to help you prepare. Let us know if you have any questions!', cancel_on_reply: true },
   },
   {
-    title: 'Turn on "After-Hours Auto Reply"',
-    description: 'Let customers know when you will be back so they never feel ignored outside business hours.',
-    template: { name: 'After-Hours Auto Reply', trigger_source: 'When a customer messages between 7 PM and 8 AM', ai_summary: 'Reply instantly stating business hours and that the team will respond first thing in the morning.' },
+    title: 'Thank customers after payment',
+    description: 'Send a thank you message immediately after receiving payment.',
+    template: { name: 'Payment Thank You', trigger_event: 'payment_received', delay_value: 0, delay_unit: 'minutes', message_text: 'Thank you for your payment, {{customer_name}}! 🎉 We\'ve received it and your booking is all set. See you soon!', cancel_on_reply: false },
   },
 ];
 
-// ── Blank draft for new rules ────────────────────────────────
-const BLANK_DRAFT: Omit<Rule, 'id'> = {
-  name: '',
-  trigger_source: '',
-  ai_summary: '',
-  status: 'active',
-  customers_reached: 0,
-  actions_taken: 0,
-};
-
-// ── Status label + colour map ────────────────────────────────
-const STATUS_STYLE: Record<Rule['status'], string> = {
-  active:   'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500',
-  learning: 'bg-amber-500/10 text-amber-600 dark:text-amber-500',
-  paused:   'bg-muted text-muted-foreground',
+const BLANK: Omit<Automation, 'id' | 'created_at' | 'customers_reached' | 'messages_sent'> = {
+  name: '', trigger_event: 'booking_confirmed', delay_value: 0, delay_unit: 'minutes',
+  message_text: '', media_url: null, media_type: null, status: 'active', cancel_on_reply: true,
 };
 
 export function AutomationsClient() {
-  const router = useRouter();
-
-  // ── State ────────────────────────────────────────────────────
-  const [rules, setRules]           = useState<Rule[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [saving, setSaving]         = useState(false);
-  const [deleting, setDeleting]     = useState(false);
-  const [draft, setDraft]           = useState<Partial<Rule>>({});
-  const [isNew, setIsNew]           = useState(false);
-  const [isDrawerOpen, setDrawer]   = useState(false);
+  const [automations, setAutomations] = useState<Automation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [draft, setDraft] = useState<Partial<Automation>>({});
+  const [isNew, setIsNew] = useState(false);
+  const [isDrawerOpen, setDrawer] = useState(false);
   const [suggestion, setSuggestion] = useState(SUGGESTIONS[0]);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  // ── Rotate suggestion daily ──────────────────────────────────
   useEffect(() => {
     const day = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86_400_000);
     setSuggestion(SUGGESTIONS[day % SUGGESTIONS.length]);
   }, []);
 
-  // ── Load rules from API ──────────────────────────────────────
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/dashboard/automations');
       const data = await res.json();
-      setRules(data.rules || []);
+      setAutomations(data.automations || []);
     } catch {
-      toast.error('Failed to load rules');
+      toast.error('Failed to load automations');
     } finally {
       setLoading(false);
     }
@@ -94,39 +104,71 @@ export function AutomationsClient() {
 
   useEffect(() => { load(); }, [load]);
 
-  // ── Open drawer ──────────────────────────────────────────────
-  const openEdit = (rule: Rule) => { setDraft(rule); setIsNew(false); setDrawer(true); };
-  const openNew  = (prefill?: Partial<Rule>) => {
-    setDraft({ ...BLANK_DRAFT, ...prefill });
+  const openEdit = (a: Automation) => { setDraft(a); setIsNew(false); setDrawer(true); };
+  const openNew = (prefill?: Partial<Automation>) => {
+    setDraft({ ...BLANK, ...prefill });
     setIsNew(true);
     setDrawer(true);
   };
   const closeDrawer = () => { setDrawer(false); setDraft({}); };
 
-  // ── Save (create or update) ──────────────────────────────────
-  const handleSave = async () => {
-    if (!draft.name?.trim() || !draft.trigger_source?.trim() || !draft.ai_summary?.trim()) {
-      toast.error('Please fill in all three fields');
+  const insertVariable = (varKey: string) => {
+    const ta = textareaRef.current;
+    if (!ta) {
+      setDraft(p => ({ ...p, message_text: (p.message_text || '') + varKey }));
       return;
     }
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const text = draft.message_text || '';
+    const newText = text.substring(0, start) + varKey + text.substring(end);
+    setDraft(p => ({ ...p, message_text: newText }));
+    setTimeout(() => { ta.focus(); ta.setSelectionRange(start + varKey.length, start + varKey.length); }, 0);
+  };
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/dashboard/automations/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setDraft(p => ({ ...p, media_url: data.url, media_type: data.mediaType }));
+      toast.success('Media uploaded');
+    } catch (err) {
+      toast.error((err as Error).message || 'Upload failed');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const handleSave = async () => {
+    if (!draft.name?.trim()) { toast.error('Name is required'); return; }
+    if (!draft.message_text?.trim()) { toast.error('Message is required'); return; }
     setSaving(true);
     try {
+      const payload = {
+        name: draft.name, trigger_event: draft.trigger_event, delay_value: draft.delay_value ?? 0,
+        delay_unit: draft.delay_unit || 'minutes', message_text: draft.message_text,
+        media_url: draft.media_url || null, media_type: draft.media_type || null,
+        cancel_on_reply: draft.cancel_on_reply ?? true,
+      };
       if (isNew) {
         const res = await fetch('/api/dashboard/automations', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: draft.name, trigger_source: draft.trigger_source, ai_summary: draft.ai_summary, status: 'active' }),
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error((await res.json()).error);
-        toast.success('Rule created');
+        toast.success('Automation created');
       } else {
         const res = await fetch(`/api/dashboard/automations/${draft.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: draft.name, trigger_source: draft.trigger_source, ai_summary: draft.ai_summary }),
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error((await res.json()).error);
-        toast.success('Rule updated');
+        toast.success('Automation updated');
       }
       closeDrawer();
       load();
@@ -137,98 +179,95 @@ export function AutomationsClient() {
     }
   };
 
-  // ── Delete ───────────────────────────────────────────────────
   const handleDelete = async (id: string) => {
     setDeleting(true);
     try {
       await fetch(`/api/dashboard/automations/${id}`, { method: 'DELETE' });
-      setRules(prev => prev.filter(r => r.id !== id));
-      toast.success('Rule deleted');
+      setAutomations(prev => prev.filter(a => a.id !== id));
+      toast.success('Automation deleted');
       closeDrawer();
     } finally {
       setDeleting(false);
     }
   };
 
-  // ── Toggle pause / resume ────────────────────────────────────
-  const handleToggle = async (rule: Rule) => {
-    const next: Rule['status'] = rule.status === 'paused' ? 'active' : 'paused';
-    // Optimistic update
-    setRules(prev => prev.map(r => r.id === rule.id ? { ...r, status: next } : r));
+  const handleToggle = async (a: Automation) => {
+    const next = a.status === 'paused' ? 'active' : 'paused';
+    setAutomations(prev => prev.map(r => r.id === a.id ? { ...r, status: next } : r));
     try {
-      const res = await fetch(`/api/dashboard/automations/${rule.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: next }),
+      const res = await fetch(`/api/dashboard/automations/${a.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: next }),
       });
       if (!res.ok) throw new Error();
-      toast.success(next === 'paused' ? 'Rule paused' : 'Rule resumed');
+      toast.success(next === 'paused' ? 'Automation paused' : 'Automation resumed');
     } catch {
-      // Revert on failure
-      setRules(prev => prev.map(r => r.id === rule.id ? { ...r, status: rule.status } : r));
+      setAutomations(prev => prev.map(r => r.id === a.id ? { ...r, status: a.status } : r));
       toast.error('Failed to update status');
     }
   };
 
-  // ── Render ───────────────────────────────────────────────────
+  const computedDelayMs = ((draft.delay_value || 0) * ({ minutes: 60_000, hours: 3_600_000, days: 86_400_000 }[draft.delay_unit || 'minutes'] || 60_000));
+  const isOver24h = computedDelayMs > 24 * 3_600_000;
+
+  const delayLabel = (v: number, u: string) => {
+    if (v === 0) return 'Immediately';
+    return `After ${v} ${u}`;
+  };
+
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-hidden relative">
 
-      {/* TOP HEADER */}
+      {/* HEADER */}
       <header className="h-14 flex items-center justify-between px-6 shrink-0 bg-background z-20 sticky top-0 border-b border-border/40">
-        <h1 className="text-[16px] font-semibold tracking-tight">Smart Rules</h1>
-        <div className="flex items-center gap-2">
-          <button onClick={() => router.push('/dashboard/analytics')} className="h-9 px-4 text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors flex items-center">
-            <Activity className="w-4 h-4 mr-2 opacity-70" />
-            Analytics
-          </button>
-          <button onClick={() => openNew()} className="h-9 px-4 bg-foreground text-background hover:bg-foreground/90 rounded-lg text-[13px] font-medium transition-transform active:scale-95 flex items-center shadow-sm">
-            <Plus className="w-4 h-4 mr-1.5" />
-            New Rule
-          </button>
-        </div>
+        <h1 className="text-[16px] font-semibold tracking-tight flex items-center gap-2">
+          <Zap className="w-4 h-4 text-amber-500" />
+          Automations
+        </h1>
+        <button onClick={() => openNew()} className="h-9 px-4 bg-foreground text-background hover:bg-foreground/90 rounded-lg text-[13px] font-medium transition-transform active:scale-95 flex items-center shadow-sm">
+          <Plus className="w-4 h-4 mr-1.5" />
+          New Automation
+        </button>
       </header>
 
-      {/* MAIN CONTENT */}
+      {/* MAIN */}
       <div className="flex-1 overflow-auto p-6 md:p-8 custom-scrollbar">
         <div className="max-w-4xl mx-auto space-y-12">
 
-          {/* HEADER COPY */}
           <div>
-            <h2 className="text-2xl font-semibold tracking-tight mb-2">Let AI do the follow-ups.</h2>
+            <h2 className="text-2xl font-semibold tracking-tight mb-2">Automate your follow-ups.</h2>
             <p className="text-[15px] text-muted-foreground leading-relaxed">
-              Your AI reads every conversation and follows these rules automatically: no code, no triggers to configure.
+              Set up event-triggered messages that send automatically — immediately or after a delay you choose.
             </p>
           </div>
 
-          {/* AI SUGGESTION */}
+          {/* SUGGESTION */}
           <section className="group relative rounded-2xl bg-muted/40 p-6 sm:p-8 hover:bg-muted/60 transition-colors">
             <div className="flex flex-col sm:flex-row gap-6 items-start sm:items-center justify-between">
               <div className="space-y-2">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="flex h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-                  <span className="text-[12px] font-semibold tracking-wide text-blue-600 dark:text-blue-400 uppercase">Suggestion for today</span>
+                  <span className="text-[12px] font-semibold tracking-wide text-blue-600 dark:text-blue-400 uppercase">Suggestion</span>
                 </div>
                 <h3 className="text-[18px] font-medium tracking-tight">{suggestion.title}</h3>
                 <p className="text-[14px] text-muted-foreground leading-relaxed max-w-xl">{suggestion.description}</p>
               </div>
               <button
-                onClick={() => openNew(suggestion.template)}
+                onClick={() => openNew(suggestion.template as any)}
                 className="shrink-0 h-10 px-5 bg-white dark:bg-black border border-border/50 group-hover:border-border text-foreground text-[14px] font-medium rounded-lg shadow-sm hover:shadow transition-all flex items-center"
               >
-                Turn this on
-                <ArrowRight className="w-4 h-4 ml-2 opacity-60 group-hover:translate-x-0.5 transition-transform" />
+                Use this
+                <Zap className="w-4 h-4 ml-2 opacity-60" />
               </button>
             </div>
           </section>
 
-          {/* RULES LIST */}
+          {/* LIST */}
           <section>
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-[14px] font-medium tracking-tight">
-                Your Rules
-                {!loading && rules.length > 0 && (
-                  <span className="ml-2 text-muted-foreground font-normal">({rules.length})</span>
+                Your Automations
+                {!loading && automations.length > 0 && (
+                  <span className="ml-2 text-muted-foreground font-normal">({automations.length})</span>
                 )}
               </h3>
             </div>
@@ -236,75 +275,79 @@ export function AutomationsClient() {
             {loading ? (
               <div className="flex items-center justify-center py-16 text-muted-foreground">
                 <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                <span className="text-[13px]">Loading rules…</span>
+                <span className="text-[13px]">Loading…</span>
               </div>
-            ) : rules.length === 0 ? (
+            ) : automations.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <div className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center mb-4">
-                  <Plus className="w-5 h-5 text-muted-foreground" />
+                  <Zap className="w-5 h-5 text-muted-foreground" />
                 </div>
-                <p className="text-[15px] font-medium text-foreground mb-1">No rules yet</p>
-                <p className="text-[13px] text-muted-foreground max-w-xs">Create your first rule to teach the AI how to handle specific situations automatically.</p>
+                <p className="text-[15px] font-medium text-foreground mb-1">No automations yet</p>
+                <p className="text-[13px] text-muted-foreground max-w-xs">Create your first automation to send messages automatically when events happen.</p>
                 <button onClick={() => openNew()} className="mt-6 h-9 px-5 bg-foreground text-background rounded-lg text-[13px] font-medium hover:bg-foreground/90 transition-colors">
-                  Create first rule
+                  Create first automation
                 </button>
               </div>
             ) : (
               <div className="space-y-4">
-                {rules.map((rule) => (
-                  <div
-                    key={rule.id}
-                    className="group relative bg-background border border-border/40 hover:border-border/80 rounded-2xl p-6 transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:hover:shadow-[0_8px_30px_rgb(255,255,255,0.02)]"
-                  >
-                    <div className="flex flex-col sm:flex-row gap-6 justify-between items-start">
-
-                      {/* Left: Info */}
-                      <div className="space-y-3 flex-1 min-w-0">
+                {automations.map(a => (
+                  <div key={a.id} className="group relative bg-background border border-border/40 hover:border-border/80 rounded-2xl p-6 transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:hover:shadow-[0_8px_30px_rgb(255,255,255,0.02)]">
+                    <div className="flex flex-col sm:flex-row gap-4 justify-between items-start">
+                      <div className="space-y-2 flex-1 min-w-0">
                         <div className="flex items-center gap-3">
-                          <h4 className="text-[16px] font-medium tracking-tight truncate">{rule.name}</h4>
-                          <span className={cn('px-2.5 py-0.5 rounded-lg text-[11px] font-medium capitalize shrink-0', STATUS_STYLE[rule.status])}>
-                            {rule.status}
+                          <h4 className="text-[16px] font-medium tracking-tight truncate">{a.name}</h4>
+                          <span className={cn(
+                            'px-2.5 py-0.5 rounded-lg text-[11px] font-medium capitalize shrink-0',
+                            a.status === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500' : 'bg-muted text-muted-foreground'
+                          )}>
+                            {a.status}
                           </span>
                         </div>
-                        <div className="text-[13px] font-medium text-muted-foreground flex items-start gap-2">
-                          <span className="uppercase text-[11px] tracking-wider text-muted-foreground/60 shrink-0 mt-px">When:</span>
-                          {rule.trigger_source}
+
+                        <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-muted/60 rounded-md">
+                            <Zap className="w-3 h-3" />
+                            {TRIGGER_LABELS[a.trigger_event]?.label || a.trigger_event}
+                          </span>
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-muted/60 rounded-md">
+                            <Clock className="w-3 h-3" />
+                            {delayLabel(a.delay_value, a.delay_unit)}
+                          </span>
+                          {a.media_url && (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-muted/60 rounded-md">
+                              <Upload className="w-3 h-3" />
+                              {a.media_type || 'media'}
+                            </span>
+                          )}
                         </div>
-                        <p className="text-[14px] text-muted-foreground/80 leading-relaxed max-w-xl">{rule.ai_summary}</p>
+
+                        <p className="text-[13px] text-muted-foreground/70 line-clamp-2">{a.message_text}</p>
                       </div>
 
-                      {/* Right: Stats → Actions on hover */}
-                      <div className="flex flex-col items-end gap-4 shrink-0 sm:min-w-[140px]">
-
-                        {/* Stats — fades on hover */}
-                        <div className="flex flex-col items-end gap-3 group-hover:opacity-0 group-hover:pointer-events-none transition-opacity duration-200 absolute sm:relative right-6 top-6 sm:right-auto sm:top-auto">
-                          <div className="text-right">
-                            <div className="text-[20px] font-semibold tracking-tight">{rule.customers_reached}</div>
-                            <div className="text-[12px] text-muted-foreground">Customers Reached</div>
+                      <div className="flex flex-col items-end gap-3 shrink-0 sm:min-w-[140px]">
+                        <div className="flex items-center gap-4 text-center group-hover:opacity-0 group-hover:pointer-events-none transition-opacity duration-200">
+                          <div>
+                            <div className="text-[18px] font-semibold tracking-tight">{a.customers_reached}</div>
+                            <div className="text-[11px] text-muted-foreground">Reached</div>
                           </div>
-                          <div className="text-right">
-                            <div className="text-[20px] font-semibold tracking-tight">{rule.actions_taken}</div>
-                            <div className="text-[12px] text-muted-foreground">Actions Taken</div>
+                          <div>
+                            <div className="text-[18px] font-semibold tracking-tight">{a.messages_sent}</div>
+                            <div className="text-[11px] text-muted-foreground">Sent</div>
                           </div>
                         </div>
 
-                        {/* Actions — appear on hover */}
                         <div className="absolute right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0 transition-all duration-300 flex items-center gap-2">
-                          <button onClick={() => openEdit(rule)} className="flex items-center gap-2 h-9 px-3 bg-muted hover:bg-muted/80 text-foreground text-[13px] font-medium rounded-lg transition-colors">
+                          <button onClick={() => openEdit(a)} className="flex items-center gap-2 h-9 px-3 bg-muted hover:bg-muted/80 text-foreground text-[13px] font-medium rounded-lg transition-colors">
                             <Edit2 className="w-3.5 h-3.5" /> Edit
                           </button>
-                          <button onClick={() => router.push('/dashboard/analytics')} className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors" title="Analytics">
-                            <BarChart2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => handleToggle(rule)} className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors" title={rule.status === 'paused' ? 'Resume' : 'Pause'}>
-                            {rule.status === 'paused' ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+                          <button onClick={() => handleToggle(a)} className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors" title={a.status === 'paused' ? 'Resume' : 'Pause'}>
+                            {a.status === 'paused' ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
                           </button>
                           <div className="w-px h-4 bg-border mx-1" />
-                          <button onClick={() => handleDelete(rule.id)} className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-red-500/10 text-muted-foreground hover:text-red-500 rounded-lg transition-colors" title="Delete">
+                          <button onClick={() => handleDelete(a.id)} className="h-9 w-9 flex items-center justify-center bg-muted hover:bg-red-500/10 text-muted-foreground hover:text-red-500 rounded-lg transition-colors" title="Delete">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
-
                       </div>
                     </div>
                   </div>
@@ -317,65 +360,168 @@ export function AutomationsClient() {
         </div>
       </div>
 
-      {/* EDIT / NEW DRAWER */}
+      {/* DRAWER */}
       {isDrawerOpen && (
         <>
           <div className="absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-sm z-40" onClick={closeDrawer} />
-          <div className="absolute right-0 top-0 bottom-0 w-full sm:w-[480px] bg-background border-l border-border shadow-2xl z-50 flex flex-col">
+          <div className="absolute right-0 top-0 bottom-0 w-full sm:w-[520px] bg-background border-l border-border shadow-2xl z-50 flex flex-col">
 
-            {/* Drawer Header */}
             <div className="h-16 border-b border-border flex items-center justify-between px-6 shrink-0">
-              <h2 className="text-[16px] font-semibold tracking-tight">{isNew ? 'New Rule' : 'Edit Rule'}</h2>
+              <h2 className="text-[16px] font-semibold tracking-tight">{isNew ? 'New Automation' : 'Edit Automation'}</h2>
               <button onClick={closeDrawer} className="p-2 text-muted-foreground hover:bg-muted rounded-full transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Drawer Body */}
-            <div className="flex-1 overflow-auto p-6 space-y-6">
-              <p className="text-[13px] text-muted-foreground leading-relaxed">
-                Write this rule in plain English. The AI will follow it automatically in every conversation.
-              </p>
+            <div className="flex-1 overflow-auto p-6 space-y-5">
 
-              <div className="space-y-2">
-                <label className="text-[13px] font-medium">Rule Name</label>
+              {/* Name */}
+              <div className="space-y-1.5">
+                <label className="text-[13px] font-medium">Name</label>
                 <input
                   type="text"
                   value={draft.name || ''}
                   onChange={e => setDraft(p => ({ ...p, name: e.target.value }))}
-                  placeholder="e.g. Follow Up Interested Customers"
+                  placeholder="e.g. Send Instagram After Booking"
                   className="w-full h-10 px-3 bg-background border border-border/80 rounded-lg text-[14px] focus:outline-none focus:border-foreground/50 transition-colors"
                 />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-[13px] font-medium">When does this trigger?</label>
-                <input
-                  type="text"
-                  value={draft.trigger_source || ''}
-                  onChange={e => setDraft(p => ({ ...p, trigger_source: e.target.value }))}
-                  placeholder="e.g. When someone asks about pricing but goes quiet"
+              {/* Trigger Event */}
+              <div className="space-y-1.5">
+                <label className="text-[13px] font-medium">Trigger Event</label>
+                <select
+                  value={draft.trigger_event || 'booking_confirmed'}
+                  onChange={e => setDraft(p => ({ ...p, trigger_event: e.target.value }))}
                   className="w-full h-10 px-3 bg-background border border-border/80 rounded-lg text-[14px] focus:outline-none focus:border-foreground/50 transition-colors"
-                />
+                >
+                  {Object.entries(TRIGGER_LABELS).map(([val, { label }]) => (
+                    <option key={val} value={val}>{label}</option>
+                  ))}
+                </select>
+                <p className="text-[12px] text-muted-foreground">{TRIGGER_LABELS[draft.trigger_event || 'booking_confirmed']?.desc}</p>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-[13px] font-medium">What should the AI do?</label>
+              {/* Delay */}
+              <div className="space-y-1.5">
+                <label className="text-[13px] font-medium">Delay</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    value={draft.delay_value ?? 0}
+                    onChange={e => setDraft(p => ({ ...p, delay_value: Math.max(0, parseInt(e.target.value) || 0) }))}
+                    className="w-24 h-10 px-3 bg-background border border-border/80 rounded-lg text-[14px] focus:outline-none focus:border-foreground/50 transition-colors"
+                  />
+                  <select
+                    value={draft.delay_unit || 'minutes'}
+                    onChange={e => setDraft(p => ({ ...p, delay_unit: e.target.value }))}
+                    className="h-10 px-3 bg-background border border-border/80 rounded-lg text-[14px] focus:outline-none focus:border-foreground/50 transition-colors"
+                  >
+                    {Object.entries(UNIT_LABELS).map(([val, label]) => (
+                      <option key={val} value={val}>{label}</option>
+                    ))}
+                  </select>
+                  {(draft.delay_value ?? 0) === 0 && (
+                    <span className="text-[12px] text-emerald-600 dark:text-emerald-500 font-medium px-2 py-1 bg-emerald-500/10 rounded-md">
+                      Sends immediately
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* 24h Warning */}
+              {isOver24h && (
+                <div className="flex items-start gap-3 rounded-xl bg-amber-500/10 px-4 py-3 text-[13px] text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <div>
+                    <strong>24-hour window:</strong> WhatsApp limits messages to within 24 hours of the customer&apos;s last message. If the window has expired, this will be sent using your approved Meta template instead.
+                  </div>
+                </div>
+              )}
+
+              {/* Message */}
+              <div className="space-y-1.5">
+                <label className="text-[13px] font-medium">Message</label>
                 <textarea
-                  value={draft.ai_summary || ''}
-                  onChange={e => setDraft(p => ({ ...p, ai_summary: e.target.value }))}
-                  placeholder="e.g. Wait 2 hours, then send a polite message asking if they have any questions about the pricing."
+                  ref={textareaRef}
+                  value={draft.message_text || ''}
+                  onChange={e => setDraft(p => ({ ...p, message_text: e.target.value }))}
+                  placeholder="Type your message here. Use variables below to personalize."
                   rows={5}
                   className="w-full p-3 bg-background border border-border/80 rounded-lg text-[14px] focus:outline-none focus:border-foreground/50 transition-colors resize-none"
                 />
+                <div className="flex flex-wrap gap-1.5">
+                  {VARIABLES.map(v => (
+                    <button
+                      key={v.key}
+                      type="button"
+                      onClick={() => insertVariable(v.key)}
+                      className="px-2 py-1 text-[11px] font-medium bg-muted hover:bg-muted/80 text-muted-foreground rounded-md transition-colors"
+                    >
+                      {v.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div className="rounded-xl bg-muted/40 px-4 py-3 text-[12px] text-muted-foreground leading-relaxed">
-                💡 <strong>Tip:</strong> Be specific. Instead of "follow up with customers", try "If a customer says they are interested but doesn't reply for 3 hours, send a friendly nudge."
+              {/* Media Upload */}
+              <div className="space-y-1.5">
+                <label className="text-[13px] font-medium">Media (optional)</label>
+                {draft.media_url ? (
+                  <div className="flex items-center gap-3 p-3 bg-muted/40 rounded-lg">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-medium truncate">{draft.media_type === 'image' ? 'Image' : draft.media_type === 'video' ? 'Video' : 'Document'} attached</p>
+                      <p className="text-[11px] text-muted-foreground truncate">{draft.media_url}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDraft(p => ({ ...p, media_url: null, media_type: null }))}
+                      className="p-1.5 text-muted-foreground hover:text-red-500 rounded transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <input ref={fileRef} type="file" onChange={handleUpload} className="hidden" accept="image/*,video/*,.pdf,.doc,.docx" />
+                    <button
+                      type="button"
+                      onClick={() => fileRef.current?.click()}
+                      disabled={uploading}
+                      className="flex items-center gap-2 h-10 px-4 border border-dashed border-border/80 hover:border-foreground/30 rounded-lg text-[13px] text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                      {uploading ? 'Uploading…' : 'Upload image, video, or document'}
+                    </button>
+                  </div>
+                )}
               </div>
+
+              {/* Cancel on Reply */}
+              <div className="flex items-center justify-between p-4 bg-muted/30 rounded-xl">
+                <div>
+                  <p className="text-[13px] font-medium">Cancel on customer reply</p>
+                  <p className="text-[12px] text-muted-foreground">Skip sending if the customer replies before the delay expires</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDraft(p => ({ ...p, cancel_on_reply: !p.cancel_on_reply }))}
+                  className={cn(
+                    'relative w-11 h-6 rounded-full transition-colors',
+                    draft.cancel_on_reply ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+                  )}
+                >
+                  <span className={cn(
+                    'absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform',
+                    draft.cancel_on_reply && 'translate-x-5'
+                  )} />
+                </button>
+              </div>
+
             </div>
 
-            {/* Drawer Footer */}
+            {/* Footer */}
             <div className="p-6 border-t border-border flex items-center justify-between bg-muted/20 shrink-0">
               {!isNew ? (
                 <button
@@ -397,7 +543,7 @@ export function AutomationsClient() {
                   className="h-10 px-5 bg-foreground text-background hover:bg-foreground/90 rounded-lg text-[13px] font-medium transition-transform active:scale-95 flex items-center shadow-sm disabled:opacity-60"
                 >
                   {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                  {isNew ? 'Create Rule' : 'Save Changes'}
+                  {isNew ? 'Create Automation' : 'Save Changes'}
                 </button>
               </div>
             </div>

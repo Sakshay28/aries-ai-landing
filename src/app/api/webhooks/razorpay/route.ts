@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { verifyWebhookSignature, handleRazorpayWebhook } from '@/lib/billing/razorpay';
 import { fireIntegrations } from '@/lib/integrations/runner';
+import { triggerAutomations } from '@/lib/automations/engine';
 import { sendTextMessage } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 
@@ -95,6 +96,18 @@ export async function POST(req: NextRequest) {
             .select('wa_access_token, wa_phone_number_id, manager_phone, business_name')
             .eq('id', tenantIdVal)
             .single();
+
+          triggerAutomations({
+            tenantId: tenantIdVal, event: 'payment_received',
+            phone: (booking.customer_phone as string) || '',
+            variables: {
+              customer_name: (booking.customer_name as string) || 'there',
+              business_name: ((tenant as any)?.business_name as string) || '',
+              reservation_id: reservationId,
+              party_size: String(booking.party_size ?? ''),
+              booking_date: String(booking.booking_date ?? ''),
+            },
+          }).catch(e => console.error('Automations (payment_received):', e.message));
 
           const mgrPhone = (tenant as any)?.manager_phone as string | null;
           const waToken = (tenant as any)?.wa_access_token

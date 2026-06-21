@@ -39,6 +39,10 @@
     {
       "path": "/api/meta-ads/cron",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/automations",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

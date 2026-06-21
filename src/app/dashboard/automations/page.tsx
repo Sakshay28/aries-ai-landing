@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function AutomationsPage() {
   return (
-    <FeaturePageGate feature="Smart Rules" allowedPlans={['growth', 'pro', 'enterprise']}>
+    <FeaturePageGate feature="Automations" allowedPlans={['starter', 'growth', 'pro', 'enterprise']}>
       <div className="h-[calc(100vh-3.5rem)]">
         <AutomationsClient />
       </div>

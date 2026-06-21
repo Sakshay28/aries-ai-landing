@@ -29,6 +29,8 @@ import { triggerCapiEvent } from '@/lib/integrations/capi-trigger';
 import { processCtwaLead, getCampaignContextForAI } from '@/lib/meta-ads/attribution';
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { isCoexistenceChange, handleCoexistenceWebhook } from '@/lib/webhook/coexistence';
+import { toSignedMediaUrl } from '@/lib/utils/storage';
+import { triggerAutomations, cancelLeadAutomations } from '@/lib/automations/engine';
 import * as Sentry from '@/lib/sentry-stub';
 
 // Infer WhatsApp media type from a stored URL's file extension.
@@ -41,35 +43,6 @@ function mediaTypeFromUrl(url: string): 'image' | 'video' | 'document' {
   return 'image';
 }
 
-// Convert any Supabase storage URL (public or path) to a fresh signed URL.
-// WhatsApp Cloud API often can't fetch Supabase public URLs (redirects/CDN issues)
-// but signed URLs work reliably.
-async function toSignedMediaUrl(url: string): Promise<string> {
-  if (!url) return url;
-
-  // Storage path (not a full URL) — sign from knowledge-docs bucket
-  if (!url.startsWith('http')) {
-    const { data } = await supabaseAdmin.storage
-      .from('knowledge-docs')
-      .createSignedUrl(url, 600);
-    return data?.signedUrl || url;
-  }
-
-  // Already a signed URL — return as-is
-  if (url.includes('/storage/v1/object/sign/')) return url;
-
-  // Supabase public URL — parse bucket+path and create signed URL
-  const publicMatch = url.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+?)(\?.*)?$/);
-  if (publicMatch) {
-    const [, bucket, path] = publicMatch;
-    const { data } = await supabaseAdmin.storage
-      .from(bucket)
-      .createSignedUrl(decodeURIComponent(path), 600);
-    return data?.signedUrl || url;
-  }
-
-  return url;
-}
 
 // ── GET: Webhook Verification Handshake ──
 export async function GET(req: NextRequest) {
@@ -433,6 +406,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     // This means the 30-min clock resets with every message the lead sends, so
     // if they go silent mid-conversation they still get a follow-up.
     cancelLeadFollowUps(existingLead.id).catch(() => {});
+    cancelLeadAutomations(existingLead.id).catch(() => {});
   } else {
     // New lead — round-robin assignment + campaign tracking in parallel (~100ms savings)
     let assignedTo: string | null = null;
@@ -563,6 +537,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           source: leadSource,
         },
       }).catch(e => console.error('Integration runner (new_lead):', e.message));
+
+      triggerAutomations({
+        tenantId: tenant.id, event: 'new_lead', leadId: newLead.id,
+        phone: cleanPhone,
+        variables: { customer_name: newLead.name || 'there', business_name: tenant.business_name || '' },
+      }).catch(e => console.error('Automations (new_lead):', e.message));
 
       appendLeadRow(tenant.id, {
         name: newLead.name || undefined,
@@ -1721,6 +1701,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       }).catch(() => {});
     }
     console.log(`🚨 [${tenant.business_name}] Escalation fired for ${leadName} — delivered: ${alertResults.filter(r => r.ok).length}/${alertResults.length}`);
+
+    triggerAutomations({
+      tenantId: tenant.id, event: 'escalation_triggered', leadId: lead?.id,
+      conversationId: conversation.id, phone: cleanPhone,
+      variables: { customer_name: leadName, business_name: tenant.business_name || '' },
+    }).catch(e => console.error('Automations (escalation_triggered):', e.message));
   }
 
   // 18. Schedule follow-ups — runs on every message, resetting the 30-min timer.
@@ -2116,6 +2102,18 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           lead: { name: customerName, phone: customerPhone },
           details: { reservation_id: reservationId, party_size: String(guestCount), date: bookingDate, time: slotTime },
         }).catch(() => {});
+      }
+
+      if (bookingWritten && lead) {
+        triggerAutomations({
+          tenantId: tenant.id, event: 'booking_confirmed', leadId: lead.id,
+          conversationId: conversation.id, phone: customerPhone,
+          variables: {
+            customer_name: customerName || 'there', business_name: tenant.business_name || '',
+            reservation_id: reservationId || '', booking_date: bookingDate || '',
+            booking_time: slotTime || '', party_size: String(guestCount || ''),
+          },
+        }).catch(e => console.error('Automations (booking_confirmed):', e.message));
       }
 
       // 3. Mark booking_saved ONLY when the row was actually written to DB
