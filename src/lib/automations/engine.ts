@@ -153,6 +153,12 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
 // Picks up due items from automation_queue.
 // ═══════════════════════════════════════
 
+// Max items to claim per run. Kept in line with what one 30s serverless
+// invocation can actually send (~2-3s per WhatsApp call). Claiming more than
+// we can drain would leave the remainder stuck in 'processing' until the
+// 5-min requeue. Overflow stays 'pending' and drains on the next minute's tick.
+const CLAIM_BATCH = 15;
+
 export async function processPendingAutomations(): Promise<number> {
   const now = new Date().toISOString();
 
@@ -162,7 +168,7 @@ export async function processPendingAutomations(): Promise<number> {
     .update({ status: 'processing' as string })
     .eq('status', 'pending')
     .lte('scheduled_at', now)
-    .limit(50)
+    .limit(CLAIM_BATCH)
     .select('id');
 
   if (claimErr || !claimed || claimed.length === 0) return 0;
