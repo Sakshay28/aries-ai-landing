@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
   for (const conn of connections || []) {
     try {
       // Quick health check — skip if token invalid
-      const health = await validateTokenHealth(conn.access_token).catch(() => ({ valid: false }));
+      const health = await validateTokenHealth(conn.access_token, conn.tenant_id).catch(() => ({ valid: false }));
       if (!health.valid) {
         await supabaseAdmin
           .from('meta_connections')

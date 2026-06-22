@@ -1,4 +1,5 @@
 import { encryptToken, decryptToken } from '@/lib/utils/crypto';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 const META_GRAPH_BASE = 'https://graph.facebook.com/v21.0';
 const META_OAUTH_BASE = 'https://www.facebook.com/v21.0/dialog/oauth';
@@ -17,11 +18,24 @@ const REQUIRED_SCOPES = [
   'pages_manage_metadata',
 ];
 
-function getAppCredentials() {
+// Per-tenant credentials take priority over global env vars.
+// meta_ads_app_secret is stored encrypted in the tenants table.
+async function getAppCredentials(tenantId?: string): Promise<{ appId: string; appSecret: string }> {
+  if (tenantId) {
+    const { data } = await supabaseAdmin
+      .from('tenants')
+      .select('meta_ads_app_id, meta_ads_app_secret')
+      .eq('id', tenantId)
+      .maybeSingle();
+    if (data?.meta_ads_app_id && data?.meta_ads_app_secret) {
+      const appSecret = decryptToken(data.meta_ads_app_secret);
+      if (appSecret) return { appId: data.meta_ads_app_id, appSecret };
+    }
+  }
   const appId = process.env.META_APP_ID;
   const appSecret = process.env.META_APP_SECRET;
   if (!appId || !appSecret) {
-    throw new Error('META_APP_ID and META_APP_SECRET must be configured');
+    throw new Error('No Meta App credentials configured for this tenant. Set meta_ads_app_id and meta_ads_app_secret on the tenant, or set META_APP_ID and META_APP_SECRET env vars.');
   }
   return { appId, appSecret };
 }
@@ -31,8 +45,8 @@ function getRedirectUri() {
   return `${appUrl}/api/meta-ads/callback`;
 }
 
-export function buildOAuthUrl(state: string): string {
-  const { appId } = getAppCredentials();
+export async function buildOAuthUrl(state: string, tenantId: string): Promise<string> {
+  const { appId } = await getAppCredentials(tenantId);
   const params = new URLSearchParams({
     client_id: appId,
     redirect_uri: getRedirectUri(),
@@ -44,11 +58,11 @@ export function buildOAuthUrl(state: string): string {
   return `${META_OAUTH_BASE}?${params.toString()}`;
 }
 
-export async function exchangeCodeForToken(code: string): Promise<{
+export async function exchangeCodeForToken(code: string, tenantId: string): Promise<{
   access_token: string;
   expires_in: number;
 }> {
-  const { appId, appSecret } = getAppCredentials();
+  const { appId, appSecret } = await getAppCredentials(tenantId);
   const params = new URLSearchParams({
     client_id: appId,
     client_secret: appSecret,
@@ -68,11 +82,11 @@ export async function exchangeCodeForToken(code: string): Promise<{
   return res.json();
 }
 
-export async function exchangeForLongLivedToken(shortLivedToken: string): Promise<{
+export async function exchangeForLongLivedToken(shortLivedToken: string, tenantId: string): Promise<{
   access_token: string;
   expires_in: number;
 }> {
-  const { appId, appSecret } = getAppCredentials();
+  const { appId, appSecret } = await getAppCredentials(tenantId);
   const params = new URLSearchParams({
     grant_type: 'fb_exchange_token',
     client_id: appId,
@@ -92,12 +106,12 @@ export async function exchangeForLongLivedToken(shortLivedToken: string): Promis
   return res.json();
 }
 
-export async function refreshLongLivedToken(currentToken: string): Promise<{
+export async function refreshLongLivedToken(currentToken: string, tenantId: string): Promise<{
   access_token: string;
   expires_in: number;
 } | null> {
   try {
-    const { appId, appSecret } = getAppCredentials();
+    const { appId, appSecret } = await getAppCredentials(tenantId);
     const params = new URLSearchParams({
       grant_type: 'fb_exchange_token',
       client_id: appId,
@@ -203,13 +217,13 @@ export async function fetchWhatsAppBusinessAccounts(accessToken: string, busines
   return results;
 }
 
-export async function debugToken(accessToken: string): Promise<{
+export async function debugToken(accessToken: string, tenantId: string): Promise<{
   is_valid: boolean;
   scopes: string[];
   expires_at: number;
   error?: { message: string };
 }> {
-  const { appId, appSecret } = getAppCredentials();
+  const { appId, appSecret } = await getAppCredentials(tenantId);
   const res = await fetch(
     `${META_GRAPH_BASE}/debug_token?input_token=${accessToken}&access_token=${appId}|${appSecret}`,
     { signal: AbortSignal.timeout(10000) }
@@ -233,7 +247,7 @@ export function decryptAccessToken(encrypted: string): string {
   return decrypted;
 }
 
-export async function validateTokenHealth(encryptedToken: string): Promise<{
+export async function validateTokenHealth(encryptedToken: string, tenantId: string): Promise<{
   valid: boolean;
   scopes: string[];
   expires_at: number | null;
@@ -241,7 +255,7 @@ export async function validateTokenHealth(encryptedToken: string): Promise<{
   error?: string;
 }> {
   const token = decryptAccessToken(encryptedToken);
-  const debug = await debugToken(token);
+  const debug = await debugToken(token, tenantId);
 
   if (!debug.is_valid) {
     return {

@@ -40,7 +40,7 @@ export async function GET() {
     // Live token health check — update status if expiring/invalid
     let status = connection.status;
     try {
-      const health = await validateTokenHealth(connection.access_token);
+      const health = await validateTokenHealth(connection.access_token, tenantId);
       if (!health.valid) {
         status = 'needs_reauth';
       } else if (health.needs_refresh) {

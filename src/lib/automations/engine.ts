@@ -16,6 +16,7 @@ const DELAY_MS: Record<string, number> = {
 
 export type TriggerEvent =
   | 'booking_confirmed'
+  | 'booking_reminder'
   | 'new_lead'
   | 'escalation_triggered'
   | 'escalation_resolved'
@@ -28,6 +29,9 @@ export interface AutomationPayload {
   conversationId?: string;
   phone?: string;
   variables?: Record<string, string>;
+  // For 'booking_reminder': the UTC instant of the booking itself. The reminder
+  // is scheduled `delay` BEFORE this, instead of `delay` AFTER the trigger.
+  eventAt?: string;
 }
 
 // ═══════════════════════════════════════
@@ -95,6 +99,38 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
       }
 
       const delayMs = (rule.delay_value || 0) * (DELAY_MS[rule.delay_unit] || DELAY_MS.minutes);
+      const isReminder = event === 'booking_reminder';
+
+      // ── Reminder scheduling: fire `delay` BEFORE the booking, not after ──
+      if (isReminder) {
+        if (!payload.eventAt) {
+          console.log(`[AUTOMATION_SKIP] rule=${rule.id} — booking_reminder with no eventAt`);
+          continue;
+        }
+        const eventMs = new Date(payload.eventAt).getTime();
+        if (isNaN(eventMs) || eventMs <= Date.now()) {
+          console.log(`[AUTOMATION_SKIP] rule=${rule.id} — booking already in the past, no reminder`);
+          continue;
+        }
+        // Reminder time = booking time − lead time. If the booking is sooner than
+        // the lead time (e.g. booked 2h out, reminder set 1 day before), we can't
+        // honour the full lead time — send on the next tick rather than drop it.
+        let scheduledMs = eventMs - delayMs;
+        if (scheduledMs < Date.now()) scheduledMs = Date.now() + 5_000;
+
+        const scheduledAt = new Date(scheduledMs).toISOString();
+        console.log(`[AUTOMATION_JOB_SCHEDULED] rule=${rule.id} lead=${leadId} (reminder) scheduledAt=${scheduledAt} bookingAt=${payload.eventAt} ${rule.delay_value}${rule.delay_unit} before`);
+        await supabaseAdmin.from('automation_queue').insert({
+          automation_id: rule.id,
+          tenant_id: tenantId,
+          lead_id: leadId,
+          conversation_id: conversationId || null,
+          scheduled_at: scheduledAt,
+          status: 'pending',
+        });
+        await bumpCounter(rule.id, 1, 0);
+        continue;
+      }
 
       if (delayMs === 0) {
         console.log(`[AUTOMATION_IMMEDIATE] rule=${rule.id} lead=${leadId} — delay=0, sending now`);

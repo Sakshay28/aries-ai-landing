@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
 
-const VALID_TRIGGERS = ['booking_confirmed', 'new_lead', 'escalation_triggered', 'escalation_resolved', 'payment_received'];
+const VALID_TRIGGERS = ['booking_confirmed', 'booking_reminder', 'new_lead', 'escalation_triggered', 'escalation_resolved', 'payment_received'];
 const VALID_UNITS = ['minutes', 'hours', 'days'];
 
 type Params = { params: Promise<{ id: string }> };

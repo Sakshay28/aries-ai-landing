@@ -60,11 +60,16 @@ const fmtTime = (iso: string | null) => {
 
 const TRIGGER_LABELS: Record<string, { label: string; desc: string }> = {
   booking_confirmed:     { label: 'Booking Confirmed',     desc: 'When a customer confirms a booking or reservation' },
+  booking_reminder:      { label: 'Before Booking (Reminder)', desc: 'Sends a reminder a set time BEFORE the reservation — great for cutting no-shows' },
   new_lead:              { label: 'New Lead',               desc: 'When a new customer messages for the first time' },
   escalation_triggered:  { label: 'Escalation Started',     desc: 'When a conversation is escalated to staff' },
   escalation_resolved:   { label: 'Escalation Resolved',    desc: 'When staff resolves an escalated conversation' },
   payment_received:      { label: 'Payment Received',       desc: 'When a payment is confirmed via Razorpay' },
 };
+
+// Triggers that schedule relative to a FUTURE event (delay = time BEFORE it),
+// vs. the default where delay = time AFTER the trigger fires.
+const PRE_EVENT_TRIGGERS = new Set(['booking_reminder']);
 
 const UNIT_LABELS: Record<string, string> = { minutes: 'Minutes', hours: 'Hours', days: 'Days' };
 
@@ -87,6 +92,11 @@ const SUGGESTIONS = [
     title: 'Follow up new leads after 2 hours',
     description: 'Nudge first-time customers who haven\'t replied in 2 hours.',
     template: { name: 'New Lead Follow-up', trigger_event: 'new_lead', delay_value: 2, delay_unit: 'hours', message_text: 'Hi {{customer_name}}! Just checking in — do you have any questions about {{business_name}}? We\'re happy to help! 😊', cancel_on_reply: true },
+  },
+  {
+    title: 'Remind customers before their booking',
+    description: 'Send a reminder a few hours before the reservation to cut down no-shows.',
+    template: { name: 'Booking Reminder', trigger_event: 'booking_reminder', delay_value: 3, delay_unit: 'hours', message_text: 'Hi {{customer_name}}! Just a friendly reminder of your booking at {{business_name}} today at {{booking_time}} for {{party_size}}. See you soon! Reply CANCEL if your plans changed.', cancel_on_reply: false },
   },
   {
     title: 'Send packing list after booking',
@@ -264,10 +274,15 @@ export function AutomationsClient() {
   const computedDelayMs = ((draft.delay_value || 0) * ({ minutes: 60_000, hours: 3_600_000, days: 86_400_000 }[draft.delay_unit || 'minutes'] || 60_000));
   const isOver24h = computedDelayMs > 24 * 3_600_000;
 
-  const delayLabel = (v: number, u: string) => {
+  const delayLabel = (v: number, u: string, trigger?: string) => {
+    if (trigger && PRE_EVENT_TRIGGERS.has(trigger)) {
+      return v === 0 ? 'At booking time' : `${v} ${u} before`;
+    }
     if (v === 0) return 'Immediately';
     return `After ${v} ${u}`;
   };
+
+  const isPreEvent = PRE_EVENT_TRIGGERS.has(draft.trigger_event || '');
 
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-hidden relative">
@@ -366,7 +381,7 @@ export function AutomationsClient() {
                           </span>
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-muted/60 rounded-md">
                             <Clock className="w-3 h-3" />
-                            {delayLabel(a.delay_value, a.delay_unit)}
+                            {delayLabel(a.delay_value, a.delay_unit, a.trigger_event)}
                           </span>
                           {a.media_url && (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-muted/60 rounded-md">
@@ -552,7 +567,7 @@ export function AutomationsClient() {
 
               {/* Delay */}
               <div className="space-y-1.5">
-                <label className="text-[13px] font-medium">Delay</label>
+                <label className="text-[13px] font-medium">{isPreEvent ? 'Send before booking' : 'Delay'}</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="number"
@@ -572,18 +587,31 @@ export function AutomationsClient() {
                   </select>
                   {(draft.delay_value ?? 0) === 0 && (
                     <span className="text-[12px] text-emerald-600 dark:text-emerald-500 font-medium px-2 py-1 bg-emerald-500/10 rounded-md">
-                      Sends immediately
+                      {isPreEvent ? 'At booking time' : 'Sends immediately'}
                     </span>
                   )}
                 </div>
+                {isPreEvent && (
+                  <p className="text-[12px] text-muted-foreground">
+                    The reminder is sent this far <strong>before</strong> the reservation time. e.g. &ldquo;3 hours&rdquo; → 3 hours before the table booking.
+                  </p>
+                )}
               </div>
 
-              {/* 24h Warning */}
-              {isOver24h && (
+              {/* 24h window note — reminders can land outside WhatsApp's 24h window */}
+              {isPreEvent && (
                 <div className="flex items-start gap-3 rounded-xl bg-amber-500/10 px-4 py-3 text-[13px] text-amber-700 dark:text-amber-400">
                   <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                   <div>
-                    <strong>24-hour window:</strong> WhatsApp limits messages to within 24 hours of the customer&apos;s last message. If the window has expired, this will be sent using your approved Meta template instead.
+                    <strong>Heads up:</strong> WhatsApp only allows free-form messages within 24 hours of the customer&apos;s last message. Reminders for bookings made more than ~24h in advance may be blocked by WhatsApp — those will show as <strong>Failed</strong> in Execution History. Reminders for same-day / next-day bookings work normally.
+                  </div>
+                </div>
+              )}
+              {!isPreEvent && isOver24h && (
+                <div className="flex items-start gap-3 rounded-xl bg-amber-500/10 px-4 py-3 text-[13px] text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <div>
+                    <strong>24-hour window:</strong> WhatsApp only allows free-form messages within 24 hours of the customer&apos;s last message. With a delay this long, the send may be blocked by WhatsApp and will show as Failed in Execution History.
                   </div>
                 </div>
               )}

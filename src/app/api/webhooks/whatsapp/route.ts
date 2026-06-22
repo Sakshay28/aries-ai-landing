@@ -31,6 +31,7 @@ import { notifyAdmin } from '@/lib/alerts/admin';
 import { isCoexistenceChange, handleCoexistenceWebhook } from '@/lib/webhook/coexistence';
 import { toSignedMediaUrl } from '@/lib/utils/storage';
 import { triggerAutomations, cancelLeadAutomations, processPendingAutomations } from '@/lib/automations/engine';
+import { zonedDateTimeToUtc } from '@/lib/utils/datetime';
 import * as Sentry from '@/lib/sentry-stub';
 
 // Infer WhatsApp media type from a stored URL's file extension.
@@ -2105,15 +2106,28 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       }
 
       if (bookingWritten && lead) {
+        const automationVars = {
+          customer_name: customerName || 'there', business_name: tenant.business_name || '',
+          reservation_id: reservationId || '', booking_date: bookingDate || '',
+          booking_time: slotTime || '', party_size: String(guestCount || ''),
+        };
+
         triggerAutomations({
           tenantId: tenant.id, event: 'booking_confirmed', leadId: lead.id,
           conversationId: conversation.id, phone: customerPhone,
-          variables: {
-            customer_name: customerName || 'there', business_name: tenant.business_name || '',
-            reservation_id: reservationId || '', booking_date: bookingDate || '',
-            booking_time: slotTime || '', party_size: String(guestCount || ''),
-          },
+          variables: automationVars,
         }).catch(e => console.error('Automations (booking_confirmed):', e.message));
+
+        // Pre-booking reminders: schedule `delay` BEFORE the reservation time.
+        const bookingAtUtc = zonedDateTimeToUtc(bookingDate, slotTime, (tenant as any).timezone || 'Asia/Kolkata');
+        if (bookingAtUtc) {
+          triggerAutomations({
+            tenantId: tenant.id, event: 'booking_reminder', leadId: lead.id,
+            conversationId: conversation.id, phone: customerPhone,
+            eventAt: bookingAtUtc.toISOString(),
+            variables: automationVars,
+          }).catch(e => console.error('Automations (booking_reminder):', e.message));
+        }
       }
 
       // 3. Mark booking_saved ONLY when the row was actually written to DB

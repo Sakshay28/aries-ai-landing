@@ -72,15 +72,15 @@ export async function GET(req: NextRequest) {
 
   try {
     // ── 2. Exchange code → tokens ──
-    const shortLived = await exchangeCodeForToken(code);
-    const longLived = await exchangeForLongLivedToken(shortLived.access_token);
+    const shortLived = await exchangeCodeForToken(code, tenantId);
+    const longLived = await exchangeForLongLivedToken(shortLived.access_token, tenantId);
     const token = longLived.access_token;
 
     // ── 3. Fetch FB user + business + scopes ──
     const fbUser = await fetchFacebookUser(token);
     const businesses = await fetchBusinessAccounts(token);
     const primaryBusiness = businesses[0] || null;
-    const tokenInfo = await debugToken(token);
+    const tokenInfo = await debugToken(token, tenantId);
 
     const expiresAt =
       longLived.expires_in && longLived.expires_in > 0

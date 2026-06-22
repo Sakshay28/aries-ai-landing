@@ -37,6 +37,10 @@ interface IntegrationDef {
   oauthRoute?: string;
   oauthSpreadsheetParam?: boolean;
   syncUrl?: string;
+  isRedirect?: boolean;
+  redirectUrl?: string;
+  redirectLabel?: string;
+  redirectBullets?: string[];
 }
 
 const INTEGRATIONS: IntegrationDef[] = [
@@ -88,18 +92,21 @@ const INTEGRATIONS: IntegrationDef[] = [
   },
   {
     id: 'meta_ads',
-    name: 'Meta Ads & Pixel (CAPI)',
-    description: 'Instantly sync Facebook Lead Forms to WhatsApp/Voice CRM, track Click-to-WhatsApp ad attribution, and trigger server-side Conversions API (CAPI) events.',
+    name: 'Meta Ads',
+    description: 'Connect your Facebook account to create Click-to-WhatsApp campaigns, track leads from ads, and automatically engage every lead with Aries AI.',
     icon: MetaIcon,
     color: 'text-[#1877F2]',
     bgColor: 'bg-[#1877F2]/10',
-    docsUrl: 'https://developers.facebook.com/docs/marketing-api/conversions-api',
-    eventBadges: ['Meta Lead Ads', 'Conversions API', 'Pixel Tracking'],
-    fields: [
-      { key: 'access_token', label: 'System Access Token', type: 'password', placeholder: 'EAAG...', required: true, hint: 'Meta Business Suite → Business Settings → System Users → Generate Token' },
-      { key: 'pixel_id', label: 'Meta Pixel ID', type: 'text', placeholder: '1234567890', required: true, hint: 'Meta Events Manager → Data Sources → Pixel ID' },
-      { key: 'page_ids', label: 'Facebook Page IDs', type: 'text', placeholder: '1029384756', required: true, hint: 'Comma-separated Page IDs associated with your active Lead Forms' },
-      { key: 'capi_events', label: 'Fire Conversions on', type: 'select', placeholder: '', required: false, options: [{ value: 'Lead,Schedule,Purchase', label: 'Lead, Schedule & Purchase events' }, { value: 'Lead', label: 'Leads only' }, { value: 'Purchase', label: 'Purchases only' }] },
+    eventBadges: ['Click-to-WhatsApp', 'Lead Attribution', 'ROI Analytics'],
+    fields: [],
+    isRedirect: true,
+    redirectUrl: '/dashboard/meta-ads/settings',
+    redirectLabel: 'Connect with Facebook',
+    redirectBullets: [
+      'Create Click-to-WhatsApp campaigns from Facebook & Instagram ads',
+      'Track every ad click through to booking with full attribution',
+      'AI auto-engages every lead the moment they message on WhatsApp',
+      'Measure cost per lead, cost per booking, and ROAS',
     ],
   },
   {
@@ -253,6 +260,17 @@ function IntegrationModal({
         <div className="px-6 py-5 space-y-4">
           <p className="text-sm text-muted-foreground">{integration.description}</p>
 
+          {integration.isRedirect && integration.redirectBullets && (
+            <ul className="space-y-2">
+              {integration.redirectBullets.map((b, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                  <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-[#1877F2]" />
+                  {b}
+                </li>
+              ))}
+            </ul>
+          )}
+
           {integration.fields.map(field => (
             <div key={field.key} className="space-y-1.5">
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{field.label}</label>
@@ -315,7 +333,15 @@ function IntegrationModal({
             <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground">
               Cancel
             </button>
-            {integration.isOAuth ? (
+            {integration.isRedirect ? (
+              <a
+                href={integration.redirectUrl}
+                className="px-5 py-2 text-sm rounded-lg bg-[#1877F2] hover:bg-[#1877F2]/90 text-white font-medium transition-colors flex items-center gap-2"
+              >
+                <MetaIcon className="w-3.5 h-3.5" />
+                {integration.redirectLabel || 'Open Settings'}
+              </a>
+            ) : integration.isOAuth ? (
               <button
                 onClick={handleOAuthConnect}
                 disabled={saving}

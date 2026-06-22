@@ -34,7 +34,7 @@ export async function GET() {
       path: '/',
     });
 
-    const url = buildOAuthUrl(signedState);
+    const url = await buildOAuthUrl(signedState, guard.tenantId);
     return NextResponse.json({ url });
   } catch (err) {
     return errorResponse(err);
