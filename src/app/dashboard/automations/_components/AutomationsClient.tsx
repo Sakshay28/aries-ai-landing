@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import {
   Plus, Play, Pause, Edit2, X, Save, Trash2, Loader2,
-  Zap, Clock, Upload, Users, MessageSquare, AlertTriangle
+  Zap, Clock, Upload, AlertTriangle, Activity, RefreshCw, CheckCircle2, XCircle
 } from 'lucide-react';
 import { cn } from "@/lib/utils";
 
@@ -23,6 +23,40 @@ interface Automation {
   messages_sent: number;
   created_at: string;
 }
+
+interface Execution {
+  id: string;
+  contact_name: string | null;
+  contact_phone: string | null;
+  automation_name: string;
+  trigger_event: string | null;
+  delay: string | null;
+  status: 'pending' | 'processing' | 'sent' | 'cancelled' | 'failed';
+  scheduled_at: string;
+  sent_at: string | null;
+  error: string | null;
+  wa_message_id: string | null;
+  created_at: string;
+}
+
+interface Diagnostics {
+  healthy: boolean;
+  checks: Record<string, { ok: boolean; detail: string }>;
+}
+
+const EXEC_STATUS_STYLE: Record<string, { dot: string; label: string; cls: string }> = {
+  sent:       { dot: '🟢', label: 'Sent',       cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500' },
+  pending:    { dot: '🟡', label: 'Scheduled',  cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-500' },
+  processing: { dot: '🔵', label: 'Processing', cls: 'bg-blue-500/10 text-blue-600 dark:text-blue-500' },
+  failed:     { dot: '🔴', label: 'Failed',     cls: 'bg-red-500/10 text-red-600 dark:text-red-500' },
+  cancelled:  { dot: '⚪', label: 'Cancelled',  cls: 'bg-muted text-muted-foreground' },
+};
+
+const fmtTime = (iso: string | null) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
 
 const TRIGGER_LABELS: Record<string, { label: string; desc: string }> = {
   booking_confirmed:     { label: 'Booking Confirmed',     desc: 'When a customer confirms a booking or reservation' },
@@ -81,6 +115,9 @@ export function AutomationsClient() {
   const [isNew, setIsNew] = useState(false);
   const [isDrawerOpen, setDrawer] = useState(false);
   const [suggestion, setSuggestion] = useState(SUGGESTIONS[0]);
+  const [executions, setExecutions] = useState<Execution[]>([]);
+  const [execLoading, setExecLoading] = useState(false);
+  const [diag, setDiag] = useState<Diagnostics | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -102,7 +139,25 @@ export function AutomationsClient() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadExecutions = useCallback(async () => {
+    setExecLoading(true);
+    try {
+      const [execRes, diagRes] = await Promise.all([
+        fetch('/api/dashboard/automations/executions'),
+        fetch('/api/dashboard/automations/diagnostics'),
+      ]);
+      const execData = await execRes.json();
+      const diagData = await diagRes.json();
+      setExecutions(execData.executions || []);
+      setDiag(diagData.healthy !== undefined ? diagData : null);
+    } catch {
+      // non-fatal — execution history is read-only visibility
+    } finally {
+      setExecLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); loadExecutions(); }, [load, loadExecutions]);
 
   const openEdit = (a: Automation) => { setDraft(a); setIsNew(false); setDrawer(true); };
   const openNew = (prefill?: Partial<Automation>) => {
@@ -352,6 +407,99 @@ export function AutomationsClient() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </section>
+
+          {/* DIAGNOSTICS HEALTH STRIP */}
+          {diag && (
+            <section>
+              <div className="flex items-center gap-2 mb-4">
+                <Activity className="w-4 h-4 text-muted-foreground" />
+                <h3 className="text-[14px] font-medium tracking-tight">Pipeline health</h3>
+                <span className={cn(
+                  'px-2 py-0.5 rounded-md text-[11px] font-medium',
+                  diag.healthy ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500' : 'bg-amber-500/10 text-amber-600 dark:text-amber-500'
+                )}>
+                  {diag.healthy ? 'All systems go' : 'Needs attention'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {Object.entries(diag.checks).map(([key, c]) => (
+                  <div key={key} className="flex items-start gap-2 p-3 bg-muted/30 rounded-lg">
+                    {c.ok
+                      ? <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                      : <XCircle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />}
+                    <div className="min-w-0">
+                      <p className="text-[12px] font-medium capitalize">{key.replace(/_/g, ' ')}</p>
+                      <p className="text-[11px] text-muted-foreground truncate">{c.detail}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* EXECUTION HISTORY */}
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-[14px] font-medium tracking-tight">Execution history</h3>
+              <button
+                onClick={() => { load(); loadExecutions(); }}
+                className="flex items-center gap-1.5 h-8 px-3 text-[12px] text-muted-foreground hover:text-foreground bg-muted/40 hover:bg-muted/70 rounded-lg transition-colors"
+              >
+                <RefreshCw className={cn('w-3.5 h-3.5', execLoading && 'animate-spin')} />
+                Refresh
+              </button>
+            </div>
+
+            {execLoading && executions.length === 0 ? (
+              <div className="flex items-center justify-center py-10 text-muted-foreground">
+                <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                <span className="text-[13px]">Loading executions…</span>
+              </div>
+            ) : executions.length === 0 ? (
+              <div className="text-center py-10 text-[13px] text-muted-foreground bg-muted/20 rounded-xl">
+                No executions yet. They&apos;ll appear here the moment an automation fires.
+              </div>
+            ) : (
+              <div className="overflow-x-auto border border-border/40 rounded-xl">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="border-b border-border/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                      <th className="px-4 py-2.5 font-medium">Contact</th>
+                      <th className="px-4 py-2.5 font-medium">Automation</th>
+                      <th className="px-4 py-2.5 font-medium">Scheduled</th>
+                      <th className="px-4 py-2.5 font-medium">Executed</th>
+                      <th className="px-4 py-2.5 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {executions.map(e => {
+                      const s = EXEC_STATUS_STYLE[e.status] || EXEC_STATUS_STYLE.pending;
+                      return (
+                        <tr key={e.id} className="border-b border-border/20 last:border-0 hover:bg-muted/20 transition-colors">
+                          <td className="px-4 py-3">
+                            <div className="font-medium truncate max-w-[140px]">{e.contact_name || 'Unknown'}</div>
+                            <div className="text-[11px] text-muted-foreground">{e.contact_phone || '—'}</div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="truncate max-w-[160px]">{e.automation_name}</div>
+                            <div className="text-[11px] text-muted-foreground">{e.trigger_event?.replace(/_/g, ' ')}</div>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmtTime(e.scheduled_at)}</td>
+                          <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmtTime(e.sent_at)}</td>
+                          <td className="px-4 py-3">
+                            <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium', s.cls)} title={e.error || undefined}>
+                              {s.dot} {s.label}
+                            </span>
+                            {e.error && <div className="text-[10px] text-red-500 mt-1 truncate max-w-[160px]" title={e.error}>{e.error}</div>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </section>

@@ -35,10 +35,15 @@ export interface AutomationPayload {
 // delay=0 → sends immediately. delay>0 → queues for cron/piggyback.
 // ═══════════════════════════════════════
 
+// Window (ms) within which an identical (automation, lead) trigger is treated as a
+// duplicate (webhook retry, double-fire). Outside this window, a genuine re-trigger
+// (e.g. the same lead escalates again next week) is allowed through.
+const DEDUP_WINDOW_MS = 2 * 60_000;
+
 export async function triggerAutomations(payload: AutomationPayload): Promise<void> {
   const { tenantId, event, conversationId, variables } = payload;
 
-  console.log(`[automations] trigger event=${event} tenant=${tenantId}`);
+  console.log(`[AUTOMATION_TRIGGER_RECEIVED] event=${event} tenant=${tenantId} lead=${payload.leadId || '?'} phone=${payload.phone || '?'}`);
 
   const { data: rules } = await supabaseAdmin
     .from('automations')
@@ -48,7 +53,7 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
     .eq('status', 'active');
 
   if (!rules || rules.length === 0) {
-    console.log(`[automations] no active rules for event=${event}`);
+    console.log(`[AUTOMATION_NO_MATCH] event=${event} tenant=${tenantId} — no active rules`);
     return;
   }
 
@@ -63,34 +68,39 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
     leadId = lead?.id;
   }
   if (!leadId) {
-    console.log(`[automations] no leadId found, skipping`);
+    console.log(`[AUTOMATION_SKIP] event=${event} tenant=${tenantId} — no leadId resolved`);
     return;
   }
 
-  console.log(`[automations] found ${rules.length} rules, leadId=${leadId}`);
+  console.log(`[AUTOMATION_MATCH_FOUND] event=${event} tenant=${tenantId} rules=${rules.length} lead=${leadId}`);
 
   for (const rule of rules) {
     try {
-      // Deduplication: skip if this lead already has a pending/sent item for this automation
-      const { count } = await supabaseAdmin
+      // Deduplication (windowed): skip if a pending item exists, OR a 'sent' item was
+      // created within DEDUP_WINDOW_MS (catches webhook retries / rapid double-fires
+      // without permanently blocking legitimate future re-triggers for the same lead).
+      const windowStart = new Date(Date.now() - DEDUP_WINDOW_MS).toISOString();
+      const { data: dupes } = await supabaseAdmin
         .from('automation_queue')
-        .select('id', { count: 'exact', head: true })
+        .select('id, status, created_at')
         .eq('automation_id', rule.id)
         .eq('lead_id', leadId)
-        .in('status', ['pending', 'sent']);
+        .in('status', ['pending', 'processing', 'sent'])
+        .gte('created_at', windowStart)
+        .limit(1);
 
-      if ((count ?? 0) > 0) {
-        console.log(`[automations] rule ${rule.id} — already queued/sent for lead ${leadId}, skipping`);
+      if (dupes && dupes.length > 0) {
+        console.log(`[AUTOMATION_DEDUP] rule=${rule.id} lead=${leadId} — duplicate within ${DEDUP_WINDOW_MS}ms (existing status=${dupes[0].status}), skipping`);
         continue;
       }
 
       const delayMs = (rule.delay_value || 0) * (DELAY_MS[rule.delay_unit] || DELAY_MS.minutes);
 
       if (delayMs === 0) {
-        console.log(`[automations] rule ${rule.id} — sending immediately`);
+        console.log(`[AUTOMATION_IMMEDIATE] rule=${rule.id} lead=${leadId} — delay=0, sending now`);
         const tenant = await getTenantById(tenantId);
         if (!tenant || !isMetaConfigured(tenant)) {
-          console.log(`[automations] tenant not configured, skipping`);
+          console.log(`[AUTOMATION_SKIP] rule=${rule.id} — tenant not WA-configured`);
           continue;
         }
 
@@ -102,9 +112,9 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
         if (!lead) continue;
 
         const result = await sendAutomationMessage(tenant, lead, rule, conversationId || null, variables);
-        console.log(`[automations] immediate send done, msgId=${result.messageId}`);
+        console.log(`[AUTOMATION_MESSAGE_SENT] rule=${rule.id} lead=${leadId} msgId=${result.messageId} (immediate)`);
 
-        // Record in queue for deduplication + audit trail
+        // Record in queue for dedup + execution history
         await supabaseAdmin.from('automation_queue').insert({
           automation_id: rule.id,
           tenant_id: tenantId,
@@ -116,10 +126,10 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
           wa_message_id: result.messageId,
         }).then(null, () => {});
 
-        await atomicIncrement(rule.id, 'messages_sent');
+        await bumpCounter(rule.id, 0, 1);
       } else {
         const scheduledAt = new Date(Date.now() + delayMs).toISOString();
-        console.log(`[automations] rule ${rule.id} — queuing for ${scheduledAt} (delay=${rule.delay_value} ${rule.delay_unit})`);
+        console.log(`[AUTOMATION_JOB_SCHEDULED] rule=${rule.id} lead=${leadId} scheduledAt=${scheduledAt} delay=${rule.delay_value}${rule.delay_unit}`);
         await supabaseAdmin.from('automation_queue').insert({
           automation_id: rule.id,
           tenant_id: tenantId,
@@ -130,9 +140,9 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
         });
       }
 
-      await atomicIncrement(rule.id, 'customers_reached');
+      await bumpCounter(rule.id, 1, 0);
     } catch (err) {
-      console.error(`[automations] rule ${rule.id} failed:`, err);
+      console.error(`[AUTOMATION_TRIGGER_FAILED] rule=${rule.id}:`, err);
       Sentry.captureException(err);
     }
   }
@@ -158,7 +168,7 @@ export async function processPendingAutomations(): Promise<number> {
   if (claimErr || !claimed || claimed.length === 0) return 0;
 
   const claimedIds = claimed.map(c => c.id);
-  console.log(`[automations] claimed ${claimedIds.length} queue items`);
+  console.log(`[AUTOMATION_JOB_STARTED] claimed ${claimedIds.length} due queue items`);
 
   const { data: queueItems, error } = await supabaseAdmin
     .from('automation_queue')
@@ -201,7 +211,7 @@ export async function processPendingAutomations(): Promise<number> {
         continue;
       }
 
-      console.log(`[automations] sending queue item ${item.id} to ${lead.phone}`);
+      console.log(`[AUTOMATION_JOB_PROCESSING] item=${item.id} lead=${lead.phone} automation=${automation.id}`);
       const result = await sendAutomationMessage(tenant, lead, automation, item.conversation_id);
 
       await supabaseAdmin
@@ -213,16 +223,17 @@ export async function processPendingAutomations(): Promise<number> {
         })
         .eq('id', item.id);
 
-      await atomicIncrement(automation.id, 'messages_sent');
+      await bumpCounter(automation.id, 0, 1);
       sent++;
-      console.log(`[automations] queue item ${item.id} sent, msgId=${result.messageId}`);
+      console.log(`[AUTOMATION_MESSAGE_SENT] item=${item.id} lead=${lead.phone} msgId=${result.messageId}`);
     } catch (err) {
-      console.error(`[automations] queue item ${item.id} failed:`, err);
+      console.error(`[AUTOMATION_MESSAGE_FAILED] item=${item.id}:`, err);
       Sentry.captureException(err);
       await updateQueueStatus(item.id, 'failed', err instanceof Error ? err.message : 'Unknown error');
     }
   }
 
+  console.log(`[AUTOMATION_JOB_DONE] processed=${claimedIds.length} sent=${sent}`);
   return sent;
 }
 
@@ -345,24 +356,31 @@ async function updateQueueStatus(id: string, status: string, errorMessage?: stri
     .eq('id', id);
 }
 
-async function atomicIncrement(automationId: string, column: 'customers_reached' | 'messages_sent'): Promise<void> {
-  // Atomic increment via raw SQL to avoid read-then-write races
-  const { error } = await supabaseAdmin.rpc('exec_sql', {
-    query: `UPDATE automations SET ${column} = ${column} + 1 WHERE id = $1`,
-    params: [automationId],
+// Atomically bump both counters in a single statement (no read-then-write race).
+// Backed by the increment_automation_counter() RPC (migration 20260622_automations_v2).
+// Falls back to read-then-write if the RPC isn't deployed yet.
+async function bumpCounter(automationId: string, reachedDelta: number, sentDelta: number): Promise<void> {
+  const { error } = await supabaseAdmin.rpc('increment_automation_counter', {
+    p_id: automationId,
+    p_reached: reachedDelta,
+    p_sent: sentDelta,
   });
 
   if (error) {
-    // Fallback: Supabase may not have exec_sql RPC — use read-then-write
+    console.warn(`[automations] counter RPC unavailable, using fallback: ${error.message}`);
     const { data } = await supabaseAdmin
       .from('automations')
-      .select(column)
+      .select('customers_reached, messages_sent')
       .eq('id', automationId)
       .single();
-    const current = (data as any)?.[column] || 0;
-    await supabaseAdmin
-      .from('automations')
-      .update({ [column]: current + 1 })
-      .eq('id', automationId);
+    if (data) {
+      await supabaseAdmin
+        .from('automations')
+        .update({
+          customers_reached: ((data as any).customers_reached || 0) + reachedDelta,
+          messages_sent: ((data as any).messages_sent || 0) + sentDelta,
+        })
+        .eq('id', automationId);
+    }
   }
 }

@@ -22,7 +22,9 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const startedAt = Date.now();
   const sent = await processPendingAutomations();
-  console.log(`[cron/automations] sent=${sent}`);
-  return NextResponse.json({ success: true, sent });
+  const ms = Date.now() - startedAt;
+  console.log(`[cron/automations] sent=${sent} durationMs=${ms}`);
+  return NextResponse.json({ success: true, sent, durationMs: ms });
 }
