@@ -407,6 +407,12 @@ export interface ParsedMetaMessage {
   mediaMimeType?: string;
   mediaFilename?: string;
   mediaCaption?: string;
+  // Populated when Meta delivers type:"unsupported" (or attaches an errors array).
+  // This is the ONLY place Meta explains WHY a message couldn't be delivered —
+  // e.g. code 131051 "Unsupported message type". Capturing it is what lets us
+  // diagnose lost messages instead of just storing a blank "[unsupported]".
+  errorCode?: number;
+  errorReason?: string;
   referral?: {        // Ad click tracking
     source_type?: string;
     source_id?: string;
@@ -457,6 +463,17 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
       let mediaFilename: string | undefined;
       let mediaCaption: string | undefined;
       let buttonId: string | undefined;
+      let errorCode: number | undefined;
+      let errorReason: string | undefined;
+
+      // Meta attaches an `errors` array whenever it can't deliver a message's
+      // contents (most commonly alongside type:"unsupported"). Capture it so we
+      // can see the real reason instead of a blank marker.
+      const firstError = Array.isArray(msg.errors) ? msg.errors[0] : undefined;
+      if (firstError) {
+        errorCode = typeof firstError.code === 'number' ? firstError.code : undefined;
+        errorReason = firstError.title || firstError.error_data?.details || firstError.message || undefined;
+      }
 
       if (msgType === 'text') {
         text = msg.text?.body || '';
@@ -540,6 +557,8 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
         mediaMimeType,
         mediaFilename,
         mediaCaption,
+        errorCode,
+        errorReason,
         referral,
         buttonId,
       };

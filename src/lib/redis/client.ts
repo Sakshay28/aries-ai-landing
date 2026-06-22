@@ -115,6 +115,25 @@ export async function acquireOffHoursLock(
   }
 }
 
+// Generic "send this notice at most once per window" gate (SET NX + TTL).
+// Same contract as acquireOffHoursLock but with a caller-supplied key, so other
+// one-shot notices (e.g. the unreadable-message fallback) don't have to re-implement
+// the Redis dance. Returns 'use_db_fallback' when Redis is unavailable so the caller
+// can degrade gracefully.
+export async function acquireOnceNotice(
+  key: string,
+  ttlSeconds = 21600 // 6 hours
+): Promise<'first_notice' | 'already_sent' | 'use_db_fallback'> {
+  const redis = getRedisClient();
+  if (!redis) return 'use_db_fallback';
+  try {
+    const result = await redis.set(key, '1', 'EX', ttlSeconds, 'NX');
+    return result ? 'first_notice' : 'already_sent';
+  } catch {
+    return 'use_db_fallback';
+  }
+}
+
 // ═══════════════════════════════════════
 // GENERIC CACHE — Redis-backed with fallback
 // ═══════════════════════════════════════

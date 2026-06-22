@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse, after } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { isDuplicateMessage, getRedisClient, acquireOffHoursLock } from '@/lib/redis/client';
+import { isDuplicateMessage, getRedisClient, acquireOffHoursLock, acquireOnceNotice } from '@/lib/redis/client';
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
 import { appendLeadRow, appendBookingRow } from '@/lib/integrations/google-sheets';
@@ -322,6 +322,13 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         content = msg.text || `[${msg.type}]`;
       }
     }
+  }
+
+  // For messages Meta couldn't deliver (type:"unsupported"), persist WHY alongside
+  // the marker so the inbox shows a useful reason instead of a blank placeholder.
+  // ChatArea matches on the "[unsupported]" prefix, so appending the reason is safe.
+  if (msg.type === 'unsupported' && msg.errorReason) {
+    content = `[unsupported]: ${msg.errorReason}`;
   }
 
   // 4. Resolve/Create Lead — ATOMIC upsert prevents duplicate-lead race condition.
@@ -833,9 +840,67 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   }
 
   // 10. Pause / Escalated checks
-  // Skip AI entirely for message types that have no actionable text content
-  if (msg.type === 'unsupported' || msg.type === 'sticker') {
-    console.log(`⏭️ Meta: skipping AI for non-text message type "${msg.type}"`);
+  // Stickers carry no actionable text — store + skip AI silently (no reply needed).
+  if (msg.type === 'sticker') {
+    console.log(`⏭️ Meta: skipping AI for sticker from ${cleanPhone}`);
+    return;
+  }
+
+  // Unsupported = Meta couldn't deliver the message's contents to us. The customer
+  // DID send something we can't read, so we must NOT silently ignore them (that was
+  // the "messages being lost" bug). We: (1) log + alert with Meta's real reason so
+  // the cause is diagnosable, (2) flag the chat for a human, and (3) auto-reply ONCE
+  // per conversation so the customer isn't ghosted while staying un-spammed on repeats.
+  if (msg.type === 'unsupported') {
+    const reason = msg.errorReason || 'unknown';
+    console.warn(`⚠️ Meta: unsupported message from ${cleanPhone} (code=${msg.errorCode ?? 'n/a'}): ${reason}`);
+
+    notifyAdmin({
+      dedupeKey: `unsupported:${tenant.id}:${cleanPhone}`,
+      subject: `Unreadable WhatsApp message — ${tenant.business_name}`,
+      summary: `WhatsApp delivered an "unsupported" message from ${cleanPhone} that we could not read. Meta code=${msg.errorCode ?? 'n/a'}: ${reason}`,
+      context: { tenantId: tenant.id, from: cleanPhone, wamid: msg.messageId, errorCode: msg.errorCode, errorReason: reason },
+    }).catch(() => {});
+
+    // Flag for a human so the chat surfaces in the inbox (don't clobber an existing
+    // escalation or a hard human-takeover).
+    if (!conversation.escalated && !conversation.bot_paused) {
+      await supabaseAdmin
+        .from('conversations')
+        .update({ escalated: true, escalated_at: new Date().toISOString(), escalation_reason: 'unreadable_message' })
+        .eq('id', conversation.id);
+    }
+
+    // Auto-reply at most once per 6h (Redis SET NX; DB fallback checks for a recent
+    // non-AI outbound so a Redis outage can't turn this into a reply storm).
+    const noticeLock = await acquireOnceNotice(`unreadable:${conversation.id}`);
+    let alreadyNotified = noticeLock === 'already_sent';
+    if (noticeLock === 'use_db_fallback') {
+      const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+      const { data: recent } = await supabaseAdmin
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', conversation.id)
+        .eq('direction', 'outbound')
+        .eq('ai_generated', false)
+        .gte('created_at', sixHoursAgo)
+        .limit(1)
+        .maybeSingle();
+      alreadyNotified = !!recent;
+    }
+
+    if (!alreadyNotified && decryptedAccessToken && tenant.wa_phone_number_id) {
+      const fallbackMsg =
+        "Sorry, I couldn't read your last message 🙏 Could you please resend it as plain text? One of our team members will assist you shortly.";
+      await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, fallbackMsg).catch(() => {});
+      await supabaseAdmin.from('messages').insert({
+        tenant_id: tenant.id, conversation_id: conversation.id,
+        direction: 'outbound', content: fallbackMsg,
+        message_type: 'text', channel: 'whatsapp',
+        status: 'sent', ai_generated: false,
+      });
+      console.log(`📨 Sent unreadable-message fallback to ${cleanPhone} and escalated for human`);
+    }
     return;
   }
 

@@ -1434,12 +1434,26 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                             // Legacy safety net: older rows stored a raw placeholder token
                             // instead of the delivered copy. Never show the token to users.
                             <p className="whitespace-pre-wrap break-words italic opacity-80">Follow-up reminder sent</p>
+                          ) : (msg.content || '').startsWith('[unsupported]') ? (
+                            // WhatsApp couldn't deliver this message's contents. Show a
+                            // clear warning + Meta's reason (when captured) so the owner
+                            // knows the customer sent something unreadable, not nothing.
+                            <p className="italic text-[12.5px] flex items-center gap-1.5 text-amber-600 dark:text-amber-400 opacity-90">
+                              <span>⚠️</span>
+                              <span>
+                                {(() => {
+                                  const reason = (msg.content || '').slice('[unsupported]'.length).replace(/^[:\s]+/, '').trim();
+                                  return reason
+                                    ? `Unreadable message — ${reason}`
+                                    : "Unreadable message (WhatsApp couldn't deliver its contents)";
+                                })()}
+                              </span>
+                            </p>
                           ) : /^\[[a-z_]+\]$/i.test(msg.content || '') ? (
                             <p className="italic text-[12.5px] flex items-center gap-1.5 opacity-60">
                               <span>🚫</span>
                               <span>
                                 {msg.content === '[sticker]' ? 'Sticker' :
-                                 msg.content === '[unsupported]' ? 'Message type not supported' :
                                  `${msg.content.slice(1, -1)} message`}
                               </span>
                             </p>
