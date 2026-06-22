@@ -30,7 +30,7 @@ import { processCtwaLead, getCampaignContextForAI } from '@/lib/meta-ads/attribu
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { isCoexistenceChange, handleCoexistenceWebhook } from '@/lib/webhook/coexistence';
 import { toSignedMediaUrl } from '@/lib/utils/storage';
-import { triggerAutomations, cancelLeadAutomations } from '@/lib/automations/engine';
+import { triggerAutomations, cancelLeadAutomations, processPendingAutomations } from '@/lib/automations/engine';
 import * as Sentry from '@/lib/sentry-stub';
 
 // Infer WhatsApp media type from a stored URL's file extension.
@@ -2161,6 +2161,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   }
 
   console.log(`✅ Meta: processed message from ${cleanPhone}, AI intent: ${aiResponse.intent}`);
+
+  processPendingAutomations().catch(e => console.error('[automations] piggyback processing failed:', e.message));
 }
 
 

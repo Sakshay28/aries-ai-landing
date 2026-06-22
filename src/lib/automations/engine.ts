@@ -32,11 +32,13 @@ export interface AutomationPayload {
 
 // ═══════════════════════════════════════
 // TRIGGER: Called inline in webhook when an event fires.
-// Finds matching active automations, queues or sends immediately.
+// delay=0 → sends immediately. delay>0 → queues for cron.
 // ═══════════════════════════════════════
 
 export async function triggerAutomations(payload: AutomationPayload): Promise<void> {
   const { tenantId, event, conversationId, variables } = payload;
+
+  console.log(`[automations] trigger event=${event} tenant=${tenantId}`);
 
   const { data: rules } = await supabaseAdmin
     .from('automations')
@@ -45,7 +47,10 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
     .eq('trigger_event', event)
     .eq('status', 'active');
 
-  if (!rules || rules.length === 0) return;
+  if (!rules || rules.length === 0) {
+    console.log(`[automations] no active rules for event=${event}`);
+    return;
+  }
 
   let leadId = payload.leadId;
   if (!leadId && payload.phone) {
@@ -57,15 +62,24 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
       .maybeSingle();
     leadId = lead?.id;
   }
-  if (!leadId) return;
+  if (!leadId) {
+    console.log(`[automations] no leadId found, skipping`);
+    return;
+  }
+
+  console.log(`[automations] found ${rules.length} rules, leadId=${leadId}`);
 
   for (const rule of rules) {
     try {
       const delayMs = (rule.delay_value || 0) * (DELAY_MS[rule.delay_unit] || DELAY_MS.minutes);
 
       if (delayMs === 0) {
+        console.log(`[automations] rule ${rule.id} — sending immediately`);
         const tenant = await getTenantById(tenantId);
-        if (!tenant || !isMetaConfigured(tenant)) continue;
+        if (!tenant || !isMetaConfigured(tenant)) {
+          console.log(`[automations] tenant not configured, skipping`);
+          continue;
+        }
 
         const { data: lead } = await supabaseAdmin
           .from('leads')
@@ -74,9 +88,13 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
           .single();
         if (!lead) continue;
 
-        await sendAutomationMessage(tenant, lead, rule, conversationId || null, variables);
+        const result = await sendAutomationMessage(tenant, lead, rule, conversationId || null, variables);
+        console.log(`[automations] immediate send done, msgId=${result.messageId}`);
+
+        await incrementCounter(rule.id, 'messages_sent');
       } else {
         const scheduledAt = new Date(Date.now() + delayMs).toISOString();
+        console.log(`[automations] rule ${rule.id} — queuing for ${scheduledAt} (delay=${rule.delay_value} ${rule.delay_unit})`);
         await supabaseAdmin.from('automation_queue').insert({
           automation_id: rule.id,
           tenant_id: tenantId,
@@ -87,27 +105,17 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
         });
       }
 
-      await supabaseAdmin.rpc('increment_counter', {
-        table_name: 'automations',
-        column_name: 'customers_reached',
-        row_id: rule.id,
-      }).then(null, () => {
-        // Fallback: plain update if RPC not available
-        supabaseAdmin
-          .from('automations')
-          .update({ customers_reached: (rule.customers_reached || 0) + 1 })
-          .eq('id', rule.id)
-          .then(null, () => {});
-      });
+      await incrementCounter(rule.id, 'customers_reached');
     } catch (err) {
-      console.error(`❌ triggerAutomations: rule ${rule.id} failed:`, err);
+      console.error(`[automations] rule ${rule.id} failed:`, err);
       Sentry.captureException(err);
     }
   }
 }
 
 // ═══════════════════════════════════════
-// PROCESS: Cron-driven. Picks up due items from automation_queue.
+// PROCESS: Cron-driven + piggyback from webhook.
+// Picks up due items from automation_queue.
 // ═══════════════════════════════════════
 
 export async function processPendingAutomations(): Promise<number> {
@@ -117,22 +125,28 @@ export async function processPendingAutomations(): Promise<number> {
     .from('automation_queue')
     .select(`
       *,
-      automations!inner ( id, tenant_id, message_text, media_url, media_type, cancel_on_reply ),
+      automations!inner ( id, tenant_id, message_text, media_url, media_type, cancel_on_reply, messages_sent ),
       leads!inner ( name, phone, lead_status )
     `)
     .eq('status', 'pending')
     .lte('scheduled_at', now)
     .limit(50);
 
-  if (error || !queueItems || queueItems.length === 0) return 0;
+  if (error) {
+    console.error(`[automations] queue query error:`, error.message);
+    return 0;
+  }
+  if (!queueItems || queueItems.length === 0) return 0;
 
+  console.log(`[automations] processing ${queueItems.length} due queue items`);
   let sent = 0;
 
   for (const item of queueItems) {
     try {
       const automation = item.automations as unknown as {
         id: string; tenant_id: string; message_text: string;
-        media_url: string | null; media_type: string | null; cancel_on_reply: boolean;
+        media_url: string | null; media_type: string | null;
+        cancel_on_reply: boolean; messages_sent: number;
       };
       const lead = item.leads as unknown as {
         name: string; phone: string; lead_status: string;
@@ -149,6 +163,7 @@ export async function processPendingAutomations(): Promise<number> {
         continue;
       }
 
+      console.log(`[automations] sending queue item ${item.id} to ${lead.phone}`);
       const result = await sendAutomationMessage(tenant, lead, automation, item.conversation_id);
 
       await supabaseAdmin
@@ -160,14 +175,11 @@ export async function processPendingAutomations(): Promise<number> {
         })
         .eq('id', item.id);
 
-      await supabaseAdmin
-        .from('automations')
-        .update({ messages_sent: (automation as any).messages_sent ? (automation as any).messages_sent + 1 : 1 })
-        .eq('id', automation.id);
-
+      await incrementCounter(automation.id, 'messages_sent');
       sent++;
+      console.log(`[automations] queue item ${item.id} sent, msgId=${result.messageId}`);
     } catch (err) {
-      console.error(`❌ processPendingAutomations: item ${item.id} failed:`, err);
+      console.error(`[automations] queue item ${item.id} failed:`, err);
       Sentry.captureException(err);
       await updateQueueStatus(item.id, 'failed', err instanceof Error ? err.message : 'Unknown error');
     }
@@ -177,15 +189,38 @@ export async function processPendingAutomations(): Promise<number> {
 }
 
 // ═══════════════════════════════════════
-// CANCEL: Called when customer replies (if cancel_on_reply is true)
+// CANCEL: Called when customer replies.
+// Only cancels items where the automation has cancel_on_reply=true.
 // ═══════════════════════════════════════
 
 export async function cancelLeadAutomations(leadId: string): Promise<void> {
+  const { data: pendingItems } = await supabaseAdmin
+    .from('automation_queue')
+    .select('id, automation_id')
+    .eq('lead_id', leadId)
+    .eq('status', 'pending');
+
+  if (!pendingItems || pendingItems.length === 0) return;
+
+  const automationIds = [...new Set(pendingItems.map(i => i.automation_id))];
+  const { data: automations } = await supabaseAdmin
+    .from('automations')
+    .select('id, cancel_on_reply')
+    .in('id', automationIds);
+
+  const cancelableIds = new Set(
+    (automations || []).filter(a => a.cancel_on_reply).map(a => a.id)
+  );
+
+  const itemsToCancel = pendingItems.filter(i => cancelableIds.has(i.automation_id));
+  if (itemsToCancel.length === 0) return;
+
   await supabaseAdmin
     .from('automation_queue')
     .update({ status: 'cancelled' })
-    .eq('lead_id', leadId)
-    .eq('status', 'pending');
+    .in('id', itemsToCancel.map(i => i.id));
+
+  console.log(`[automations] cancelled ${itemsToCancel.length} pending items for lead ${leadId}`);
 }
 
 // ═══════════════════════════════════════
@@ -202,11 +237,13 @@ async function sendAutomationMessage(
   const token = decryptToken(tenant.wa_access_token as string) as string;
   const phoneNumberId = tenant.wa_phone_number_id as string;
 
-  let message = interpolateVariables(automation.message_text, {
+  const message = interpolateVariables(automation.message_text, {
     customer_name: lead.name || 'there',
     business_name: tenant.business_name || '',
     ...variables,
   });
+
+  console.log(`[automations] sending to ${lead.phone}: "${message.slice(0, 80)}..."`);
 
   // Check 24h window
   const { data: lastMsg } = await supabaseAdmin
@@ -228,6 +265,7 @@ async function sendAutomationMessage(
   let sentMessageType = 'text';
 
   if (hoursSinceInbound > 24) {
+    console.log(`[automations] 24h window expired (${hoursSinceInbound.toFixed(1)}h), using template`);
     try {
       const result = await sendTemplateMessage(
         token, phoneNumberId, lead.phone,
@@ -236,8 +274,8 @@ async function sendAutomationMessage(
         'en'
       );
       metaMsgId = result?.messageId || null;
-    } catch {
-      console.warn(`⚠️ [${tenant.business_name}] Automation template send failed, skipping`);
+    } catch (err) {
+      console.warn(`[automations] template send failed:`, (err as Error).message);
     }
     sentMessageType = 'template';
   } else if (automation.media_url) {
@@ -252,6 +290,8 @@ async function sendAutomationMessage(
     const result = await sendTextMessage(token, phoneNumberId, lead.phone, message);
     metaMsgId = result?.messageId ?? null;
   }
+
+  console.log(`[automations] WhatsApp API result: msgId=${metaMsgId}`);
 
   if (conversationId) {
     await supabaseAdmin.from('messages').insert({
@@ -278,7 +318,7 @@ async function sendAutomationMessage(
     event_type: 'automation_sent',
     channel: 'whatsapp',
     metadata: { lead_name: lead.name },
-  });
+  }).then(null, () => {});
 
   return { messageId: metaMsgId };
 }
@@ -292,4 +332,18 @@ async function updateQueueStatus(id: string, status: string, errorMessage?: stri
     .from('automation_queue')
     .update({ status, error_message: errorMessage || null })
     .eq('id', id);
+}
+
+async function incrementCounter(automationId: string, column: 'customers_reached' | 'messages_sent'): Promise<void> {
+  const { data } = await supabaseAdmin
+    .from('automations')
+    .select(column)
+    .eq('id', automationId)
+    .single();
+
+  const current = (data as any)?.[column] || 0;
+  await supabaseAdmin
+    .from('automations')
+    .update({ [column]: current + 1 })
+    .eq('id', automationId);
 }
