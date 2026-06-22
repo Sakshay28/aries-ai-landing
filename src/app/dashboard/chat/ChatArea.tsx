@@ -896,11 +896,11 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   }
 
   return (
-    <div className="flex-1 flex flex-col relative overflow-hidden bg-[#EFEAE2] dark:bg-[#0B141A]" style={chatBgStyle}>
+    <div className="flex-1 min-w-0 flex flex-col relative overflow-hidden bg-[#EFEAE2] dark:bg-[#0B141A]" style={chatBgStyle}>
 
       {/* ── Header ── */}
-      <div className="h-[60px] flex items-center justify-between px-5 bg-white dark:bg-[#1C2333] shadow-[0_1px_3px_rgba(0,0,0,0.06)] relative z-30 flex-shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="h-[60px] flex items-center justify-between gap-2 px-5 bg-white dark:bg-[#1C2333] shadow-[0_1px_3px_rgba(0,0,0,0.06)] relative z-30 flex-shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={() => router.push('/dashboard/chat')}
             className="lg:hidden p-1 mr-1 rounded-full text-muted-foreground/80 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] hover:text-foreground transition-colors"
@@ -917,11 +917,11 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
               </div>
             <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-400 border-2 border-white dark:border-[#1C2333]" />
           </div>
-          <div>
+          <div className="min-w-0">
             {conversationMeta ? (
               <>
                 <div className="flex items-center gap-2">
-                  <p className="text-[13.5px] font-semibold text-foreground leading-none">{displayName}</p>
+                  <p className="text-[13.5px] font-semibold text-foreground leading-none truncate">{displayName}</p>
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <p className="text-[11.5px] text-muted-foreground/60 leading-none">
@@ -939,7 +939,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         </div>
 
         {/* Right side */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-shrink-0">
           {/* Search toggle */}
           <button
             title="Search in chat"
@@ -1094,7 +1094,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           filteredFeed.map((item, i) => {
             if (item.type === 'date') {
               return (
-                <div key={`d-${i}`} className="flex items-center justify-center py-3 sticky top-0 z-10 pointer-events-none">
+                <div key={`d-${i}`} className="flex items-center justify-center py-3 sticky top-0 z-20 pointer-events-none">
                   <span className="pointer-events-auto text-[10.5px] font-semibold text-foreground/60 bg-white/70 dark:bg-[#1C2333]/70 backdrop-blur-md px-3 py-1 rounded-full shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
                     {item.label}
                   </span>
@@ -1114,7 +1114,9 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
                   const hoverToolbar = (
                     <div className={cn(
-                      "transition-opacity duration-150 flex items-center gap-0.5 bg-white dark:bg-[#1F2B3E] rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.1)] ring-1 ring-black/[0.04] dark:ring-white/[0.06] px-0.5 py-0.5 flex-shrink-0 self-center",
+                      // self-end keeps the toolbar anchored to the bottom of the bubble (next to the
+                      // timestamp) instead of floating at the vertical center of tall image bubbles.
+                      "transition-opacity duration-150 flex items-center gap-0.5 bg-white dark:bg-[#1F2B3E] rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.1)] ring-1 ring-black/[0.04] dark:ring-white/[0.06] px-0.5 py-0.5 flex-shrink-0 self-end mb-1",
                       activeMessageMenuId === msg.id ? "opacity-100 z-50" : "opacity-0 group-hover:opacity-100"
                     )}>
                       <button 
