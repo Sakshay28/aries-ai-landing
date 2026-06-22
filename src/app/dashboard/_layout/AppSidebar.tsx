@@ -55,7 +55,7 @@ const navigationItems: NavItem[] = [
   { label: "Leads", icon: Target, href: "/dashboard/leads" },
   { label: "Campaigns", icon: Radar, href: "/dashboard/campaigns" },
   {
-    label: "Smart Rules",
+    label: "Automations",
     icon: Workflow, 
     href: "/dashboard/automations",
   },

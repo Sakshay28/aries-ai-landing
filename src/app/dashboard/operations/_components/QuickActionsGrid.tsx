@@ -51,7 +51,7 @@ export function QuickActionsGrid() {
     },
     {
       icon: Workflow,
-      title: "Smart Rules",
+      title: "Automations",
       subtitle: "Configure automations",
       iconBg: "bg-emerald-500/10 text-emerald-500",
       href: "/dashboard/flows",
