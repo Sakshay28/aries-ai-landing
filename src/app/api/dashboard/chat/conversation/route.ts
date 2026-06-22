@@ -123,13 +123,20 @@ export async function PATCH(req: NextRequest) {
     if (updateData.escalated === false) {
       const { data: conv } = await supabaseAdmin
         .from('conversations')
-        .select('lead_id')
+        .select('lead_id, leads!inner(name, phone)')
         .eq('id', id)
         .single();
       if (conv?.lead_id) {
+        const leadData = conv.leads as unknown as { name: string; phone: string } | null;
+        const { data: tenantRow } = await supabaseAdmin
+          .from('tenants').select('business_name').eq('id', tenantId).single();
         triggerAutomations({
           tenantId, event: 'escalation_resolved', leadId: conv.lead_id,
           conversationId: id,
+          variables: {
+            customer_name: leadData?.name || 'there',
+            business_name: tenantRow?.business_name || '',
+          },
         }).catch(e => console.error('Automations (escalation_resolved):', e.message));
       }
     }

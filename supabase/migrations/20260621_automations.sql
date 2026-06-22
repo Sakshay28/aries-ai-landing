@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS automation_queue (
   conversation_id   UUID          REFERENCES conversations(id) ON DELETE SET NULL,
   scheduled_at      TIMESTAMPTZ   NOT NULL,
   status            TEXT          NOT NULL DEFAULT 'pending'
-                      CHECK (status IN ('pending', 'sent', 'cancelled', 'failed')),
+                      CHECK (status IN ('pending', 'processing', 'sent', 'cancelled', 'failed')),
   sent_at           TIMESTAMPTZ,
   error_message     TEXT,
   wa_message_id     TEXT,

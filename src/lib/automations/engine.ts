@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { sendTextMessage, sendMediaMessage, sendTemplateMessage } from '@/lib/meta/service';
+import { sendTextMessage, sendMediaMessage } from '@/lib/meta/service';
 import { getTenantById } from '@/lib/tenant/manager';
 import { decryptToken } from '@/lib/utils/crypto';
 import { toSignedMediaUrl } from '@/lib/utils/storage';
@@ -32,7 +32,7 @@ export interface AutomationPayload {
 
 // ═══════════════════════════════════════
 // TRIGGER: Called inline in webhook when an event fires.
-// delay=0 → sends immediately. delay>0 → queues for cron.
+// delay=0 → sends immediately. delay>0 → queues for cron/piggyback.
 // ═══════════════════════════════════════
 
 export async function triggerAutomations(payload: AutomationPayload): Promise<void> {
@@ -71,6 +71,19 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
 
   for (const rule of rules) {
     try {
+      // Deduplication: skip if this lead already has a pending/sent item for this automation
+      const { count } = await supabaseAdmin
+        .from('automation_queue')
+        .select('id', { count: 'exact', head: true })
+        .eq('automation_id', rule.id)
+        .eq('lead_id', leadId)
+        .in('status', ['pending', 'sent']);
+
+      if ((count ?? 0) > 0) {
+        console.log(`[automations] rule ${rule.id} — already queued/sent for lead ${leadId}, skipping`);
+        continue;
+      }
+
       const delayMs = (rule.delay_value || 0) * (DELAY_MS[rule.delay_unit] || DELAY_MS.minutes);
 
       if (delayMs === 0) {
@@ -91,7 +104,19 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
         const result = await sendAutomationMessage(tenant, lead, rule, conversationId || null, variables);
         console.log(`[automations] immediate send done, msgId=${result.messageId}`);
 
-        await incrementCounter(rule.id, 'messages_sent');
+        // Record in queue for deduplication + audit trail
+        await supabaseAdmin.from('automation_queue').insert({
+          automation_id: rule.id,
+          tenant_id: tenantId,
+          lead_id: leadId,
+          conversation_id: conversationId || null,
+          scheduled_at: new Date().toISOString(),
+          status: 'sent',
+          sent_at: new Date().toISOString(),
+          wa_message_id: result.messageId,
+        }).then(null, () => {});
+
+        await atomicIncrement(rule.id, 'messages_sent');
       } else {
         const scheduledAt = new Date(Date.now() + delayMs).toISOString();
         console.log(`[automations] rule ${rule.id} — queuing for ${scheduledAt} (delay=${rule.delay_value} ${rule.delay_unit})`);
@@ -105,7 +130,7 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
         });
       }
 
-      await incrementCounter(rule.id, 'customers_reached');
+      await atomicIncrement(rule.id, 'customers_reached');
     } catch (err) {
       console.error(`[automations] rule ${rule.id} failed:`, err);
       Sentry.captureException(err);
@@ -121,24 +146,37 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
 export async function processPendingAutomations(): Promise<number> {
   const now = new Date().toISOString();
 
+  // Claim items atomically: set status='processing' so concurrent callers don't double-send
+  const { data: claimed, error: claimErr } = await supabaseAdmin
+    .from('automation_queue')
+    .update({ status: 'processing' as string })
+    .eq('status', 'pending')
+    .lte('scheduled_at', now)
+    .limit(50)
+    .select('id');
+
+  if (claimErr || !claimed || claimed.length === 0) return 0;
+
+  const claimedIds = claimed.map(c => c.id);
+  console.log(`[automations] claimed ${claimedIds.length} queue items`);
+
   const { data: queueItems, error } = await supabaseAdmin
     .from('automation_queue')
     .select(`
       *,
-      automations!inner ( id, tenant_id, message_text, media_url, media_type, cancel_on_reply, messages_sent ),
+      automations!inner ( id, tenant_id, message_text, media_url, media_type, cancel_on_reply ),
       leads!inner ( name, phone, lead_status )
     `)
-    .eq('status', 'pending')
-    .lte('scheduled_at', now)
-    .limit(50);
+    .in('id', claimedIds);
 
   if (error) {
     console.error(`[automations] queue query error:`, error.message);
+    // Release claimed items back to pending
+    await supabaseAdmin.from('automation_queue').update({ status: 'pending' }).in('id', claimedIds);
     return 0;
   }
   if (!queueItems || queueItems.length === 0) return 0;
 
-  console.log(`[automations] processing ${queueItems.length} due queue items`);
   let sent = 0;
 
   for (const item of queueItems) {
@@ -146,7 +184,7 @@ export async function processPendingAutomations(): Promise<number> {
       const automation = item.automations as unknown as {
         id: string; tenant_id: string; message_text: string;
         media_url: string | null; media_type: string | null;
-        cancel_on_reply: boolean; messages_sent: number;
+        cancel_on_reply: boolean;
       };
       const lead = item.leads as unknown as {
         name: string; phone: string; lead_status: string;
@@ -175,7 +213,7 @@ export async function processPendingAutomations(): Promise<number> {
         })
         .eq('id', item.id);
 
-      await incrementCounter(automation.id, 'messages_sent');
+      await atomicIncrement(automation.id, 'messages_sent');
       sent++;
       console.log(`[automations] queue item ${item.id} sent, msgId=${result.messageId}`);
     } catch (err) {
@@ -245,40 +283,12 @@ async function sendAutomationMessage(
 
   console.log(`[automations] sending to ${lead.phone}: "${message.slice(0, 80)}..."`);
 
-  // Check 24h window
-  const { data: lastMsg } = await supabaseAdmin
-    .from('messages')
-    .select('created_at')
-    .eq('conversation_id', conversationId || '')
-    .eq('direction', 'inbound')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const hoursSinceInbound = lastMsg
-    ? (Date.now() - new Date(lastMsg.created_at).getTime()) / 3_600_000
-    : 999;
-
   let metaMsgId: string | null = null;
   let sentMediaUrl: string | null = null;
   let sentMimeType: string | null = null;
   let sentMessageType = 'text';
 
-  if (hoursSinceInbound > 24) {
-    console.log(`[automations] 24h window expired (${hoursSinceInbound.toFixed(1)}h), using template`);
-    try {
-      const result = await sendTemplateMessage(
-        token, phoneNumberId, lead.phone,
-        'follow_up_reminder',
-        [lead.name || 'there'],
-        'en'
-      );
-      metaMsgId = result?.messageId || null;
-    } catch (err) {
-      console.warn(`[automations] template send failed:`, (err as Error).message);
-    }
-    sentMessageType = 'template';
-  } else if (automation.media_url) {
+  if (automation.media_url) {
     const signedUrl = await toSignedMediaUrl(automation.media_url);
     const mediaType = (automation.media_type || 'image') as 'image' | 'video' | 'document';
     const result = await sendMediaMessage(token, phoneNumberId, lead.phone, mediaType, signedUrl, message);
@@ -293,6 +303,7 @@ async function sendAutomationMessage(
 
   console.log(`[automations] WhatsApp API result: msgId=${metaMsgId}`);
 
+  // Record outbound message in conversation if we have context
   if (conversationId) {
     await supabaseAdmin.from('messages').insert({
       tenant_id: tenant.id,
@@ -317,7 +328,7 @@ async function sendAutomationMessage(
     tenant_id: tenant.id,
     event_type: 'automation_sent',
     channel: 'whatsapp',
-    metadata: { lead_name: lead.name },
+    metadata: { lead_name: lead.name, automation_message: message.slice(0, 100) },
   }).then(null, () => {});
 
   return { messageId: metaMsgId };
@@ -334,16 +345,24 @@ async function updateQueueStatus(id: string, status: string, errorMessage?: stri
     .eq('id', id);
 }
 
-async function incrementCounter(automationId: string, column: 'customers_reached' | 'messages_sent'): Promise<void> {
-  const { data } = await supabaseAdmin
-    .from('automations')
-    .select(column)
-    .eq('id', automationId)
-    .single();
+async function atomicIncrement(automationId: string, column: 'customers_reached' | 'messages_sent'): Promise<void> {
+  // Atomic increment via raw SQL to avoid read-then-write races
+  const { error } = await supabaseAdmin.rpc('exec_sql', {
+    query: `UPDATE automations SET ${column} = ${column} + 1 WHERE id = $1`,
+    params: [automationId],
+  });
 
-  const current = (data as any)?.[column] || 0;
-  await supabaseAdmin
-    .from('automations')
-    .update({ [column]: current + 1 })
-    .eq('id', automationId);
+  if (error) {
+    // Fallback: Supabase may not have exec_sql RPC — use read-then-write
+    const { data } = await supabaseAdmin
+      .from('automations')
+      .select(column)
+      .eq('id', automationId)
+      .single();
+    const current = (data as any)?.[column] || 0;
+    await supabaseAdmin
+      .from('automations')
+      .update({ [column]: current + 1 })
+      .eq('id', automationId);
+  }
 }
