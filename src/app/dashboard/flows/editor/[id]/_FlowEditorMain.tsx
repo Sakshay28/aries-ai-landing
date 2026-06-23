@@ -22,14 +22,13 @@ const FlowAnalytics      = dynamic(() => import("../../_components/FlowAnalytics
 const FlowFlightRecorder = dynamic(() => import("../../_components/FlowFlightRecorder"), { ssr: false });
 
 export default function FlowEditorMain() {
-  const { selectedNodeId, isSimulating, setIsSimulating, isPublishing, isSaving, publishFlow, loadTemplate, loadFlow, saveFlow, undo, redo, history, nodes } = useFlowStore();
+  const { selectedNodeId, isSimulating, setIsSimulating, isPublishing, isSaving, publishFlow, loadTemplate, loadFlow, saveFlow, undo, redo, history, nodes, flowName, setFlowName, renameFlow } = useFlowStore();
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
   const routeId = params.id as string;
   const businessType = searchParams?.get('type') || 'blank';
   const templateId = searchParams?.get('template') || null;
-  const [flowName, setFlowName] = useState('Untitled Flow');
 
   const config = BUSINESS_TYPE_CONFIG[businessType] || BUSINESS_TYPE_CONFIG['blank'];
 
@@ -180,7 +179,12 @@ export default function FlowEditorMain() {
               className="bg-transparent font-semibold text-[13.5px] focus:outline-none transition-colors px-0.5 min-w-[110px]"
               style={{ color: 'rgba(255,255,255,0.88)', borderBottom: '1px solid transparent' }}
               onFocus={e => { (e.target as HTMLInputElement).style.borderBottomColor = 'rgba(255,255,255,0.18)'; }}
-              onBlur={e => { (e.target as HTMLInputElement).style.borderBottomColor = 'transparent'; }}
+              onBlur={e => {
+                (e.target as HTMLInputElement).style.borderBottomColor = 'transparent';
+                const name = e.target.value.trim();
+                if (name && name !== 'Untitled Flow') renameFlow(name);
+              }}
+              onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
               placeholder="Untitled Flow"
             />
           </div>

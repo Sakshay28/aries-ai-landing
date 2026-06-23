@@ -17,6 +17,7 @@ export type AppNode = Node;
 
 type FlowState = {
   flowId: string | null;
+  flowName: string;
   nodes: AppNode[];
   edges: Edge[];
   selectedNodeId: string | null;
@@ -42,6 +43,8 @@ type FlowState = {
   loadFlow: (id: string) => Promise<void>;
   saveFlow: (name?: string) => Promise<string | null>;
   setFlowId: (id: string) => void;
+  setFlowName: (name: string) => void;
+  renameFlow: (name: string) => Promise<void>;
 };
 
 const initialNodes: AppNode[] = [];
@@ -51,6 +54,7 @@ let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useFlowStore = create<FlowState>((set, get) => ({
   flowId: null,
+  flowName: 'Untitled Flow',
   nodes: initialNodes,
   edges: initialEdges,
   selectedNodeId: null,
@@ -209,6 +213,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
         }));
         set({
           flowId: json.data.id,
+          flowName: json.data.name || 'Untitled Flow',
           nodes: json.data.nodes ?? [],
           edges: normalizedEdges,
           history: { past: [], future: [] },
@@ -287,6 +292,20 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     }
   },
   
+  setFlowName: (name: string) => set({ flowName: name }),
+
+  renameFlow: async (name: string) => {
+    set({ flowName: name });
+    const { flowId } = get();
+    if (flowId) {
+      await fetch(`/api/dashboard/flows/${flowId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      }).catch(console.error);
+    }
+  },
+
   setConnectingNodeId: (id: string | null) => {
     set({ connectingNodeId: id });
   }
