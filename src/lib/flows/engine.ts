@@ -281,7 +281,7 @@ export async function runFlowsForMessage(
       }
     }
 
-    if (triggerMatches(flow, lowerMsg, isFirstMessage, messageType, buttonId, hasActiveWorkflow, isFromAd)) {
+    if (triggerMatches(flow, lowerMsg, isFirstMessage, messageType, buttonId, hasActiveWorkflow, isFromAd, referral?.source_id)) {
       const handled = await executeFlow(flow, ctx);
       if (handled) {
         // Mark all_messages flows as fired so they don't repeat in this session
@@ -308,11 +308,19 @@ function triggerMatches(
   messageType = 'text',
   buttonId?: string,
   hasActiveWorkflow = false,
-  isFromAd = false
+  isFromAd = false,
+  adSourceId?: string
 ): boolean {
-  // CTWA trigger — fires only when the message came from a Meta WhatsApp Ad click
+  // CTWA trigger — fires only when the message came from a Meta WhatsApp Ad click.
+  // If the ctwa_trigger node has an ad_id configured, only fire for that specific ad.
   const hasCtwa = flow.nodes?.some(n => n.type === 'ctwa_trigger');
-  if (hasCtwa) return isFromAd;
+  if (hasCtwa) {
+    if (!isFromAd) return false;
+    const ctwaNode = flow.nodes.find(n => n.type === 'ctwa_trigger');
+    const filteredAdId = (ctwaNode?.data?.ad_id as string || '').trim();
+    if (filteredAdId) return adSourceId === filteredAdId;
+    return true;
+  }
 
   // Check if this flow has a button_trigger node — if so, only fire on button clicks
   const hasButtonTriggerNode = flow.nodes?.some(n => n.type === 'button_trigger');
@@ -1681,8 +1689,13 @@ export async function simulateFlow(
   // Direct overlay to ensure they all exist in ctx.variables
   Object.assign(ctx.variables, mockValues);
 
-  const triggerNode = nodes.find(n => n.type === 'trigger' || n.type === 'keyword_trigger');
+  const triggerNode = nodes.find(n => n.type === 'trigger' || n.type === 'keyword_trigger' || n.type === 'button_trigger' || n.type === 'ctwa_trigger');
   if (!triggerNode) return { matched: false, flowName: flow.name as string, trace, variables: {}, messageSent: false };
+
+  if (triggerNode.type === 'ctwa_trigger') {
+    ctx.variables.name = ctx.variables.name || 'Test User';
+    ctx.variables.ad_headline = ctx.variables.ad_headline || 'Simulated Ad';
+  }
 
   const messageSent = await executeFlowGraph(nodes, edges, ctx, triggerNode.id);
 
