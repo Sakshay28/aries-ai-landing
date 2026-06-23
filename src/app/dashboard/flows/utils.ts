@@ -257,7 +257,8 @@ export function validateFlow(nodes: Node[], edges: Edge[]): FlowHealthReport {
   const issues: FlowHealthReport['issues'] = [];
 
   // 1. Trigger existence
-  const hasTrigger = nodes.some(n => n.type === 'trigger' || n.type === 'keyword_trigger');
+  const TRIGGER_TYPES = ['trigger', 'keyword_trigger', 'button_trigger', 'ctwa_trigger'];
+  const hasTrigger = nodes.some(n => TRIGGER_TYPES.includes(n.type!));
   if (!hasTrigger && nodes.length > 0) {
     issues.push({ nodeId: '', nodeLabel: 'Flow', nodeType: '', issue: { message: 'No trigger node — flow cannot start', severity: 'error' } });
   }
@@ -281,7 +282,7 @@ export function validateFlow(nodes: Node[], edges: Edge[]): FlowHealthReport {
 
   // 4. Orphan nodes (no connections at all, not trigger/end)
   for (const node of nodes) {
-    if (node.type === 'trigger' || node.type === 'keyword_trigger' || node.type === 'end') continue;
+    if (TRIGGER_TYPES.includes(node.type!) || node.type === 'end') continue;
     const hasAnyEdge = edges.some(e => e.source === node.id || e.target === node.id);
     if (!hasAnyEdge) {
       const label = (node.data as any)?.label || node.type || 'Unknown';

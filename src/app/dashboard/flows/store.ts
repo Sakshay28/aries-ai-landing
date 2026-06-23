@@ -260,8 +260,10 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       }
       if (id) {
         // Extract trigger config from the trigger node
-        const triggerNode = nodes.find(n => n.type === 'trigger' || n.type === 'keyword_trigger');
-        const triggerType = (triggerNode?.data?.triggerType as string) || 'keyword';
+        const triggerNode = nodes.find(n => n.type === 'trigger' || n.type === 'keyword_trigger' || n.type === 'button_trigger' || n.type === 'ctwa_trigger');
+        const triggerType = triggerNode?.type === 'ctwa_trigger' ? 'ctwa'
+          : triggerNode?.type === 'button_trigger' ? 'button'
+          : (triggerNode?.data?.triggerType as string) || 'keyword';
         const rawKeywords = (triggerNode?.data?.keywords as string) || '';
         const triggerKeywords = rawKeywords
           .split(',')
