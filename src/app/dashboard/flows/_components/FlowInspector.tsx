@@ -406,6 +406,7 @@ function ContentTab({
   const f1 = useFocusStyle();
   const f2 = useFocusStyle();
   const f3 = useFocusStyle();
+  const f4 = useFocusStyle();
 
   if (nodeType === "trigger" || nodeType === "keyword_trigger") {
     return (
@@ -626,6 +627,44 @@ function ContentTab({
             </div>
           </Field>
         )}
+      </>
+    );
+  }
+
+  if (nodeType === "ctwa_trigger") {
+    return (
+      <>
+        <Field label="Filter by Ad ID (optional)">
+          <input
+            type="text"
+            value={(localData.ad_id as string) || ""}
+            onChange={e => commitField("ad_id", e.target.value)}
+            onBlur={e => flushField("ad_id", e.target.value)}
+            placeholder="e.g. 120212345678901234"
+            className={INPUT_CLS}
+            style={f4.style}
+            onFocus={f4.onFocus}
+          />
+          <p className="text-[10px] mt-1.5" style={{ color: "rgba(52,211,153,0.6)" }}>
+            Leave empty to trigger on any Meta ad click. Enter a Meta Ad ID to target a specific campaign.
+          </p>
+        </Field>
+        <Field label="Available Ad Variables">
+          <div className="rounded-[10px] p-2.5 space-y-1.5" style={{ background: "rgba(29,109,219,0.06)", border: "1px solid rgba(29,109,219,0.18)" }}>
+            {([
+              ["{{ad_headline}}", "Ad headline text"],
+              ["{{ad_body}}", "Ad description body"],
+              ["{{ad_source_id}}", "Meta ad ID"],
+              ["{{ad_source_url}}", "Landing page URL"],
+              ["{{ad_ctwa_clid}}", "Click ID (for CAPI)"],
+            ] as const).map(([v, desc]) => (
+              <div key={v} className="flex items-center gap-2">
+                <code className="text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0" style={{ background: "rgba(29,109,219,0.2)", color: "#60a5fa" }}>{v}</code>
+                <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.35)" }}>{desc}</span>
+              </div>
+            ))}
+          </div>
+        </Field>
       </>
     );
   }

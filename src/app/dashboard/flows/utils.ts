@@ -98,7 +98,7 @@ export function validateNode(node: Node, nodes: Node[], edges: Edge[]): NodeVali
       issues.push({ message: 'No outgoing connection', severity: 'warning' });
     }
   }
-  if (node.type !== 'trigger' && node.type !== 'keyword_trigger' && node.type !== 'button_trigger') {
+  if (node.type !== 'trigger' && node.type !== 'keyword_trigger' && node.type !== 'button_trigger' && node.type !== 'ctwa_trigger') {
     if (!edges.some(e => e.target === node.id)) {
       issues.push({ message: 'No incoming connection', severity: 'warning' });
     }
