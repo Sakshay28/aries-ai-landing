@@ -9,7 +9,7 @@ import {
   PlayCircle, Code2, Paintbrush, Hourglass, FileText,
   ListChecks, Zap, MoreVertical, Pencil, Copy, Trash2,
   LayoutGrid, GitBranch, FileSignature, MousePointerClick,
-  CalendarCheck, Mail, Sliders, Tag,
+  CalendarCheck, Mail, Sliders, Tag, Globe,
 } from "lucide-react";
 import { useFlowStore } from "../store";
 import { validateNode, type ValidationSeverity } from "../utils";
@@ -696,6 +696,35 @@ export const ButtonTriggerNode = React.memo(function ButtonTriggerNode({ id, dat
       <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
       <Card id={id} selected={selected} color="#3B82F6" Icon={MousePointerClick} title={data.label || "Button Click"}>
         <Badge label={data.mode === "specific" ? `Wait for: ${data.button || "any"}` : "Any Button"} color="#3B82F6" />
+      </Card>
+    </Root>
+  );
+});
+
+// ─── META AD CLICK (CTWA) TRIGGER NODE ────────────────────────────────────────
+export const CtwaNode = React.memo(function CtwaNode({ id, data, selected }: any) {
+  const adId = (data.ad_id as string || '').trim();
+  return (
+    <Root width={244}>
+      <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
+      <Card id={id} selected={selected} color="#1D6DDB" Icon={Globe} title={data.label || "Meta Ad Click"}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" as const, padding: "2px 8px", borderRadius: 99, background: "rgba(29,109,219,0.1)", color: "#1D6DDB", border: "1px solid rgba(29,109,219,0.25)" }}>
+              Click-to-WhatsApp
+            </span>
+          </div>
+          <p style={{ fontSize: 11.5, color: "#475569", margin: 0 }}>
+            {adId ? `Ad ID: ${adId.slice(0, 18)}…` : "Fires on any Meta ad click"}
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 4 }}>
+            {["ad_headline", "ad_source_id", "ad_ctwa_clid"].map(v => (
+              <span key={v} style={{ fontSize: 9.5, padding: "1px 6px", borderRadius: 99, background: "rgba(29,109,219,0.06)", color: "#2563eb", border: "1px solid rgba(29,109,219,0.15)", fontFamily: "monospace" }}>
+                {`{{${v}}}`}
+              </span>
+            ))}
+          </div>
+        </div>
       </Card>
     </Root>
   );
