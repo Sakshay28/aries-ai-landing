@@ -1250,7 +1250,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       lead?.id ?? null,
       isFirstMessage,
       msg.type,        // "text" | "interactive" | "button" — for button_trigger matching
-      msg.buttonId     // raw button reply id from Meta
+      msg.buttonId,    // raw button reply id from Meta
+      msg.referral     // Meta ad referral (undefined when not from a CTWA ad)
     );
     if (flowHandled) {
       console.log(`✅ Flow engine handled message for conversation ${conversation.id}, skipping AI`);

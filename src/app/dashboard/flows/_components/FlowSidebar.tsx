@@ -14,6 +14,7 @@ export const nodeCategories = [
       { id: "trigger", type: "trigger", icon: PlayCircle, label: "Message Trigger", desc: "Any incoming message" },
       { id: "keyword_trigger", type: "trigger", icon: Tag, label: "Keyword Trigger", desc: "Match specific words" },
       { id: "button_trigger", type: "button_trigger", icon: LayoutGrid, label: "Button Click", desc: "Interactive button press" },
+      { id: "ctwa_trigger", type: "ctwa_trigger", icon: Globe, label: "Meta Ad Click", desc: "Click-to-WhatsApp ad lead" },
       { id: "webhook_trigger", type: "trigger", icon: Webhook, label: "Webhook Trigger", desc: "External HTTP event" },
       { id: "schedule_trigger", type: "trigger", icon: Clock, label: "Scheduled Time", desc: "Cron / time-based" },
       { id: "wait", type: "wait", icon: Hourglass, label: "Wait for Event", desc: "Pause until triggered" },
@@ -107,6 +108,7 @@ export const nodeCategories = [
 export const getDefaultNodeData = (id: string) => {
   const map: Record<string, Record<string, unknown>> = {
     trigger: { label: "Incoming Message", triggerType: "Any Message" },
+    ctwa_trigger: { label: "Meta Ad Click", description: "Fires when a customer clicks your Click-to-WhatsApp ad" },
     extract: { label: "Extract Contact Info", entities: ["name", "email", "phone"] },
     memory: { label: "Save Context", scope: "User Session" },
     format: { label: "Clean Formatting", formatType: "Add Quick Replies" },

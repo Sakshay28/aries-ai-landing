@@ -9,6 +9,7 @@ import { getTenantId } from '@/lib/auth/getTenantId';
 import { getCurrentUser, canManageTeam } from '@/lib/auth/getCurrentUser';
 import { encryptToken } from '@/lib/utils/crypto';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
+import { trimCredentialFields } from '@/lib/utils/credentials';
 
 export async function GET() {
   const tenantId = await getTenantId();
@@ -175,6 +176,10 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
+  // Trim stray whitespace from credential IDs — a leading/trailing space gets
+  // URL-encoded to %20 in Meta Graph API calls and silently breaks them.
+  trimCredentialFields(updates);
+
   // Handle encrypted access token specifically
   if (body.wa_access_token !== undefined) {
     if (body.wa_access_token === '••••••••') {
@@ -182,8 +187,9 @@ export async function PATCH(req: NextRequest) {
     } else if (body.wa_access_token === '' || body.wa_access_token === null) {
       updates.wa_access_token = null;
     } else {
-      // Encrypt the new token using AES-256-GCM
-      updates.wa_access_token = encryptToken(body.wa_access_token);
+      // Encrypt the new token using AES-256-GCM (trim first — a stray space
+      // breaks Bearer auth just like it breaks the plaintext IDs).
+      updates.wa_access_token = encryptToken(String(body.wa_access_token).trim());
     }
   }
 
@@ -194,7 +200,7 @@ export async function PATCH(req: NextRequest) {
     } else if (body.wa_app_secret === '' || body.wa_app_secret === null) {
       updates.wa_app_secret = null;
     } else {
-      updates.wa_app_secret = encryptToken(body.wa_app_secret);
+      updates.wa_app_secret = encryptToken(String(body.wa_app_secret).trim());
     }
   }
 

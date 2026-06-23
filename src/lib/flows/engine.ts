@@ -80,6 +80,15 @@ interface ExecContext {
   isFirstMessage: boolean;
   messageType?: string;        // "text" | "interactive" | "button" — for button_trigger matching
   buttonId?: string;           // raw button reply id from Meta (interactive/button messages)
+  isFromAd?: boolean;          // true when message arrived via a CTWA (Click-to-WhatsApp) ad
+  referral?: {                 // Meta ad referral data (populated when isFromAd=true)
+    source_id?: string;
+    source_type?: string;
+    headline?: string;
+    body?: string;
+    ctwa_clid?: string;
+    source_url?: string;
+  };
   pendingFlowNode?: string;    // node id to resume on next inbound message
   variables: Record<string, unknown>; // inter-node data bag — persisted across wait_for_reply
   dryRun?:  boolean;       // if true: skip all side-effects (no WhatsApp sends, no DB writes)
@@ -126,7 +135,15 @@ export async function runFlowsForMessage(
   leadId: string | null,
   isFirstMessage = false,
   messageType = 'text',
-  buttonId?: string
+  buttonId?: string,
+  referral?: {
+    source_id?: string;
+    source_type?: string;
+    headline?: string;
+    body?: string;
+    ctwa_clid?: string;
+    source_url?: string;
+  }
 ): Promise<boolean> {
   // Fetch active flows for this tenant
   const { data: flows, error } = await supabaseAdmin
@@ -159,6 +176,8 @@ export async function runFlowsForMessage(
     return false;
   }
 
+  const isFromAd = !!referral && referral.source_type === 'ad';
+
   const ctx: ExecContext = {
     tenantId,
     leadId,
@@ -171,6 +190,8 @@ export async function runFlowsForMessage(
     isFirstMessage,
     messageType,
     buttonId,
+    isFromAd,
+    referral,
     variables: {
       wa_name: (lead as { name?: string } | null)?.name || 'there',
       wa_phone: phone,
@@ -180,6 +201,14 @@ export async function runFlowsForMessage(
       language: 'en',
       last_message: messageText,
       conversation_id: conversationId,
+      // Ad variables — populated when message comes from a Meta CTWA ad
+      ...(isFromAd && referral && {
+        ad_source_id:  referral.source_id  || '',
+        ad_headline:   referral.headline   || '',
+        ad_body:       referral.body       || '',
+        ad_source_url: referral.source_url || '',
+        ad_ctwa_clid:  referral.ctwa_clid  || '',
+      }),
     },
   };
 
@@ -252,7 +281,7 @@ export async function runFlowsForMessage(
       }
     }
 
-    if (triggerMatches(flow, lowerMsg, isFirstMessage, messageType, buttonId, hasActiveWorkflow)) {
+    if (triggerMatches(flow, lowerMsg, isFirstMessage, messageType, buttonId, hasActiveWorkflow, isFromAd)) {
       const handled = await executeFlow(flow, ctx);
       if (handled) {
         // Mark all_messages flows as fired so they don't repeat in this session
@@ -278,8 +307,13 @@ function triggerMatches(
   isFirstMessage: boolean,
   messageType = 'text',
   buttonId?: string,
-  hasActiveWorkflow = false
+  hasActiveWorkflow = false,
+  isFromAd = false
 ): boolean {
+  // CTWA trigger — fires only when the message came from a Meta WhatsApp Ad click
+  const hasCtwa = flow.nodes?.some(n => n.type === 'ctwa_trigger');
+  if (hasCtwa) return isFromAd;
+
   // Check if this flow has a button_trigger node — if so, only fire on button clicks
   const hasButtonTriggerNode = flow.nodes?.some(n => n.type === 'button_trigger');
   if (hasButtonTriggerNode) {
@@ -378,6 +412,7 @@ async function executeFlow(flow: FlowRecord, ctx: ExecContext): Promise<boolean>
     n => n.type === 'trigger'
       || n.type === 'keyword_trigger'
       || n.type === 'button_trigger'
+      || n.type === 'ctwa_trigger'
       || n.type === 'webhook_trigger'
       || n.type === 'inactivity_trigger'
       || n.type === 'schedule_trigger'
@@ -388,6 +423,12 @@ async function executeFlow(flow: FlowRecord, ctx: ExecContext): Promise<boolean>
   if (triggerNode.type === 'button_trigger' && ctx.buttonId) {
     ctx.variables.selected_button = ctx.buttonId;
     ctx.variables.button_value    = ctx.buttonId;
+  }
+
+  // For ctwa_trigger nodes, ad variables are already in ctx.variables (set during ctx init)
+  // but also set a convenience flag for condition nodes
+  if (triggerNode.type === 'ctwa_trigger') {
+    ctx.variables.is_from_ad = true;
   }
 
   return executeFlowGraph(nodes, edges, ctx, triggerNode.id);
@@ -408,7 +449,7 @@ async function executeNode(
   const type = node.type;
 
   // ── Trigger — just pass through ──────────────────────────
-  if (type === 'trigger' || type === 'keyword_trigger') {
+  if (type === 'trigger' || type === 'keyword_trigger' || type === 'ctwa_trigger') {
     if (ctx.dryRun) {
       ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'trigger_matched', payload: String(node.data?.label || 'Flow started'), nextId: getNextNode(node.id, null, edges) });
     }

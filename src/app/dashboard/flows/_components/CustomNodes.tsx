@@ -45,6 +45,7 @@ export const NODE_CATEGORY: Record<string, { color: string; label: string }> = {
   send_gallery:    { color: '#10B981', label: 'GALLERY' },
   send_buttons:    { color: '#10B981', label: 'BUTTONS' },
   button_trigger:  { color: '#3B82F6', label: 'BUTTON CLICK' },
+  ctwa_trigger:    { color: '#1D6DDB', label: 'META AD CLICK' },
   intent_routing:  { color: '#8B5CF6', label: 'INTENT ROUTING' },
   intake_form:     { color: '#F59E0B', label: 'INTAKE FORM' },
 };
