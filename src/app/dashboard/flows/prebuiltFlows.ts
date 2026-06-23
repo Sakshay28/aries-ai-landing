@@ -115,6 +115,114 @@ export function getPrebuiltFlow(templateId: string, businessType: string): { nod
     return { nodes, edges };
   }
 
+  if (templateId === 'meta-ad-lead') {
+    const nodes: AppNode[] = [
+      { id: 'ctwa1', type: 'ctwa_trigger',  position: { x: 400, y: 50   }, data: { label: 'Meta Ad Click',          ad_id: '' } },
+      { id: 'ctwa2', type: 'standard',      position: { x: 400, y: 210  }, data: { label: 'Ad Welcome',             content: "Hi {{name}}! 👋\n\nThanks for reaching out via our ad — *{{ad_headline}}*.\n\nI'm here to help. What would you like to know?" } },
+      { id: 'ctwa3', type: 'send_buttons',  position: { x: 400, y: 400  }, data: { label: 'Qualify Interest',       message: 'What can we help you with?', buttons: [{ id: 'b1', label: '💬 Learn More', value: 'learn_more' }, { id: 'b2', label: '📅 Book a Slot', value: 'book_slot' }, { id: 'b3', label: '💰 See Pricing', value: 'pricing' }] } },
+      { id: 'ctwa4', type: 'condition',     position: { x: 400, y: 590  }, data: { label: 'Wants to Book?',         field: 'button_value', operator: '==', value: 'book_slot' } },
+      { id: 'ctwa5', type: 'intake_form',   position: { x: 80,  y: 770  }, data: { label: 'Capture Lead Details',   fields: [{ id: 'f1', name: 'Your Name', type: 'text', required: true, saveAs: 'lead_name', placeholder: 'Full name' }, { id: 'f2', name: 'Best time to call', type: 'text', required: true, saveAs: 'preferred_time', placeholder: 'e.g. Tomorrow 3 PM' }, { id: 'f3', name: 'Your requirement', type: 'text', required: false, saveAs: 'requirement', placeholder: 'Tell us a bit more…' }] } },
+      { id: 'ctwa6', type: 'standard',      position: { x: 80,  y: 990  }, data: { label: 'Booking Confirmed ✅',  content: "✅ Got it, {{lead_name}}!\n\nWe'll call you at {{preferred_time}} to take things forward.\n\nIn the meantime, feel free to ask anything! 😊" } },
+      { id: 'ctwa7', type: 'handoff',       position: { x: 80,  y: 1160 }, data: { label: 'Notify Sales Team',     message: '🔔 New Ad Lead!\nSource: {{ad_headline}}\nName: {{lead_name}}\nTime: {{preferred_time}}\nRequirement: {{requirement}}\nPhone: {{wa_phone}}' } },
+      { id: 'ctwa8', type: 'end',           position: { x: 80,  y: 1300 }, data: { label: 'End' } },
+      { id: 'ctwa9', type: 'condition',     position: { x: 750, y: 590  }, data: { label: 'Wants Pricing?',         field: 'button_value', operator: '==', value: 'pricing' } },
+      { id: 'ctwa10', type: 'standard',     position: { x: 550, y: 770  }, data: { label: 'Share Pricing',          content: "Here's a quick overview of our packages:\n\n📦 *Starter* — ₹999/mo\n📦 *Growth* — ₹2,499/mo\n📦 *Pro* — ₹6,999/mo\n\nWant us to recommend the best fit? Reply with your use case! 💬" } },
+      { id: 'ctwa11', type: 'end',          position: { x: 550, y: 970  }, data: { label: 'End' } },
+      { id: 'ctwa12', type: 'ai_reply',     position: { x: 1020, y: 770 }, data: { label: 'AI: Answer Query',       systemPrompt: 'You are a helpful sales assistant. The customer came from a Meta ad ("{{ad_headline}}"). Answer their query helpfully and try to guide them toward booking a call.' } },
+      { id: 'ctwa13', type: 'end',          position: { x: 1020, y: 970 }, data: { label: 'End' } },
+    ];
+    const edges: Edge[] = [
+      generateEdge('ctwa1',  'ctwa2'),
+      generateEdge('ctwa2',  'ctwa3'),
+      generateEdge('ctwa3',  'ctwa4'),
+      generateEdge('ctwa4',  'ctwa5',  'true'),
+      generateEdge('ctwa4',  'ctwa9',  'false'),
+      generateEdge('ctwa5',  'ctwa6'),
+      generateEdge('ctwa6',  'ctwa7'),
+      generateEdge('ctwa7',  'ctwa8'),
+      generateEdge('ctwa9',  'ctwa10', 'true'),
+      generateEdge('ctwa9',  'ctwa12', 'false'),
+      generateEdge('ctwa10', 'ctwa11'),
+      generateEdge('ctwa12', 'ctwa13'),
+    ];
+    return { nodes, edges };
+  }
+
+  // ─── DEYOR TRIPS / TRAVEL CTWA LEAD FLOW ─────────────────────────────────────
+  if (templateId === 'deyor-ladakh') {
+    const nodes: AppNode[] = [
+      // 1. Trigger — fires when customer clicks the Meta CTWA ad
+      { id: 'dy1', type: 'ctwa_trigger', position: { x: 400, y: 50   }, data: { label: 'Meta Ad Click', ad_id: '' } },
+
+      // 2. Welcome — greet with ad headline
+      { id: 'dy2', type: 'standard',     position: { x: 400, y: 210  }, data: { label: 'Welcome', content: "Hi {{name}}! 👋 Thanks for your interest in our Ladakh expeditions!\n\nWe have some amazing trips lined up and we'd love to help you find the perfect one. Let's get started! 🏔️" } },
+
+      // 3. Trip selection buttons
+      { id: 'dy3', type: 'send_buttons', position: { x: 400, y: 390  }, data: { label: 'Which Trip?', message: 'Which Ladakh expedition are you interested in?', buttons: [{ id: 'b1', label: '6N/7D with Turtuk', value: 'turtuk' }, { id: 'b2', label: '7N/8D with Umling La', value: 'umling_la' }, { id: 'b3', label: 'Other Trips', value: 'other_trip' }] } },
+
+      // 4. Pass-through condition (any button click continues)
+      { id: 'dy4', type: 'condition',    position: { x: 400, y: 570  }, data: { label: 'Trip Selected', field: 'button_value', operator: '!=', value: 'NEVER_MATCHES' } },
+
+      // 5. Date selection buttons
+      { id: 'dy5', type: 'send_buttons', position: { x: 400, y: 760  }, data: { label: 'Which Dates?', message: "Great choice! 🎉\n\nWhich departure date works best for you?", buttons: [{ id: 'b4', label: '2 Jul - 8 Jul', value: 'jul_2' }, { id: 'b5', label: '23 Jul - 29 Jul', value: 'jul_23' }, { id: 'b6', label: 'Other Dates', value: 'other_date' }] } },
+
+      // 6. Pass-through
+      { id: 'dy6', type: 'condition',    position: { x: 400, y: 940  }, data: { label: 'Date Selected', field: 'button_value', operator: '!=', value: 'NEVER_MATCHES' } },
+
+      // 7. Budget check buttons
+      { id: 'dy7', type: 'send_buttons', position: { x: 400, y: 1120 }, data: { label: 'Budget OK?', message: "💰 The cost for this expedition is *₹69,999 per person* (all inclusive — bike, accommodation, meals & transfers).\n\nIs this budget okay for you?", buttons: [{ id: 'b7', label: "That's fine! ✅", value: 'budget_ok' }, { id: 'b8', label: 'I need to think', value: 'budget_think' }] } },
+
+      // 8. Pass-through
+      { id: 'dy8', type: 'condition',    position: { x: 400, y: 1300 }, data: { label: 'Budget Response', field: 'button_value', operator: '!=', value: 'NEVER_MATCHES' } },
+
+      // 9. Flights to Leh buttons
+      { id: 'dy9', type: 'send_buttons', position: { x: 400, y: 1480 }, data: { label: 'Flights Booked?', message: "✈️ Are your flights to Leh already booked?", buttons: [{ id: 'b9', label: 'Yes, booked! ✈️', value: 'flights_yes' }, { id: 'b10', label: 'Not yet', value: 'flights_no' }] } },
+
+      // 10. Pass-through
+      { id: 'dy10', type: 'condition',   position: { x: 400, y: 1660 }, data: { label: 'Flights Response', field: 'button_value', operator: '!=', value: 'NEVER_MATCHES' } },
+
+      // 11. Special requirements (free text)
+      { id: 'dy11', type: 'standard',    position: { x: 400, y: 1840 }, data: { label: 'Special Requirements?', content: "Last question! 📝\n\nDo you have any special requirements? (dietary needs, medical conditions, experience level, etc.)\n\nType your answer below, or reply *None* if nothing specific." } },
+
+      // 12. Collect the free-text answer
+      { id: 'dy12', type: 'intake_form', position: { x: 400, y: 2020 }, data: { label: 'Collect Requirements', fields: [{ id: 'f1', name: 'Special Requirements', type: 'text', required: false, saveAs: 'special_req', placeholder: 'e.g. Vegetarian, no prior bike exp, altitude sickness concern…' }] } },
+
+      // 13. Notify team
+      { id: 'dy13', type: 'handoff',     position: { x: 400, y: 2240 }, data: { label: 'Notify Team 🔔', message: "🏔️ *New Ladakh Trip Lead!*\n\nName: {{name}}\nPhone: {{wa_phone}}\nSpecial Requirements: {{special_req}}\n\n_(Check WhatsApp conversation for trip choice, dates, budget & flight status)_" } },
+
+      // 14. Thank you + itinerary highlights
+      { id: 'dy14', type: 'standard',    position: { x: 400, y: 2440 }, data: { label: 'Thank You 🌟', content: "Amazing! 🌟\n\nWe've got your details and our team will reach out to you shortly!\n\nIn the meantime, here's a quick look at what each trip covers:\n\n🏕️ *6N/7D with Turtuk*\nNubra Valley → Remote Turtuk village → Pangong Lake\n\n⛰️ *7N/8D with Umling La*\nWorld's highest motorable road → Hanle → Tso Moriri Lake\n\nStay excited — Ladakh awaits! 🏔️" } },
+
+      // 15. End
+      { id: 'dy15', type: 'end',         position: { x: 400, y: 2640 }, data: { label: 'End' } },
+
+      // 16. Dead-end for false branches (unreachable in practice)
+      { id: 'dy16', type: 'end',         position: { x: 780, y: 940  }, data: { label: 'End' } },
+    ];
+
+    const edges: Edge[] = [
+      generateEdge('dy1',  'dy2'),
+      generateEdge('dy2',  'dy3'),
+      generateEdge('dy3',  'dy4'),
+      generateEdge('dy4',  'dy5',  'true'),   // any trip button → ask dates
+      generateEdge('dy4',  'dy16', 'false'),  // dead branch
+      generateEdge('dy5',  'dy6'),
+      generateEdge('dy6',  'dy7',  'true'),   // any date → ask budget
+      generateEdge('dy6',  'dy16', 'false'),
+      generateEdge('dy7',  'dy8'),
+      generateEdge('dy8',  'dy9',  'true'),   // any budget answer → ask flights
+      generateEdge('dy8',  'dy16', 'false'),
+      generateEdge('dy9',  'dy10'),
+      generateEdge('dy10', 'dy11', 'true'),   // any flight answer → special req
+      generateEdge('dy10', 'dy16', 'false'),
+      generateEdge('dy11', 'dy12'),
+      generateEdge('dy12', 'dy13'),
+      generateEdge('dy13', 'dy14'),
+      generateEdge('dy14', 'dy15'),
+    ];
+    return { nodes, edges };
+  }
+
   if (templateId === 'product-recs') {
     const nodes: AppNode[] = [
       { id: 'trigger_1', type: 'trigger', position: { x: 400, y: 50 }, data: { label: 'User Request', triggerType: 'Keyword Match' } },
