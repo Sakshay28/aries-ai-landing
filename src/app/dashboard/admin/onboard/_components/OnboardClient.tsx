@@ -12,6 +12,7 @@ type TenantRow = {
   is_approved: boolean;
   owner_email: string;
   wa_configured: boolean;
+  parent_tenant_id: string | null;
 };
 
 type TenantForm = Record<string, string | boolean | null>;
@@ -73,6 +74,7 @@ export function OnboardClient() {
   const [loadingTenant, setLoadingTenant] = useState(false);
   const [saving, setSaving] = useState(false);
   const [impersonating, setImpersonating] = useState(false);
+  const [parentTenantId, setParentTenantId] = useState<string>('');
 
   useEffect(() => {
     (async () => {
@@ -100,6 +102,32 @@ export function OnboardClient() {
     );
   }, [tenants, query]);
 
+  // Build ordered list: parents first, then children immediately after their parent.
+  const orderedTenants = useMemo(() => {
+    const parents = filtered.filter(t => !t.parent_tenant_id);
+    const childrenByParent: Record<string, TenantRow[]> = {};
+    for (const t of filtered) {
+      if (t.parent_tenant_id) {
+        if (!childrenByParent[t.parent_tenant_id]) childrenByParent[t.parent_tenant_id] = [];
+        childrenByParent[t.parent_tenant_id].push(t);
+      }
+    }
+    const result: { tenant: TenantRow; isChild: boolean }[] = [];
+    for (const p of parents) {
+      result.push({ tenant: p, isChild: false });
+      for (const c of childrenByParent[p.id] || []) {
+        result.push({ tenant: c, isChild: true });
+      }
+    }
+    // Orphaned children (parent filtered out) appended at end
+    for (const t of filtered) {
+      if (t.parent_tenant_id && !filtered.find(p => p.id === t.parent_tenant_id)) {
+        result.push({ tenant: t, isChild: true });
+      }
+    }
+    return result;
+  }, [filtered]);
+
   const selectTenant = async (id: string) => {
     setSelectedId(id);
     setLoadingTenant(true);
@@ -112,6 +140,7 @@ export function OnboardClient() {
         for (const k of ALL_KEYS) next[k] = data.tenant[k] ?? '';
         setForm(next);
         setOwnerEmail(data.tenant.owner_email || '');
+        setParentTenantId(data.tenant.parent_tenant_id || '');
       } else {
         toast.error(data.error || 'Failed to load tenant');
       }
@@ -132,6 +161,7 @@ export function OnboardClient() {
         if (SECRET_KEYS.includes(k) && form[k] === MASK) continue;
         payload[k] = form[k];
       }
+      payload.parent_tenant_id = parentTenantId || null;
       const res = await fetch('/api/admin/provision', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -142,7 +172,9 @@ export function OnboardClient() {
         toast.success('Client provisioned — live on the next message');
         setTenants(prev =>
           prev.map(t =>
-            t.id === selectedId ? { ...t, wa_configured: Boolean(form.wa_phone_number_id), business_name: (form.business_name as string) || t.business_name } : t
+            t.id === selectedId
+              ? { ...t, wa_configured: Boolean(form.wa_phone_number_id), business_name: (form.business_name as string) || t.business_name, parent_tenant_id: parentTenantId || null }
+              : t
           )
         );
       } else {
@@ -209,22 +241,25 @@ export function OnboardClient() {
           <div className="flex-1 overflow-auto custom-scrollbar divide-y divide-border/60">
             {loading ? (
               <div className="p-6 text-center text-sm text-muted-foreground">Loading…</div>
-            ) : filtered.length === 0 ? (
+            ) : orderedTenants.length === 0 ? (
               <div className="p-6 text-center text-sm text-muted-foreground">No tenants found.</div>
             ) : (
-              filtered.map(t => (
+              orderedTenants.map(({ tenant: t, isChild }) => (
                 <button
                   key={t.id}
                   onClick={() => selectTenant(t.id)}
-                  className={`w-full text-left p-4 flex items-start gap-3 transition-colors ${
-                    selectedId === t.id ? 'bg-indigo-50 dark:bg-indigo-950/30' : 'hover:bg-secondary/40'
-                  }`}
+                  className={`w-full text-left flex items-start gap-3 transition-colors ${
+                    isChild ? 'pl-8 pr-4 py-3' : 'p-4'
+                  } ${selectedId === t.id ? 'bg-indigo-50 dark:bg-indigo-950/30' : 'hover:bg-secondary/40'}`}
                 >
-                  <div className="w-9 h-9 rounded-lg bg-secondary flex items-center justify-center shrink-0">
-                    <Building2 className="w-4 h-4 text-muted-foreground" />
+                  {isChild && (
+                    <div className="w-px self-stretch bg-border mr-0 shrink-0" style={{ marginLeft: '-20px', marginRight: '8px' }} />
+                  )}
+                  <div className={`rounded-lg bg-secondary flex items-center justify-center shrink-0 ${isChild ? 'w-7 h-7' : 'w-9 h-9'}`}>
+                    <Building2 className={`text-muted-foreground ${isChild ? 'w-3.5 h-3.5' : 'w-4 h-4'}`} />
                   </div>
                   <div className="min-w-0">
-                    <div className="font-medium text-sm truncate">{t.business_name || 'Unnamed'}</div>
+                    <div className={`font-medium truncate ${isChild ? 'text-xs' : 'text-sm'}`}>{t.business_name || 'Unnamed'}</div>
                     <div className="text-xs text-muted-foreground truncate">{t.owner_email || 'no email'}</div>
                     <div className="mt-1 flex items-center gap-1.5">
                       {t.wa_configured ? (
@@ -305,6 +340,32 @@ export function OnboardClient() {
                   </div>
                 </section>
               ))}
+
+              <section className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
+                <div className="px-5 py-3 border-b border-border bg-secondary/30">
+                  <h2 className="text-sm font-semibold">Grouping</h2>
+                </div>
+                <div className="p-5">
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Grouped under (parent tenant)</label>
+                  <select
+                    value={parentTenantId}
+                    onChange={e => setParentTenantId(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                  >
+                    <option value="">— standalone —</option>
+                    {tenants
+                      .filter(t => t.id !== selectedId && !t.parent_tenant_id)
+                      .map(t => (
+                        <option key={t.id} value={t.id}>
+                          {t.business_name || 'Unnamed'} {t.owner_email ? `(${t.owner_email})` : ''}
+                        </option>
+                      ))}
+                  </select>
+                  <p className="text-[11px] text-muted-foreground mt-1.5">
+                    Sets this tenant as a sub-entry shown below the selected parent in the sidebar.
+                  </p>
+                </div>
+              </section>
 
               <div className="flex justify-end pb-4">
                 <button

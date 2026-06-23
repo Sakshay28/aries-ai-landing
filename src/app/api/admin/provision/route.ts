@@ -17,6 +17,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getCurrentUser } from '@/lib/auth/getCurrentUser';
 import { encryptToken } from '@/lib/utils/crypto';
 import { invalidateTenantAllCaches } from '@/lib/tenant/manager';
+import { trimCredentialFields } from '@/lib/utils/credentials';
 
 const forbidden = () => NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
@@ -30,6 +31,7 @@ const ALLOWED_FIELDS = [
   'off_hours_enabled', 'off_hours_message',
   'google_review_url', 'review_automation_enabled',
   'wa_phone_number_id', 'wa_business_account_id', 'wa_verify_token',
+  'parent_tenant_id',
 ];
 
 const MASK = '••••••••';
@@ -52,7 +54,7 @@ export async function GET(req: NextRequest) {
         off_hours_enabled, off_hours_message,
         google_review_url, review_automation_enabled,
         wa_phone_number_id, wa_business_account_id, wa_access_token,
-        wa_app_secret, wa_verify_token, is_approved
+        wa_app_secret, wa_verify_token, is_approved, parent_tenant_id
       `)
       .eq('id', tenantId)
       .single();
@@ -78,7 +80,7 @@ export async function GET(req: NextRequest) {
   // ── List all tenants (picker) ──
   const { data: tenants, error } = await supabaseAdmin
     .from('tenants')
-    .select('id, business_name, plan, created_at, is_approved, wa_phone_number_id')
+    .select('id, business_name, plan, created_at, is_approved, wa_phone_number_id, parent_tenant_id')
     .order('created_at', { ascending: false });
 
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -105,6 +107,7 @@ export async function GET(req: NextRequest) {
       is_approved: t.is_approved,
       owner_email: owners[t.id] || '',
       wa_configured: Boolean(t.wa_phone_number_id),
+      parent_tenant_id: t.parent_tenant_id || null,
     })),
   });
 }
@@ -128,14 +131,19 @@ export async function PATCH(req: NextRequest) {
     if (body[key] !== undefined) updates[key] = body[key];
   }
 
+  // Trim stray whitespace from credential IDs — a leading/trailing space gets
+  // URL-encoded to %20 in Meta Graph API calls and silently breaks them.
+  trimCredentialFields(updates);
+
   // Encrypt the access token + app secret exactly like the self-serve settings
   // route: skip if masked (unchanged), null if cleared, encrypt if new.
+  // Trim the plaintext first — a stray space breaks Bearer auth / HMAC too.
   for (const secretField of ['wa_access_token', 'wa_app_secret'] as const) {
     if (body[secretField] === undefined) continue;
     const val = body[secretField];
     if (val === MASK) continue; // unchanged — keep existing ciphertext
     if (val === '' || val === null) { updates[secretField] = null; continue; }
-    updates[secretField] = encryptToken(String(val));
+    updates[secretField] = encryptToken(String(val).trim());
   }
 
   if (Object.keys(updates).length === 0) {
