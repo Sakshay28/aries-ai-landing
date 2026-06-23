@@ -84,12 +84,26 @@ function NodeMenu({ id }: { id: string }) {
   const [open, setOpen] = React.useState(false);
   const [pos, setPos] = React.useState<{ top: number; right: number } | null>(null);
   const btnRef = React.useRef<HTMLButtonElement>(null);
+  const menuRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    let removeListener: (() => void) | null = null;
+    // Defer listener registration so the mousedown that opened the menu
+    // doesn't immediately fire the close handler in the same event cycle.
+    const timer = setTimeout(() => {
+      const handleMouseDown = (e: MouseEvent) => {
+        // Don't close when clicking inside the menu itself.
+        if (menuRef.current?.contains(e.target as Node)) return;
+        setOpen(false);
+      };
+      document.addEventListener("mousedown", handleMouseDown);
+      removeListener = () => document.removeEventListener("mousedown", handleMouseDown);
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      removeListener?.();
+    };
   }, [open]);
 
   const toggle = (e: React.MouseEvent) => {
@@ -105,6 +119,7 @@ function NodeMenu({ id }: { id: string }) {
     open && pos
       ? createPortal(
           <div
+            ref={menuRef}
             className="nodrag nopan"
             onMouseDown={(e) => e.stopPropagation()}
             style={{
