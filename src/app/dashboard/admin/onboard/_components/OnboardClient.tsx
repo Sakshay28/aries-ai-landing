@@ -91,18 +91,29 @@ export function OnboardClient() {
     })();
   }, []);
 
+  // Apply the in-progress parent selection so the sidebar updates immediately
+  // as soon as the user picks a parent — before they hit Save.
+  const effectiveTenants = useMemo(() => {
+    if (!selectedId) return tenants;
+    return tenants.map(t =>
+      t.id === selectedId ? { ...t, parent_tenant_id: parentTenantId || null } : t
+    );
+  }, [tenants, selectedId, parentTenantId]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return tenants;
-    return tenants.filter(
+    if (!q) return effectiveTenants;
+    return effectiveTenants.filter(
       t =>
         (t.business_name || '').toLowerCase().includes(q) ||
         (t.owner_email || '').toLowerCase().includes(q) ||
         t.id.toLowerCase().includes(q)
     );
-  }, [tenants, query]);
+  }, [effectiveTenants, query]);
 
-  // Build ordered list: parents first, then children immediately after their parent.
+  // Build ordered list: parents first, children immediately after their parent.
+  // Tenants with a parent_tenant_id are ONLY shown as sub-entries below their
+  // parent — they never appear as standalone entries in the main list.
   const orderedTenants = useMemo(() => {
     const parents = filtered.filter(t => !t.parent_tenant_id);
     const childrenByParent: Record<string, TenantRow[]> = {};
@@ -119,7 +130,7 @@ export function OnboardClient() {
         result.push({ tenant: c, isChild: true });
       }
     }
-    // Orphaned children (parent filtered out) appended at end
+    // Orphaned children (parent was filtered out by search) shown at end
     for (const t of filtered) {
       if (t.parent_tenant_id && !filtered.find(p => p.id === t.parent_tenant_id)) {
         result.push({ tenant: t, isChild: true });
