@@ -12,10 +12,8 @@ const REQUIRED_SCOPES = [
   'pages_read_engagement',
   'whatsapp_business_management',
   'whatsapp_business_messaging',
-  'instagram_basic',
-  'leads_retrieval',
-  'pages_manage_ads',
-  'pages_manage_metadata',
+  // instagram_basic, leads_retrieval, pages_manage_ads, pages_manage_metadata
+  // require App Review before they can be requested. Not needed for CTWA.
 ];
 
 // Per-tenant credentials take priority over global env vars.
