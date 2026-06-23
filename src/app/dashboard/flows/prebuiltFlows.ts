@@ -148,6 +148,69 @@ export function getPrebuiltFlow(templateId: string, businessType: string): { nod
     return { nodes, edges };
   }
 
+  // ─── GLOBESOME ZANSKAR RAFTING CTWA FLOW ─────────────────────────────────────
+  if (templateId === 'globesome-rafting') {
+    const nodes: AppNode[] = [
+      // 1. Fires when customer clicks the Meta CTWA ad
+      { id: 'gr1',  type: 'ctwa_trigger', position: { x: 400, y: 50   }, data: { label: 'Meta Ad Click', ad_id: '' } },
+
+      // 2. Brief ack before first question
+      { id: 'gr2',  type: 'standard',     position: { x: 400, y: 210  }, data: { label: 'Welcome', content: "Hi {{name}}! 👋 Thanks for your interest in our *6N/7D Zanskar River Rafting Expedition*! 🛶\n\nLet me quickly get a few details so our team can assist you." } },
+
+      // 3. Date selection
+      { id: 'gr3',  type: 'send_buttons', position: { x: 400, y: 390  }, data: { label: 'Which Date?', message: 'Which date are you looking to join? 📅', buttons: [{ id: 'b1', label: '2nd Jul - 8th Jul', value: 'jul_2_8' }, { id: 'b2', label: '23rd Jul - 29th Jul', value: 'jul_23_29' }, { id: 'b3', label: 'Other Dates', value: 'other_date' }] } },
+      { id: 'gr4',  type: 'condition',    position: { x: 400, y: 570  }, data: { label: 'Date Selected', field: 'button_value', operator: '!=', value: 'NEVER_MATCHES' } },
+
+      // 4. Cost confirmation
+      { id: 'gr5',  type: 'send_buttons', position: { x: 400, y: 760  }, data: { label: 'Cost OK?', message: 'The cost of the expedition is *₹69,999 per person* (all inclusive). Is this okay for you?', buttons: [{ id: 'b4', label: "That's not an issue", value: 'cost_ok' }, { id: 'b5', label: 'I need to think', value: 'cost_think' }] } },
+      { id: 'gr6',  type: 'condition',    position: { x: 400, y: 940  }, data: { label: 'Cost Response', field: 'button_value', operator: '!=', value: 'NEVER_MATCHES' } },
+
+      // 5. Group size
+      { id: 'gr7',  type: 'send_buttons', position: { x: 400, y: 1120 }, data: { label: 'How Many People?', message: 'How many people will be joining the expedition? 👥', buttons: [{ id: 'b6', label: 'Just me! (1)', value: 'solo' }, { id: 'b7', label: '2 People', value: 'two' }, { id: 'b8', label: '3+ People', value: 'group' }] } },
+      { id: 'gr8',  type: 'condition',    position: { x: 400, y: 1300 }, data: { label: 'Group Size', field: 'button_value', operator: '!=', value: 'NEVER_MATCHES' } },
+
+      // 6. Flights to Ladakh
+      { id: 'gr9',  type: 'send_buttons', position: { x: 400, y: 1480 }, data: { label: 'Flights Booked?', message: '✈️ Are your flights to Leh/Ladakh already booked?', buttons: [{ id: 'b9', label: 'Yes, booked! ✈️', value: 'flights_yes' }, { id: 'b10', label: 'No, not yet', value: 'flights_no' }] } },
+      { id: 'gr10', type: 'condition',    position: { x: 400, y: 1660 }, data: { label: 'Flights Response', field: 'button_value', operator: '!=', value: 'NEVER_MATCHES' } },
+
+      // 7. Special requirements (free text)
+      { id: 'gr11', type: 'standard',     position: { x: 400, y: 1840 }, data: { label: 'Special Requirements?', content: "Last question! 📝\n\nDo you have any special requirements?\n(Dietary needs, medical conditions, swimming ability, prior rafting experience, etc.)\n\nType your answer below, or reply *None*." } },
+      { id: 'gr12', type: 'intake_form',  position: { x: 400, y: 2020 }, data: { label: 'Collect Requirements', fields: [{ id: 'f1', name: 'Special Requirements', type: 'text', required: false, saveAs: 'special_req', placeholder: 'e.g. Vegetarian, non-swimmer, first time rafting…' }] } },
+
+      // 8. Notify the Globesome team
+      { id: 'gr13', type: 'handoff',      position: { x: 400, y: 2240 }, data: { label: 'Notify Team 🔔', message: "🛶 *New Zanskar Rafting Lead!*\n\nName: {{name}}\nPhone: {{wa_phone}}\nSpecial Requirements: {{special_req}}\n\n_(Check WhatsApp conversation for date, budget, group size & flight details)_" } },
+
+      // 9. Thank you
+      { id: 'gr14', type: 'standard',     position: { x: 400, y: 2440 }, data: { label: 'Thank You 🌟', content: "Amazing! 🌟\n\nWe've got all your details! Our team will reach out to you shortly to confirm your spot on the *6N/7D Zanskar River Rafting Expedition*.\n\n🛶 Get ready for the adventure of a lifetime — the Zanskar awaits! 🏔️" } },
+
+      // 10. End
+      { id: 'gr15', type: 'end',          position: { x: 400, y: 2640 }, data: { label: 'End' } },
+      { id: 'gr16', type: 'end',          position: { x: 780, y: 940  }, data: { label: 'End' } },
+    ];
+
+    const edges: Edge[] = [
+      generateEdge('gr1',  'gr2'),
+      generateEdge('gr2',  'gr3'),
+      generateEdge('gr3',  'gr4'),
+      generateEdge('gr4',  'gr5',  'true'),
+      generateEdge('gr4',  'gr16', 'false'),
+      generateEdge('gr5',  'gr6'),
+      generateEdge('gr6',  'gr7',  'true'),
+      generateEdge('gr6',  'gr16', 'false'),
+      generateEdge('gr7',  'gr8'),
+      generateEdge('gr8',  'gr9',  'true'),
+      generateEdge('gr8',  'gr16', 'false'),
+      generateEdge('gr9',  'gr10'),
+      generateEdge('gr10', 'gr11', 'true'),
+      generateEdge('gr10', 'gr16', 'false'),
+      generateEdge('gr11', 'gr12'),
+      generateEdge('gr12', 'gr13'),
+      generateEdge('gr13', 'gr14'),
+      generateEdge('gr14', 'gr15'),
+    ];
+    return { nodes, edges };
+  }
+
   // ─── DEYOR TRIPS / TRAVEL CTWA LEAD FLOW ─────────────────────────────────────
   if (templateId === 'deyor-ladakh') {
     const nodes: AppNode[] = [
