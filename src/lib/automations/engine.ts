@@ -173,6 +173,7 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
           conversation_id: conversationId || null,
           scheduled_at: scheduledAt,
           status: 'pending',
+          variables: variables ?? null,
         });
       }
 
@@ -254,7 +255,7 @@ export async function processPendingAutomations(): Promise<number> {
       }
 
       console.log(`[AUTOMATION_JOB_PROCESSING] item=${item.id} lead=${lead.phone} automation=${automation.id}`);
-      const result = await sendAutomationMessage(tenant, lead, automation, item.conversation_id);
+      const result = await sendAutomationMessage(tenant, lead, automation, item.conversation_id, item.variables ?? undefined);
 
       await supabaseAdmin
         .from('automation_queue')
