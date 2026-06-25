@@ -69,6 +69,10 @@ export interface Tenant {
   // Supports variables: {{customer_name}} {{customer_phone}} {{reason}} {{message}} {{business_name}}
   // Falls back to the platform default if null.
   escalation_alert_template: string | null;
+  // Custom message sent to staff on WhatsApp when a booking is confirmed.
+  // Supports variables: {{customer_name}} {{customer_phone}} {{guest_count}} {{date}} {{time}} {{table}} {{reservation_id}} {{business_name}} {{special_requests}}
+  // Falls back to the platform default if null.
+  booking_alert_template: string | null;
   escalation_enabled: boolean;
   escalation_keywords: string[];
   escalation_reply: string | null;

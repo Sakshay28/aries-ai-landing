@@ -33,6 +33,7 @@ interface SettingsData {
   escalation_keywords: string[];
   escalation_reply: string;
   escalation_alert_template: string;
+  booking_alert_template: string;
   followup_30min: boolean;
   followup_3hr: boolean;
   followup_24hr: boolean;
@@ -70,6 +71,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   usps: [], core_services: '', industry: 'retail', staff_phone: '', staff_name: '', manager_phone: '',
   escalation_enabled: true, escalation_keywords: [], escalation_reply: '',
   escalation_alert_template: '',
+  booking_alert_template: '',
   followup_30min: true, followup_3hr: true, followup_24hr: true, followup_7day: false,
   escalation_timeout_mins: 5, hot_keywords: [], warm_keywords: [],
   working_hours: {}, off_hours_enabled: false, off_hours_message: '', off_hours_capture_lead: true,
@@ -1138,6 +1140,72 @@ export default function SettingsPage() {
                 <span className="font-semibold text-xs" style={{ color: 'var(--foreground)' }}>How escalation works</span>
               </div>
               When a customer says a trigger keyword or asks for a human, the AI pauses and sends your alert to staff on WhatsApp. After {settings.escalation_timeout_mins || 30} mins the bot resumes automatically.
+            </div>
+          </SectionCard>
+
+          {/* Booking alert message */}
+          <SectionCard title="Booking Alert Message" icon={Bell}>
+            <p className="text-xs -mt-1 mb-4" style={{ color: 'var(--muted-foreground)' }}>
+              This WhatsApp message is sent to your staff number every time a customer confirms a booking. Customize it with booking details.
+            </p>
+            <Field label="Booking Alert Template">
+              <textarea
+                rows={7}
+                value={settings.booking_alert_template || ''}
+                onChange={e => update('booking_alert_template', e.target.value)}
+                placeholder={`🔔 *NEW BOOKING — {{business_name}}*\n\n👤 {{customer_name}}\n📞 {{customer_phone}}\n👥 {{guest_count}}\n📅 {{date}}\n⏰ {{time}}\n🪑 {{table}}\n🆔 {{reservation_id}}`}
+                className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none transition-colors"
+                style={{
+                  background: 'var(--input)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--foreground)',
+                  fontFamily: 'inherit',
+                  lineHeight: '1.6',
+                }}
+              />
+            </Field>
+            {/* Variable chips */}
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {[
+                { tag: '{{customer_name}}',   label: 'Customer Name' },
+                { tag: '{{customer_phone}}',  label: 'Phone' },
+                { tag: '{{guest_count}}',     label: 'Guests' },
+                { tag: '{{date}}',            label: 'Date' },
+                { tag: '{{time}}',            label: 'Time' },
+                { tag: '{{table}}',           label: 'Table' },
+                { tag: '{{reservation_id}}',  label: 'Reservation ID' },
+                { tag: '{{business_name}}',   label: 'Business Name' },
+                { tag: '{{special_requests}}',label: 'Special Requests' },
+              ].map(({ tag, label }) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => update('booking_alert_template', (settings.booking_alert_template || '') + tag)}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono transition-colors cursor-pointer"
+                  style={{
+                    background: 'rgba(6,182,212,0.08)',
+                    border: '1px solid rgba(6,182,212,0.25)',
+                    color: 'var(--foreground)',
+                  }}
+                  title={`Insert ${label}`}
+                >
+                  <span style={{ color: 'rgb(6,182,212)' }}>+</span> {tag}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
+              Click a variable to insert it. Leave blank to use the platform default.
+            </p>
+
+            <div
+              className="rounded-xl p-4 text-sm mt-4"
+              style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.2)', color: 'var(--muted-foreground)' }}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <MessageSquare className="w-3.5 h-3.5 text-cyan-500" />
+                <span className="font-semibold text-xs" style={{ color: 'var(--foreground)' }}>How booking alerts work</span>
+              </div>
+              Every time the AI confirms a table booking, this message is instantly sent to your staff WhatsApp number so they know who is coming, when, and how many guests.
             </div>
           </SectionCard>
 

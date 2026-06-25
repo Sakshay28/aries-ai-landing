@@ -2194,17 +2194,31 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         const businessName = (tenant as any).business_name || 'us';
 
         // 1. Staff/manager alert — fires for EVERY confirmed booking.
-        const staffAlert =
-          `🔔 *NEW BOOKING*\n\n` +
-          `👤 ${customerName}\n` +
-          `📞 ${customerPhone}\n` +
-          `👥 ${guestLabel}\n` +
-          `📅 ${prettyDate}\n` +
-          `⏰ ${prettyTime}\n` +
-          (assignedTableName ? `🪑 Table ${assignedTableName}\n` : '') +
-          (contextObj.specialRequests ? `📝 ${String(contextObj.specialRequests)}\n` : '') +
-          (isPrepaid ? `💳 Payment: pending (₹${feeRupees} fee link sent)\n` : '') +
-          `🆔 ${reservationId}`;
+        const DEFAULT_BOOKING_ALERT_TEMPLATE =
+          `🔔 *NEW BOOKING — {{business_name}}*\n\n` +
+          `👤 {{customer_name}}\n` +
+          `📞 {{customer_phone}}\n` +
+          `👥 {{guest_count}}\n` +
+          `📅 {{date}}\n` +
+          `⏰ {{time}}\n` +
+          `{{table}}` +
+          `{{special_requests}}` +
+          `🆔 {{reservation_id}}`;
+
+        const bookingAlertVars: Record<string, string> = {
+          customer_name:    customerName || 'Guest',
+          customer_phone:   customerPhone,
+          guest_count:      guestLabel,
+          date:             prettyDate,
+          time:             prettyTime,
+          table:            assignedTableName ? `🪑 Table ${assignedTableName}\n` : '',
+          special_requests: contextObj.specialRequests ? `📝 ${String(contextObj.specialRequests)}\n` : '',
+          reservation_id:   reservationId,
+          business_name:    (tenant as any).business_name || 'us',
+        };
+
+        const rawBookingTemplate = (tenant as any).booking_alert_template?.trim() || DEFAULT_BOOKING_ALERT_TEMPLATE;
+        const staffAlert = rawBookingTemplate.replace(/\{\{(\w+)\}\}/g, (_: string, key: string) => bookingAlertVars[key] ?? '');
         sendStaffAlert(tenant, staffAlert)
           .then(r => console.log(`   📨 Staff booking alert sent (${r.filter(x => x.ok).length}/${r.length} delivered)`))
           .catch(e => console.error('   ❌ Staff booking alert failed:', (e as Error).message));
