@@ -29,6 +29,7 @@ interface SettingsData {
   staff_phone: string;
   staff_name: string;
   manager_phone: string;
+  staff_email: string;
   escalation_enabled: boolean;
   escalation_keywords: string[];
   escalation_reply: string;
@@ -68,7 +69,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   business_name: '', business_type: '', business_phone: '',
   business_address: '', business_website: '', business_email: '',
   bot_name: '', bot_personality: 'sales_pro', welcome_message: '', welcome_offer: '',
-  usps: [], core_services: '', industry: 'retail', staff_phone: '', staff_name: '', manager_phone: '',
+  usps: [], core_services: '', industry: 'retail', staff_phone: '', staff_name: '', manager_phone: '', staff_email: '',
   escalation_enabled: true, escalation_keywords: [], escalation_reply: '',
   escalation_alert_template: '',
   booking_alert_template: '',
@@ -1032,6 +1033,14 @@ export default function SettingsPage() {
               </Field>
               <Field label="Manager Phone (Escalations)">
                 <PhoneInput value={settings.manager_phone || ''} onChange={v => update('manager_phone', v)} />
+              </Field>
+              <Field label="Staff Alert Email">
+                <Input
+                  type="email"
+                  value={settings.staff_email || ''}
+                  onChange={v => update('staff_email', v)}
+                  placeholder="staff@yourbusiness.com"
+                />
               </Field>
               <Field label="Escalation Timeout (mins)">
                 <Input

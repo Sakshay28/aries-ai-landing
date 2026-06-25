@@ -28,6 +28,7 @@ import { randomUUID } from 'crypto';
 import { triggerCapiEvent } from '@/lib/integrations/capi-trigger';
 import { processCtwaLead, getCampaignContextForAI } from '@/lib/meta-ads/attribution';
 import { notifyAdmin } from '@/lib/alerts/admin';
+import { sendBookingAlertEmail } from '@/lib/alerts/bookingEmail';
 import { isCoexistenceChange, handleCoexistenceWebhook } from '@/lib/webhook/coexistence';
 import { toSignedMediaUrl } from '@/lib/utils/storage';
 import { triggerAutomations, cancelLeadAutomations, processPendingAutomations } from '@/lib/automations/engine';
@@ -2222,6 +2223,23 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         sendStaffAlert(tenant, staffAlert)
           .then(r => console.log(`   📨 Staff booking alert sent (${r.filter(x => x.ok).length}/${r.length} delivered)`))
           .catch(e => console.error('   ❌ Staff booking alert failed:', (e as Error).message));
+
+        // Email alert — reliable fallback (no Meta 24-hour window restriction)
+        const staffEmail = (tenant as any).staff_email?.trim();
+        if (staffEmail) {
+          sendBookingAlertEmail({
+            staffEmail,
+            businessName:    (tenant as any).business_name || 'Your Business',
+            customerName:    customerName || 'Guest',
+            customerPhone,
+            guestCount:      guestLabel,
+            date:            prettyDate,
+            time:            prettyTime,
+            tableName:       assignedTableName,
+            specialRequests: contextObj.specialRequests ? String(contextObj.specialRequests) : null,
+            reservationId,
+          }).catch(e => console.error('   ❌ Booking alert email failed:', (e as Error).message));
+        }
 
         // 2. Customer confirmation card with the reservation ID. Prepaid bookings
         //    already receive the payment message with the ID, so only send this for
