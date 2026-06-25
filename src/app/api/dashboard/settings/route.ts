@@ -31,7 +31,7 @@ export async function GET() {
       outbound_webhook_url, system_prompt`;
   // Optional columns added by later migrations. Select them when present;
   // fall back to BASE_COLS if the migration hasn't run yet.
-  const OPT_COLS = `wa_mode, coexistence_auto_pause, coexistence_connected_at, welcome_image_url, bot_language_mode, response_length, prohibited_topics, always_mention_rules, competitors, competitor_deflection_reply`;
+  const OPT_COLS = `wa_mode, coexistence_auto_pause, coexistence_connected_at, welcome_image_url, bot_language_mode, response_length, prohibited_topics, always_mention_rules, competitors, competitor_deflection_reply, booking_alert_template`;
 
   let { data, error } = await supabaseAdmin
     .from('tenants')
@@ -145,7 +145,7 @@ export async function PATCH(req: NextRequest) {
     'business_name', 'business_type', 'business_phone', 'business_address',
     'business_website', 'business_email', 'bot_name', 'bot_personality',
     'welcome_message', 'welcome_image_url', 'welcome_offer', 'usps', 'working_hours',
-    'staff_phone', 'staff_name', 'manager_phone', 'escalation_alert_template',
+    'staff_phone', 'staff_name', 'manager_phone', 'escalation_alert_template', 'booking_alert_template',
     'escalation_enabled', 'escalation_keywords', 'escalation_reply',
     'followup_30min', 'followup_3hr', 'followup_24hr', 'followup_7day',
     'escalation_timeout_mins', 'hot_keywords', 'warm_keywords',
