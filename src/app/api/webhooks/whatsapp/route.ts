@@ -1990,6 +1990,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       }
 
       let bookingWritten = false; // true only when the DB row was actually inserted
+      let assignedTableName: string | null = null; // captured for the staff alert
 
       if (!slotId || !chosenSlot) {
         console.error('❌ AI Auto-Book: could not resolve a slot for this tenant');
@@ -2126,6 +2127,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
             });
             const assignInfo = tableResult as { assigned: boolean; table_name?: string } | null;
             if (assignInfo?.assigned) {
+              assignedTableName = assignInfo.table_name ?? null;
               console.log(`   🪑 Auto-assigned table ${assignInfo.table_name} for ${guestCount} guests`);
             } else {
               console.log(`   ⚠️ No available table for ${guestCount} guests — booking saved without table assignment`);
@@ -2169,6 +2171,72 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           lead: { name: customerName, phone: customerPhone },
           details: { reservation_id: reservationId, party_size: String(guestCount), date: bookingDate, time: slotTime },
         }).catch(() => {});
+      }
+
+      // ── Notify staff + send the customer a clean confirmation (every booking) ──
+      if (bookingWritten) {
+        // Human-friendly date ("Sat, 28 Jun 2026") and 12-hour time ("7:30 PM")
+        const prettyDate = (() => {
+          const d = new Date(`${bookingDate}T00:00:00`);
+          return isNaN(d.getTime())
+            ? bookingDate
+            : d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+        })();
+        const prettyTime = (() => {
+          const [h, m] = slotTime.split(':');
+          const hr = parseInt(h, 10);
+          if (isNaN(hr)) return slotTime.slice(0, 5);
+          const ampm = hr >= 12 ? 'PM' : 'AM';
+          const hr12 = hr % 12 === 0 ? 12 : hr % 12;
+          return `${hr12}:${m} ${ampm}`;
+        })();
+        const guestLabel = `${guestCount} guest${guestCount !== 1 ? 's' : ''}`;
+        const businessName = (tenant as any).business_name || 'us';
+
+        // 1. Staff/manager alert — fires for EVERY confirmed booking.
+        const staffAlert =
+          `🔔 *NEW BOOKING*\n\n` +
+          `👤 ${customerName}\n` +
+          `📞 ${customerPhone}\n` +
+          `👥 ${guestLabel}\n` +
+          `📅 ${prettyDate}\n` +
+          `⏰ ${prettyTime}\n` +
+          (assignedTableName ? `🪑 Table ${assignedTableName}\n` : '') +
+          (contextObj.specialRequests ? `📝 ${String(contextObj.specialRequests)}\n` : '') +
+          (isPrepaid ? `💳 Payment: pending (₹${feeRupees} fee link sent)\n` : '') +
+          `🆔 ${reservationId}`;
+        sendStaffAlert(tenant, staffAlert)
+          .then(r => console.log(`   📨 Staff booking alert sent (${r.filter(x => x.ok).length}/${r.length} delivered)`))
+          .catch(e => console.error('   ❌ Staff booking alert failed:', (e as Error).message));
+
+        // 2. Customer confirmation card with the reservation ID. Prepaid bookings
+        //    already receive the payment message with the ID, so only send this for
+        //    free bookings to avoid duplicate messages.
+        if (!isPrepaid && decryptedAccessToken && tenant.wa_phone_number_id) {
+          const confirmCard =
+            `✅ *Booking Confirmed!*\n\n` +
+            `Thank you ${customerName}, we can't wait to host you at ${businessName}! 🎉\n\n` +
+            `👥 ${guestLabel}\n` +
+            `📅 ${prettyDate}\n` +
+            `⏰ ${prettyTime}\n` +
+            (assignedTableName ? `🪑 Table ${assignedTableName}\n` : '') +
+            `🆔 Reservation ID: ${reservationId}\n\n` +
+            `See you soon! ✨`;
+          sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, customerPhone, confirmCard)
+            .then(() =>
+              supabaseAdmin.from('messages').insert({
+                tenant_id:       tenant.id,
+                conversation_id: conversation.id,
+                direction:       'outbound',
+                content:         confirmCard,
+                message_type:    'text',
+                channel:         'whatsapp',
+                status:          'sent',
+                ai_generated:    false,
+              }).then(() => {}, () => {})
+            )
+            .catch(e => console.error('   ❌ Customer confirmation card failed:', (e as Error).message));
+        }
       }
 
       if (bookingWritten && lead) {

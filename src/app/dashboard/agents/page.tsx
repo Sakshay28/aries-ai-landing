@@ -166,6 +166,7 @@ const STARTER_TEMPLATES = [
 // ────────────────────────────────────────────────────────────
 const PERSONA_HELPERS: Record<string, string> = {
   'Premium Fine Dining': 'Elegant, polite, formal tone optimized for reservations and premium dining.',
+  'Lounge & Club': 'Warm, emoji-rich, energetic host vibe — celebratory, respectful, and genuinely exciting for guests. Best for clubs, lounges, and bars.',
   'Fast Casual': 'High-energy, fast, friendly voice focusing on quick dining and takeaways.',
   'Luxury Hospitality': 'Attentive, concierge-style premium service for high-end lounges and VIPs.',
   'Cafe Friendly': 'Warm, casual, conversational, and approachable neighborhood barista style.',
@@ -1123,6 +1124,7 @@ export default function AISettingsPage() {
                         className="w-full h-10 px-3 rounded-xl text-sm border border-border bg-background outline-none transition-all focus:border-foreground/30 text-foreground"
                       >
                         <option value="Premium Fine Dining">Premium Fine Dining</option>
+                        <option value="Lounge &amp; Club">🎉 Lounge &amp; Club</option>
                         <option value="Fast Casual">Fast Casual</option>
                         <option value="Luxury Hospitality">Luxury Hospitality</option>
                         <option value="Cafe Friendly">Cafe Friendly</option>
