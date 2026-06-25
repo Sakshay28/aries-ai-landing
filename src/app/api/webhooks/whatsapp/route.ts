@@ -407,7 +407,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   if (existingLead) {
     lead = existingLead;
     const updateData: Record<string, any> = { last_message_at: new Date().toISOString() };
-    if (isFromAd && !existingLead.source) updateData.source = leadSource;
+    if (isFromAd && !existingLead.source_detail) updateData.source_detail = leadSource;
     // Awaited — fire-and-forget dies on serverless freeze, leaving CRM timestamps stale
     await supabaseAdmin.from('leads').update(updateData).eq('id', existingLead.id);
     // Cancel any pending follow-ups — they will be re-scheduled below (either in
@@ -500,7 +500,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           channel: 'whatsapp',
           lead_status: 'new',
           lead_score: isFromAd ? 30 : 10,
-          source: leadSource,
+          source_detail: leadSource,
           first_message_at: new Date().toISOString(),
           last_message_at: new Date().toISOString(),
           ...(assignedTo && { assigned_to: assignedTo }),
@@ -689,6 +689,15 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     console.error('❌ Meta Webhook: failed to resolve conversation');
     return;
   }
+
+  // Self-heal: if conversation.lead_id is null but we now have a lead (can happen
+  // when leads were previously unlinked due to the source_detail column bug), patch it.
+  if (lead && !conversation.lead_id) {
+    supabaseAdmin.from('conversations').update({ lead_id: lead.id }).eq('id', conversation.id).then(() => {
+      conversation!.lead_id = lead!.id;
+    }).catch(() => {});
+  }
+
   perf('lead+conv_resolved');
 
   // 6. Broadcast reply tracking (non-blocking)
