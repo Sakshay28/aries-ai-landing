@@ -905,6 +905,23 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     return;
   }
 
+  // Staff/manager phone detection — skip customer AI, send a meaningful staff reply.
+  // This also opens the Meta 24-hour window so booking alerts can be delivered to them.
+  const normStaff   = (tenant.staff_phone   || '').replace(/\D/g, '');
+  const normManager = (tenant.manager_phone || '').replace(/\D/g, '');
+  if (cleanPhone && (cleanPhone === normStaff || cleanPhone === normManager)) {
+    if (decryptedAccessToken && tenant.wa_phone_number_id) {
+      const businessName = (tenant as any).business_name || 'your business';
+      const staffReply =
+        `👋 Hi! You're connected to the *${businessName}* staff portal.\n\n` +
+        `🔔 *Booking alerts are active* — you'll receive a WhatsApp message here every time a customer confirms a reservation.\n\n` +
+        `You're all set! No action needed. 🎉`;
+      sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, staffReply)
+        .catch(e => console.error('[staff-detect] reply failed:', (e as Error).message));
+    }
+    return;
+  }
+
   // bot_paused = hard stop (human agent has taken over — never override)
   if (conversation.bot_paused) {
     console.log(`🔇 Meta: bot paused (human takeover) for conversation ${conversation.id}, skipping AI`);
