@@ -6,13 +6,13 @@ import {
   ArrowLeft, Smartphone,
 } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from "framer-motion";
-import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { Message } from "@/lib/types";
+import type { Message, InteractiveButtonMeta, InteractiveListMeta, TemplateMeta, InteractiveMetadata } from "@/lib/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { SharedConversationMeta } from "./page";
 import AIAssistPanel from "./AIAssistPanel";
@@ -730,11 +730,32 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         ? (() => { const d = rawPhone.replace(/\D/g, ''); const loc = d.startsWith('91') && d.length === 12 ? d.slice(2) : d; return loc.charAt(0) || '?'; })()
         : '?';
 
+  // Link inbound button replies to their parent outbound interactive message
+  const enrichedMessages = useMemo(() => {
+    return messages.map(m => {
+      if (m.direction !== 'outbound' || !m.wa_message_id || !m.metadata) return m;
+      if (!m.metadata.interactive_type) return m;
+      const reply = messages.find(r =>
+        r.direction === 'inbound' &&
+        r.metadata &&
+        'reply_to_wa_message_id' in r.metadata &&
+        (r.metadata as { reply_to_wa_message_id?: string }).reply_to_wa_message_id === m.wa_message_id &&
+        'selected_button_id' in r.metadata
+      );
+      if (reply?.metadata && 'selected_button_id' in reply.metadata) {
+        return { ...m, metadata: { ...m.metadata, _selectedId: (reply.metadata as { selected_button_id?: string }).selected_button_id } as InteractiveMetadata };
+      }
+      return m;
+    });
+  }, [messages]);
+
+  const [payloadInspectMsgId, setPayloadInspectMsgId] = useState<string | null>(null);
+
   // Search-filtered messages
   const filteredFeed = buildFeed(
     searchQuery.trim()
-      ? messages.filter(m => m.content?.toLowerCase().includes(searchQuery.toLowerCase()))
-      : messages
+      ? enrichedMessages.filter(m => m.content?.toLowerCase().includes(searchQuery.toLowerCase()))
+      : enrichedMessages
   );
 
   const copyMessage = (msgId: string, text: string) => {
@@ -1234,6 +1255,20 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                                     <span>{msg.media_url ? 'Copy link' : 'Copy text'}</span>
                                   </button>
 
+                                  {(msg.metadata || msg.raw_webhook) && (
+                                    <button
+                                      onClick={() => {
+                                        setPayloadInspectMsgId(payloadInspectMsgId === msg.id ? null : msg.id);
+                                        setActiveMessageMenuId(null);
+                                      }}
+                                      className="group flex items-center gap-3 px-3 py-2 rounded-xl text-left w-full hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors cursor-pointer text-foreground/90 font-semibold text-[13px]"
+                                      style={{ minHeight: '38px' }}
+                                    >
+                                      <HelpCircle className="w-4 h-4 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
+                                      <span>View Payload</span>
+                                    </button>
+                                  )}
+
                                   {/* Delete divider */}
                                   <div className="h-px bg-black/[0.06] dark:bg-white/[0.06] mx-2 my-0.5" />
 
@@ -1430,71 +1465,186 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                           )}
                         >
                           {replyPreviewCard}
+
+                          {/* ── Header (text / image / video / document) ── */}
+                          {msg.metadata && 'header' in msg.metadata && msg.metadata.header && (
+                            typeof msg.metadata.header === 'string' ? (
+                              <p className="text-[13px] font-semibold mb-1 text-[#111B21] dark:text-[#E9EDEF]">{msg.metadata.header}</p>
+                            ) : msg.metadata.header.type === 'image' && msg.metadata.header.url ? (
+                              <img src={msg.metadata.header.url} alt="" className="w-full rounded-md mb-1.5 max-h-48 object-cover" loading="lazy" />
+                            ) : msg.metadata.header.type === 'video' && msg.metadata.header.url ? (
+                              <video src={msg.metadata.header.url} controls className="w-full rounded-md mb-1.5 max-h-48" preload="metadata" />
+                            ) : msg.metadata.header.type === 'document' && msg.metadata.header.url ? (
+                              <a href={msg.metadata.header.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-2 mb-1.5 rounded-md bg-black/[0.03] dark:bg-white/[0.05] text-[12px] text-[#00A884] hover:underline">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                Document
+                              </a>
+                            ) : msg.metadata.header.text ? (
+                              <p className="text-[13px] font-semibold mb-1 text-[#111B21] dark:text-[#E9EDEF]">{msg.metadata.header.text}</p>
+                            ) : null
+                          )}
+
+                          {/* ── Message body ── */}
                           {/^\[follow_up_template:.+\]$/i.test(msg.content || '') ? (
                             <p className="whitespace-pre-wrap break-words italic opacity-80">Follow-up reminder sent</p>
                           ) : (msg.content || '').startsWith('[unsupported]') ? (
                             <p className="italic text-[12.5px] flex items-center gap-1.5 text-amber-600 dark:text-amber-400 opacity-90">
-                              <span>⚠️</span>
+                              <span className="flex-shrink-0">&#x26A0;&#xFE0F;</span>
                               <span>
                                 {(() => {
                                   const reason = (msg.content || '').slice('[unsupported]'.length).replace(/^[:\s]+/, '').trim();
                                   return reason
                                     ? `Unreadable message — ${reason}`
-                                    : "Unreadable message (WhatsApp couldn't deliver its contents)";
+                                    : "Unreadable message (WhatsApp couldn’t deliver its contents)";
                                 })()}
                               </span>
                             </p>
                           ) : /^\[[a-z_]+\]$/i.test(msg.content || '') ? (
                             <p className="italic text-[12.5px] flex items-center gap-1.5 opacity-60">
-                              <span>🚫</span>
+                              <span className="flex-shrink-0">&#x1F6AB;</span>
                               <span>
                                 {msg.content === '[sticker]' ? 'Sticker' :
-                                 `${msg.content.slice(1, -1)} message`}
+                                 `${(msg.content ?? '').slice(1, -1)} message`}
                               </span>
                             </p>
+                          ) : msg.message_type === 'template' && msg.metadata?.interactive_type === 'template' ? (
+                            <div>
+                              <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                              <div className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] text-[#667781] dark:text-[#aebac1] bg-black/[0.04] dark:bg-white/[0.06] rounded-md px-2 py-1">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                                Template: {(msg.metadata as TemplateMeta).template_name}
+                              </div>
+                            </div>
+                          ) : msg.metadata?.interactive_type === 'flow' ? (
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1">
+                                <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                                <div className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] rounded-md px-2 py-1 border border-black/[0.06] dark:border-white/[0.06]">
+                                  {(msg.metadata as { flow_status?: string }).flow_status === 'completed' ? (
+                                    <span className="text-[#00A884] flex items-center gap-1"><Check className="w-3 h-3" /> Flow Completed</span>
+                                  ) : (
+                                    <span className="text-[#667781] dark:text-[#aebac1] flex items-center gap-1">
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 6v6l4 2"/></svg>
+                                      Flow: {(msg.metadata as { flow_name?: string }).flow_name || 'Active'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
                           ) : (
                             <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                           )}
 
-                          {/* ── Interactive buttons ── */}
-                          {msg.metadata?.interactive_type === 'button' && msg.metadata.buttons && msg.metadata.buttons.length > 0 && (
-                            <div className="mt-2 flex flex-col gap-1.5 border-t border-black/5 dark:border-white/10 pt-2">
-                              {msg.metadata.buttons.map((btn: { id: string; title: string }) => (
-                                <div
-                                  key={btn.id}
-                                  className="text-center py-1.5 px-3 text-[13px] font-medium text-[#00A884] dark:text-[#00A884] border border-[#00A884]/30 dark:border-[#00A884]/20 rounded-lg bg-[#00A884]/5 dark:bg-[#00A884]/10"
-                                >
-                                  {btn.title}
-                                </div>
-                              ))}
+                          {/* ── Footer ── */}
+                          {msg.metadata && 'footer' in msg.metadata && typeof (msg.metadata as { footer?: string }).footer === 'string' && (msg.metadata as { footer?: string }).footer && (
+                            <p className="text-[11px] text-[#667781] dark:text-[#aebac1] mt-1">{(msg.metadata as { footer?: string }).footer}</p>
+                          )}
+
+                          {/* ── Interactive reply buttons (with selected state) ── */}
+                          {msg.metadata?.interactive_type === 'button' && (msg.metadata as InteractiveButtonMeta).buttons.length > 0 && (
+                            <div className="mt-2 flex flex-col gap-1 border-t border-black/[0.06] dark:border-white/[0.06] pt-2">
+                              {(msg.metadata as InteractiveButtonMeta).buttons.map(btn => {
+                                const selectedId = (msg.metadata as InteractiveButtonMeta)._selectedId;
+                                const isSelected = selectedId === btn.id;
+                                const hasSelection = !!selectedId;
+                                return (
+                                  <div
+                                    key={btn.id}
+                                    className={cn(
+                                      "text-center py-[7px] px-3 text-[13.5px] font-medium rounded-lg transition-colors",
+                                      isSelected
+                                        ? "text-white bg-[#00A884]"
+                                        : hasSelection
+                                          ? "text-[#00A884]/50 dark:text-[#00A884]/40 border border-[#00A884]/15 dark:border-[#00A884]/10 bg-transparent"
+                                          : "text-[#00A884] border border-[#00A884]/25 dark:border-[#00A884]/20 bg-[#00A884]/[0.04] dark:bg-[#00A884]/[0.08]"
+                                    )}
+                                  >
+                                    {isSelected && <span className="mr-1">&#x2713;</span>}
+                                    {btn.title}
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
 
-                          {/* ── Interactive list ── */}
-                          {msg.metadata?.interactive_type === 'list' && msg.metadata.sections && (
-                            <div className="mt-2 border-t border-black/5 dark:border-white/10 pt-2">
-                              <div className="text-center py-1.5 px-3 text-[13px] font-medium text-[#00A884] dark:text-[#00A884] border border-[#00A884]/30 dark:border-[#00A884]/20 rounded-lg bg-[#00A884]/5 dark:bg-[#00A884]/10 flex items-center justify-center gap-1.5">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-                                {msg.metadata.list_button || 'View options'}
+                          {/* ── Interactive list (with selected state) ── */}
+                          {msg.metadata?.interactive_type === 'list' && (
+                            <div className="mt-2 border-t border-black/[0.06] dark:border-white/[0.06] pt-2">
+                              <div className="text-center py-[7px] px-3 text-[13.5px] font-medium text-[#00A884] border border-[#00A884]/25 dark:border-[#00A884]/20 rounded-lg bg-[#00A884]/[0.04] dark:bg-[#00A884]/[0.08] flex items-center justify-center gap-1.5 cursor-default">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                                {(msg.metadata as InteractiveListMeta).list_button || 'View options'}
                               </div>
-                              {msg.metadata.sections.map((section: { title?: string; rows: Array<{ id: string; title: string; description?: string }> }, si: number) => (
-                                <div key={si} className="mt-1.5">
-                                  {section.title && <p className="text-[11px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#aebac1] mb-1">{section.title}</p>}
-                                  {section.rows.map((row: { id: string; title: string; description?: string }) => (
-                                    <div key={row.id} className="py-1 px-2 text-[12.5px] text-[#111B21] dark:text-[#E9EDEF] border-b border-black/5 dark:border-white/5 last:border-0">
-                                      <span className="font-medium">{row.title}</span>
-                                      {row.description && <span className="ml-1 text-[#667781] dark:text-[#aebac1]">— {row.description}</span>}
-                                    </div>
-                                  ))}
+                              <div className="mt-1.5 rounded-lg border border-black/[0.06] dark:border-white/[0.06] overflow-hidden">
+                                {(msg.metadata as InteractiveListMeta).sections.map((section, si) => (
+                                  <div key={si}>
+                                    {section.title && (
+                                      <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#aebac1] bg-black/[0.02] dark:bg-white/[0.03]">
+                                        {section.title}
+                                      </div>
+                                    )}
+                                    {section.rows.map(row => {
+                                      const isRowSelected = (msg.metadata as InteractiveListMeta)._selectedId === row.id;
+                                      return (
+                                        <div
+                                          key={row.id}
+                                          className={cn(
+                                            "px-3 py-2 text-[13px] border-b border-black/[0.04] dark:border-white/[0.04] last:border-0",
+                                            isRowSelected && "bg-[#00A884]/[0.08] dark:bg-[#00A884]/[0.12]"
+                                          )}
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            {isRowSelected && <span className="text-[#00A884] text-[12px] flex-shrink-0">&#x2713;</span>}
+                                            <span className="font-medium text-[#111B21] dark:text-[#E9EDEF]">{row.title}</span>
+                                          </div>
+                                          {row.description && (
+                                            <p className={cn("text-[11.5px] text-[#667781] dark:text-[#aebac1] mt-0.5", isRowSelected && "ml-5")}>{row.description}</p>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* ── Template buttons (quick_reply, url, phone, copy_code, otp, flow) ── */}
+                          {msg.metadata?.interactive_type === 'template' && (msg.metadata as TemplateMeta).buttons && (msg.metadata as TemplateMeta).buttons!.length > 0 && (
+                            <div className="mt-2 flex flex-col gap-1 border-t border-black/[0.06] dark:border-white/[0.06] pt-2">
+                              {(msg.metadata as TemplateMeta).buttons!.map((btn, i) => (
+                                <div
+                                  key={i}
+                                  className="text-center py-[7px] px-3 text-[13px] font-medium text-[#00A884] border border-[#00A884]/25 dark:border-[#00A884]/20 rounded-lg bg-[#00A884]/[0.04] dark:bg-[#00A884]/[0.08] flex items-center justify-center gap-1.5"
+                                >
+                                  {btn.type === 'url' && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>}
+                                  {btn.type === 'phone_number' && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>}
+                                  {btn.type === 'quick_reply' && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>}
+                                  {btn.type === 'copy_code' && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>}
+                                  {btn.type === 'otp' && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>}
+                                  {btn.type === 'flow' && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 6v6l4 2"/></svg>}
+                                  {btn.text}
                                 </div>
                               ))}
                             </div>
                           )}
 
                           {/* ── Inbound: show which button was selected ── */}
-                          {isInbound && msg.metadata?.selected_button_id && (
-                            <div className="mt-1 text-[11px] text-[#00A884] dark:text-[#00A884] flex items-center gap-1">
-                              <Check className="w-3 h-3" /> Selected: {msg.metadata.selected_button_id}
+                          {isInbound && msg.metadata && 'selected_button_id' in msg.metadata && (msg.metadata as { selected_button_id?: string }).selected_button_id && (
+                            <div className="mt-1 text-[11px] text-[#00A884] flex items-center gap-1 opacity-80">
+                              <Check className="w-3 h-3" /> Button reply
+                            </div>
+                          )}
+
+                          {/* ── Raw payload inspector (toggled from context menu) ── */}
+                          {payloadInspectMsgId === msg.id && (msg.metadata || msg.raw_webhook) && (
+                            <div className="mt-2 border-t border-black/[0.06] dark:border-white/[0.06] pt-2">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[11px] font-semibold text-[#667781] dark:text-[#aebac1] uppercase tracking-wide">Payload</span>
+                                <button onClick={() => setPayloadInspectMsgId(null)} className="text-[#667781] hover:text-[#111B21] dark:hover:text-[#E9EDEF] transition-colors"><X className="w-3.5 h-3.5" /></button>
+                              </div>
+                              <pre className="text-[10.5px] leading-relaxed bg-black/[0.03] dark:bg-white/[0.04] rounded-md p-2 overflow-x-auto max-h-48 text-[#111B21] dark:text-[#E9EDEF] whitespace-pre-wrap break-all font-mono">
+                                {JSON.stringify(msg.raw_webhook || msg.metadata, null, 2)}
+                              </pre>
                             </div>
                           )}
 

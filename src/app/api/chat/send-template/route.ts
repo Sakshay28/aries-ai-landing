@@ -96,17 +96,24 @@ export async function POST(req: NextRequest) {
     // 5. Optionally log message in Database under the active conversation (for Live Chat UI)
     if (conversationId) {
       try {
-        const previewText = `[Template: ${templateName}] Variables: ${mappedVariables.join(', ')}`;
+        const previewText = mappedVariables.length > 0
+          ? `[Template: ${templateName}] ${mappedVariables.join(', ')}`
+          : `[Template: ${templateName}]`;
         await supabaseAdmin.from('messages').insert({
           tenant_id: tenantId,
           conversation_id: conversationId,
           direction: 'outbound',
           content: previewText,
-          message_type: 'text',
+          message_type: 'template' as string,
           channel: 'whatsapp',
           status: 'sent',
           ai_generated: false,
           wa_message_id: waResult.messageId,
+          metadata: {
+            interactive_type: 'template',
+            template_name: templateName,
+            ...(headerImageUrl ? { header: { type: 'image', url: headerImageUrl } } : {}),
+          },
         });
 
         // Update conversation timestamp

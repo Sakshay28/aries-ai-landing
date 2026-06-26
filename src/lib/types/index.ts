@@ -240,18 +240,59 @@ export interface Message {
   sent_via?: string | null;
   // True for messages backfilled by the coexistence `history` webhook.
   is_historical?: boolean | null;
-  // Interactive payload: buttons, list rows, header, footer stored as JSONB
-  metadata?: {
-    interactive_type?: 'button' | 'list' | 'cta_url' | 'flow';
-    buttons?: Array<{ id: string; title: string }>;
-    list_button?: string;
-    sections?: Array<{ title?: string; rows: Array<{ id: string; title: string; description?: string }> }>;
-    header?: string;
-    footer?: string;
-    selected_button_id?: string;
-    selected_row_id?: string;
-  } | null;
+  metadata?: InteractiveMetadata | null;
+  raw_webhook?: Record<string, unknown> | null;
 }
+
+// ── Interactive metadata (discriminated union) ──
+export interface InteractiveButton { id: string; title: string }
+export interface InteractiveListRow { id: string; title: string; description?: string }
+export interface InteractiveListSection { title?: string; rows: InteractiveListRow[] }
+
+export interface InteractiveButtonMeta {
+  interactive_type: 'button';
+  buttons: InteractiveButton[];
+  header?: string | { type: 'text' | 'image' | 'video' | 'document'; text?: string; url?: string };
+  footer?: string;
+  _selectedId?: string;
+}
+
+export interface InteractiveListMeta {
+  interactive_type: 'list';
+  list_button: string;
+  sections: InteractiveListSection[];
+  header?: string | { type: 'text' | 'image' | 'video' | 'document'; text?: string; url?: string };
+  footer?: string;
+  _selectedId?: string;
+}
+
+export interface TemplateMeta {
+  interactive_type: 'template';
+  template_name: string;
+  buttons?: Array<{ type: 'quick_reply' | 'url' | 'phone_number' | 'copy_code' | 'otp' | 'flow'; text: string; url?: string; phone_number?: string }>;
+  header?: { type: 'text' | 'image' | 'video' | 'document'; text?: string; url?: string };
+  footer?: string;
+}
+
+export interface FlowMeta {
+  interactive_type: 'flow';
+  flow_name?: string;
+  flow_status?: 'sent' | 'completed' | 'expired';
+}
+
+export interface InboundReplyMeta {
+  interactive_type?: undefined;
+  selected_button_id?: string;
+  selected_row_id?: string;
+  reply_to_wa_message_id?: string;
+}
+
+export type InteractiveMetadata =
+  | InteractiveButtonMeta
+  | InteractiveListMeta
+  | TemplateMeta
+  | FlowMeta
+  | InboundReplyMeta;
 
 // Mirrors what the webhook actually stores: msg.type passes through for all media
 // types, including 'voice' (WhatsApp voice notes) and 'sticker'.

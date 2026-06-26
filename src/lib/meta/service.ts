@@ -600,6 +600,8 @@ export interface ParsedMetaMessage {
   // diagnose lost messages instead of just storing a blank "[unsupported]".
   errorCode?: number;
   errorReason?: string;
+  contextMessageId?: string;
+  rawWebhook?: Record<string, unknown>;
   referral?: {        // Ad click tracking
     source_type?: string;
     source_id?: string;
@@ -752,6 +754,8 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
         errorReason,
         referral,
         buttonId,
+        contextMessageId: msg.context?.id || undefined,
+        rawWebhook: msg as Record<string, unknown>,
       };
     }
   } catch (err) {
