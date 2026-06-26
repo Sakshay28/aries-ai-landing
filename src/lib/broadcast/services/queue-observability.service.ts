@@ -50,21 +50,32 @@ export class QueueObservabilityService {
       const readCount = analytics?.read_count || 0;
       const failedCount = analytics?.failed_count || 0;
 
-      // 3. Resolve active pacing settings to calculate throughput
+      // 3. MEASURED throughput — count messages this campaign actually pushed to
+      //    Meta in the trailing 60s. This replaces the old behaviour of echoing the
+      //    configured throttle, which reported a rate the system could not achieve.
+      let measuredPerMin = 0;
+      try {
+        const { data: sentLast60 } = await supabaseAdmin
+          .rpc('campaign_sent_last_seconds', { p_campaign_id: campaignId, p_seconds: 60 });
+        measuredPerMin = Number(sentLast60 ?? 0);
+      } catch { /* RPC not yet migrated — fall back to configured rate below */ }
+
       const { data: settings } = await supabaseAdmin
         .from('broadcast_delivery_settings')
         .select('throttle_per_minute')
         .eq('campaign_id', campaignId)
         .single();
+      const configuredRate = settings?.throttle_per_minute || 300;
 
-      const throttleRate = settings?.throttle_per_minute || 300; // default 5 msgs/sec (300/min)
-      
       const totalRecipientCount = queuedCount + processingCount + retryingCount + sentCount + failedCount;
       const remainingCount = queuedCount + processingCount + retryingCount;
 
-      // Dynamic ETA and Throughput calculations
-      const throughputPerMin = throttleRate;
-      const etaSecondsRemaining = this.calculateETA(remainingCount, throttleRate);
+      // Prefer the live measured rate; fall back to the configured throttle only
+      // when nothing has sent yet (so a just-launched campaign still shows an ETA).
+      const throughputPerMin = measuredPerMin > 0
+        ? measuredPerMin
+        : (remainingCount > 0 ? configuredRate : 0);
+      const etaSecondsRemaining = this.calculateETA(remainingCount, throughputPerMin || configuredRate);
 
       return {
         queuedCount,

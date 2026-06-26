@@ -23,6 +23,7 @@ export interface DLQEntry {
   job_type: DLQJobType;
   flow_id?: string;
   conversation_id?: string;
+  campaign_id?: string;
   payload: unknown;
   error_message: string;
   error_stack?: string;

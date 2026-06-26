@@ -79,8 +79,14 @@ export async function createMetaTemplate(
 
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const errMsg = (json as { error?: { message?: string } }).error?.message ?? `Error ${res.status}`;
-      throw new Error(errMsg);
+      const err = (json as { error?: { message?: string; code?: number; error_subcode?: number; error_user_msg?: string } }).error;
+      const detail = [
+        err?.message,
+        err?.code ? `code ${err.code}` : null,
+        err?.error_subcode ? `subcode ${err.error_subcode}` : null,
+        err?.error_user_msg,
+      ].filter(Boolean).join(' — ');
+      throw new Error(detail || `Error ${res.status}`);
     }
 
     return {

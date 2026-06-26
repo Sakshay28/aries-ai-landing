@@ -48,6 +48,21 @@ export async function POST(req: NextRequest) {
         // without this, a reply to phone X gets attributed to whichever tenant last sent to X.
         const webhookPhoneNumberId = change.value?.metadata?.phone_number_id;
         const inboundMessages = change.value?.messages || [];
+
+        // Resolve the owning tenant ONCE per change (constant for the whole change)
+        // instead of once per inbound message. At delivery volume this removes a
+        // DB round-trip per reply, keeping the webhook fast enough that Meta does
+        // not back off / retry.
+        let ownerTenantId: string | null = null;
+        if (webhookPhoneNumberId && inboundMessages.length > 0) {
+          const { data: ownerTenant } = await supabaseAdmin
+            .from('tenants')
+            .select('id')
+            .eq('wa_phone_number_id', webhookPhoneNumberId)
+            .maybeSingle();
+          ownerTenantId = ownerTenant?.id ?? null;
+        }
+
         for (const msg of inboundMessages) {
           if (!msg.from || !msg.id) continue;
 
@@ -59,15 +74,8 @@ export async function POST(req: NextRequest) {
             .limit(1);
 
           // Scope to the correct tenant via their phone_number_id
-          if (webhookPhoneNumberId) {
-            const { data: ownerTenant } = await supabaseAdmin
-              .from('tenants')
-              .select('id')
-              .eq('wa_phone_number_id', webhookPhoneNumberId)
-              .maybeSingle();
-            if (ownerTenant) {
-              deliveryQuery = deliveryQuery.eq('tenant_id', ownerTenant.id);
-            }
+          if (ownerTenantId) {
+            deliveryQuery = deliveryQuery.eq('tenant_id', ownerTenantId);
           }
 
           const { data: delivery } = await deliveryQuery.maybeSingle();

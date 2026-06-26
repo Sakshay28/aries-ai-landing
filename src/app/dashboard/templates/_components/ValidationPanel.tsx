@@ -158,6 +158,17 @@ export function validateTemplate(state: TemplateFormState): ValidationIssue[] {
     });
   }
 
+  // Meta forbids mixing Quick Reply with CTA buttons (URL/Phone)
+  if (quickReplies.length > 0 && (urlButtons.length > 0 || phoneButtons.length > 0)) {
+    issues.push({
+      severity: 'error',
+      code: 'MIXED_BUTTON_TYPES',
+      message: 'Cannot mix Quick Reply buttons with Call/URL buttons — Meta will reject with "Invalid parameter".',
+      suggestion: 'Use only Quick Reply buttons OR only Call/URL buttons, not both.',
+      field: 'buttons',
+    });
+  }
+
   if (quickReplies.length > 3) {
     issues.push({
       severity: 'error',
@@ -183,6 +194,26 @@ export function validateTemplate(state: TemplateFormState): ValidationIssue[] {
       message: 'Maximum of 1 Call Phone button allowed.',
       field: 'buttons',
     });
+  }
+
+  // Phone button validation
+  for (const btn of phoneButtons) {
+    if (!btn.phoneNumber?.trim()) {
+      issues.push({
+        severity: 'error',
+        code: 'MISSING_PHONE_NUMBER',
+        message: `Button "${btn.text || 'Call Us'}" has no phone number. Meta will reject with "Invalid parameter".`,
+        suggestion: 'Enter a phone number in E.164 format, e.g. +918824850206',
+        field: 'buttons',
+      });
+    } else if (!/^\+\d{7,15}$/.test(btn.phoneNumber.trim())) {
+      issues.push({
+        severity: 'error',
+        code: 'INVALID_PHONE_NUMBER',
+        message: `Button phone number must be in E.164 format (e.g. +918824850206).`,
+        field: 'buttons',
+      });
+    }
   }
 
   // URL button validation

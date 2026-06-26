@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { RefreshCw, Database, Zap, Cpu, MailWarning, CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
+import { RefreshCw, Database, Zap, Cpu, MailWarning, Radio, CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
 
 interface ServiceStatus { status: "up" | "down" | "degraded"; latencyMs?: number; detail?: string; }
 interface HealthReport {
@@ -12,14 +12,16 @@ interface HealthReport {
     redis: ServiceStatus;
     worker: ServiceStatus;
     dlq: ServiceStatus;
+    broadcastQueue?: ServiceStatus;
   };
 }
 
 const SERVICE_META: Record<string, { label: string; Icon: React.ElementType }> = {
-  db:     { label: "Database",       Icon: Database },
-  redis:  { label: "Redis / Cache",  Icon: Zap },
-  worker: { label: "BullMQ Worker",  Icon: Cpu },
-  dlq:    { label: "Job Queue",      Icon: MailWarning },
+  db:             { label: "Database",         Icon: Database },
+  redis:          { label: "Redis / Cache",    Icon: Zap },
+  worker:         { label: "Broadcast Worker",  Icon: Cpu },
+  dlq:            { label: "Dead Letter Queue", Icon: MailWarning },
+  broadcastQueue: { label: "Broadcast Queue",   Icon: Radio },
 };
 
 function StatusDot({ status }: { status: string }) {

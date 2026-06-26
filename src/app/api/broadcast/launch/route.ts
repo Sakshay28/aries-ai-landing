@@ -146,28 +146,25 @@ export async function POST(req: NextRequest) {
     await ExecutionEventService.logEvent(tenantId, campaignId, 'launch_requested', 'Launch requested', 'Campaign launch initiated.');
     await ExecutionEventService.logEvent(tenantId, campaignId, 'queue_created', 'Queue initialized', `${result.queuedCount} messages queued for dispatch.`);
 
-    // 7. Process the full queue immediately in after() — direct call, no HTTP round-trip.
-    //    With a 100-recipient cap, 100 items × ~600ms = ~60s is safe for Vercel's
-    //    after() budget. Process all to avoid reliance on fragile chaining.
+    // 7. Send a SMALL first batch inline for instant UI feedback (a few sends show
+    //    up immediately), then hand off to the persistent worker which drains the
+    //    rest in per-tenant parallel lanes. We no longer try to process the whole
+    //    campaign in after() — that was over the Vercel time budget for large
+    //    audiences and relied on fragile self-chaining. The cron backstop poke
+    //    covers the case where the worker is momentarily down.
     after(async () => {
       try {
-        const processed = await BroadcastEngineService.processQueue(150);
-        console.log(`[BROADCAST_LAUNCH] after() processed ${processed} items`);
-
-        // Belt-and-suspenders: if somehow more remain (retries, concurrent campaigns),
-        // chain via HTTP to mop up.
-        if (processed >= 150) {
-          const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
-          const cronSecret = process.env.CRON_SECRET;
-          if (appUrl && cronSecret) {
-            fetch(`${appUrl}/api/broadcast/process-queue`, {
-              method: 'POST',
-              headers: { 'Authorization': `Bearer ${cronSecret}` },
-            }).catch(() => {});
-          }
-        }
+        await BroadcastEngineService.processQueue(20);
       } catch (err) {
-        console.error('[BROADCAST_LAUNCH] Failed to process queue:', err);
+        console.error('[BROADCAST_LAUNCH] inline first-batch failed:', err);
+      }
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+      const cronSecret = process.env.CRON_SECRET;
+      if (appUrl && cronSecret) {
+        fetch(`${appUrl}/api/broadcast/process-queue`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${cronSecret}` },
+        }).catch(() => {});
       }
     });
 

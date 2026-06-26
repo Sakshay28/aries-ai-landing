@@ -3,8 +3,17 @@ import { sendTextMessage, sendMediaMessage } from '@/lib/meta/service';
 import { getTenantById } from '@/lib/tenant/manager';
 import { decryptToken } from '@/lib/utils/crypto';
 import { toSignedMediaUrl } from '@/lib/utils/storage';
+import { KNOWN_VARIABLE_NAMES } from '@/lib/automations/variables';
+import { createHash } from 'crypto';
 import * as Sentry from '@/lib/sentry-stub';
 import type { Tenant } from '@/lib/types';
+
+function generateIdempotencyKey(automationId: string, leadId: string, scheduledAt: string): string {
+  return createHash('sha256')
+    .update(`${automationId}:${leadId}:${scheduledAt}`)
+    .digest('hex')
+    .slice(0, 32);
+}
 
 const isMetaConfigured = (t: Tenant) => !!t.wa_access_token && !!t.wa_phone_number_id;
 
@@ -119,8 +128,9 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
         if (scheduledMs < Date.now()) scheduledMs = Date.now() + 5_000;
 
         const scheduledAt = new Date(scheduledMs).toISOString();
-        console.log(`[AUTOMATION_JOB_SCHEDULED] rule=${rule.id} lead=${leadId} (reminder) scheduledAt=${scheduledAt} bookingAt=${payload.eventAt} ${rule.delay_value}${rule.delay_unit} before`);
-        await supabaseAdmin.from('automation_queue').insert({
+        const idemKey = generateIdempotencyKey(rule.id, leadId, scheduledAt);
+        console.log(`[AUTOMATION_JOB_SCHEDULED] rule=${rule.id} lead=${leadId} (reminder) scheduledAt=${scheduledAt} bookingAt=${payload.eventAt} ${rule.delay_value}${rule.delay_unit} before idemKey=${idemKey}`);
+        const { error: insertErr } = await supabaseAdmin.from('automation_queue').insert({
           automation_id: rule.id,
           tenant_id: tenantId,
           lead_id: leadId,
@@ -128,7 +138,12 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
           scheduled_at: scheduledAt,
           status: 'pending',
           variables: variables ?? null,
+          idempotency_key: idemKey,
         });
+        if (insertErr && /idempotency|duplicate|unique/i.test(insertErr.message || '')) {
+          console.log(`[AUTOMATION_IDEMPOTENCY] rule=${rule.id} lead=${leadId} — duplicate blocked by idempotency key`);
+          continue;
+        }
         await bumpCounter(rule.id, 1, 0);
         continue;
       }
@@ -152,23 +167,26 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
         console.log(`[AUTOMATION_MESSAGE_SENT] rule=${rule.id} lead=${leadId} msgId=${result.messageId} (immediate)`);
 
         // Record in queue for dedup + execution history
+        const sentAt = new Date().toISOString();
         await supabaseAdmin.from('automation_queue').insert({
           automation_id: rule.id,
           tenant_id: tenantId,
           lead_id: leadId,
           conversation_id: conversationId || null,
-          scheduled_at: new Date().toISOString(),
+          scheduled_at: sentAt,
           status: 'sent',
-          sent_at: new Date().toISOString(),
+          sent_at: sentAt,
           wa_message_id: result.messageId,
           variables: variables ?? null,
+          idempotency_key: generateIdempotencyKey(rule.id, leadId, sentAt),
         }).then(null, () => {});
 
         await bumpCounter(rule.id, 0, 1);
       } else {
         const scheduledAt = new Date(Date.now() + delayMs).toISOString();
-        console.log(`[AUTOMATION_JOB_SCHEDULED] rule=${rule.id} lead=${leadId} scheduledAt=${scheduledAt} delay=${rule.delay_value}${rule.delay_unit}`);
-        await supabaseAdmin.from('automation_queue').insert({
+        const idemKey = generateIdempotencyKey(rule.id, leadId, scheduledAt);
+        console.log(`[AUTOMATION_JOB_SCHEDULED] rule=${rule.id} lead=${leadId} scheduledAt=${scheduledAt} delay=${rule.delay_value}${rule.delay_unit} idemKey=${idemKey}`);
+        const { error: insertErr } = await supabaseAdmin.from('automation_queue').insert({
           automation_id: rule.id,
           tenant_id: tenantId,
           lead_id: leadId,
@@ -176,7 +194,12 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
           scheduled_at: scheduledAt,
           status: 'pending',
           variables: variables ?? null,
+          idempotency_key: idemKey,
         });
+        if (insertErr && /idempotency|duplicate|unique/i.test(insertErr.message || '')) {
+          console.log(`[AUTOMATION_IDEMPOTENCY] rule=${rule.id} lead=${leadId} — duplicate blocked by idempotency key`);
+          continue;
+        }
       }
 
       await bumpCounter(rule.id, 1, 0);
@@ -370,7 +393,11 @@ async function sendAutomationMessage(
   };
 
   // ── Pre-send validation: detect unresolved placeholders BEFORE sending ──
-  const { rendered, unresolved } = renderTemplate(automation.message_text, allVars);
+  const { rendered, unresolved, unknownKeys } = renderTemplate(automation.message_text, allVars);
+
+  if (unknownKeys.length > 0) {
+    console.warn(`[AUTOMATION_UNKNOWN_VARS] lead=${lead.phone} unknownKeys=${unknownKeys.join(',')}`);
+  }
 
   if (unresolved.length > 0) {
     const errMsg = `Unresolved variables: ${unresolved.join(', ')}`;
@@ -441,9 +468,11 @@ async function sendAutomationMessage(
 function renderTemplate(
   text: string,
   vars: Record<string, string>,
-): { rendered: string; unresolved: string[] } {
+): { rendered: string; unresolved: string[]; unknownKeys: string[] } {
   const unresolved: string[] = [];
+  const unknownKeys: string[] = [];
   const rendered = text.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+    if (!KNOWN_VARIABLE_NAMES.has(key)) unknownKeys.push(key);
     const val = vars[key];
     if (val === undefined || val === null) {
       unresolved.push(key);
@@ -451,7 +480,7 @@ function renderTemplate(
     }
     return val;
   });
-  return { rendered, unresolved };
+  return { rendered, unresolved, unknownKeys };
 }
 
 async function updateQueueStatus(id: string, status: string, errorMessage?: string): Promise<void> {

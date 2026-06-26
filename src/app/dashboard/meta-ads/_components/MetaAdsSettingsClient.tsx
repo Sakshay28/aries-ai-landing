@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import {
   RefreshCw, CheckCircle, XCircle, AlertTriangle,
   Unlink, ChevronRight, Store, Megaphone, MessageSquare,
-  Camera, Phone, BarChart2, Loader2, ExternalLink, Globe, Link2,
+  Camera, Phone, BarChart2, Loader2, ExternalLink, Globe, Link2, Workflow,
 } from "lucide-react";
 
 // Meta / Facebook brand icon (inline SVG — Lucide removed it from v3+)
@@ -476,6 +476,7 @@ export function MetaAdsSettingsClient() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {[
                   { label: "Create Campaign", href: "/dashboard/meta-ads/campaigns?new=1", icon: Megaphone },
+                  { label: "Build Ad Flow", href: "/dashboard/flows/editor/new?type=blank&template=meta-ad-lead", icon: Workflow },
                   { label: "View Analytics", href: "/dashboard/meta-ads/analytics", icon: BarChart2 },
                   { label: "View Leads", href: "/dashboard/meta-ads/leads", icon: MessageSquare },
                 ].map(({ label, href, icon: Icon }) => (

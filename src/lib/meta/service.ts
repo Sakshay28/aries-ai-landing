@@ -10,23 +10,97 @@ import { decryptToken } from '@/lib/utils/crypto';
 
 const META_BASE = 'https://graph.facebook.com/v21.0';
 
-// ── Retry helper: up to 3 attempts, exponential backoff, skips 4xx errors ──
+// ── Typed Meta API error ──
+// Carries the HTTP status, Meta's numeric error code, and any Retry-After hint so
+// the retry layer and the broadcast engine can make correct decisions instead of
+// regex-matching a string. The previous code treated EVERY 4xx (including 429
+// rate-limits) as non-retryable, so a throttled send was wrongly marked failed.
+export class MetaApiError extends Error {
+  status: number;
+  code?: number;
+  retryAfterMs?: number;
+  // True for transient throttling that WILL succeed if retried later.
+  isRateLimited: boolean;
+  // True for Meta messaging-tier / pair-rate limits — the engine should pace down,
+  // not just blindly retry (sending harder makes the quality rating worse).
+  isTierLimited: boolean;
+
+  constructor(message: string, status: number, opts: { code?: number; retryAfterMs?: number } = {}) {
+    super(message);
+    this.name = 'MetaApiError';
+    this.status = status;
+    this.code = opts.code;
+    this.retryAfterMs = opts.retryAfterMs;
+    // Meta throttle/rate-limit error codes (transient):
+    //   4      = application request limit reached
+    //   80007  = rate limit issues
+    //   130429 = cloud API rate limit hit
+    //   131048 = spam rate limit hit
+    //   131056 = (re-)engagement / pair rate limit
+    //   133016 = too many requests for this number
+    const rateCodes = new Set([4, 80007, 130429, 131048, 131056, 133016]);
+    const tierCodes = new Set([131048, 131056, 130472]);
+    this.isRateLimited = status === 429 || (opts.code != null && rateCodes.has(opts.code));
+    this.isTierLimited = opts.code != null && tierCodes.has(opts.code);
+  }
+}
+
+// Build a MetaApiError from a non-OK Response, parsing Meta's error code and
+// the Retry-After header (seconds) when present.
+async function metaErrorFromResponse(res: Response, kind: string): Promise<MetaApiError> {
+  const bodyText = await res.text().catch(() => res.statusText);
+  let code: number | undefined;
+  try {
+    const parsed = JSON.parse(bodyText);
+    code = parsed?.error?.code ?? parsed?.error?.error_subcode;
+  } catch { /* non-JSON body */ }
+
+  let retryAfterMs: number | undefined;
+  const ra = res.headers.get('retry-after');
+  if (ra) {
+    const secs = Number(ra);
+    if (!Number.isNaN(secs)) retryAfterMs = secs * 1000;
+  }
+
+  return new MetaApiError(
+    `Meta Cloud API ${kind} error ${res.status}: ${bodyText.slice(0, 300)}`,
+    res.status,
+    { code, retryAfterMs }
+  );
+}
+
+// ── Retry helper: up to 3 attempts, exponential backoff ──
+// Retries on: network errors, 5xx, 429, and Meta throttle codes (honoring
+// Retry-After). Fails fast on genuine 4xx (bad token / payload / template).
 async function withMetaRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      const msg = (err as Error).message;
-      // 4xx errors are credentials/payload issues - retrying will not help
-      if (/Meta Cloud API error 4\d\d/.test(msg) || /status 4\d\d/.test(msg)) {
-        throw err;
-      }
-      if (attempt === maxRetries) throw err;
-      // Exponential backoff: 500 ms → 1 s → 2 s
-      await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt)));
+      const retryable = isRetryableMetaError(err);
+      if (!retryable || attempt === maxRetries) throw err;
+
+      // Honor Meta's Retry-After when it gives one; otherwise exponential backoff
+      // (500 ms → 1 s → 2 s), capped so a single send never blocks a batch too long.
+      const hinted = err instanceof MetaApiError ? err.retryAfterMs : undefined;
+      const backoff = hinted ?? 500 * Math.pow(2, attempt);
+      await new Promise(r => setTimeout(r, Math.min(backoff, 8000)));
     }
   }
   throw new Error('Meta API: max retries exceeded');
+}
+
+// A send is worth retrying in-process only for transient failures. Hard 4xx
+// (auth/payload) and any other error are surfaced immediately to the caller,
+// which (for broadcasts) schedules a longer DB-level backoff.
+export function isRetryableMetaError(err: unknown): boolean {
+  if (err instanceof MetaApiError) {
+    if (err.status === 429 || err.isRateLimited) return true;
+    if (err.status >= 500) return true;
+    return false; // genuine 4xx — don't hammer Meta
+  }
+  // Network / timeout errors (AbortError, fetch failures) are transient.
+  return true;
 }
 
 // ── Clean phone numbers: remove +, spaces, dashes, brackets ──
@@ -171,8 +245,7 @@ export async function sendTextMessage(
     }
 
     if (!res.ok) {
-      const errText = await res.text().catch(() => res.statusText);
-      throw new Error(`Meta Cloud API error ${res.status}: ${errText.slice(0, 300)}`);
+      throw await metaErrorFromResponse(res, 'text');
     }
 
     const data = await res.json();
@@ -244,8 +317,7 @@ export async function sendTemplateMessage(
     }
 
     if (!res.ok) {
-      const errText = await res.text().catch(() => res.statusText);
-      throw new Error(`Meta Cloud API template error ${res.status}: ${errText.slice(0, 300)}`);
+      throw await metaErrorFromResponse(res, 'template');
     }
 
     const data = await res.json();
@@ -308,8 +380,7 @@ export async function sendMediaMessage(
     }
 
     if (!res.ok) {
-      const errText = await res.text().catch(() => res.statusText);
-      throw new Error(`Meta Cloud API media error ${res.status}: ${errText.slice(0, 300)}`);
+      throw await metaErrorFromResponse(res, 'media');
     }
 
     const data = await res.json();
@@ -513,7 +584,9 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
         const contact = msg.contacts?.[0];
         text = contact ? `👤 ${contact.name?.formatted_name || 'Contact shared'}` : '👤 Contact shared';
       } else if (msgType === 'unsupported') {
-        text = '[unsupported]';
+        // Meta sometimes embeds text even in unsupported messages (e.g. system OTPs).
+        text = msg.text?.body || '[unsupported]';
+        console.warn('⚠️ Meta unsupported msg raw:', JSON.stringify(msg));
       } else if (msgType === 'reaction') {
         const reactionObj = msg.reaction;
         return {
@@ -529,7 +602,9 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
           reactedToMessageId: reactionObj?.message_id || '',
         };
       } else {
-        text = `[${msgType}]`;
+        // Unknown message type — try to extract text body before falling back.
+        text = msg.text?.body || `[${msgType}]`;
+        console.warn('⚠️ Meta unknown msg type raw:', JSON.stringify(msg));
       }
 
       // Extract Meta Ad (CTWA) referrals if present

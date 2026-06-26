@@ -1,18 +1,26 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { sendTemplateMessage } from '@/lib/meta/service';
+import { sendTemplateMessage, MetaApiError } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { AudienceEngineService } from './audience-engine.service';
 import { MetaPayloadBuilderService } from './meta-payload-builder.service';
 import { TemplateParserService } from './template-parser.service';
-import { sleep } from '@/lib/utils/safety';
 import { ExecutionEventService } from './execution-event.service';
 import { notifyAdmin } from '@/lib/alerts/admin';
+import { pushToDLQ } from '@/lib/queue/deadLetter';
+import { TokenBucket, metaTierCap, remainingTierBudget } from './rate-limiter';
 
 const RETRY_BACKOFF_MINUTES = [1, 5, 15, 30, 60];
 
+interface ProcessOpts {
+  forceNow?: boolean;
+  // Per-number pacer. Supplied by the persistent worker so sustained throughput
+  // stays under Meta's limit. Omitted by the Vercel backstop (tiny batches).
+  limiter?: TokenBucket;
+}
+
 export class BroadcastEngineService {
   /**
-   * Resolves the target audience cohort, E.164 formats them, filters opt-outs, 
+   * Resolves the target audience cohort, E.164 formats them, filters opt-outs,
    * and populates the database queue table in pending state.
    */
   static async launchCampaign(tenantId: string, campaignId: string): Promise<{ success: boolean; queuedCount?: number; error?: string }> {
@@ -131,22 +139,16 @@ export class BroadcastEngineService {
     }
   }
 
-  /**
-   * Core dispatcher loop. Processes enqueued pending/retrying messages,
-   * enforces throttling rate limits, exponential backoffs, quiet hours, and updates statuses.
-   */
+  // ───────────────────────────────────────────────────────────────────────────
+  // GLOBAL DRAIN (Vercel backstop). Claims one batch across ALL tenants and
+  // processes it. The persistent worker uses processTenantQueue() per tenant for
+  // true parallelism + fairness; this remains as a safety net if the worker is
+  // down. Kept behaviorally identical to the pre-refactor version.
+  // ───────────────────────────────────────────────────────────────────────────
   static async processQueue(limit = 100, forceNow = false): Promise<number> {
-    let processed = 0;
     try {
-      // 0. Unlock items stuck in 'processing' for more than 10 minutes (crashed runs)
-      const staleThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-      await supabaseAdmin
-        .from('broadcast_queue')
-        .update({ status: 'pending', locked_at: null })
-        .eq('status', 'processing')
-        .lt('locked_at', staleThreshold);
+      await this.resetStaleProcessing();
 
-      // 0b. forceNow: reset next_attempt_at on deferred pending items so they're picked up immediately
       if (forceNow) {
         await supabaseAdmin
           .from('broadcast_queue')
@@ -156,39 +158,7 @@ export class BroadcastEngineService {
           .gt('next_attempt_at', new Date().toISOString());
       }
 
-      // 1. Atomically fetch and lock items using FOR UPDATE SKIP LOCKED.
-      //    This eliminates the race window between SELECT and UPDATE that caused
-      //    duplicate sends when two cron invocations overlapped.
-      //    Requires the lock_broadcast_queue_batch() RPC from supabase/migrations/20260611_broadcast_production_hardening.sql.
-      let queueItems: any[] | null = null;
-      const { data: atomicItems, error: lockErr } = await supabaseAdmin
-        .rpc('lock_broadcast_queue_batch', { batch_limit: limit });
-
-      if (!lockErr) {
-        queueItems = atomicItems;
-      } else {
-        // Fallback to two-step SELECT → UPDATE while RPC migration is pending
-        console.warn('[QUEUE_JOB] Atomic lock RPC unavailable, using two-step fallback:', lockErr.message);
-        const nowIso = new Date().toISOString();
-        const { data: fallbackItems } = await supabaseAdmin
-          .from('broadcast_queue')
-          .select('*')
-          .in('status', ['pending', 'retrying'])
-          .is('locked_at', null)
-          .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
-          .order('created_at', { ascending: true })
-          .limit(limit);
-
-        if (fallbackItems && fallbackItems.length > 0) {
-          const ids = fallbackItems.map((item: any) => item.id);
-          await supabaseAdmin
-            .from('broadcast_queue')
-            .update({ locked_at: new Date().toISOString(), status: 'processing' })
-            .in('id', ids);
-          queueItems = fallbackItems;
-        }
-      }
-
+      const queueItems = await this.claimGlobalBatch(limit);
       if (!queueItems || queueItems.length === 0) {
         console.log('[QUEUE_JOB] No pending items found in broadcast_queue');
         return 0;
@@ -196,7 +166,7 @@ export class BroadcastEngineService {
 
       console.log(`[QUEUE_JOB] Processing ${queueItems.length} queue items`);
 
-      // 3. Group by tenant to process credentials and handle quiet hours efficiently
+      // Group by tenant and process each group with the shared per-tenant routine.
       const tenantGroupMap = new Map<string, any[]>();
       queueItems.forEach(item => {
         const list = tenantGroupMap.get(item.tenant_id) || [];
@@ -204,400 +174,508 @@ export class BroadcastEngineService {
         tenantGroupMap.set(item.tenant_id, list);
       });
 
+      let processed = 0;
       for (const [tenantId, items] of tenantGroupMap.entries()) {
-        // A. Resolve tenant credentials and local settings
-        const { data: tenant } = await supabaseAdmin
-          .from('tenants')
-          .select('wa_access_token, wa_phone_number_id, timezone')
-          .eq('id', tenantId)
-          .single();
+        processed += await this.processItemsForTenant(tenantId, items, { forceNow });
+      }
+      return processed;
+    } catch (e) {
+      console.error('❌ Background cron processQueue failed:', e);
+      return 0;
+    }
+  }
 
-        if (!tenant?.wa_access_token || !tenant?.wa_phone_number_id) {
+  // ───────────────────────────────────────────────────────────────────────────
+  // PER-TENANT DRAIN (persistent worker lane). Claims a tenant-scoped batch via
+  // SKIP LOCKED, enforces the Meta 24h messaging-tier budget, and paces sends
+  // through the supplied TokenBucket. This is what makes 100 tenants send in
+  // parallel without one campaign starving the others.
+  // ───────────────────────────────────────────────────────────────────────────
+  static async processTenantQueue(tenantId: string, limit: number, opts: ProcessOpts = {}): Promise<number> {
+    try {
+      // Enforce the Meta messaging-tier 24h budget BEFORE claiming work. Sending
+      // past the tier is what collapses the number's quality rating.
+      const { data: tenant } = await supabaseAdmin
+        .from('tenants')
+        .select('wa_messaging_tier, wa_daily_conversation_cap')
+        .eq('id', tenantId)
+        .single();
+
+      const cap = metaTierCap(tenant?.wa_messaging_tier, tenant?.wa_daily_conversation_cap);
+      let claimLimit = limit;
+      if (Number.isFinite(cap)) {
+        const { data: sent24h } = await supabaseAdmin
+          .rpc('count_tenant_unique_recipients_24h', { p_tenant_id: tenantId });
+        const remaining = remainingTierBudget(cap, Number(sent24h ?? 0));
+        if (remaining <= 0) {
+          notifyAdmin({
+            dedupeKey: `broadcast-tier-budget-${tenantId}`,
+            subject: `Broadcast paused — Meta 24h tier budget reached`,
+            summary: `Tenant ${tenantId} hit its ${cap}-recipient/24h messaging tier. Remaining sends deferred to the next window to protect the number's quality rating.`,
+            context: { tenantId, tierCap: cap, sent24h: Number(sent24h ?? 0) },
+          }).catch(() => {});
+          return 0;
+        }
+        claimLimit = Math.min(limit, remaining);
+      }
+
+      const { data: items, error } = await supabaseAdmin
+        .rpc('claim_broadcast_batch_for_tenant', { p_tenant_id: tenantId, batch_limit: claimLimit });
+
+      if (error) {
+        console.error(`[WORKER] claim_broadcast_batch_for_tenant failed for ${tenantId}:`, error.message);
+        return 0;
+      }
+      if (!items || items.length === 0) return 0;
+
+      return await this.processItemsForTenant(tenantId, items, opts);
+    } catch (e) {
+      console.error(`❌ processTenantQueue failed for ${tenantId}:`, e);
+      return 0;
+    }
+  }
+
+  /** Unlock items stuck in 'processing' for >10 min (crashed/killed runs). */
+  static async resetStaleProcessing(): Promise<void> {
+    const staleThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    await supabaseAdmin
+      .from('broadcast_queue')
+      .update({ status: 'pending', locked_at: null })
+      .eq('status', 'processing')
+      .lt('locked_at', staleThreshold);
+  }
+
+  /** Atomically claim a global batch (RPC, with a two-step fallback if missing). */
+  private static async claimGlobalBatch(limit: number): Promise<any[] | null> {
+    const { data: atomicItems, error: lockErr } = await supabaseAdmin
+      .rpc('lock_broadcast_queue_batch', { batch_limit: limit });
+
+    if (!lockErr) return atomicItems;
+
+    console.warn('[QUEUE_JOB] Atomic lock RPC unavailable, using two-step fallback:', lockErr.message);
+    const nowIso = new Date().toISOString();
+    const { data: fallbackItems } = await supabaseAdmin
+      .from('broadcast_queue')
+      .select('*')
+      .in('status', ['pending', 'retrying'])
+      .is('locked_at', null)
+      .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
+      .order('created_at', { ascending: true })
+      .limit(limit);
+
+    if (fallbackItems && fallbackItems.length > 0) {
+      const ids = fallbackItems.map((item: any) => item.id);
+      await supabaseAdmin
+        .from('broadcast_queue')
+        .update({ locked_at: new Date().toISOString(), status: 'processing' })
+        .in('id', ids);
+      return fallbackItems;
+    }
+    return null;
+  }
+
+  /**
+   * Core dispatcher for one tenant's already-claimed batch. Enforces throttling,
+   * quiet hours, opt-outs, frequency caps, exponential backoff, DLQ on permanent
+   * failure, and updates statuses. Shared by both the global and per-tenant paths.
+   */
+  private static async processItemsForTenant(tenantId: string, items: any[], opts: ProcessOpts = {}): Promise<number> {
+    const { forceNow = false, limiter } = opts;
+    let processed = 0;
+
+    // A. Resolve tenant credentials and local settings
+    const { data: tenant } = await supabaseAdmin
+      .from('tenants')
+      .select('wa_access_token, wa_phone_number_id, timezone')
+      .eq('id', tenantId)
+      .single();
+
+    if (!tenant?.wa_access_token || !tenant?.wa_phone_number_id) {
+      await supabaseAdmin
+        .from('broadcast_queue')
+        .update({
+          status: 'failed',
+          failure_reason: 'Meta credentials not active or missing',
+          processed_at: new Date().toISOString(),
+          locked_at: null
+        })
+        .in('id', items.map(i => i.id));
+      notifyAdmin({
+        dedupeKey: `broadcast-no-creds-${tenantId}`,
+        subject: `Broadcast failed — tenant missing WhatsApp credentials`,
+        summary: `Tenant ${tenantId} has ${items.length} queued messages but no Meta access token or phone number ID. All messages permanently failed.`,
+        context: { tenantId, failedCount: items.length, campaignIds: [...new Set(items.map(i => i.campaign_id))] },
+      }).catch(() => {});
+      return 0;
+    }
+
+    const accessToken = decryptToken(tenant.wa_access_token) as string;
+
+    // B. Pre-fetch opt-out list for just-in-time filtering at send time.
+    const { data: optoutRows } = await supabaseAdmin
+      .from('broadcast_optouts')
+      .select('phone')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true);
+    const optoutPhones = new Set((optoutRows || []).map((r: { phone: string }) => r.phone));
+
+    // C. Pre-fetch campaign data, variable mappings, and template cache ONCE per
+    //    unique campaign in this tenant batch — avoids N identical DB round-trips.
+    const uniqueCampaignIds = [...new Set(items.map(i => i.campaign_id))];
+    const campaignCache    = new Map<string, any>();
+    const varIndicesCache  = new Map<string, string[]>();
+    const varMapCache      = new Map<string, Record<string, any>>();
+    const deliverySettingsCache = new Map<string, any>();
+
+    const [campResults, settingsResults] = await Promise.all([
+      Promise.all(uniqueCampaignIds.map(cid => supabaseAdmin.from('broadcast_campaigns').select('*').eq('id', cid).single())),
+      Promise.all(uniqueCampaignIds.map(cid => supabaseAdmin.from('broadcast_delivery_settings').select('*').eq('campaign_id', cid).maybeSingle())),
+    ]);
+    campResults.forEach(({ data: camp }, i) => {
+      if (camp) campaignCache.set(uniqueCampaignIds[i], camp);
+    });
+    settingsResults.forEach(({ data: settings }, i) => {
+      if (settings) deliverySettingsCache.set(uniqueCampaignIds[i], settings);
+    });
+
+    await Promise.all(uniqueCampaignIds.map(async (cid) => {
+      const camp = campaignCache.get(cid);
+      if (!camp) return;
+
+      const [{ data: mappings }, { data: tmpl }] = await Promise.all([
+        supabaseAdmin.from('broadcast_variable_mapping').select('*').eq('campaign_id', cid),
+        supabaseAdmin.from('broadcast_templates_cache').select('template_json')
+          .eq('tenant_id', tenantId).eq('name', camp.template_name).maybeSingle(),
+      ]);
+
+      const vMap: Record<string, any> = {};
+      (mappings || []).forEach((v: any) => {
+        vMap[v.variable_key] = { index: v.variable_key, sourceType: v.source_type, crmField: v.crm_field, staticValue: v.custom_value };
+      });
+
+      let indices = [...new Set((mappings || []).map((v: any) => String(v.variable_key)))].sort((a, b) => Number(a) - Number(b));
+
+      if (indices.length === 0 && tmpl?.template_json) {
+        const parsed = TemplateParserService.parse(tmpl.template_json);
+        if (parsed.detectedVariables.length > 0) {
+          indices = parsed.detectedVariables;
+          parsed.detectedVariables.forEach((idx, i) => {
+            vMap[idx] = { index: idx, sourceType: i === 0 ? 'crm_field' : 'static', crmField: i === 0 ? 'name' : undefined, staticValue: i === 0 ? undefined : ' ' };
+          });
+        }
+      }
+
+      varMapCache.set(cid, vMap);
+      varIndicesCache.set(cid, indices);
+    }));
+
+    // D. Process enqueued messages using cached campaign data
+    const consecutiveFailures = new Map<string, number>();
+    const campaignLiveStatusCache = new Map<string, string>();
+    for (const item of items) {
+      try {
+        const campaign          = campaignCache.get(item.campaign_id);
+        const variablesMap      = varMapCache.get(item.campaign_id) || {};
+        const detectedVarIndices = varIndicesCache.get(item.campaign_id) || [];
+
+        if (!campaign) {
+          await supabaseAdmin
+            .from('broadcast_queue')
+            .update({ status: 'failed', failure_reason: 'Campaign configuration missing', locked_at: null })
+            .eq('id', item.id);
+          continue;
+        }
+
+        // Pause-on-failure: if 5 consecutive sends to this campaign failed, pause it
+        const cid = item.campaign_id;
+        if ((consecutiveFailures.get(cid) ?? 0) >= 5) {
+          await supabaseAdmin
+            .from('broadcast_campaigns')
+            .update({ status: 'paused', updated_at: new Date().toISOString() })
+            .eq('id', cid)
+            .eq('status', 'sending');
+          await supabaseAdmin
+            .from('broadcast_queue')
+            .update({ status: 'pending', locked_at: null })
+            .eq('id', item.id);
+          console.warn(`[BROADCAST] Campaign ${cid} paused — 5 consecutive failures`);
+          notifyAdmin({
+            dedupeKey: `broadcast-paused-${cid}`,
+            subject: `Broadcast campaign auto-paused — 5 consecutive failures`,
+            summary: `Campaign ${cid} for tenant ${tenantId} was paused after 5 consecutive send failures. Likely cause: expired Meta token or template rejected.`,
+            context: { tenantId, campaignId: cid },
+          }).catch(() => {});
+          processed++;
+          continue;
+        }
+
+        // Quiet hours enforcement: skip sends between 9 PM and 9 AM in campaign timezone.
+        const dSettings = deliverySettingsCache.get(item.campaign_id);
+        if (dSettings?.quiet_hours && !forceNow) {
+          const tz = dSettings.timezone || 'Asia/Kolkata';
+          const localHour = new Date().toLocaleString('en-US', { timeZone: tz, hour: 'numeric', hour12: false });
+          const h = parseInt(localHour, 10);
+          if (h >= 21 || h < 9) {
+            await supabaseAdmin
+              .from('broadcast_queue')
+              .update({ status: 'pending', locked_at: null })
+              .eq('id', item.id);
+            processed++;
+            continue;
+          }
+        }
+
+        // Check if campaign was cancelled/paused mid-send.
+        if (!campaignLiveStatusCache.has(item.campaign_id)) {
+          const { data: liveRow } = await supabaseAdmin
+            .from('broadcast_campaigns')
+            .select('status, updated_at, auto_resumed')
+            .eq('id', item.campaign_id)
+            .single();
+          const st = liveRow?.status || 'unknown';
+
+          if (st === 'paused' && liveRow?.updated_at && !liveRow?.auto_resumed) {
+            const pausedAgo = Date.now() - new Date(liveRow.updated_at).getTime();
+            if (pausedAgo > 30 * 60 * 1000) {
+              await supabaseAdmin
+                .from('broadcast_campaigns')
+                .update({ status: 'sending', auto_resumed: true, updated_at: new Date().toISOString() })
+                .eq('id', item.campaign_id);
+              campaignLiveStatusCache.set(item.campaign_id, 'sending');
+              console.log(`[BROADCAST] Auto-resumed campaign ${item.campaign_id} after 30-min cooldown`);
+              notifyAdmin({
+                dedupeKey: `broadcast-autoresume-${item.campaign_id}`,
+                subject: `Broadcast campaign auto-resumed after 30-min cooldown`,
+                summary: `Campaign ${item.campaign_id} (tenant ${tenantId}) was auto-resumed. If it pauses again, it will stay paused permanently — manual Retry Now required.`,
+                context: { tenantId, campaignId: item.campaign_id },
+              }).catch(() => {});
+            } else {
+              campaignLiveStatusCache.set(item.campaign_id, st);
+            }
+          } else {
+            campaignLiveStatusCache.set(item.campaign_id, st);
+          }
+        }
+        const liveStatus = campaignLiveStatusCache.get(item.campaign_id);
+        if (liveStatus === 'cancelled' || liveStatus === 'paused') {
+          await supabaseAdmin
+            .from('broadcast_queue')
+            .update({
+              status: liveStatus === 'cancelled' ? 'cancelled' : 'pending',
+              locked_at: null,
+              processed_at: liveStatus === 'cancelled' ? new Date().toISOString() : null,
+            })
+            .eq('id', item.id);
+          processed++;
+          continue;
+        }
+
+        // Just-in-time opt-out check
+        if (optoutPhones.has(item.phone)) {
+          await supabaseAdmin
+            .from('broadcast_queue')
+            .update({ status: 'cancelled', failure_reason: 'Recipient opted out', locked_at: null, processed_at: new Date().toISOString() })
+            .eq('id', item.id);
+          processed++;
+          continue;
+        }
+
+        // Per-contact frequency cap: max 3 broadcasts per phone per 24h per tenant
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { count: recentSends } = await supabaseAdmin
+          .from('broadcast_contact_sends')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .eq('phone', item.phone)
+          .gte('sent_at', oneDayAgo);
+        if ((recentSends ?? 0) >= 3) {
+          await supabaseAdmin
+            .from('broadcast_queue')
+            .update({ status: 'cancelled', failure_reason: 'Frequency cap: 3 broadcasts/day exceeded', locked_at: null, processed_at: new Date().toISOString() })
+            .eq('id', item.id);
+          processed++;
+          continue;
+        }
+
+        const leadRecord = {
+          id: item.contact_id || '',
+          name: item.payload?.name || 'there',
+          phone: item.phone
+        };
+
+        const metaComponents = MetaPayloadBuilderService.buildPayload(
+          variablesMap,
+          detectedVarIndices,
+          leadRecord
+        );
+
+        const languageCode = item.language_code || campaign.template_language || 'en';
+
+        // Pace the SUSTAINED send rate to the number's safe throughput.
+        if (limiter) await limiter.remove(1);
+
+        // Dispatch to Meta
+        const waResult = await sendTemplateMessage(
+          accessToken,
+          tenant.wa_phone_number_id,
+          item.phone,
+          campaign.template_name,
+          metaComponents,
+          languageCode
+        );
+
+        console.log(`[WHATSAPP_SEND] Dispatched to ${item.phone}: messageId=${waResult.messageId || 'NONE'}`);
+
+        if (waResult.messageId) {
+          await supabaseAdmin
+            .from('broadcast_queue')
+            .update({ status: 'sent', processed_at: new Date().toISOString(), locked_at: null })
+            .eq('id', item.id);
+
+          await supabaseAdmin
+            .from('broadcast_deliveries')
+            .upsert({
+              tenant_id: tenantId,
+              campaign_id: item.campaign_id,
+              contact_id: item.contact_id,
+              phone: item.phone,
+              message_id: waResult.messageId,
+              status: 'sent'
+            }, { onConflict: 'message_id', ignoreDuplicates: false });
+
+          await supabaseAdmin.rpc('increment_campaign_counter', {
+            p_campaign_id: item.campaign_id,
+            p_status: 'sent',
+          });
+
+          await supabaseAdmin.from('broadcast_contact_sends').insert({
+            tenant_id: tenantId,
+            phone: item.phone,
+            campaign_id: item.campaign_id,
+          });
+
+          consecutiveFailures.set(item.campaign_id, 0);
+        } else {
+          throw new Error('Missing outbound messageId');
+        }
+
+      } catch (err) {
+        const errorMsg = (err as Error).message || 'Unknown network error';
+        console.error(`❌ Meta dispatch failure to ${item.phone}:`, errorMsg);
+        consecutiveFailures.set(item.campaign_id, (consecutiveFailures.get(item.campaign_id) ?? 0) + 1);
+
+        // A Meta tier/rate limit means "slow down", not "this recipient is bad".
+        // Re-queue WITHOUT consuming an attempt so the message isn't wrongly burned.
+        if (err instanceof MetaApiError && (err.isRateLimited || err.isTierLimited)) {
+          const deferMins = err.isTierLimited ? 60 : 5;
+          const nextTime = new Date(Date.now() + deferMins * 60 * 1000);
+          await supabaseAdmin
+            .from('broadcast_queue')
+            .update({ status: 'retrying', next_attempt_at: nextTime.toISOString(), failure_reason: `Meta throttled: ${errorMsg}`, locked_at: null })
+            .eq('id', item.id);
+          processed++;
+          continue;
+        }
+
+        const nextAttempt = (item.attempt_count || 0) + 1;
+
+        if (nextAttempt <= RETRY_BACKOFF_MINUTES.length) {
+          const delayMins = RETRY_BACKOFF_MINUTES[nextAttempt - 1];
+          const nextTime = new Date();
+          nextTime.setMinutes(nextTime.getMinutes() + delayMins);
+
+          await supabaseAdmin
+            .from('broadcast_queue')
+            .update({
+              status: 'retrying',
+              attempt_count: nextAttempt,
+              next_attempt_at: nextTime.toISOString(),
+              failure_reason: errorMsg,
+              locked_at: null
+            })
+            .eq('id', item.id);
+        } else {
+          // Permanent failure — mark failed AND record in the DLQ for recovery/audit.
           await supabaseAdmin
             .from('broadcast_queue')
             .update({
               status: 'failed',
-              failure_reason: 'Meta credentials not active or missing',
+              attempt_count: nextAttempt,
+              failure_reason: `Max attempts reached. Final error: ${errorMsg}`,
               processed_at: new Date().toISOString(),
               locked_at: null
             })
-            .in('id', items.map(i => i.id));
-          notifyAdmin({
-            dedupeKey: `broadcast-no-creds-${tenantId}`,
-            subject: `Broadcast failed — tenant missing WhatsApp credentials`,
-            summary: `Tenant ${tenantId} has ${items.length} queued messages but no Meta access token or phone number ID. All messages permanently failed.`,
-            context: { tenantId, failedCount: items.length, campaignIds: [...new Set(items.map(i => i.campaign_id))] },
+            .eq('id', item.id);
+
+          await pushToDLQ({
+            tenant_id: tenantId,
+            job_type: 'broadcast',
+            campaign_id: item.campaign_id,
+            payload: { queueItemId: item.id, phone: item.phone, contactId: item.contact_id, campaignId: item.campaign_id },
+            error_message: errorMsg,
+            retry_count: nextAttempt,
           }).catch(() => {});
-          continue;
-        }
 
-        const accessToken = decryptToken(tenant.wa_access_token) as string;
-
-        // B. Pre-fetch opt-out list for just-in-time filtering at send time.
-        //    Contacts may opt out between audience resolution and message dispatch.
-        const { data: optoutRows } = await supabaseAdmin
-          .from('broadcast_optouts')
-          .select('phone')
-          .eq('tenant_id', tenantId)
-          .eq('is_active', true);
-        const optoutPhones = new Set((optoutRows || []).map((r: { phone: string }) => r.phone));
-
-        // C. Pre-fetch campaign data, variable mappings, and template cache ONCE per
-        //    unique campaign in this tenant batch — avoids N identical DB round-trips.
-        const uniqueCampaignIds = [...new Set(items.map(i => i.campaign_id))];
-        const campaignCache    = new Map<string, any>();
-        const varIndicesCache  = new Map<string, string[]>();
-        const varMapCache      = new Map<string, Record<string, any>>();
-        const deliverySettingsCache = new Map<string, any>();
-
-        // Step 1: fetch all campaigns + delivery settings in parallel
-        const [campResults, settingsResults] = await Promise.all([
-          Promise.all(uniqueCampaignIds.map(cid => supabaseAdmin.from('broadcast_campaigns').select('*').eq('id', cid).single())),
-          Promise.all(uniqueCampaignIds.map(cid => supabaseAdmin.from('broadcast_delivery_settings').select('*').eq('campaign_id', cid).maybeSingle())),
-        ]);
-        campResults.forEach(({ data: camp }, i) => {
-          if (camp) campaignCache.set(uniqueCampaignIds[i], camp);
-        });
-        settingsResults.forEach(({ data: settings }, i) => {
-          if (settings) deliverySettingsCache.set(uniqueCampaignIds[i], settings);
-        });
-
-        // Step 2: fetch variable mappings + template cache in parallel (now we know template names)
-        await Promise.all(uniqueCampaignIds.map(async (cid) => {
-          const camp = campaignCache.get(cid);
-          if (!camp) return;
-
-          const [{ data: mappings }, { data: tmpl }] = await Promise.all([
-            supabaseAdmin.from('broadcast_variable_mapping').select('*').eq('campaign_id', cid),
-            supabaseAdmin.from('broadcast_templates_cache').select('template_json')
-              .eq('tenant_id', tenantId).eq('name', camp.template_name).maybeSingle(),
-          ]);
-
-          const vMap: Record<string, any> = {};
-          (mappings || []).forEach((v: any) => {
-            vMap[v.variable_key] = { index: v.variable_key, sourceType: v.source_type, crmField: v.crm_field, staticValue: v.custom_value };
+          await supabaseAdmin.rpc('increment_broadcast_analytics', {
+            target_campaign_id: item.campaign_id,
+            col_name: 'failed_count'
           });
-
-          let indices = [...new Set((mappings || []).map((v: any) => String(v.variable_key)))].sort((a, b) => Number(a) - Number(b));
-
-          if (indices.length === 0 && tmpl?.template_json) {
-            const parsed = TemplateParserService.parse(tmpl.template_json);
-            if (parsed.detectedVariables.length > 0) {
-              indices = parsed.detectedVariables;
-              parsed.detectedVariables.forEach((idx, i) => {
-                vMap[idx] = { index: idx, sourceType: i === 0 ? 'crm_field' : 'static', crmField: i === 0 ? 'name' : undefined, staticValue: i === 0 ? undefined : ' ' };
-              });
-            }
-          }
-
-          varMapCache.set(cid, vMap);
-          varIndicesCache.set(cid, indices);
-        }));
-
-        // D. Process enqueued messages using cached campaign data
-        const consecutiveFailures = new Map<string, number>();
-        const campaignLiveStatusCache = new Map<string, string>();
-        for (const item of items) {
-          try {
-            const campaign          = campaignCache.get(item.campaign_id);
-            const variablesMap      = varMapCache.get(item.campaign_id) || {};
-            const detectedVarIndices = varIndicesCache.get(item.campaign_id) || [];
-
-            if (!campaign) {
-              await supabaseAdmin
-                .from('broadcast_queue')
-                .update({ status: 'failed', failure_reason: 'Campaign configuration missing', locked_at: null })
-                .eq('id', item.id);
-              continue;
-            }
-
-            // Pause-on-failure: if 5 consecutive sends to this campaign failed, pause it
-            const cid = item.campaign_id;
-            if ((consecutiveFailures.get(cid) ?? 0) >= 5) {
-              await supabaseAdmin
-                .from('broadcast_campaigns')
-                .update({ status: 'paused', updated_at: new Date().toISOString() })
-                .eq('id', cid)
-                .eq('status', 'sending');
-              await supabaseAdmin
-                .from('broadcast_queue')
-                .update({ status: 'pending', locked_at: null })
-                .eq('id', item.id);
-              console.warn(`[BROADCAST] Campaign ${cid} paused — 5 consecutive failures`);
-              notifyAdmin({
-                dedupeKey: `broadcast-paused-${cid}`,
-                subject: `Broadcast campaign auto-paused — 5 consecutive failures`,
-                summary: `Campaign ${cid} for tenant ${tenantId} was paused after 5 consecutive send failures. Likely cause: expired Meta token or template rejected.`,
-                context: { tenantId, campaignId: cid },
-              }).catch(() => {});
-              processed++;
-              continue;
-            }
-
-            // Quiet hours enforcement: skip sends between 9 PM and 9 AM in campaign timezone.
-            // forceNow (operator-initiated "Retry Now") is an explicit override — send immediately.
-            const dSettings = deliverySettingsCache.get(item.campaign_id);
-            if (dSettings?.quiet_hours && !forceNow) {
-              const tz = dSettings.timezone || 'Asia/Kolkata';
-              const localHour = new Date().toLocaleString('en-US', { timeZone: tz, hour: 'numeric', hour12: false });
-              const h = parseInt(localHour, 10);
-              if (h >= 21 || h < 9) {
-                // Re-queue for later — don't cancel, just defer
-                await supabaseAdmin
-                  .from('broadcast_queue')
-                  .update({ status: 'pending', locked_at: null })
-                  .eq('id', item.id);
-                processed++;
-                continue;
-              }
-            }
-
-            // Check if campaign was cancelled/paused mid-send.
-            // Re-fetch live status once per campaign (not per item) to detect cancel API calls.
-            if (!campaignLiveStatusCache.has(item.campaign_id)) {
-              const { data: liveRow } = await supabaseAdmin
-                .from('broadcast_campaigns')
-                .select('status, updated_at, auto_resumed')
-                .eq('id', item.campaign_id)
-                .single();
-              const st = liveRow?.status || 'unknown';
-
-              // Auto-resume: if paused >30 min ago and never auto-resumed before,
-              // give it one more chance (handles temporary Meta outages).
-              if (st === 'paused' && liveRow?.updated_at && !liveRow?.auto_resumed) {
-                const pausedAgo = Date.now() - new Date(liveRow.updated_at).getTime();
-                if (pausedAgo > 30 * 60 * 1000) {
-                  await supabaseAdmin
-                    .from('broadcast_campaigns')
-                    .update({ status: 'sending', auto_resumed: true, updated_at: new Date().toISOString() })
-                    .eq('id', item.campaign_id);
-                  campaignLiveStatusCache.set(item.campaign_id, 'sending');
-                  console.log(`[BROADCAST] Auto-resumed campaign ${item.campaign_id} after 30-min cooldown`);
-                  notifyAdmin({
-                    dedupeKey: `broadcast-autoresume-${item.campaign_id}`,
-                    subject: `Broadcast campaign auto-resumed after 30-min cooldown`,
-                    summary: `Campaign ${item.campaign_id} (tenant ${tenantId}) was auto-resumed. If it pauses again, it will stay paused permanently — manual Retry Now required.`,
-                    context: { tenantId, campaignId: item.campaign_id },
-                  }).catch(() => {});
-                } else {
-                  campaignLiveStatusCache.set(item.campaign_id, st);
-                }
-              } else {
-                campaignLiveStatusCache.set(item.campaign_id, st);
-              }
-            }
-            const liveStatus = campaignLiveStatusCache.get(item.campaign_id);
-            if (liveStatus === 'cancelled' || liveStatus === 'paused') {
-              await supabaseAdmin
-                .from('broadcast_queue')
-                .update({
-                  status: liveStatus === 'cancelled' ? 'cancelled' : 'pending',
-                  locked_at: null,
-                  processed_at: liveStatus === 'cancelled' ? new Date().toISOString() : null,
-                })
-                .eq('id', item.id);
-              processed++;
-              continue;
-            }
-
-            // Just-in-time opt-out check — contact may have opted out after audience resolution
-            if (optoutPhones.has(item.phone)) {
-              await supabaseAdmin
-                .from('broadcast_queue')
-                .update({ status: 'cancelled', failure_reason: 'Recipient opted out', locked_at: null, processed_at: new Date().toISOString() })
-                .eq('id', item.id);
-              processed++;
-              continue;
-            }
-
-            // Per-contact frequency cap: max 3 broadcasts per phone per 24h per tenant
-            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-            const { count: recentSends } = await supabaseAdmin
-              .from('broadcast_contact_sends')
-              .select('id', { count: 'exact', head: true })
-              .eq('tenant_id', tenantId)
-              .eq('phone', item.phone)
-              .gte('sent_at', oneDayAgo);
-            if ((recentSends ?? 0) >= 3) {
-              await supabaseAdmin
-                .from('broadcast_queue')
-                .update({ status: 'cancelled', failure_reason: 'Frequency cap: 3 broadcasts/day exceeded', locked_at: null, processed_at: new Date().toISOString() })
-                .eq('id', item.id);
-              processed++;
-              continue;
-            }
-
-            const leadRecord = {
-              id: item.contact_id || '',
-              name: item.payload?.name || 'there',
-              phone: item.phone
-            };
-
-            const metaComponents = MetaPayloadBuilderService.buildPayload(
-              variablesMap,
-              detectedVarIndices,
-              leadRecord
-            );
-
-            const languageCode = item.language_code || campaign.template_language || 'en';
-
-            // Dispatch to Meta
-            const waResult = await sendTemplateMessage(
-              accessToken,
-              tenant.wa_phone_number_id,
-              item.phone,
-              campaign.template_name,
-              metaComponents,
-              languageCode
-            );
-
-            console.log(`[WHATSAPP_SEND] Dispatched to ${item.phone}: messageId=${waResult.messageId || 'NONE'}`);
-
-            if (waResult.messageId) {
-              // Mark queue item as sent
-              await supabaseAdmin
-                .from('broadcast_queue')
-                .update({
-                  status: 'sent',
-                  processed_at: new Date().toISOString(),
-                  locked_at: null
-                })
-                .eq('id', item.id);
-
-              // Ingest in broadcast_deliveries — source of truth for per-message status.
-              await supabaseAdmin
-                .from('broadcast_deliveries')
-                .upsert({
-                  tenant_id: tenantId,
-                  campaign_id: item.campaign_id,
-                  contact_id: item.contact_id,
-                  phone: item.phone,
-                  message_id: waResult.messageId,
-                  status: 'sent'
-                }, { onConflict: 'message_id', ignoreDuplicates: false });
-
-              // Increment sent_count HERE — the webhook 'sent' status won't trigger
-              // a change (delivery already 'sent'), so it would never be counted otherwise.
-              await supabaseAdmin.rpc('increment_campaign_counter', {
-                p_campaign_id: item.campaign_id,
-                p_status: 'sent',
-              });
-
-              // Record send for per-contact frequency cap
-              await supabaseAdmin.from('broadcast_contact_sends').insert({
-                tenant_id: tenantId,
-                phone: item.phone,
-                campaign_id: item.campaign_id,
-              });
-
-              consecutiveFailures.set(item.campaign_id, 0);
-            } else {
-              throw new Error('Missing outbound messageId');
-            }
-
-          } catch (err) {
-            const errorMsg = (err as Error).message || 'Unknown network error';
-            console.error(`❌ Meta dispatch failure to ${item.phone}:`, errorMsg);
-            consecutiveFailures.set(item.campaign_id, (consecutiveFailures.get(item.campaign_id) ?? 0) + 1);
-
-            const nextAttempt = (item.attempt_count || 0) + 1;
-            
-            if (nextAttempt <= RETRY_BACKOFF_MINUTES.length) {
-              // Backoff delay
-              const delayMins = RETRY_BACKOFF_MINUTES[nextAttempt - 1];
-              const nextTime = new Date();
-              nextTime.setMinutes(nextTime.getMinutes() + delayMins);
-
-              await supabaseAdmin
-                .from('broadcast_queue')
-                .update({
-                  status: 'retrying',
-                  attempt_count: nextAttempt,
-                  next_attempt_at: nextTime.toISOString(),
-                  failure_reason: errorMsg,
-                  locked_at: null
-                })
-                .eq('id', item.id);
-            } else {
-              // Permanent failure limit exceeded
-              await supabaseAdmin
-                .from('broadcast_queue')
-                .update({
-                  status: 'failed',
-                  attempt_count: nextAttempt,
-                  failure_reason: `Max attempts reached. Final error: ${errorMsg}`,
-                  processed_at: new Date().toISOString(),
-                  locked_at: null
-                })
-                .eq('id', item.id);
-
-              // Increment failed analytics
-              await supabaseAdmin.rpc('increment_broadcast_analytics', {
-                target_campaign_id: item.campaign_id,
-                col_name: 'failed_count'
-              });
-              await supabaseAdmin.rpc('increment_campaign_counter', {
-                p_campaign_id: item.campaign_id,
-                p_status: 'failed'
-              });
-            }
-          }
-
-          processed++;
-          
-          // No artificial sleep needed — Meta allows 80 msg/sec; our DB latency is the natural throttle
-        }
-
-        // E. Check if queue is fully cleared for each campaign processed in this batch
-        const campaignIdsInBatch = [...new Set(items.map(i => i.campaign_id))];
-        for (const campaignId of campaignIdsInBatch) {
-          const { count, error: countErr } = await supabaseAdmin
-            .from('broadcast_queue')
-            .select('*', { count: 'exact', head: true })
-            .eq('campaign_id', campaignId)
-            .in('status', ['pending', 'retrying', 'processing']);
-
-          if (!countErr && count === 0) {
-            await supabaseAdmin
-              .from('broadcast_campaigns')
-              .update({ status: 'completed', updated_at: new Date().toISOString() })
-              .eq('id', campaignId);
-
-            await ExecutionEventService.logEvent(
-              tenantId,
-              campaignId,
-              'campaign_completed',
-              'Campaign completed',
-              'All enqueued messages processed successfully.',
-              'success'
-            );
-
-            const { count: failedCount } = await supabaseAdmin
-              .from('broadcast_queue')
-              .select('*', { count: 'exact', head: true })
-              .eq('campaign_id', campaignId)
-              .eq('status', 'failed');
-            const { count: totalCount } = await supabaseAdmin
-              .from('broadcast_queue')
-              .select('*', { count: 'exact', head: true })
-              .eq('campaign_id', campaignId);
-            const total = totalCount ?? 0;
-            const failed = failedCount ?? 0;
-            if (total > 0 && failed / total > 0.2) {
-              notifyAdmin({
-                dedupeKey: `broadcast-high-fail-${campaignId}`,
-                subject: `Broadcast completed with ${Math.round(failed / total * 100)}% failure rate`,
-                summary: `Campaign ${campaignId} (tenant ${tenantId}) finished: ${failed}/${total} messages failed. Check Meta token validity and template approval status.`,
-                context: { tenantId, campaignId, total, failed, failureRate: `${Math.round(failed / total * 100)}%` },
-              }).catch(() => {});
-            }
-          }
+          await supabaseAdmin.rpc('increment_campaign_counter', {
+            p_campaign_id: item.campaign_id,
+            p_status: 'failed'
+          });
         }
       }
 
-    } catch (e) {
-      console.error('❌ Background cron processQueue failed:', e);
+      processed++;
     }
+
+    // E. Check if queue is fully cleared for each campaign processed in this batch
+    const campaignIdsInBatch = [...new Set(items.map(i => i.campaign_id))];
+    for (const campaignId of campaignIdsInBatch) {
+      const { count, error: countErr } = await supabaseAdmin
+        .from('broadcast_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('campaign_id', campaignId)
+        .in('status', ['pending', 'retrying', 'processing']);
+
+      if (!countErr && count === 0) {
+        await supabaseAdmin
+          .from('broadcast_campaigns')
+          .update({ status: 'completed', updated_at: new Date().toISOString() })
+          .eq('id', campaignId);
+
+        await ExecutionEventService.logEvent(
+          tenantId,
+          campaignId,
+          'campaign_completed',
+          'Campaign completed',
+          'All enqueued messages processed successfully.',
+          'success'
+        );
+
+        const { count: failedCount } = await supabaseAdmin
+          .from('broadcast_queue')
+          .select('*', { count: 'exact', head: true })
+          .eq('campaign_id', campaignId)
+          .eq('status', 'failed');
+        const { count: totalCount } = await supabaseAdmin
+          .from('broadcast_queue')
+          .select('*', { count: 'exact', head: true })
+          .eq('campaign_id', campaignId);
+        const total = totalCount ?? 0;
+        const failed = failedCount ?? 0;
+        if (total > 0 && failed / total > 0.2) {
+          notifyAdmin({
+            dedupeKey: `broadcast-high-fail-${campaignId}`,
+            subject: `Broadcast completed with ${Math.round(failed / total * 100)}% failure rate`,
+            summary: `Campaign ${campaignId} (tenant ${tenantId}) finished: ${failed}/${total} messages failed. Check Meta token validity and template approval status.`,
+            context: { tenantId, campaignId, total, failed, failureRate: `${Math.round(failed / total * 100)}%` },
+          }).catch(() => {});
+        }
+      }
+    }
+
     return processed;
   }
 }

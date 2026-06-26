@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
     await AuditLogService.logChange(tenantId, campaignId, actorId, 'launch', 'campaign', { status: 'draft' }, { status: 'sending' });
     await ExecutionEventService.logEvent(tenantId, campaignId, 'launch_requested', 'Launch requested', 'Campaign launch process initiated.');
     await ExecutionEventService.logEvent(tenantId, campaignId, 'queue_created', 'Queue initialized', `${res.queuedCount} recipient messages enqueued for dispatch.`);
-    await ExecutionEventService.logEvent(tenantId, campaignId, 'sending_started', 'Sending started', 'Rate: 300 messages per minute (5/sec).');
+    await ExecutionEventService.logEvent(tenantId, campaignId, 'sending_started', 'Sending started', 'Dispatching via per-tenant worker (paced to the number\'s Meta tier).');
 
     // Kick off the self-chaining process-queue pipeline in the background
     after(async () => {

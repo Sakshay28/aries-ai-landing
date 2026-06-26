@@ -32,6 +32,7 @@ import { sendBookingAlertEmail } from '@/lib/alerts/bookingEmail';
 import { isCoexistenceChange, handleCoexistenceWebhook } from '@/lib/webhook/coexistence';
 import { toSignedMediaUrl } from '@/lib/utils/storage';
 import { triggerAutomations, cancelLeadAutomations, processPendingAutomations } from '@/lib/automations/engine';
+import { resolveBookingVariables } from '@/lib/automations/variables';
 import { zonedDateTimeToUtc } from '@/lib/utils/datetime';
 import * as Sentry from '@/lib/sentry-stub';
 
@@ -2301,15 +2302,11 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       }
 
       if (bookingWritten && lead) {
-        const automationVars = {
-          customer_name: customerName || 'there', business_name: tenant.business_name || '',
-          reservation_id: reservationId || '', booking_date: prettyDate || bookingDate || '',
-          booking_time: prettyTime || slotTime || '', party_size: String(guestCount || ''),
-          guest_count: guestLabel || String(guestCount || ''),
-          date: prettyDate || bookingDate || '', time: prettyTime || slotTime || '',
-          table: assignedTableName ? `Table ${assignedTableName}` : '',
-          special_requests: contextObj.specialRequests ? String(contextObj.specialRequests) : '',
-        };
+        const automationVars = resolveBookingVariables({
+          customerName, customerPhone, guestCount, bookingDate, slotTime,
+          reservationId, tableName: assignedTableName,
+          specialRequests: contextObj.specialRequests ? String(contextObj.specialRequests) : null,
+        }, tenant);
 
         triggerAutomations({
           tenantId: tenant.id, event: 'booking_confirmed', leadId: lead.id,
@@ -2317,7 +2314,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           variables: automationVars,
         }).catch(e => console.error('Automations (booking_confirmed):', e.message));
 
-        // Pre-booking reminders: schedule `delay` BEFORE the reservation time.
         const bookingAtUtc = zonedDateTimeToUtc(bookingDate, slotTime, (tenant as any).timezone || 'Asia/Kolkata');
         if (bookingAtUtc) {
           triggerAutomations({

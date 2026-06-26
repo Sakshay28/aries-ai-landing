@@ -1,8 +1,10 @@
 # ─────────────────────────────────────────────────────────────
-# Dockerfile.worker — BullMQ Standalone Worker
+# Dockerfile.worker — Broadcast Drain Worker (per-tenant parallel)
 # ─────────────────────────────────────────────────────────────
 # Build:  docker build -f Dockerfile.worker -t aries-worker .
-# Run:    docker run --env-file .env.worker aries-worker
+# Run:    docker run --env-file .env.worker -p 3001:3001 aries-worker
+# Needs:  SUPABASE_SERVICE_ROLE_KEY, NEXT_PUBLIC_SUPABASE_URL, TOKEN_ENCRYPTION
+#         key(s), CRON_SECRET, RESEND_API_KEY/PLATFORM_ADMIN_EMAIL (alerts).
 # ─────────────────────────────────────────────────────────────
 
 # ── Stage 1: Install deps ──────────────────────────────────
@@ -27,12 +29,9 @@ COPY tsconfig.json ./
 COPY worker.ts ./
 COPY src/ ./src/
 
-# Bull-Board UI assets (needed at runtime)
-COPY --from=deps /app/node_modules/@bull-board ./node_modules/@bull-board
-
 EXPOSE 3001
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:3001/admin/queue || exit 1
+  CMD wget -qO- http://localhost:3001/health || exit 1
 
 CMD ["tsx", "worker.ts"]

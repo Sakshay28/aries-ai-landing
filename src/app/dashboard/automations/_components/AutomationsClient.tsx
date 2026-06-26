@@ -36,7 +36,24 @@ interface Execution {
   sent_at: string | null;
   error: string | null;
   wa_message_id: string | null;
+  variables: Record<string, string> | null;
   created_at: string;
+}
+
+interface VariableEntry {
+  name: string;
+  label: string;
+  description: string;
+  required: boolean;
+  defaultFallback: string | null;
+  category: string;
+}
+
+interface TemplateValidation {
+  valid: boolean;
+  unknownVariables: string[];
+  suggestions: Record<string, string>;
+  preview: string;
 }
 
 interface Diagnostics {
@@ -73,13 +90,20 @@ const PRE_EVENT_TRIGGERS = new Set(['booking_reminder']);
 
 const UNIT_LABELS: Record<string, string> = { minutes: 'Minutes', hours: 'Hours', days: 'Days' };
 
-const VARIABLES = [
+const FALLBACK_VARIABLES = [
   { key: '{{customer_name}}', label: 'Customer Name' },
   { key: '{{business_name}}', label: 'Business Name' },
   { key: '{{reservation_id}}', label: 'Reservation ID' },
   { key: '{{booking_date}}', label: 'Booking Date' },
   { key: '{{booking_time}}', label: 'Booking Time' },
+  { key: '{{guest_count}}', label: 'Guest Count' },
   { key: '{{party_size}}', label: 'Party Size' },
+  { key: '{{table}}', label: 'Table' },
+  { key: '{{special_requests}}', label: 'Special Requests' },
+  { key: '{{restaurant_name}}', label: 'Restaurant Name' },
+  { key: '{{instagram}}', label: 'Instagram' },
+  { key: '{{google_review_url}}', label: 'Google Review URL' },
+  { key: '{{first_name}}', label: 'First Name' },
 ];
 
 const SUGGESTIONS = [
@@ -128,8 +152,14 @@ export function AutomationsClient() {
   const [executions, setExecutions] = useState<Execution[]>([]);
   const [execLoading, setExecLoading] = useState(false);
   const [diag, setDiag] = useState<Diagnostics | null>(null);
+  const [registryVars, setRegistryVars] = useState<VariableEntry[]>([]);
+  const [sampleData, setSampleData] = useState<Record<string, string>>({});
+  const [templateValidation, setTemplateValidation] = useState<TemplateValidation | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [expandedExec, setExpandedExec] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const validateTimer = useRef<ReturnType<typeof setTimeout>>(null);
 
   useEffect(() => {
     const day = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86_400_000);
@@ -168,6 +198,45 @@ export function AutomationsClient() {
   }, []);
 
   useEffect(() => { load(); loadExecutions(); }, [load, loadExecutions]);
+
+  // Load variable registry from API
+  useEffect(() => {
+    fetch('/api/dashboard/automations/variables')
+      .then(r => r.json())
+      .then(d => {
+        if (d.variables) setRegistryVars(d.variables);
+        if (d.sampleData) setSampleData(d.sampleData);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Debounced template validation
+  const validateTemplate = useCallback((text: string) => {
+    if (!text?.trim()) { setTemplateValidation(null); return; }
+    if (validateTimer.current) clearTimeout(validateTimer.current);
+    validateTimer.current = setTimeout(async () => {
+      setValidating(true);
+      try {
+        const res = await fetch('/api/dashboard/automations/variables', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ template: text }),
+        });
+        const data = await res.json();
+        setTemplateValidation(data);
+      } catch { /* non-fatal */ }
+      setValidating(false);
+    }, 400);
+  }, []);
+
+  // Re-validate when message_text changes
+  useEffect(() => {
+    if (isDrawerOpen && draft.message_text) {
+      validateTemplate(draft.message_text);
+    } else {
+      setTemplateValidation(null);
+    }
+  }, [draft.message_text, isDrawerOpen, validateTemplate]);
 
   const openEdit = (a: Automation) => { setDraft(a); setIsNew(false); setDrawer(true); };
   const openNew = (prefill?: Partial<Automation>) => {
@@ -214,6 +283,10 @@ export function AutomationsClient() {
   const handleSave = async () => {
     if (!draft.name?.trim()) { toast.error('Name is required'); return; }
     if (!draft.message_text?.trim()) { toast.error('Message is required'); return; }
+    if (templateValidation && !templateValidation.valid) {
+      toast.error(`Fix unknown variables before saving: ${templateValidation.unknownVariables.map(v => `{{${v}}}`).join(', ')}`);
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -492,25 +565,92 @@ export function AutomationsClient() {
                   <tbody>
                     {executions.map(e => {
                       const s = EXEC_STATUS_STYLE[e.status] || EXEC_STATUS_STYLE.pending;
+                      const isExpanded = expandedExec === e.id;
                       return (
-                        <tr key={e.id} className="border-b border-border/20 last:border-0 hover:bg-muted/20 transition-colors">
-                          <td className="px-4 py-3">
-                            <div className="font-medium truncate max-w-[140px]">{e.contact_name || 'Unknown'}</div>
-                            <div className="text-[11px] text-muted-foreground">{e.contact_phone || '—'}</div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="truncate max-w-[160px]">{e.automation_name}</div>
-                            <div className="text-[11px] text-muted-foreground">{e.trigger_event?.replace(/_/g, ' ')}</div>
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmtTime(e.scheduled_at)}</td>
-                          <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmtTime(e.sent_at)}</td>
-                          <td className="px-4 py-3">
-                            <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium', s.cls)} title={e.error || undefined}>
-                              {s.dot} {s.label}
-                            </span>
-                            {e.error && <div className="text-[10px] text-red-500 mt-1 truncate max-w-[160px]" title={e.error}>{e.error}</div>}
-                          </td>
-                        </tr>
+                        <React.Fragment key={e.id}>
+                          <tr
+                            className="border-b border-border/20 last:border-0 hover:bg-muted/20 transition-colors cursor-pointer"
+                            onClick={() => setExpandedExec(isExpanded ? null : e.id)}
+                          >
+                            <td className="px-4 py-3">
+                              <div className="font-medium truncate max-w-[140px]">{e.contact_name || 'Unknown'}</div>
+                              <div className="text-[11px] text-muted-foreground">{e.contact_phone || '—'}</div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="truncate max-w-[160px]">{e.automation_name}</div>
+                              <div className="text-[11px] text-muted-foreground">{e.trigger_event?.replace(/_/g, ' ')}</div>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmtTime(e.scheduled_at)}</td>
+                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmtTime(e.sent_at)}</td>
+                            <td className="px-4 py-3">
+                              <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium', s.cls)} title={e.error || undefined}>
+                                {s.dot} {s.label}
+                              </span>
+                              {e.error && <div className="text-[10px] text-red-500 mt-1 truncate max-w-[160px]" title={e.error}>{e.error}</div>}
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr className="bg-muted/10">
+                              <td colSpan={5} className="px-4 py-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-[12px]">
+                                  {/* Timeline */}
+                                  <div className="space-y-2">
+                                    <h4 className="font-semibold text-[11px] uppercase tracking-wide text-muted-foreground">Timeline</h4>
+                                    <div className="space-y-1.5">
+                                      <div className="flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                        <span className="text-muted-foreground w-16 shrink-0">Created</span>
+                                        <span>{fmtTime(e.created_at)}</span>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                        <span className="text-muted-foreground w-16 shrink-0">Scheduled</span>
+                                        <span>{fmtTime(e.scheduled_at)}</span>
+                                      </div>
+                                      {e.sent_at && (
+                                        <div className="flex items-center gap-2">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                          <span className="text-muted-foreground w-16 shrink-0">Sent</span>
+                                          <span>{fmtTime(e.sent_at)}</span>
+                                        </div>
+                                      )}
+                                      {e.error && (
+                                        <div className="flex items-start gap-2">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 mt-1" />
+                                          <span className="text-muted-foreground w-16 shrink-0">Error</span>
+                                          <span className="text-red-600 dark:text-red-400">{e.error}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                    {e.wa_message_id && (
+                                      <div className="mt-2">
+                                        <span className="text-muted-foreground">WA Msg ID: </span>
+                                        <code className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded break-all">{e.wa_message_id}</code>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Variables */}
+                                  <div className="space-y-2">
+                                    <h4 className="font-semibold text-[11px] uppercase tracking-wide text-muted-foreground">Resolved Variables</h4>
+                                    {e.variables && Object.keys(e.variables).length > 0 ? (
+                                      <div className="space-y-1">
+                                        {Object.entries(e.variables).filter(([,v]) => v).map(([k, v]) => (
+                                          <div key={k} className="flex items-start gap-2">
+                                            <code className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-blue-700 dark:text-blue-400 shrink-0">{`{{${k}}}`}</code>
+                                            <span className="truncate">{v}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <p className="text-muted-foreground italic">No variables stored</p>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
@@ -618,28 +758,94 @@ export function AutomationsClient() {
 
               {/* Message */}
               <div className="space-y-1.5">
-                <label className="text-[13px] font-medium">Message</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[13px] font-medium">Message</label>
+                  {validating && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+                  {templateValidation && !validating && (
+                    templateValidation.valid
+                      ? <span className="text-[11px] text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> All variables valid</span>
+                      : <span className="text-[11px] text-amber-600 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> {templateValidation.unknownVariables.length} unknown</span>
+                  )}
+                </div>
                 <textarea
                   ref={textareaRef}
                   value={draft.message_text || ''}
                   onChange={e => setDraft(p => ({ ...p, message_text: e.target.value }))}
                   placeholder="Type your message here. Use variables below to personalize."
                   rows={5}
-                  className="w-full p-3 bg-background border border-border/80 rounded-lg text-[14px] focus:outline-none focus:border-foreground/50 transition-colors resize-none"
+                  className={cn(
+                    "w-full p-3 bg-background border rounded-lg text-[14px] focus:outline-none transition-colors resize-none",
+                    templateValidation && !templateValidation.valid
+                      ? "border-amber-500/60 focus:border-amber-500"
+                      : "border-border/80 focus:border-foreground/50"
+                  )}
                 />
+
+                {/* Unknown variable warnings */}
+                {templateValidation && templateValidation.unknownVariables.length > 0 && (
+                  <div className="rounded-lg bg-amber-500/10 px-3 py-2 space-y-1">
+                    {templateValidation.unknownVariables.map(v => (
+                      <div key={v} className="flex items-center gap-2 text-[12px]">
+                        <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                        <span className="text-amber-700 dark:text-amber-400">
+                          <code className="font-mono">{`{{${v}}}`}</code> is not a known variable
+                          {templateValidation.suggestions[v] && (
+                            <> — did you mean <button
+                              type="button"
+                              className="underline font-medium"
+                              onClick={() => {
+                                const text = (draft.message_text || '').replace(`{{${v}}}`, `{{${templateValidation.suggestions[v]}}}`);
+                                setDraft(p => ({ ...p, message_text: text }));
+                              }}
+                            >{`{{${templateValidation.suggestions[v]}}}`}</button>?</>
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Variable chips from registry */}
                 <div className="flex flex-wrap gap-1.5">
-                  {VARIABLES.map(v => (
+                  {(registryVars.length > 0
+                    ? registryVars.map(v => ({ key: `{{${v.name}}}`, label: v.label, desc: v.description, required: v.required }))
+                    : FALLBACK_VARIABLES.map(v => ({ ...v, desc: '', required: false }))
+                  ).map(v => (
                     <button
                       key={v.key}
                       type="button"
                       onClick={() => insertVariable(v.key)}
-                      className="px-2 py-1 text-[11px] font-medium bg-muted hover:bg-muted/80 text-muted-foreground rounded-md transition-colors"
+                      title={v.desc}
+                      className={cn(
+                        "px-2 py-1 text-[11px] font-medium rounded-md transition-colors",
+                        v.required
+                          ? "bg-blue-500/10 hover:bg-blue-500/20 text-blue-700 dark:text-blue-400"
+                          : "bg-muted hover:bg-muted/80 text-muted-foreground"
+                      )}
                     >
                       {v.label}
                     </button>
                   ))}
                 </div>
               </div>
+
+              {/* LIVE PREVIEW */}
+              {templateValidation?.preview && draft.message_text?.includes('{{') && (
+                <div className="space-y-1.5">
+                  <label className="text-[13px] font-medium flex items-center gap-2">
+                    <Activity className="w-3.5 h-3.5 text-muted-foreground" />
+                    Live Preview
+                  </label>
+                  <div className="relative p-4 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 rounded-xl">
+                    <div className="absolute -top-2 left-4 px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 rounded text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+                      Sample preview
+                    </div>
+                    <p className="text-[13px] whitespace-pre-wrap leading-relaxed text-foreground/80 mt-1">
+                      {templateValidation.preview}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Media Upload */}
               <div className="space-y-1.5">

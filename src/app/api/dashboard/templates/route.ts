@@ -350,7 +350,6 @@ export async function POST(request: Request) {
         category,
         language,
         components,
-        allow_category_change: false,
       });
     } catch (metaErr) {
       const msg = (metaErr as Error).message;
