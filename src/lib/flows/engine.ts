@@ -623,9 +623,11 @@ async function executeNode(
     }
 
     try {
+      console.log(`🔘 Flow send_buttons node: ${mappedButtons.length} buttons, raw=${JSON.stringify(buttons.slice(0, 3))}`);
       if (mappedButtons.length > 0) {
         await sendInteractiveButtonsMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content, mappedButtons, headerText, footerText);
       } else {
+        console.warn(`⚠️ Flow send_buttons: no valid buttons — falling back to text`);
         await sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content);
       }
       await supabaseAdmin.from('messages').insert({
