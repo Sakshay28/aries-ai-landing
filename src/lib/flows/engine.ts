@@ -639,6 +639,12 @@ async function executeNode(
         channel: 'whatsapp',
         status: 'sent',
         ai_generated: false,
+        metadata: mappedButtons.length > 0 ? {
+          interactive_type: 'button' as const,
+          buttons: mappedButtons,
+          ...(headerText ? { header: headerText } : {}),
+          ...(footerText ? { footer: footerText } : {}),
+        } : null,
       });
 
       // Auto-pause after sending so the flow waits for the customer's
@@ -707,6 +713,13 @@ async function executeNode(
         channel: 'whatsapp',
         status: 'sent',
         ai_generated: false,
+        metadata: rows.length > 0 ? {
+          interactive_type: 'list' as const,
+          list_button: buttonLabel,
+          sections: [{ rows }],
+          ...(headerText ? { header: headerText } : {}),
+          ...(footerText ? { footer: footerText } : {}),
+        } : null,
       });
 
       const nextNodeId = getNextNode(node.id, null, edges);

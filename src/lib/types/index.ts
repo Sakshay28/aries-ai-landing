@@ -238,6 +238,17 @@ export interface Message {
   sent_via?: string | null;
   // True for messages backfilled by the coexistence `history` webhook.
   is_historical?: boolean | null;
+  // Interactive payload: buttons, list rows, header, footer stored as JSONB
+  metadata?: {
+    interactive_type?: 'button' | 'list' | 'cta_url' | 'flow';
+    buttons?: Array<{ id: string; title: string }>;
+    list_button?: string;
+    sections?: Array<{ title?: string; rows: Array<{ id: string; title: string; description?: string }> }>;
+    header?: string;
+    footer?: string;
+    selected_button_id?: string;
+    selected_row_id?: string;
+  } | null;
 }
 
 // Mirrors what the webhook actually stores: msg.type passes through for all media

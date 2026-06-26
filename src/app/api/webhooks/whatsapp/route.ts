@@ -731,20 +731,21 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // The others get a unique_violation (code 23505) → return immediately.
   // This permanently eliminates triple/duplicate replies.
   const isMedia = ['image', 'video', 'audio', 'document', 'voice', 'sticker'].includes(msg.type);
+  const inboundMetadata = msg.type === 'interactive' || msg.type === 'button'
+    ? { selected_button_id: msg.buttonId || undefined } : undefined;
   const inboundMsgPayload = {
     tenant_id: tenant.id,
     conversation_id: conversation.id,
     direction: 'inbound' as const,
     content,
-    message_type: isMedia ? msg.type : 'text',
+    message_type: isMedia ? msg.type : (msg.type === 'interactive' || msg.type === 'button') ? 'interactive' : 'text',
     channel: 'whatsapp',
     sender_id: cleanPhone,
     status: 'delivered',
     ai_generated: false,
     wa_message_id: msg.messageId,
+    ...(inboundMetadata && { metadata: inboundMetadata }),
     ...(isMedia && {
-      // Use the permanent Supabase Storage URL (resolvedMediaUrl) so the image
-      // never expires in the inbox. Falls back to content if storage upload failed.
       media_url: resolvedMediaUrl || content || null,
       file_name: msg.mediaFilename || `${msg.type}_${msg.messageId}.${msg.mediaMimeType?.split('/')?.[1]?.split(';')?.[0] || 'bin'}`,
       mime_type: msg.mediaMimeType || (msg.type === 'image' ? 'image/jpeg' : msg.type === 'video' ? 'video/mp4' : msg.type === 'audio' || msg.type === 'voice' ? 'audio/ogg' : 'application/octet-stream'),

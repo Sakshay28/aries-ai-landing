@@ -1431,13 +1431,8 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                         >
                           {replyPreviewCard}
                           {/^\[follow_up_template:.+\]$/i.test(msg.content || '') ? (
-                            // Legacy safety net: older rows stored a raw placeholder token
-                            // instead of the delivered copy. Never show the token to users.
                             <p className="whitespace-pre-wrap break-words italic opacity-80">Follow-up reminder sent</p>
                           ) : (msg.content || '').startsWith('[unsupported]') ? (
-                            // WhatsApp couldn't deliver this message's contents. Show a
-                            // clear warning + Meta's reason (when captured) so the owner
-                            // knows the customer sent something unreadable, not nothing.
                             <p className="italic text-[12.5px] flex items-center gap-1.5 text-amber-600 dark:text-amber-400 opacity-90">
                               <span>⚠️</span>
                               <span>
@@ -1459,6 +1454,48 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                             </p>
                           ) : (
                             <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                          )}
+
+                          {/* ── Interactive buttons ── */}
+                          {msg.metadata?.interactive_type === 'button' && msg.metadata.buttons && msg.metadata.buttons.length > 0 && (
+                            <div className="mt-2 flex flex-col gap-1.5 border-t border-black/5 dark:border-white/10 pt-2">
+                              {msg.metadata.buttons.map((btn: { id: string; title: string }) => (
+                                <div
+                                  key={btn.id}
+                                  className="text-center py-1.5 px-3 text-[13px] font-medium text-[#00A884] dark:text-[#00A884] border border-[#00A884]/30 dark:border-[#00A884]/20 rounded-lg bg-[#00A884]/5 dark:bg-[#00A884]/10"
+                                >
+                                  {btn.title}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* ── Interactive list ── */}
+                          {msg.metadata?.interactive_type === 'list' && msg.metadata.sections && (
+                            <div className="mt-2 border-t border-black/5 dark:border-white/10 pt-2">
+                              <div className="text-center py-1.5 px-3 text-[13px] font-medium text-[#00A884] dark:text-[#00A884] border border-[#00A884]/30 dark:border-[#00A884]/20 rounded-lg bg-[#00A884]/5 dark:bg-[#00A884]/10 flex items-center justify-center gap-1.5">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                                {msg.metadata.list_button || 'View options'}
+                              </div>
+                              {msg.metadata.sections.map((section: { title?: string; rows: Array<{ id: string; title: string; description?: string }> }, si: number) => (
+                                <div key={si} className="mt-1.5">
+                                  {section.title && <p className="text-[11px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#aebac1] mb-1">{section.title}</p>}
+                                  {section.rows.map((row: { id: string; title: string; description?: string }) => (
+                                    <div key={row.id} className="py-1 px-2 text-[12.5px] text-[#111B21] dark:text-[#E9EDEF] border-b border-black/5 dark:border-white/5 last:border-0">
+                                      <span className="font-medium">{row.title}</span>
+                                      {row.description && <span className="ml-1 text-[#667781] dark:text-[#aebac1]">— {row.description}</span>}
+                                    </div>
+                                  ))}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* ── Inbound: show which button was selected ── */}
+                          {isInbound && msg.metadata?.selected_button_id && (
+                            <div className="mt-1 text-[11px] text-[#00A884] dark:text-[#00A884] flex items-center gap-1">
+                              <Check className="w-3 h-3" /> Selected: {msg.metadata.selected_button_id}
+                            </div>
                           )}
 
                           {/* Timestamp + ticks — shown on every bubble */}
