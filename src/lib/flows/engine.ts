@@ -234,18 +234,37 @@ export async function runFlowsForMessage(
   );
 
   if (pendingNode) {
-    // Restore saved variables and clear the pending marker
     const savedCtx = { ...(conv?.context as Record<string, unknown>) };
+    const pauseType = (savedCtx._pending_pause_type as string) || '';
+    const isButtonReply = messageType === 'interactive' || messageType === 'button';
+
+    // Out-of-box detection: if the flow paused on buttons/list expecting a
+    // structured reply but the customer typed free text instead, let the AI
+    // handle their message naturally. The flow stays paused so the next
+    // message (hopefully a button click or a direct answer) resumes it.
+    if ((pauseType === 'buttons' || pauseType === 'list') && !isButtonReply) {
+      console.log(`🤖 Flow engine: out-of-box text reply while waiting for ${pauseType} — handing to AI, flow stays paused`);
+      return false; // fall through to AI; pending_flow_node remains in context
+    }
+
+    // Valid reply — clear the pending marker and resume the flow
     delete savedCtx.pending_flow_node;
+    delete savedCtx._pending_pause_type;
     await supabaseAdmin
       .from('conversations')
-      .update({ context: { ...savedCtx, pending_flow_node: null } })
+      .update({ context: { ...savedCtx, pending_flow_node: null, _pending_pause_type: null } })
       .eq('id', conversationId);
 
     // Find the flow that owns this node and resume, with restored variables
     const ownerFlow = (flows as FlowRecord[]).find(f => f.nodes.some(n => n.id === pendingNode));
     if (ownerFlow) {
       const resumeVars = { ...ctx.variables, ...savedCtx };
+      // Save the customer's reply into the variable configured by ask_question/collect_input
+      const pendingSaveAs = (savedCtx._pending_save_as as string || '').trim();
+      if (pendingSaveAs) {
+        resumeVars[pendingSaveAs] = messageText;
+        delete resumeVars._pending_save_as;
+      }
       // Capture the customer's button click so downstream condition nodes can evaluate it
       if (buttonId) {
         resumeVars.selected_button = buttonId;
@@ -615,21 +634,18 @@ async function executeNode(
         ai_generated: false,
       });
 
-      // Auto-pause after sending buttons so the flow waits for the customer's
-      // button click before continuing. Without this, the entire flow fires in
-      // one shot and dumps all questions at once.
-      if (mappedButtons.length > 0) {
-        const nextNodeId = getNextNode(node.id, null, edges);
-        if (nextNodeId) {
-          await supabaseAdmin
-            .from('conversations')
-            .update({ context: { ...ctx.variables, pending_flow_node: nextNodeId } })
-            .eq('id', ctx.conversationId);
-        }
-        return { stop: true, sent: true };
+      // Auto-pause after sending so the flow waits for the customer's
+      // reply before continuing. Without this, sequential questions all
+      // fire in one shot. Applies even when buttons are empty (degraded
+      // to text) because the node type semantically means "ask and wait."
+      const nextNodeId = getNextNode(node.id, null, edges);
+      if (nextNodeId) {
+        await supabaseAdmin
+          .from('conversations')
+          .update({ context: { ...ctx.variables, pending_flow_node: nextNodeId, _pending_pause_type: 'buttons' } })
+          .eq('id', ctx.conversationId);
       }
-
-      return { nextId: getNextNode(node.id, null, edges), sent: true };
+      return { stop: true, sent: true };
     } catch (e) {
       console.error(`Flow engine: sendInteractiveButtons failed for node ${node.id}:`, (e as Error).message);
       return { nextId: getNextNode(node.id, 'error', edges) };
@@ -681,18 +697,14 @@ async function executeNode(
         ai_generated: false,
       });
 
-      if (rows.length > 0) {
-        const nextNodeId = getNextNode(node.id, null, edges);
-        if (nextNodeId) {
-          await supabaseAdmin
-            .from('conversations')
-            .update({ context: { ...ctx.variables, pending_flow_node: nextNodeId } })
-            .eq('id', ctx.conversationId);
-        }
-        return { stop: true, sent: true };
+      const nextNodeId = getNextNode(node.id, null, edges);
+      if (nextNodeId) {
+        await supabaseAdmin
+          .from('conversations')
+          .update({ context: { ...ctx.variables, pending_flow_node: nextNodeId, _pending_pause_type: 'list' } })
+          .eq('id', ctx.conversationId);
       }
-
-      return { nextId: getNextNode(node.id, null, edges), sent: true };
+      return { stop: true, sent: true };
     } catch (e) {
       console.error(`Flow engine: sendInteractiveList failed for node ${node.id}:`, (e as Error).message);
       return { nextId: getNextNode(node.id, 'error', edges) };
@@ -708,9 +720,11 @@ async function executeNode(
   ) {
     const raw = (node.data?.content as string) || (node.data?.message as string) || '';
     const content = interpolate(raw, ctx);
+    const isQuestion = type === 'ask_question' || type === 'collect_input';
     if (content.trim()) {
       if (ctx.dryRun) {
         ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_message', payload: content, variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
+        if (isQuestion) return { stop: true, sent: true };
         return { nextId: getNextNode(node.id, null, edges), sent: true };
       }
       try {
@@ -725,6 +739,28 @@ async function executeNode(
           status: 'sent',
           ai_generated: false,
         });
+
+        // ask_question / collect_input: pause flow and wait for customer reply
+        // before continuing — without this, sequential questions all fire at once
+        if (isQuestion) {
+          const nextNodeId = getNextNode(node.id, null, edges);
+          if (nextNodeId) {
+            const saveAs = (node.data?.saveAs as string || '').trim();
+            await supabaseAdmin
+              .from('conversations')
+              .update({
+                context: {
+                  ...ctx.variables,
+                  pending_flow_node: nextNodeId,
+                  _pending_pause_type: 'question',
+                  ...(saveAs ? { _pending_save_as: saveAs } : {}),
+                },
+              })
+              .eq('id', ctx.conversationId);
+          }
+          return { stop: true, sent: true };
+        }
+
         return { nextId: getNextNode(node.id, null, edges), sent: true };
       } catch (e) {
         console.error(`Flow engine: sendTextMessage failed for node ${node.id}:`, (e as Error).message);
@@ -1215,7 +1251,7 @@ async function executeNode(
     if (nextNodeId) {
       await supabaseAdmin
         .from('conversations')
-        .update({ context: { ...ctx.variables, pending_flow_node: nextNodeId } })
+        .update({ context: { ...ctx.variables, pending_flow_node: nextNodeId, _pending_pause_type: 'wait_for_reply' } })
         .eq('id', ctx.conversationId);
     }
     return { stop: true }; // Stop execution until next inbound message resumes here
@@ -1306,7 +1342,7 @@ async function executeNode(
         // Save pending flow node to conversation context
         await supabaseAdmin
           .from('conversations')
-          .update({ context: { ...ctx.variables, pending_flow_node: node.id } })
+          .update({ context: { ...ctx.variables, pending_flow_node: node.id, _pending_pause_type: 'question' } })
           .eq('id', ctx.conversationId);
 
         return { stop: true, sent: true };
