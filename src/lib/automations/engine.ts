@@ -127,6 +127,7 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
           conversation_id: conversationId || null,
           scheduled_at: scheduledAt,
           status: 'pending',
+          variables: variables ?? null,
         });
         await bumpCounter(rule.id, 1, 0);
         continue;
