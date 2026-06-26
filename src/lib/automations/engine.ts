@@ -217,7 +217,7 @@ export async function processPendingAutomations(): Promise<number> {
   const { data: queueItems, error } = await supabaseAdmin
     .from('automation_queue')
     .select(`
-      *,
+      id, automation_id, tenant_id, lead_id, conversation_id, variables,
       automations!inner ( id, tenant_id, message_text, media_url, media_type, cancel_on_reply ),
       leads!inner ( name, phone, lead_status )
     `)
