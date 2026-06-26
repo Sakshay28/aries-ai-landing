@@ -42,7 +42,7 @@
     },
     {
       "path": "/api/cron/automations",
-      "schedule": "* * * * *"
+      "schedule": "0 */6 * * *"
     }
   ]
 }
