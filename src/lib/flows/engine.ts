@@ -613,7 +613,14 @@ async function executeNode(
       }));
 
     if (ctx.dryRun) {
-      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_interactive_buttons', payload: { body: content, buttons: mappedButtons }, variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
+      // Simulate auto-pause: show that the flow waits here for a button click.
+      // Pick the first button as the simulated reply so downstream conditions work.
+      const simButton = mappedButtons[0];
+      if (simButton) {
+        ctx.variables.selected_button = simButton.id;
+        ctx.variables.button_value = simButton.id;
+      }
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_interactive_buttons', payload: { body: content, buttons: mappedButtons, pause: true, simulatedReply: simButton?.id }, variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
       return { nextId: getNextNode(node.id, null, edges), sent: true };
     }
 
@@ -676,7 +683,12 @@ async function executeNode(
       }));
 
     if (ctx.dryRun) {
-      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_interactive_list', payload: { body: content, rows }, variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
+      const simRow = rows[0];
+      if (simRow) {
+        ctx.variables.selected_button = simRow.id;
+        ctx.variables.button_value = simRow.id;
+      }
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_interactive_list', payload: { body: content, rows, pause: true, simulatedReply: simRow?.id }, variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
       return { nextId: getNextNode(node.id, null, edges), sent: true };
     }
 
@@ -1834,8 +1846,6 @@ export async function simulateFlow(
     party_size: '4',
     special_request: 'Window seat please',
     reservation_id: `SIM-${tomorrow.replace(/-/g, '')}-0001`,
-    selected_button: 'book_table',
-    button_value: 'book_table',
     host_name: 'Test User',
     event_date: new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10),
     guest_count: '25',
