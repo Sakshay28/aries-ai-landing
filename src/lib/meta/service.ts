@@ -826,6 +826,14 @@ export async function sendStaffAlert(
   },
   text: string
 ): Promise<StaffAlertResult[]> {
+  // ── Debug: log what we received ──────────────────────────────────────────
+  console.log(
+    `[sendStaffAlert] Loaded settings — ` +
+    `staff_phone=${tenant.staff_phone ?? 'null'}, ` +
+    `manager_phone=${tenant.manager_phone ?? 'null'}, ` +
+    `wa_phone_number_id=${tenant.wa_phone_number_id ?? 'null'}`
+  );
+
   if (!tenant.wa_phone_number_id || !tenant.wa_access_token) {
     console.error(`❌ sendStaffAlert: skipped — missing ${!tenant.wa_phone_number_id ? 'wa_phone_number_id' : 'wa_access_token'}`);
     return [];
@@ -833,28 +841,42 @@ export async function sendStaffAlert(
 
   const rawPhones = [tenant.staff_phone, tenant.manager_phone].filter(Boolean) as string[];
   if (rawPhones.length === 0) {
-    console.error(`❌ sendStaffAlert: skipped — no staff/manager phones configured (staff_phone=${tenant.staff_phone}, manager_phone=${tenant.manager_phone})`);
+    console.error(
+      `❌ sendStaffAlert: skipped — no staff/manager phones configured ` +
+      `(staff_phone=${tenant.staff_phone}, manager_phone=${tenant.manager_phone})`
+    );
     return [];
   }
 
   const phones = [...new Set(rawPhones.map(normalizePhone))];
-  const token = decryptToken(tenant.wa_access_token) as string;
 
+  // Log recipients list before sending
+  console.log(`[sendStaffAlert] Recipients (${phones.length}): ${phones.join(', ')}`);
+  if (rawPhones.length !== phones.length) {
+    console.log(`[sendStaffAlert] Note: ${rawPhones.length - phones.length} duplicate(s) removed after normalisation`);
+  }
+
+  const token = decryptToken(tenant.wa_access_token) as string;
   const results: StaffAlertResult[] = [];
 
   await Promise.all(
     phones.map(async (phone) => {
+      console.log(`[sendStaffAlert] Sending alert to: +${phone}`);
       try {
-        await sendTextMessage(token, tenant.wa_phone_number_id!, phone, text);
-        console.log(`✅ Staff alert delivered → ${phone}`);
+        const res = await sendTextMessage(token, tenant.wa_phone_number_id!, phone, text);
+        console.log(`✅ Staff alert delivered → +${phone} (messageId=${res.messageId})`);
         results.push({ phone, ok: true });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`❌ Staff alert failed → ${phone}: ${msg}`);
+        console.error(`❌ Staff alert failed → +${phone}: ${msg}`);
         results.push({ phone, ok: false, error: msg });
       }
     })
   );
+
+  // Summary log
+  const ok = results.filter(r => r.ok).length;
+  console.log(`[sendStaffAlert] Delivery summary: ${ok}/${results.length} succeeded`);
 
   return results;
 }

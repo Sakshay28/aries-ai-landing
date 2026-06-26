@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withTenantGuard } from '@/lib/auth/tenantGuard';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
-import { sendTextMessage } from '@/lib/meta/service';
+import { sendStaffAlert } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 
 export async function GET(req: NextRequest) {
@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
 
   const { data: tenant } = await supabaseAdmin
     .from('tenants')
-    .select('short_code, wa_access_token, wa_phone_number_id, manager_phone')
+    .select('short_code, wa_access_token, wa_phone_number_id, staff_phone, manager_phone')
     .eq('id', tenantId)
     .single();
 
@@ -176,26 +176,40 @@ export async function POST(req: NextRequest) {
     created_at: new Date().toISOString(),
   }).catch(() => {});
 
-  // Notify manager on WhatsApp (non-blocking)
+  // Notify staff + manager on WhatsApp (both recipients, independent sends)
+  const staffPhone  = (tenant as any)?.staff_phone   as string | null;
   const managerPhone = (tenant as any)?.manager_phone as string | null;
   const waToken = (tenant as any)?.wa_access_token
     ? (decryptToken((tenant as any).wa_access_token as string) as string)
     : null;
   const waPhoneId = (tenant as any)?.wa_phone_number_id as string | null;
-  if (managerPhone && waToken && waPhoneId) {
+
+  console.log(`[bookings] Loaded settings — staff_phone=${staffPhone ?? 'null'}, manager_phone=${managerPhone ?? 'null'}`);
+
+  if (waToken && waPhoneId) {
     const [hh, mm] = slot.slot_time.split(':').map(Number);
     const ampm = hh >= 12 ? 'PM' : 'AM';
     const hr12 = hh > 12 ? hh - 12 : hh === 0 ? 12 : hh;
     const displayTime = `${hr12}:${String(mm).padStart(2, '0')} ${ampm}`;
-    const managerMsg =
+    const alertMsg =
       `🔔 New Booking (staff added)!\n\n` +
       `👤 ${customer_name.trim()}, ${guestCount} guest${guestCount !== 1 ? 's' : ''}\n` +
       `⏰ ${displayTime} on ${booking_date}\n` +
       `📋 Reservation ID: ${reservation_id}\n` +
       `📞 Phone: ${cleanPhone}` +
       (special_request?.trim() ? `\n📝 Note: ${special_request.trim()}` : '');
-    sendTextMessage(waToken, waPhoneId, managerPhone, managerMsg).catch(e =>
-      console.error('❌ [BOOKINGS] Manager notification failed:', (e as Error).message));
+
+    sendStaffAlert(
+      {
+        wa_phone_number_id: waPhoneId,
+        wa_access_token: (tenant as any)?.wa_access_token as string,
+        staff_phone:   staffPhone,
+        manager_phone: managerPhone,
+      },
+      alertMsg
+    ).then(results =>
+      console.log(`[bookings] Booking alert sent to ${results.filter(r => r.ok).length}/${results.length} recipients:`, results.map(r => `${r.phone}=${r.ok ? 'ok' : r.error}`))
+    ).catch(e => console.error('❌ [BOOKINGS] Staff notification failed:', (e as Error).message));
   }
 
   return NextResponse.json({ success: true, data: { ...booking, slot_time: slot.slot_time } });

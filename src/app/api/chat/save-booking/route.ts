@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
 import { createBookingPaymentLink, fireIntegrations } from '@/lib/integrations/runner';
-import { sendTextMessage } from '@/lib/meta/service';
+import { sendTextMessage, sendStaffAlert } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 
 function timeToMins(t: string): number {
@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
     // 3. Fetch Tenant details for Short Code generating Reservation ID
     const { data: tenant, error: tenantErr } = await supabaseAdmin
       .from('tenants')
-      .select('short_code, business_name, booking_fee_per_person, wa_access_token, wa_phone_number_id, manager_phone')
+      .select('short_code, business_name, booking_fee_per_person, wa_access_token, wa_phone_number_id, staff_phone, manager_phone')
       .eq('id', tenantId)
       .single();
 
@@ -307,12 +307,12 @@ export async function POST(req: NextRequest) {
       }).catch(() => {});
     }
 
-    // Always notify manager immediately — paid or free.
-    const managerPhone = (tenant as any).manager_phone as string | null;
-    if (accessToken && phoneNumberId && managerPhone) {
+    // Always notify staff + manager immediately (both recipients, independent sends).
+    console.log(`[save-booking] Loaded settings — staff_phone=${(tenant as any).staff_phone ?? 'null'}, manager_phone=${(tenant as any).manager_phone ?? 'null'}`);
+    if (accessToken && phoneNumberId) {
       const displayTime = formatSlotTime(chosenSlot!.slot_time);
       const paymentNote = isPrepaid ? `\n💳 Payment: ₹${feeRupees} pending` : '';
-      const managerMsg =
+      const alertMsg =
         `🔔 New Booking!\n\n` +
         `👤 ${name}, ${guestCount} guest${guestCount !== 1 ? 's' : ''}\n` +
         `⏰ ${displayTime} on ${bookingDate}\n` +
@@ -320,8 +320,17 @@ export async function POST(req: NextRequest) {
         `📞 Phone: ${cleanPhoneStr}` +
         paymentNote +
         (special_request ? `\n📝 Note: ${special_request}` : '');
-      sendTextMessage(accessToken, phoneNumberId, managerPhone, managerMsg).catch(e =>
-        console.error('❌ [SAVE BOOKING] Manager notification failed:', (e as Error).message));
+      sendStaffAlert(
+        {
+          wa_phone_number_id: phoneNumberId,
+          wa_access_token: (tenant as any).wa_access_token as string,
+          staff_phone:   (tenant as any).staff_phone   as string | null,
+          manager_phone: (tenant as any).manager_phone as string | null,
+        },
+        alertMsg
+      ).then(results =>
+        console.log(`[save-booking] Booking alert sent to ${results.filter(r => r.ok).length}/${results.length} recipients:`, results.map(r => `${r.phone}=${r.ok ? 'ok' : r.error}`))
+      ).catch(e => console.error('❌ [SAVE BOOKING] Staff notification failed:', (e as Error).message));
     }
 
     return NextResponse.json({

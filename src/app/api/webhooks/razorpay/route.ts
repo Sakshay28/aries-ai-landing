@@ -11,7 +11,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { verifyWebhookSignature, handleRazorpayWebhook } from '@/lib/billing/razorpay';
 import { fireIntegrations } from '@/lib/integrations/runner';
 import { triggerAutomations } from '@/lib/automations/engine';
-import { sendTextMessage } from '@/lib/meta/service';
+import { sendStaffAlert } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 
 export async function POST(req: NextRequest) {
@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
           // Notify manager that payment is confirmed
           const { data: tenant } = await supabaseAdmin
             .from('tenants')
-            .select('wa_access_token, wa_phone_number_id, manager_phone, business_name')
+            .select('wa_access_token, wa_phone_number_id, staff_phone, manager_phone, business_name')
             .eq('id', tenantIdVal)
             .single();
 
@@ -109,23 +109,36 @@ export async function POST(req: NextRequest) {
             },
           }).catch(e => console.error('Automations (payment_received):', e.message));
 
-          const mgrPhone = (tenant as any)?.manager_phone as string | null;
+          const staffPhone  = (tenant as any)?.staff_phone   as string | null;
+          const mgrPhone    = (tenant as any)?.manager_phone as string | null;
           const waToken = (tenant as any)?.wa_access_token
             ? (decryptToken((tenant as any).wa_access_token as string) as string)
             : null;
           const waPhoneId = (tenant as any)?.wa_phone_number_id as string | null;
 
-          if (mgrPhone && waToken && waPhoneId) {
+          console.log(`[razorpay] Loaded settings — staff_phone=${staffPhone ?? 'null'}, manager_phone=${mgrPhone ?? 'null'}`);
+
+          if (waToken && waPhoneId) {
             const pSize = booking.party_size ?? '';
             const bDate = booking.booking_date ?? '';
-            const mgrMsg =
+            const alertMsg =
               `✅ Payment Confirmed!\n\n` +
               `👤 ${booking.customer_name}, ${pSize} guest${Number(pSize) !== 1 ? 's' : ''}\n` +
               `📅 ${bDate}\n` +
               `📋 Reservation: ${reservationId}\n` +
               `📞 Phone: ${booking.customer_phone}`;
-            sendTextMessage(waToken, waPhoneId, mgrPhone, mgrMsg).catch(e =>
-              console.error('❌ [RAZORPAY] Manager notification failed:', (e as Error).message));
+
+            sendStaffAlert(
+              {
+                wa_phone_number_id: waPhoneId,
+                wa_access_token: (tenant as any)?.wa_access_token as string,
+                staff_phone:   staffPhone,
+                manager_phone: mgrPhone,
+              },
+              alertMsg
+            ).then(results =>
+              console.log(`[razorpay] Payment alert sent to ${results.filter(r => r.ok).length}/${results.length} recipients:`, results.map(r => `${r.phone}=${r.ok ? 'ok' : r.error}`))
+            ).catch(e => console.error('❌ [RAZORPAY] Staff notification failed:', (e as Error).message));
           }
 
           console.log(`✅ Booking ${reservationId} marked paid + confirmed`);

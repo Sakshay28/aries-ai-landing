@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { sendTextMessage } from '@/lib/meta/service';
+import { sendTextMessage, sendStaffAlert } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
 import { fireIntegrations } from '@/lib/integrations/runner';
@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
   const { data: tenant, error: tenantErr } = await supabaseAdmin
     .from('tenants')
     .select(
-      'id, business_name, razorpay_customer_id, wa_phone_number_id, wa_access_token, manager_phone, short_code, modules'
+      'id, business_name, razorpay_customer_id, wa_phone_number_id, wa_access_token, staff_phone, manager_phone, short_code, modules'
     )
     .eq('id', restaurant_id)
     .single();
@@ -183,11 +183,13 @@ export async function POST(req: NextRequest) {
     const displayTime = formatSlotTime(slot_time);
     const displayDate = formatBookingDate(booking_date);
     const businessName = tenant.business_name;
-    const notifyPhone = (tenant as any).manager_phone as string | null;
     const waPhoneId = tenant.wa_phone_number_id as string | null;
     const waToken = tenant.wa_access_token
       ? (decryptToken(tenant.wa_access_token as string) as string)
       : null;
+
+    // Log loaded phones for debugging
+    console.log(`[confirm] Loaded settings — staff_phone=${(tenant as any).staff_phone ?? 'null'}, manager_phone=${(tenant as any).manager_phone ?? 'null'}`);
 
     // Fetch full booking for Sheets sync
     const { data: bookingRow } = await supabaseAdmin
@@ -216,23 +218,24 @@ export async function POST(req: NextRequest) {
           console.error('❌ WA customer confirmation failed:', (err as Error).message);
         }
 
-        // ── 2. Manager notification ────────────────────────────────────
-        if (notifyPhone) {
-          try {
-            await sendTextMessage(
-              waToken,
-              waPhoneId,
-              notifyPhone,
-              `🔔 New Booking!\n\n` +
-              `👤 ${customer_name}, ${party_size} guests\n` +
-              `⏰ ${displayTime} on ${displayDate}\n` +
-              `📋 Reservation ID: ${reservation_id}\n` +
-              `📞 Phone: ${customer_phone}`
-            );
-          } catch (err) {
-            console.error('❌ WA manager notification failed:', (err as Error).message);
-          }
-        }
+        // ── 2. Staff + Manager notification (both recipients, independent sends) ─
+        const staffAlertMsg =
+          `🔔 New Booking!\n\n` +
+          `👤 ${customer_name}, ${party_size} guests\n` +
+          `⏰ ${displayTime} on ${displayDate}\n` +
+          `📋 Reservation ID: ${reservation_id}\n` +
+          `📞 Phone: ${customer_phone}`;
+
+        const alertResults = await sendStaffAlert(
+          {
+            wa_phone_number_id: waPhoneId,
+            wa_access_token: tenant.wa_access_token as string,
+            staff_phone:   (tenant as any).staff_phone   as string | null,
+            manager_phone: (tenant as any).manager_phone as string | null,
+          },
+          staffAlertMsg
+        );
+        console.log(`[confirm] Booking alert sent to ${alertResults.filter(r => r.ok).length}/${alertResults.length} recipients:`, alertResults.map(r => `${r.phone}=${r.ok ? 'ok' : r.error}`));
       }
 
       // ── 3. Google Sheets sync ──────────────────────────────────────
