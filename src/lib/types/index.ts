@@ -74,6 +74,8 @@ export interface Tenant {
   // Supports variables: {{customer_name}} {{customer_phone}} {{guest_count}} {{date}} {{time}} {{table}} {{reservation_id}} {{business_name}} {{special_requests}}
   // Falls back to the platform default if null.
   booking_alert_template: string | null;
+  default_lead_assignee_id: string | null;
+  lead_assigned_email_template: string | null;
   escalation_enabled: boolean;
   escalation_keywords: string[];
   escalation_reply: string | null;

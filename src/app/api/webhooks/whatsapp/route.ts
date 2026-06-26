@@ -454,17 +454,26 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     try {
       const teamMembers = teamMembersResult.data as Array<{ id: string; is_sales_agent?: boolean; email?: string; full_name?: string }> | null;
       if (teamMembers && teamMembers.length > 0) {
-        const salesPool = teamMembers.filter((m) => m.is_sales_agent);
-        const pool = salesPool.length > 0 ? salesPool : teamMembers;
-        const counter = (tenant.lead_assignment_counter as number) ?? 0;
-        const idx = counter % pool.length;
-        assignedMember = pool[idx];
-        assignedTo = pool[idx].id;
-        // Awaited: if the counter write dies, round-robin sticks on one agent
-        await supabaseAdmin
-          .from('tenants')
-          .update({ lead_assignment_counter: counter + 1 })
-          .eq('id', tenant.id);
+        const defaultAssigneeId = (tenant as any).default_lead_assignee_id;
+        const defaultMember = defaultAssigneeId ? teamMembers.find(m => m.id === defaultAssigneeId) : null;
+
+        if (defaultMember) {
+          assignedMember = defaultMember;
+          assignedTo = defaultMember.id;
+          console.log(`👤 Assigned lead to default assignee: ${assignedMember.full_name || assignedMember.email}`);
+        } else {
+          const salesPool = teamMembers.filter((m) => m.is_sales_agent);
+          const pool = salesPool.length > 0 ? salesPool : teamMembers;
+          const counter = (tenant.lead_assignment_counter as number) ?? 0;
+          const idx = counter % pool.length;
+          assignedMember = pool[idx];
+          assignedTo = pool[idx].id;
+          // Awaited: if the counter write dies, round-robin sticks on one agent
+          await supabaseAdmin
+            .from('tenants')
+            .update({ lead_assignment_counter: counter + 1 })
+            .eq('id', tenant.id);
+        }
       }
     } catch (e) {
       console.warn('⚠️ Assignment failed:', e);
@@ -571,11 +580,13 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       }
 
       if (isFromAd && assignedMember?.email) {
+        const customTemplate = (tenant as any).lead_assigned_email_template;
         sendLeadAssignedEmail(
           assignedMember.email,
           newLead.name || cleanPhone,
           (tenant.business_name as string) || 'your business',
-          'Meta Ad'
+          'Meta Ad',
+          customTemplate
         ).catch(() => {});
       }
     }

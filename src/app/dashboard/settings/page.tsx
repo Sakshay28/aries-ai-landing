@@ -62,7 +62,8 @@ interface SettingsData {
   always_mention_rules: Array<{ topic: string; mention: string }>;
   competitors: string[];
   competitor_deflection_reply: string;
-
+  default_lead_assignee_id: string;
+  lead_assigned_email_template: string;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -88,6 +89,8 @@ const DEFAULT_SETTINGS: SettingsData = {
   always_mention_rules: [],
   competitors: [],
   competitor_deflection_reply: '',
+  default_lead_assignee_id: '',
+  lead_assigned_email_template: '',
 };
 
 const TABS = [
@@ -357,6 +360,7 @@ export default function SettingsPage() {
   const [dirty, setDirty] = useState(false);
   const [templates, setTemplates] = useState<FollowUpTemplates>({});
   const [expandedFu, setExpandedFu] = useState<Record<string, boolean>>({});
+  const [users, setUsers] = useState<any[]>([]);
 
   // Meta Cloud API States
   const [testingConnection, setTestingConnection] = useState(false);
@@ -392,10 +396,12 @@ export default function SettingsPage() {
     Promise.all([
       fetch('/api/dashboard/settings').then(r => r.json()),
       fetch('/api/dashboard/follow-up-templates').then(r => r.json()),
+      fetch('/api/dashboard/team').then(r => r.json()),
     ])
-      .then(([settingsRes, tplRes]) => {
+      .then(([settingsRes, tplRes, teamRes]) => {
         if (settingsRes.data) setSettings({ ...DEFAULT_SETTINGS, ...settingsRes.data });
         if (tplRes.data)      setTemplates(tplRes.data);
+        if (teamRes.success && teamRes.users) setUsers(teamRes.users);
       })
       .catch(() => toast.error('Failed to load settings'))
       .finally(() => setLoading(false));
@@ -1215,6 +1221,80 @@ export default function SettingsPage() {
                 <span className="font-semibold text-xs" style={{ color: 'var(--foreground)' }}>How booking alerts work</span>
               </div>
               Every time the AI confirms a table booking, this message is instantly sent to your staff WhatsApp number so they know who is coming, when, and how many guests.
+            </div>
+          </SectionCard>
+
+          {/* Lead Assignment & Email Notification */}
+          <SectionCard title="Lead Assignment & Email Notification" icon={Users}>
+            <p className="text-xs -mt-1 mb-4" style={{ color: 'var(--muted-foreground)' }}>
+              Configure how new leads from Meta Ads are assigned and how email notifications are sent to the assigned staff member.
+            </p>
+
+            <div className="grid grid-cols-1 gap-5">
+              <Field label="Assign Lead To">
+                <select
+                  value={settings.default_lead_assignee_id || ''}
+                  onChange={e => update('default_lead_assignee_id', e.target.value)}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none transition-colors"
+                  style={{
+                    background: 'var(--input)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--foreground)',
+                  }}
+                >
+                  <option value="">Round-Robin (Assign to all sales agents / team members)</option>
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.full_name || u.email} ({u.role})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <div className="mt-3">
+                <Field label="Lead Assigned Email Template">
+                  <textarea
+                    rows={6}
+                    value={settings.lead_assigned_email_template || ''}
+                    onChange={e => update('lead_assigned_email_template', e.target.value)}
+                    placeholder={`A new lead (<strong>{{lead_name}}</strong>) from <strong>{{source}}</strong> has just been assigned to you at <strong>{{business_name}}</strong>.\n\nOpen your AriesAI dashboard to reply and manage this lead.`}
+                    className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none transition-colors"
+                    style={{
+                      background: 'var(--input)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--foreground)',
+                      fontFamily: 'inherit',
+                      lineHeight: '1.6',
+                    }}
+                  />
+                </Field>
+                {/* Variable chips */}
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {[
+                    { tag: '{{lead_name}}',     label: 'Lead Identifier' },
+                    { tag: '{{business_name}}',  label: 'Business Name' },
+                    { tag: '{{source}}',         label: 'Traffic Source' },
+                  ].map(({ tag, label }) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => update('lead_assigned_email_template', (settings.lead_assigned_email_template || '') + tag)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono transition-colors cursor-pointer"
+                      style={{
+                        background: 'rgba(6,182,212,0.08)',
+                        border: '1px solid rgba(6,182,212,0.25)',
+                        color: 'var(--foreground)',
+                      }}
+                      title={`Insert ${label}`}
+                    >
+                      <span style={{ color: 'rgb(6,182,212)' }}>+</span> {tag}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                  Click a variable to insert it. Supports HTML tags. Leave blank to use the platform default template.
+                </p>
+              </div>
             </div>
           </SectionCard>
 

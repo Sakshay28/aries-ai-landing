@@ -23,15 +23,33 @@ export async function sendNewLeadEmail(to: string, leadName: string, businessNam
   }
 }
 
-export async function sendLeadAssignedEmail(to: string, leadName: string, businessName: string, source?: string) {
+export async function sendLeadAssignedEmail(
+  to: string,
+  leadName: string,
+  businessName: string,
+  source?: string,
+  customTemplate?: string | null
+) {
   try {
     const resend = getResend();
     if (!resend) return;
+
+    let htmlContent = `<p>A new lead (<strong>${leadName}</strong>)${source ? ` from <strong>${source}</strong>` : ''} has just been assigned to you at <strong>${businessName}</strong>.</p><p>Open your AriesAI dashboard to reply and manage this lead.</p>`;
+
+    if (customTemplate && customTemplate.trim()) {
+      const vars: Record<string, string> = {
+        lead_name: leadName,
+        business_name: businessName,
+        source: source || '',
+      };
+      htmlContent = customTemplate.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? '');
+    }
+
     await resend.emails.send({
       from: 'Aries AI <notifications@ariesai.in>',
       to,
       subject: `New lead assigned to you: ${leadName}`,
-      html: `<p>A new lead (<strong>${leadName}</strong>)${source ? ` from <strong>${source}</strong>` : ''} has just been assigned to you at <strong>${businessName}</strong>.</p><p>Open your AriesAI dashboard to reply and manage this lead.</p>`,
+      html: htmlContent,
     });
   } catch (error) {
     console.error('Failed to send lead assigned email:', error);
