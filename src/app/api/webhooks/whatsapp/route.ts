@@ -570,24 +570,13 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           .catch(e => console.error('⚠️ CAPI trigger failed (CTWA lead):', e.message));
       }
 
-      if (isFromAd) {
-        if (assignedMember?.email) {
-          sendLeadAssignedEmail(
-            assignedMember.email,
-            newLead.name || cleanPhone,
-            (tenant.business_name as string) || 'your business',
-            'Meta Ad'
-          ).catch(() => {});
-        }
-
-        const agentName = assignedMember?.full_name || assignedMember?.email || 'unassigned';
-        const leadName = newLead.name || cleanPhone;
-        const businessName = (tenant.business_name as string) || 'your business';
-        const alertMsg = `📢 *New Lead Assigned*\n\nA new lead (*${leadName}*) from *Meta Ad* has just been assigned to *${agentName}* at *${businessName}*.\n\nOpen your AriesAI dashboard to reply and manage this lead.`;
-        
-        sendStaffAlert(tenant, alertMsg).catch((e) => {
-          console.error('❌ Failed to send lead assignment staff alert:', e.message);
-        });
+      if (isFromAd && assignedMember?.email) {
+        sendLeadAssignedEmail(
+          assignedMember.email,
+          newLead.name || cleanPhone,
+          (tenant.business_name as string) || 'your business',
+          'Meta Ad'
+        ).catch(() => {});
       }
     }
   }
