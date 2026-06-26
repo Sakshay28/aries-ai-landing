@@ -257,6 +257,122 @@ export async function sendTextMessage(
 }
 
 // ═══════════════════════════════════════
+// SEND: Interactive Buttons Message (Reply Buttons)
+// ═══════════════════════════════════════
+// WhatsApp Cloud API interactive message with up to 3 reply buttons.
+// See: https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-reply-buttons-messages
+export async function sendInteractiveButtonsMessage(
+  accessToken: string,
+  phoneNumberId: string,
+  destination: string,
+  bodyText: string,
+  buttons: Array<{ id: string; title: string }>,
+  headerText?: string,
+  footerText?: string
+): Promise<MetaSendResult> {
+  if (!accessToken || !phoneNumberId || !destination || !bodyText) {
+    throw new Error('Meta sendInteractiveButtonsMessage: missing required parameters');
+  }
+  if (buttons.length === 0 || buttons.length > 3) {
+    throw new Error(`Meta sendInteractiveButtonsMessage: must have 1-3 buttons (got ${buttons.length})`);
+  }
+
+  const interactive: Record<string, unknown> = {
+    type: 'button',
+    body: { text: bodyText },
+    action: {
+      buttons: buttons.map(b => ({
+        type: 'reply',
+        reply: {
+          id: b.id.slice(0, 256),
+          title: b.title.slice(0, 20),
+        },
+      })),
+    },
+  };
+  if (headerText) interactive.header = { type: 'text', text: headerText.slice(0, 60) };
+  if (footerText) interactive.footer = { text: footerText.slice(0, 60) };
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: cleanPhone(destination),
+    type: 'interactive',
+    interactive,
+  };
+
+  return withMetaRetry(async () => {
+    const res = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: headers(accessToken),
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) throw await metaErrorFromResponse(res, 'interactive_buttons');
+    const data = await res.json();
+    return { messageId: data.messages?.[0]?.id || '', status: 'sent' };
+  });
+}
+
+// ═══════════════════════════════════════
+// SEND: Interactive List Message
+// ═══════════════════════════════════════
+// WhatsApp Cloud API interactive list message with up to 10 rows.
+// See: https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-list-messages
+export async function sendInteractiveListMessage(
+  accessToken: string,
+  phoneNumberId: string,
+  destination: string,
+  bodyText: string,
+  buttonLabel: string,
+  sections: Array<{ title?: string; rows: Array<{ id: string; title: string; description?: string }> }>,
+  headerText?: string,
+  footerText?: string
+): Promise<MetaSendResult> {
+  if (!accessToken || !phoneNumberId || !destination || !bodyText) {
+    throw new Error('Meta sendInteractiveListMessage: missing required parameters');
+  }
+
+  const interactive: Record<string, unknown> = {
+    type: 'list',
+    body: { text: bodyText },
+    action: {
+      button: (buttonLabel || 'Select').slice(0, 20),
+      sections: sections.map(s => ({
+        ...(s.title ? { title: s.title.slice(0, 24) } : {}),
+        rows: s.rows.map(r => ({
+          id: r.id.slice(0, 200),
+          title: r.title.slice(0, 24),
+          ...(r.description ? { description: r.description.slice(0, 72) } : {}),
+        })),
+      })),
+    },
+  };
+  if (headerText) interactive.header = { type: 'text', text: headerText.slice(0, 60) };
+  if (footerText) interactive.footer = { text: footerText.slice(0, 60) };
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: cleanPhone(destination),
+    type: 'interactive',
+    interactive,
+  };
+
+  return withMetaRetry(async () => {
+    const res = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: headers(accessToken),
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) throw await metaErrorFromResponse(res, 'interactive_list');
+    const data = await res.json();
+    return { messageId: data.messages?.[0]?.id || '', status: 'sent' };
+  });
+}
+
+// ═══════════════════════════════════════
 // SEND: Template Message
 // ═══════════════════════════════════════
 // Supports both a raw components array (Meta format) and a simple list of body variables

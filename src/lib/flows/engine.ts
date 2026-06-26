@@ -26,7 +26,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getRedisClient } from '@/lib/redis/client';
-import { sendTextMessage, sendMediaMessage, MetaMediaType } from '@/lib/meta/service';
+import { sendTextMessage, sendMediaMessage, sendInteractiveButtonsMessage, sendInteractiveListMessage, MetaMediaType } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { processMessageWithAI, TenantAIConfig } from '@/lib/ai/engine';
 import { getTenantConfig } from '@/lib/tenant/manager';
@@ -245,7 +245,14 @@ export async function runFlowsForMessage(
     // Find the flow that owns this node and resume, with restored variables
     const ownerFlow = (flows as FlowRecord[]).find(f => f.nodes.some(n => n.id === pendingNode));
     if (ownerFlow) {
-      const resumeCtx: ExecContext = { ...ctx, variables: { ...ctx.variables, ...savedCtx }, pendingFlowNode: pendingNode };
+      const resumeVars = { ...ctx.variables, ...savedCtx };
+      // Capture the customer's button click so downstream condition nodes can evaluate it
+      if (buttonId) {
+        resumeVars.selected_button = buttonId;
+        resumeVars.button_value = buttonId;
+      }
+      resumeVars.last_message = messageText;
+      const resumeCtx: ExecContext = { ...ctx, variables: resumeVars, pendingFlowNode: pendingNode };
       const handled = await executeFlowFromNode(ownerFlow, resumeCtx, pendingNode);
       if (handled) return true;
     }
@@ -567,27 +574,147 @@ async function executeNode(
     return { nextId: getNextNode(node.id, null, edges), sent: sentCount > 0 };
   }
 
+  // ── Send Interactive Buttons ──────────────────────────────
+  if (type === 'send_buttons' || type === 'send_quick_replies') {
+    const raw = (node.data?.message as string) || (node.data?.content as string) || '';
+    const content = interpolate(raw, ctx);
+    const buttons: Array<{ id?: string; label?: string; value?: string; title?: string }> =
+      Array.isArray(node.data?.buttons) ? (node.data.buttons as any[]) : [];
+    const headerText = node.data?.header ? interpolate(node.data.header as string, ctx) : undefined;
+    const footerText = node.data?.footer ? interpolate(node.data.footer as string, ctx) : undefined;
+
+    if (!content.trim()) return { nextId: getNextNode(node.id, null, edges) };
+
+    const mappedButtons = buttons
+      .filter(b => (b.label || b.title || '').trim())
+      .slice(0, 3)
+      .map(b => ({
+        id: (b.value || b.id || b.label || '').trim(),
+        title: (b.label || b.title || '').trim().slice(0, 20),
+      }));
+
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_interactive_buttons', payload: { body: content, buttons: mappedButtons }, variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
+      return { nextId: getNextNode(node.id, null, edges), sent: true };
+    }
+
+    try {
+      if (mappedButtons.length > 0) {
+        await sendInteractiveButtonsMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content, mappedButtons, headerText, footerText);
+      } else {
+        await sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content);
+      }
+      await supabaseAdmin.from('messages').insert({
+        tenant_id: ctx.tenantId,
+        conversation_id: ctx.conversationId,
+        direction: 'outbound',
+        content,
+        message_type: mappedButtons.length > 0 ? 'interactive' : 'text',
+        channel: 'whatsapp',
+        status: 'sent',
+        ai_generated: false,
+      });
+
+      // Auto-pause after sending buttons so the flow waits for the customer's
+      // button click before continuing. Without this, the entire flow fires in
+      // one shot and dumps all questions at once.
+      if (mappedButtons.length > 0) {
+        const nextNodeId = getNextNode(node.id, null, edges);
+        if (nextNodeId) {
+          await supabaseAdmin
+            .from('conversations')
+            .update({ context: { ...ctx.variables, pending_flow_node: nextNodeId } })
+            .eq('id', ctx.conversationId);
+        }
+        return { stop: true, sent: true };
+      }
+
+      return { nextId: getNextNode(node.id, null, edges), sent: true };
+    } catch (e) {
+      console.error(`Flow engine: sendInteractiveButtons failed for node ${node.id}:`, (e as Error).message);
+      return { nextId: getNextNode(node.id, 'error', edges) };
+    }
+  }
+
+  // ── Send Interactive List ───────────────────────────────────
+  if (type === 'send_list') {
+    const raw = (node.data?.message as string) || (node.data?.content as string) || '';
+    const content = interpolate(raw, ctx);
+    const items: Array<{ id?: string; title?: string; label?: string; description?: string; value?: string }> =
+      Array.isArray(node.data?.items) ? (node.data.items as any[]) :
+      Array.isArray(node.data?.options) ? (node.data.options as any[]) :
+      Array.isArray(node.data?.buttons) ? (node.data.buttons as any[]) : [];
+    const buttonLabel = (node.data?.buttonLabel as string) || (node.data?.button_label as string) || 'Select';
+    const headerText = node.data?.header ? interpolate(node.data.header as string, ctx) : undefined;
+    const footerText = node.data?.footer ? interpolate(node.data.footer as string, ctx) : undefined;
+
+    if (!content.trim()) return { nextId: getNextNode(node.id, null, edges) };
+
+    const rows = items
+      .filter(i => (i.title || i.label || '').trim())
+      .slice(0, 10)
+      .map(i => ({
+        id: (i.value || i.id || i.title || i.label || '').trim(),
+        title: (i.title || i.label || '').trim().slice(0, 24),
+        ...(i.description ? { description: i.description.slice(0, 72) } : {}),
+      }));
+
+    if (ctx.dryRun) {
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_interactive_list', payload: { body: content, rows }, variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
+      return { nextId: getNextNode(node.id, null, edges), sent: true };
+    }
+
+    try {
+      if (rows.length > 0) {
+        await sendInteractiveListMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content, buttonLabel, [{ rows }], headerText, footerText);
+      } else {
+        await sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content);
+      }
+      await supabaseAdmin.from('messages').insert({
+        tenant_id: ctx.tenantId,
+        conversation_id: ctx.conversationId,
+        direction: 'outbound',
+        content,
+        message_type: rows.length > 0 ? 'interactive' : 'text',
+        channel: 'whatsapp',
+        status: 'sent',
+        ai_generated: false,
+      });
+
+      if (rows.length > 0) {
+        const nextNodeId = getNextNode(node.id, null, edges);
+        if (nextNodeId) {
+          await supabaseAdmin
+            .from('conversations')
+            .update({ context: { ...ctx.variables, pending_flow_node: nextNodeId } })
+            .eq('id', ctx.conversationId);
+        }
+        return { stop: true, sent: true };
+      }
+
+      return { nextId: getNextNode(node.id, null, edges), sent: true };
+    } catch (e) {
+      console.error(`Flow engine: sendInteractiveList failed for node ${node.id}:`, (e as Error).message);
+      return { nextId: getNextNode(node.id, 'error', edges) };
+    }
+  }
+
   // ── Send Text Message ─────────────────────────────────────
   if (
     type === 'standard' ||
     type === 'send_location' ||
-    type === 'send_buttons' ||
-    type === 'send_list' ||
-    type === 'send_quick_replies' ||
     type === 'collect_input' ||
     type === 'ask_question'
   ) {
     const raw = (node.data?.content as string) || (node.data?.message as string) || '';
     const content = interpolate(raw, ctx);
     if (content.trim()) {
-      // Dry-run: record what would be sent without any side-effects
       if (ctx.dryRun) {
         ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_message', payload: content, variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
         return { nextId: getNextNode(node.id, null, edges), sent: true };
       }
       try {
         await sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content);
-        // Record the outbound message in DB
         await supabaseAdmin.from('messages').insert({
           tenant_id: ctx.tenantId,
           conversation_id: ctx.conversationId,
