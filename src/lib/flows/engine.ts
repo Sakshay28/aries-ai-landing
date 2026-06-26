@@ -235,19 +235,12 @@ export async function runFlowsForMessage(
 
   if (pendingNode) {
     const savedCtx = { ...(conv?.context as Record<string, unknown>) };
-    const pauseType = (savedCtx._pending_pause_type as string) || '';
     const isButtonReply = messageType === 'interactive' || messageType === 'button';
 
-    // Out-of-box detection: if the flow paused on buttons/list expecting a
-    // structured reply but the customer typed free text instead, let the AI
-    // handle their message naturally. The flow stays paused so the next
-    // message (hopefully a button click or a direct answer) resumes it.
-    if ((pauseType === 'buttons' || pauseType === 'list') && !isButtonReply) {
-      console.log(`🤖 Flow engine: out-of-box text reply while waiting for ${pauseType} — handing to AI, flow stays paused`);
-      return false; // fall through to AI; pending_flow_node remains in context
-    }
-
-    // Valid reply — clear the pending marker and resume the flow
+    // Always resume the flow on any reply (button click OR text).
+    // Text replies work when buttons don't render on WhatsApp —
+    // the customer's text is stored as button_value so conditions
+    // can still evaluate it.
     delete savedCtx.pending_flow_node;
     delete savedCtx._pending_pause_type;
     await supabaseAdmin
@@ -265,10 +258,15 @@ export async function runFlowsForMessage(
         resumeVars[pendingSaveAs] = messageText;
         delete resumeVars._pending_save_as;
       }
-      // Capture the customer's button click so downstream condition nodes can evaluate it
+      // Capture the customer's reply — button click id OR typed text
       if (buttonId) {
         resumeVars.selected_button = buttonId;
         resumeVars.button_value = buttonId;
+      } else {
+        // Text reply (buttons didn't render or customer typed instead)
+        // Store the text as button_value so condition nodes can evaluate it
+        resumeVars.selected_button = messageText;
+        resumeVars.button_value = messageText;
       }
       resumeVars.last_message = messageText;
       const resumeCtx: ExecContext = { ...ctx, variables: resumeVars, pendingFlowNode: pendingNode };
