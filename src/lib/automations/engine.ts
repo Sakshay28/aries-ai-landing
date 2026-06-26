@@ -161,6 +161,7 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
           status: 'sent',
           sent_at: new Date().toISOString(),
           wa_message_id: result.messageId,
+          variables: variables ?? null,
         }).then(null, () => {});
 
         await bumpCounter(rule.id, 0, 1);
@@ -200,6 +201,18 @@ const CLAIM_BATCH = 15;
 export async function processPendingAutomations(): Promise<number> {
   const now = new Date().toISOString();
 
+  // Recovery: release items stuck in 'processing' for >5 minutes (serverless timeout or crash)
+  const stuckCutoff = new Date(Date.now() - 5 * 60_000).toISOString();
+  const { data: stuck } = await supabaseAdmin
+    .from('automation_queue')
+    .update({ status: 'pending' })
+    .eq('status', 'processing')
+    .lte('scheduled_at', stuckCutoff)
+    .select('id');
+  if (stuck && stuck.length > 0) {
+    console.log(`[AUTOMATION_RECOVERY] released ${stuck.length} stuck items back to pending`);
+  }
+
   // Claim items atomically: set status='processing' so concurrent callers don't double-send
   const { data: claimed, error: claimErr } = await supabaseAdmin
     .from('automation_queue')
@@ -217,7 +230,7 @@ export async function processPendingAutomations(): Promise<number> {
   const { data: queueItems, error } = await supabaseAdmin
     .from('automation_queue')
     .select(`
-      id, automation_id, tenant_id, lead_id, conversation_id, variables,
+      id, automation_id, tenant_id, lead_id, conversation_id, variables, error_message,
       automations!inner ( id, tenant_id, message_text, media_url, media_type, cancel_on_reply ),
       leads!inner ( name, phone, lead_status )
     `)
@@ -255,7 +268,7 @@ export async function processPendingAutomations(): Promise<number> {
         continue;
       }
 
-      console.log(`[AUTOMATION_JOB_PROCESSING] item=${item.id} lead=${lead.phone} automation=${automation.id}`);
+      console.log(`[AUTOMATION_JOB_PROCESSING] item=${item.id} lead=${lead.phone} automation=${automation.id} vars=${JSON.stringify(item.variables)}`);
       const result = await sendAutomationMessage(tenant, lead, automation, item.conversation_id, item.variables ?? undefined);
 
       await supabaseAdmin
@@ -271,9 +284,29 @@ export async function processPendingAutomations(): Promise<number> {
       sent++;
       console.log(`[AUTOMATION_MESSAGE_SENT] item=${item.id} lead=${lead.phone} msgId=${result.messageId}`);
     } catch (err) {
-      console.error(`[AUTOMATION_MESSAGE_FAILED] item=${item.id}:`, err);
+      const errMsg = err instanceof Error ? err.message : 'Unknown error';
+      const isValidationError = errMsg.startsWith('Unresolved variables') || errMsg.startsWith('Rendered message contains');
+      console.error(`[AUTOMATION_MESSAGE_FAILED] item=${item.id} validation=${isValidationError}:`, errMsg);
       Sentry.captureException(err);
-      await updateQueueStatus(item.id, 'failed', err instanceof Error ? err.message : 'Unknown error');
+
+      if (isValidationError) {
+        await updateQueueStatus(item.id, 'failed', errMsg);
+      } else {
+        // Transient error (Meta API, network) — requeue for retry up to 3 times
+        const prevRetry = (item.error_message || '').match(/Retry (\d+)\/3/);
+        const retryCount = (prevRetry ? parseInt(prevRetry[1]) : 0) + 1;
+        if (retryCount <= 3) {
+          const backoffMs = retryCount * 30_000;
+          await supabaseAdmin.from('automation_queue').update({
+            status: 'pending',
+            scheduled_at: new Date(Date.now() + backoffMs).toISOString(),
+            error_message: `Retry ${retryCount}/3: ${errMsg}`,
+          }).eq('id', item.id);
+          console.log(`[AUTOMATION_RETRY] item=${item.id} retry=${retryCount}/3 backoff=${backoffMs}ms`);
+        } else {
+          await updateQueueStatus(item.id, 'failed', `Exhausted 3 retries: ${errMsg}`);
+        }
+      }
     }
   }
 
@@ -330,13 +363,30 @@ async function sendAutomationMessage(
   const token = decryptToken(tenant.wa_access_token as string) as string;
   const phoneNumberId = tenant.wa_phone_number_id as string;
 
-  const message = interpolateVariables(automation.message_text, {
+  const allVars: Record<string, string> = {
     customer_name: lead.name || 'there',
     business_name: tenant.business_name || '',
     ...variables,
-  });
+  };
 
-  console.log(`[automations] sending to ${lead.phone}: "${message.slice(0, 80)}..."`);
+  // ── Pre-send validation: detect unresolved placeholders BEFORE sending ──
+  const { rendered, unresolved } = renderTemplate(automation.message_text, allVars);
+
+  if (unresolved.length > 0) {
+    const errMsg = `Unresolved variables: ${unresolved.join(', ')}`;
+    console.error(`[AUTOMATION_VALIDATION_FAILED] lead=${lead.phone} vars=${JSON.stringify(allVars)} unresolved=${unresolved.join(',')}`);
+    throw new Error(errMsg);
+  }
+
+  // Sanity check: if the rendered message has obviously broken lines like
+  // "📅 at" or "👥 guests" with no actual data, block it.
+  if (/📅\s+at\b/.test(rendered) || /👥\s+guests?\b/.test(rendered) || /🆔\s*Ref:\s*$/.test(rendered)) {
+    const errMsg = 'Rendered message contains empty data lines — variables resolved to blank';
+    console.error(`[AUTOMATION_VALIDATION_FAILED] lead=${lead.phone} message="${rendered.slice(0, 120)}"`);
+    throw new Error(errMsg);
+  }
+
+  console.log(`[AUTOMATION_SENDING] lead=${lead.phone} vars=${JSON.stringify(allVars)} message="${rendered.slice(0, 100)}..."`);
 
   let metaMsgId: string | null = null;
   let sentMediaUrl: string | null = null;
@@ -346,25 +396,24 @@ async function sendAutomationMessage(
   if (automation.media_url) {
     const signedUrl = await toSignedMediaUrl(automation.media_url);
     const mediaType = (automation.media_type || 'image') as 'image' | 'video' | 'document';
-    const result = await sendMediaMessage(token, phoneNumberId, lead.phone, mediaType, signedUrl, message);
+    const result = await sendMediaMessage(token, phoneNumberId, lead.phone, mediaType, signedUrl, rendered);
     metaMsgId = result?.messageId ?? null;
     sentMediaUrl = signedUrl;
     sentMimeType = mediaType === 'image' ? 'image/jpeg' : mediaType === 'video' ? 'video/mp4' : 'application/octet-stream';
     sentMessageType = mediaType;
   } else {
-    const result = await sendTextMessage(token, phoneNumberId, lead.phone, message);
+    const result = await sendTextMessage(token, phoneNumberId, lead.phone, rendered);
     metaMsgId = result?.messageId ?? null;
   }
 
-  console.log(`[automations] WhatsApp API result: msgId=${metaMsgId}`);
+  console.log(`[AUTOMATION_API_RESULT] lead=${lead.phone} msgId=${metaMsgId}`);
 
-  // Record outbound message in conversation if we have context
   if (conversationId) {
     await supabaseAdmin.from('messages').insert({
       tenant_id: tenant.id,
       conversation_id: conversationId,
       direction: 'outbound',
-      content: message,
+      content: rendered,
       message_type: sentMessageType,
       channel: 'whatsapp',
       sender_id: null,
@@ -374,7 +423,7 @@ async function sendAutomationMessage(
       ...(sentMediaUrl && {
         media_url: sentMediaUrl,
         mime_type: sentMimeType,
-        media_caption: message || null,
+        media_caption: rendered || null,
       }),
     });
   }
@@ -383,14 +432,26 @@ async function sendAutomationMessage(
     tenant_id: tenant.id,
     event_type: 'automation_sent',
     channel: 'whatsapp',
-    metadata: { lead_name: lead.name, automation_message: message.slice(0, 100) },
+    metadata: { lead_name: lead.name, automation_message: rendered.slice(0, 100) },
   }).then(null, () => {});
 
   return { messageId: metaMsgId };
 }
 
-function interpolateVariables(text: string, vars: Record<string, string>): string {
-  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] || '');
+function renderTemplate(
+  text: string,
+  vars: Record<string, string>,
+): { rendered: string; unresolved: string[] } {
+  const unresolved: string[] = [];
+  const rendered = text.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+    const val = vars[key];
+    if (val === undefined || val === null) {
+      unresolved.push(key);
+      return match;
+    }
+    return val;
+  });
+  return { rendered, unresolved };
 }
 
 async function updateQueueStatus(id: string, status: string, errorMessage?: string): Promise<void> {

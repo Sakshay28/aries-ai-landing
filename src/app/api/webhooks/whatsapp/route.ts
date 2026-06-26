@@ -693,9 +693,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // Self-heal: if conversation.lead_id is null but we now have a lead (can happen
   // when leads were previously unlinked due to the source_detail column bug), patch it.
   if (lead && !conversation.lead_id) {
-    supabaseAdmin.from('conversations').update({ lead_id: lead.id }).eq('id', conversation.id).then(() => {
-      conversation!.lead_id = lead!.id;
-    }).catch(() => {});
+    supabaseAdmin.from('conversations').update({ lead_id: lead.id }).eq('id', conversation.id).then(
+      () => { conversation!.lead_id = lead!.id; },
+      () => {},
+    );
   }
 
   perf('lead+conv_resolved');
@@ -2200,25 +2201,27 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         }).catch(() => {});
       }
 
+      // Human-friendly date ("Sat, 28 Jun 2026") and 12-hour time ("7:30 PM")
+      // Hoisted above both if-blocks so automationVars can also use them.
+      const prettyDate = (() => {
+        const d = new Date(`${bookingDate}T00:00:00`);
+        return isNaN(d.getTime())
+          ? bookingDate
+          : d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+      })();
+      const prettyTime = (() => {
+        const [h, m] = slotTime.split(':');
+        const hr = parseInt(h, 10);
+        if (isNaN(hr)) return slotTime.slice(0, 5);
+        const ampm = hr >= 12 ? 'PM' : 'AM';
+        const hr12 = hr % 12 === 0 ? 12 : hr % 12;
+        return `${hr12}:${m} ${ampm}`;
+      })();
+      const guestLabel = `${guestCount} guest${guestCount !== 1 ? 's' : ''}`;
+      const businessName = (tenant as any).business_name || 'us';
+
       // ── Notify staff + send the customer a clean confirmation (every booking) ──
       if (bookingWritten) {
-        // Human-friendly date ("Sat, 28 Jun 2026") and 12-hour time ("7:30 PM")
-        const prettyDate = (() => {
-          const d = new Date(`${bookingDate}T00:00:00`);
-          return isNaN(d.getTime())
-            ? bookingDate
-            : d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-        })();
-        const prettyTime = (() => {
-          const [h, m] = slotTime.split(':');
-          const hr = parseInt(h, 10);
-          if (isNaN(hr)) return slotTime.slice(0, 5);
-          const ampm = hr >= 12 ? 'PM' : 'AM';
-          const hr12 = hr % 12 === 0 ? 12 : hr % 12;
-          return `${hr12}:${m} ${ampm}`;
-        })();
-        const guestLabel = `${guestCount} guest${guestCount !== 1 ? 's' : ''}`;
-        const businessName = (tenant as any).business_name || 'us';
 
         // 1. Staff/manager alert — fires for EVERY confirmed booking.
         const DEFAULT_BOOKING_ALERT_TEMPLATE =
@@ -2300,8 +2303,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       if (bookingWritten && lead) {
         const automationVars = {
           customer_name: customerName || 'there', business_name: tenant.business_name || '',
-          reservation_id: reservationId || '', booking_date: bookingDate || '',
-          booking_time: slotTime || '', party_size: String(guestCount || ''),
+          reservation_id: reservationId || '', booking_date: prettyDate || bookingDate || '',
+          booking_time: prettyTime || slotTime || '', party_size: String(guestCount || ''),
+          guest_count: guestLabel || String(guestCount || ''),
+          date: prettyDate || bookingDate || '', time: prettyTime || slotTime || '',
+          table: assignedTableName ? `Table ${assignedTableName}` : '',
+          special_requests: contextObj.specialRequests ? String(contextObj.specialRequests) : '',
         };
 
         triggerAutomations({

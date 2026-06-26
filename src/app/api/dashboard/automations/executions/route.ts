@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   let query = supabaseAdmin
     .from('automation_queue')
     .select(`
-      id, status, scheduled_at, sent_at, error_message, wa_message_id, created_at,
+      id, status, scheduled_at, sent_at, error_message, wa_message_id, variables, created_at,
       automations ( id, name, trigger_event, delay_value, delay_unit ),
       leads ( name, phone )
     `)
@@ -45,6 +45,7 @@ export async function GET(req: NextRequest) {
       sent_at: row.sent_at,
       error: row.error_message,
       wa_message_id: row.wa_message_id,
+      variables: row.variables,
       created_at: row.created_at,
     };
   });
