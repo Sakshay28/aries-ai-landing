@@ -31,7 +31,7 @@ import { notifyAdmin } from '@/lib/alerts/admin';
 import { sendBookingAlertEmail } from '@/lib/alerts/bookingEmail';
 import { isCoexistenceChange, handleCoexistenceWebhook } from '@/lib/webhook/coexistence';
 import { toSignedMediaUrl } from '@/lib/utils/storage';
-import { triggerAutomations, cancelLeadAutomations, processPendingAutomations } from '@/lib/automations/engine';
+import { triggerAutomations, cancelLeadAutomations } from '@/lib/automations/engine';
 import { resolveBookingVariables } from '@/lib/automations/variables';
 import { zonedDateTimeToUtc } from '@/lib/utils/datetime';
 import * as Sentry from '@/lib/sentry-stub';
@@ -966,6 +966,13 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         .update({ escalated: false, escalation_reason: null })
         .eq('id', conversation.id);
       conversation.escalated = false;
+      // H1: auto-resolve must fire escalation_resolved automations too, not just
+      // the manual dashboard "resolve" button.
+      triggerAutomations({
+        tenantId: tenant.id, event: 'escalation_resolved', leadId: lead?.id,
+        conversationId: conversation.id, phone: cleanPhone,
+        variables: { customer_name: lead?.name || 'there', business_name: tenant.business_name || '' },
+      }).catch(e => console.error('Automations (escalation_resolved):', e.message));
     } else if (conversation.escalated_at) {
       // Real-time timeout check — don't wait for the daily cron
       const timeoutMs = (tenant.escalation_timeout_mins || 30) * 60 * 1000;
@@ -977,6 +984,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           .update({ escalated: false, escalation_reason: null })
           .eq('id', conversation.id);
         conversation.escalated = false;
+        // H1: timeout auto-resolve also fires escalation_resolved automations.
+        triggerAutomations({
+          tenantId: tenant.id, event: 'escalation_resolved', leadId: lead?.id,
+          conversationId: conversation.id, phone: cleanPhone,
+          variables: { customer_name: lead?.name || 'there', business_name: tenant.business_name || '' },
+        }).catch(e => console.error('Automations (escalation_resolved):', e.message));
       } else {
         // Still within timeout window — bot paused, human should handle.
         // Send a brief "hold on" acknowledgment so the customer isn't left in silence.
@@ -2387,7 +2400,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   console.log(`✅ Meta: processed message from ${cleanPhone}, AI intent: ${aiResponse.intent}`);
 
-  processPendingAutomations().catch(e => console.error('[automations] piggyback processing failed:', e.message));
+  // H4: the queue is now drained every minute by pg_cron (migration 20260625).
+  // Draining inline on every inbound webhook added the claim/recovery/select
+  // load to the hot path for no benefit, so the piggyback was removed.
 }
 
 

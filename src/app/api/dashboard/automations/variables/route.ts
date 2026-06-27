@@ -1,23 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
-import {
-  VARIABLE_REGISTRY,
-  SAMPLE_VARIABLES,
-  validateTemplate,
-} from '@/lib/automations/variables';
+import { VARIABLE_REGISTRY, validateTemplate } from '@/lib/automations/variables';
+import { tenantSampleData } from '@/lib/automations/preview';
 
-// GET — returns the variable registry + sample data for template editor
+// GET — returns the variable registry + tenant-specific sample data
 export async function GET() {
   const tenantId = await getTenantId();
   if (!tenantId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   return NextResponse.json({
     variables: VARIABLE_REGISTRY,
-    sampleData: SAMPLE_VARIABLES,
+    sampleData: await tenantSampleData(tenantId),
   });
 }
 
-// POST — validates a template and returns a live preview
+// POST — validates a template and returns a live preview rendered with the
+// tenant's own sample data
 export async function POST(req: NextRequest) {
   const tenantId = await getTenantId();
   if (!tenantId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -28,10 +26,10 @@ export async function POST(req: NextRequest) {
   }
 
   const validation = validateTemplate(template);
+  const sample = await tenantSampleData(tenantId);
 
-  // Render preview with sample data
   const preview = template.replace(/\{\{(\w+)\}\}/g, (_: string, key: string) =>
-    SAMPLE_VARIABLES[key] ?? `{{${key}}}`,
+    sample[key] ?? `{{${key}}}`,
   );
 
   return NextResponse.json({

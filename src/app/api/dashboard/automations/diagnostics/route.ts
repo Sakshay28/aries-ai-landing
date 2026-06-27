@@ -88,6 +88,30 @@ export async function GET() {
     detail: `${failedCount ?? 0} failed sends`,
   };
 
+  // 7. Drain heartbeat (M4) — proves the minute-cron actually ran recently,
+  // independent of whether this tenant currently has anything due. Global
+  // signal (one row), so it's the same for every tenant.
+  const { data: hb } = await supabaseAdmin
+    .from('system_heartbeats')
+    .select('last_run_at, detail')
+    .eq('key', 'automation_drain')
+    .maybeSingle();
+  if (hb?.last_run_at) {
+    const ageSec = Math.round((now - new Date(hb.last_run_at).getTime()) / 1000);
+    checks.cron_heartbeat = {
+      // The cron fires every minute; allow 3 min of slack before flagging.
+      ok: ageSec <= 180,
+      detail: ageSec <= 180
+        ? `Last drain ${ageSec}s ago`
+        : `Last drain ${Math.round(ageSec / 60)} min ago ⚠️ cron may be down`,
+    };
+  } else {
+    checks.cron_heartbeat = {
+      ok: false,
+      detail: 'No drain recorded yet — run migration 20260627 + verify pg_cron',
+    };
+  }
+
   const healthy = Object.values(checks).every(c => c.ok);
   return NextResponse.json({ healthy, checks });
 }

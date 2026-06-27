@@ -11,6 +11,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { verifyWebhookSignature, handleRazorpayWebhook } from '@/lib/billing/razorpay';
 import { fireIntegrations } from '@/lib/integrations/runner';
 import { triggerAutomations } from '@/lib/automations/engine';
+import { resolveBookingVariables } from '@/lib/automations/variables';
 import { sendStaffAlert } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 
@@ -75,7 +76,7 @@ export async function POST(req: NextRequest) {
           .update({ payment_status: 'paid', razorpay_payment_id: paymentId, booking_status: 'confirmed' })
           .eq('reservation_id', reservationId)
           .eq('restaurant_id', existingBooking.restaurant_id) // ← explicit tenant scope
-          .select('restaurant_id, customer_name, customer_phone, party_size, booking_date')
+          .select('restaurant_id, customer_name, customer_phone, party_size, booking_date, slot_time, special_request')
           .single();
         if (booking) {
           const tenantIdVal = booking.restaurant_id as string;
@@ -93,20 +94,28 @@ export async function POST(req: NextRequest) {
           // Notify manager that payment is confirmed
           const { data: tenant } = await supabaseAdmin
             .from('tenants')
-            .select('wa_access_token, wa_phone_number_id, staff_phone, manager_phone, business_name')
+            .select('wa_access_token, wa_phone_number_id, staff_phone, manager_phone, business_name, business_phone, business_address, google_review_url')
             .eq('id', tenantIdVal)
             .single();
 
+          // H2/H3: resolve the FULL formatted variable set (booking_time,
+          // guest_count, pretty date, etc.) the same way booking_confirmed does,
+          // instead of hand-rolling a partial set with raw DB values.
           triggerAutomations({
             tenantId: tenantIdVal, event: 'payment_received',
             phone: (booking.customer_phone as string) || '',
-            variables: {
-              customer_name: (booking.customer_name as string) || 'there',
-              business_name: ((tenant as any)?.business_name as string) || '',
-              reservation_id: reservationId,
-              party_size: String(booking.party_size ?? ''),
-              booking_date: String(booking.booking_date ?? ''),
-            },
+            variables: resolveBookingVariables(
+              {
+                customerName: (booking.customer_name as string) || '',
+                customerPhone: (booking.customer_phone as string) || '',
+                guestCount: Number(booking.party_size) || 0,
+                bookingDate: String(booking.booking_date ?? ''),
+                slotTime: String((booking as any).slot_time ?? ''),
+                reservationId: reservationId,
+                specialRequests: ((booking as any).special_request as string) || null,
+              },
+              (tenant as any) || {},
+            ),
           }).catch(e => console.error('Automations (payment_received):', e.message));
 
           const staffPhone  = (tenant as any)?.staff_phone   as string | null;

@@ -1,9 +1,12 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { sendTextMessage, sendMediaMessage } from '@/lib/meta/service';
+import { sendTextMessage, sendMediaMessage, sendTemplateMessage } from '@/lib/meta/service';
 import { getTenantById } from '@/lib/tenant/manager';
 import { decryptToken } from '@/lib/utils/crypto';
 import { toSignedMediaUrl } from '@/lib/utils/storage';
 import { KNOWN_VARIABLE_NAMES } from '@/lib/automations/variables';
+import { evaluateConditions, pickVariant, isWindowClosedError, type ConditionGroup } from '@/lib/automations/logic';
+import { getRedisClient } from '@/lib/redis/client';
+import { notifyAdmin } from '@/lib/alerts/admin';
 import { createHash } from 'crypto';
 import * as Sentry from '@/lib/sentry-stub';
 import type { Tenant } from '@/lib/types';
@@ -21,6 +24,7 @@ const DELAY_MS: Record<string, number> = {
   minutes: 60_000,
   hours:   3_600_000,
   days:    86_400_000,
+  weeks:   604_800_000,
 };
 
 export type TriggerEvent =
@@ -43,6 +47,29 @@ export interface AutomationPayload {
   eventAt?: string;
 }
 
+// The subset of an automation row the send path needs. Comes either from the
+// full row (immediate trigger) or the joined select (cron processing).
+interface SendableAutomation {
+  id?: string;
+  message_text: string;
+  message_text_b?: string | null;
+  ab_split_percent?: number | null;
+  media_url: string | null;
+  media_type: string | null;
+  cancel_on_reply?: boolean;
+  conditions?: ConditionGroup | null;
+  fallback_template_name?: string | null;
+}
+
+// Thrown when an automation's send conditions (L6) are not satisfied. Treated as
+// an expected cancellation (status='cancelled'), NOT a failure — never retried.
+class ConditionSkip extends Error {
+  constructor(reason: string) {
+    super(`Condition not met: ${reason}`);
+    this.name = 'ConditionSkip';
+  }
+}
+
 // ═══════════════════════════════════════
 // TRIGGER: Called inline in webhook when an event fires.
 // delay=0 → sends immediately. delay>0 → queues for cron/piggyback.
@@ -58,12 +85,14 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
 
   console.log(`[AUTOMATION_TRIGGER_RECEIVED] event=${event} tenant=${tenantId} lead=${payload.leadId || '?'} phone=${payload.phone || '?'}`);
 
+  // Only live (active, not soft-deleted) rules fire.
   const { data: rules } = await supabaseAdmin
     .from('automations')
     .select('*')
     .eq('tenant_id', tenantId)
     .eq('trigger_event', event)
-    .eq('status', 'active');
+    .eq('status', 'active')
+    .is('deleted_at', null);
 
   if (!rules || rules.length === 0) {
     console.log(`[AUTOMATION_NO_MATCH] event=${event} tenant=${tenantId} — no active rules`);
@@ -105,6 +134,17 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
       if (dupes && dupes.length > 0) {
         console.log(`[AUTOMATION_DEDUP] rule=${rule.id} lead=${leadId} — duplicate within ${DEDUP_WINDOW_MS}ms (existing status=${dupes[0].status}), skipping`);
         continue;
+      }
+
+      // ── L9: per-lead frequency cap ──
+      // Skip if this automation has already reached its daily send cap for this
+      // lead (counts sent/pending/processing in the last 24h). NULL = unlimited.
+      if (rule.max_per_lead_per_day != null) {
+        const within = await withinFrequencyCap(rule.id, leadId, rule.max_per_lead_per_day);
+        if (!within) {
+          console.log(`[AUTOMATION_FREQ_CAP] rule=${rule.id} lead=${leadId} — daily cap ${rule.max_per_lead_per_day} reached, skipping`);
+          continue;
+        }
       }
 
       const delayMs = (rule.delay_value || 0) * (DELAY_MS[rule.delay_unit] || DELAY_MS.minutes);
@@ -163,25 +203,46 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
           .single();
         if (!lead) continue;
 
-        const result = await sendAutomationMessage(tenant, lead, rule, conversationId || null, variables);
-        console.log(`[AUTOMATION_MESSAGE_SENT] rule=${rule.id} lead=${leadId} msgId=${result.messageId} (immediate)`);
-
-        // Record in queue for dedup + execution history
         const sentAt = new Date().toISOString();
-        await supabaseAdmin.from('automation_queue').insert({
-          automation_id: rule.id,
-          tenant_id: tenantId,
-          lead_id: leadId,
-          conversation_id: conversationId || null,
-          scheduled_at: sentAt,
-          status: 'sent',
-          sent_at: sentAt,
-          wa_message_id: result.messageId,
-          variables: variables ?? null,
-          idempotency_key: generateIdempotencyKey(rule.id, leadId, sentAt),
-        }).then(null, () => {});
+        try {
+          const result = await sendAutomationMessage(tenant, lead, rule, conversationId || null, variables);
+          console.log(`[AUTOMATION_MESSAGE_SENT] rule=${rule.id} lead=${leadId} msgId=${result.messageId} variant=${result.variant ?? '-'} (immediate)`);
 
-        await bumpCounter(rule.id, 0, 1);
+          // Record in queue for dedup + execution history
+          await supabaseAdmin.from('automation_queue').insert({
+            automation_id: rule.id,
+            tenant_id: tenantId,
+            lead_id: leadId,
+            conversation_id: conversationId || null,
+            scheduled_at: sentAt,
+            status: 'sent',
+            sent_at: sentAt,
+            wa_message_id: result.messageId,
+            variant: result.variant,
+            variables: variables ?? null,
+            idempotency_key: generateIdempotencyKey(rule.id, leadId, sentAt),
+          }).then(null, () => {});
+
+          await bumpCounter(rule.id, 0, 1);
+        } catch (sendErr) {
+          if (sendErr instanceof ConditionSkip) {
+            console.log(`[AUTOMATION_CONDITION_SKIP] rule=${rule.id} lead=${leadId} — ${sendErr.message}`);
+            await supabaseAdmin.from('automation_queue').insert({
+              automation_id: rule.id,
+              tenant_id: tenantId,
+              lead_id: leadId,
+              conversation_id: conversationId || null,
+              scheduled_at: sentAt,
+              status: 'cancelled',
+              error_message: sendErr.message,
+              variables: variables ?? null,
+              idempotency_key: generateIdempotencyKey(rule.id, leadId, sentAt),
+            }).then(null, () => {});
+            await bumpCounter(rule.id, 1, 0);
+            continue;
+          }
+          throw sendErr;
+        }
       } else {
         const scheduledAt = new Date(Date.now() + delayMs).toISOString();
         const idemKey = generateIdempotencyKey(rule.id, leadId, scheduledAt);
@@ -221,120 +282,186 @@ export async function triggerAutomations(payload: AutomationPayload): Promise<vo
 // 5-min requeue. Overflow stays 'pending' and drains on the next minute's tick.
 const CLAIM_BATCH = 15;
 
+// Per-tenant send budget per minute (fairness + Meta pair-rate safety). One
+// tenant with a flood of due items can't monopolise a drain or hammer their
+// number past Meta's limits — overflow defers to the next minute. Fails OPEN
+// when Redis is unavailable so sends are never silently blocked.
+const TENANT_RATE_PER_MIN = Number(process.env.AUTOMATION_TENANT_RATE_PER_MIN || 30);
+
 export async function processPendingAutomations(): Promise<number> {
-  const now = new Date().toISOString();
-
-  // Recovery: release items stuck in 'processing' for >5 minutes (serverless timeout or crash)
-  const stuckCutoff = new Date(Date.now() - 5 * 60_000).toISOString();
-  const { data: stuck } = await supabaseAdmin
-    .from('automation_queue')
-    .update({ status: 'pending' })
-    .eq('status', 'processing')
-    .lte('scheduled_at', stuckCutoff)
-    .select('id');
-  if (stuck && stuck.length > 0) {
-    console.log(`[AUTOMATION_RECOVERY] released ${stuck.length} stuck items back to pending`);
-  }
-
-  // Claim items atomically: set status='processing' so concurrent callers don't double-send
-  const { data: claimed, error: claimErr } = await supabaseAdmin
-    .from('automation_queue')
-    .update({ status: 'processing' as string })
-    .eq('status', 'pending')
-    .lte('scheduled_at', now)
-    .limit(CLAIM_BATCH)
-    .select('id');
-
-  if (claimErr || !claimed || claimed.length === 0) return 0;
-
-  const claimedIds = claimed.map(c => c.id);
-  console.log(`[AUTOMATION_JOB_STARTED] claimed ${claimedIds.length} due queue items`);
-
-  const { data: queueItems, error } = await supabaseAdmin
-    .from('automation_queue')
-    .select(`
-      id, automation_id, tenant_id, lead_id, conversation_id, variables, error_message,
-      automations!inner ( id, tenant_id, message_text, media_url, media_type, cancel_on_reply ),
-      leads!inner ( name, phone, lead_status )
-    `)
-    .in('id', claimedIds);
-
-  if (error) {
-    console.error(`[automations] queue query error:`, error.message);
-    // Release claimed items back to pending
-    await supabaseAdmin.from('automation_queue').update({ status: 'pending' }).in('id', claimedIds);
-    return 0;
-  }
-  if (!queueItems || queueItems.length === 0) return 0;
-
+  let claimedCount = 0;
   let sent = 0;
 
-  for (const item of queueItems) {
-    try {
-      const automation = item.automations as unknown as {
-        id: string; tenant_id: string; message_text: string;
-        media_url: string | null; media_type: string | null;
-        cancel_on_reply: boolean;
-      };
-      const lead = item.leads as unknown as {
-        name: string; phone: string; lead_status: string;
-      };
+  try {
+    const now = new Date().toISOString();
 
-      if (lead.lead_status === 'converted' || lead.lead_status === 'lost') {
-        await updateQueueStatus(item.id, 'cancelled', 'Lead status changed');
-        continue;
-      }
+    // Recovery: release items stuck in 'processing' for >5 minutes since they
+    // were CLAIMED (serverless timeout/crash mid-send). Keys off claimed_at —
+    // created_at/scheduled_at would mis-fire and double-send a healthy in-flight
+    // item. Legacy rows with null claimed_at are swept by the SQL safety-net cron.
+    const stuckCutoff = new Date(Date.now() - 5 * 60_000).toISOString();
+    const { data: stuck } = await supabaseAdmin
+      .from('automation_queue')
+      .update({ status: 'pending', claimed_at: null })
+      .eq('status', 'processing')
+      .lt('claimed_at', stuckCutoff)
+      .select('id');
+    if (stuck && stuck.length > 0) {
+      console.log(`[AUTOMATION_RECOVERY] released ${stuck.length} stuck items back to pending`);
+    }
 
-      const tenant = await getTenantById(item.tenant_id);
-      if (!tenant || !tenant.is_active || !isMetaConfigured(tenant)) {
-        await updateQueueStatus(item.id, 'cancelled', 'Tenant inactive or WA not configured');
-        continue;
-      }
+    // Claim items atomically: set status='processing' + stamp claimed_at so
+    // concurrent callers don't double-send and recovery can age them correctly.
+    const { data: claimed, error: claimErr } = await supabaseAdmin
+      .from('automation_queue')
+      .update({ status: 'processing' as string, claimed_at: now })
+      .eq('status', 'pending')
+      .lte('scheduled_at', now)
+      .limit(CLAIM_BATCH)
+      .select('id');
 
-      console.log(`[AUTOMATION_JOB_PROCESSING] item=${item.id} lead=${lead.phone} automation=${automation.id} vars=${JSON.stringify(item.variables)}`);
-      const result = await sendAutomationMessage(tenant, lead, automation, item.conversation_id, item.variables ?? undefined);
+    if (claimErr || !claimed || claimed.length === 0) return 0;
+    claimedCount = claimed.length;
 
-      await supabaseAdmin
-        .from('automation_queue')
-        .update({
-          status: 'sent',
-          sent_at: new Date().toISOString(),
-          wa_message_id: result.messageId,
-        })
-        .eq('id', item.id);
+    const claimedIds = claimed.map(c => c.id);
+    console.log(`[AUTOMATION_JOB_STARTED] claimed ${claimedIds.length} due queue items`);
 
-      await bumpCounter(automation.id, 0, 1);
-      sent++;
-      console.log(`[AUTOMATION_MESSAGE_SENT] item=${item.id} lead=${lead.phone} msgId=${result.messageId}`);
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Unknown error';
-      const isValidationError = errMsg.startsWith('Unresolved variables') || errMsg.startsWith('Rendered message contains');
-      console.error(`[AUTOMATION_MESSAGE_FAILED] item=${item.id} validation=${isValidationError}:`, errMsg);
-      Sentry.captureException(err);
+    const { data: queueItems, error } = await supabaseAdmin
+      .from('automation_queue')
+      .select(`
+        id, automation_id, tenant_id, lead_id, conversation_id, variables, error_message, created_at,
+        automations!inner ( id, tenant_id, message_text, message_text_b, ab_split_percent, media_url, media_type, cancel_on_reply, conditions, fallback_template_name, status, deleted_at ),
+        leads!inner ( name, phone, lead_status )
+      `)
+      .in('id', claimedIds);
 
-      if (isValidationError) {
-        await updateQueueStatus(item.id, 'failed', errMsg);
-      } else {
-        // Transient error (Meta API, network) — requeue for retry up to 3 times
-        const prevRetry = (item.error_message || '').match(/Retry (\d+)\/3/);
-        const retryCount = (prevRetry ? parseInt(prevRetry[1]) : 0) + 1;
-        if (retryCount <= 3) {
-          const backoffMs = retryCount * 30_000;
-          await supabaseAdmin.from('automation_queue').update({
-            status: 'pending',
-            scheduled_at: new Date(Date.now() + backoffMs).toISOString(),
-            error_message: `Retry ${retryCount}/3: ${errMsg}`,
-          }).eq('id', item.id);
-          console.log(`[AUTOMATION_RETRY] item=${item.id} retry=${retryCount}/3 backoff=${backoffMs}ms`);
+    if (error) {
+      console.error(`[automations] queue query error:`, error.message);
+      // Release claimed items back to pending
+      await supabaseAdmin.from('automation_queue').update({ status: 'pending', claimed_at: null }).in('id', claimedIds);
+      return 0;
+    }
+    if (!queueItems || queueItems.length === 0) return 0;
+
+    for (const item of queueItems) {
+      try {
+        const automation = item.automations as unknown as SendableAutomation & {
+          id: string; tenant_id: string; status: string; deleted_at: string | null;
+        };
+        const lead = item.leads as unknown as {
+          name: string; phone: string; lead_status: string;
+        };
+
+        // Automation paused or soft-deleted after this item was queued → don't send.
+        if (automation.status !== 'active' || automation.deleted_at) {
+          await updateQueueStatus(item.id, 'cancelled', 'Automation paused or deleted');
+          continue;
+        }
+
+        if (lead.lead_status === 'converted' || lead.lead_status === 'lost') {
+          await updateQueueStatus(item.id, 'cancelled', 'Lead status changed');
+          continue;
+        }
+
+        // M6: close the cancel-on-reply race. The reply-time canceller only
+        // catches 'pending' items; an item already 'processing' could slip
+        // through. Re-check for an inbound reply since this item was created.
+        if (automation.cancel_on_reply && item.conversation_id) {
+          const { data: reply } = await supabaseAdmin
+            .from('messages')
+            .select('id')
+            .eq('conversation_id', item.conversation_id)
+            .eq('direction', 'inbound')
+            .gt('created_at', item.created_at)
+            .limit(1)
+            .maybeSingle();
+          if (reply) {
+            await updateQueueStatus(item.id, 'cancelled', 'Customer replied before send');
+            continue;
+          }
+        }
+
+        const tenant = await getTenantById(item.tenant_id);
+        if (!tenant || !tenant.is_active || !isMetaConfigured(tenant)) {
+          await updateQueueStatus(item.id, 'cancelled', 'Tenant inactive or WA not configured');
+          continue;
+        }
+
+        // H6: per-tenant per-minute send budget. Over budget → leave the item
+        // for the next tick (not a failure), so one tenant can't starve others.
+        if (!(await withinTenantRateBudget(item.tenant_id))) {
+          await supabaseAdmin
+            .from('automation_queue')
+            .update({ status: 'pending', claimed_at: null, scheduled_at: new Date(Date.now() + 60_000).toISOString() })
+            .eq('id', item.id);
+          console.log(`[AUTOMATION_RATE_DEFER] item=${item.id} tenant=${item.tenant_id} — over ${TENANT_RATE_PER_MIN}/min, deferred`);
+          continue;
+        }
+
+        console.log(`[AUTOMATION_JOB_PROCESSING] item=${item.id} lead=${lead.phone} automation=${automation.id} vars=${JSON.stringify(item.variables)}`);
+        const result = await sendAutomationMessage(tenant, lead, automation, item.conversation_id, item.variables ?? undefined);
+
+        await supabaseAdmin
+          .from('automation_queue')
+          .update({
+            status: 'sent',
+            sent_at: new Date().toISOString(),
+            wa_message_id: result.messageId,
+            variant: result.variant,
+          })
+          .eq('id', item.id);
+
+        await bumpCounter(automation.id, 0, 1);
+        sent++;
+        console.log(`[AUTOMATION_MESSAGE_SENT] item=${item.id} lead=${lead.phone} msgId=${result.messageId} variant=${result.variant ?? '-'}`);
+      } catch (err) {
+        // Condition not met → expected cancellation, never retry.
+        if (err instanceof ConditionSkip) {
+          console.log(`[AUTOMATION_CONDITION_SKIP] item=${item.id} — ${err.message}`);
+          await updateQueueStatus(item.id, 'cancelled', err.message);
+          continue;
+        }
+
+        const errMsg = err instanceof Error ? err.message : 'Unknown error';
+        // Non-retryable failures: bad variables, broken render, or 24h window
+        // closed (only an approved template can reach the customer — retrying
+        // the free-form send will never succeed).
+        const isPermanent =
+          errMsg.startsWith('Unresolved variables') ||
+          errMsg.startsWith('Rendered message contains') ||
+          errMsg.startsWith('Outside 24h window');
+        console.error(`[AUTOMATION_MESSAGE_FAILED] item=${item.id} permanent=${isPermanent}:`, errMsg);
+        Sentry.captureException(err);
+
+        if (isPermanent) {
+          await updateQueueStatus(item.id, 'failed', errMsg);
         } else {
-          await updateQueueStatus(item.id, 'failed', `Exhausted 3 retries: ${errMsg}`);
+          // Transient error (Meta API, network) — requeue for retry up to 3 times
+          const prevRetry = (item.error_message || '').match(/Retry (\d+)\/3/);
+          const retryCount = (prevRetry ? parseInt(prevRetry[1]) : 0) + 1;
+          if (retryCount <= 3) {
+            const backoffMs = retryCount * 30_000;
+            await supabaseAdmin.from('automation_queue').update({
+              status: 'pending',
+              claimed_at: null,
+              scheduled_at: new Date(Date.now() + backoffMs).toISOString(),
+              error_message: `Retry ${retryCount}/3: ${errMsg}`,
+            }).eq('id', item.id);
+            console.log(`[AUTOMATION_RETRY] item=${item.id} retry=${retryCount}/3 backoff=${backoffMs}ms`);
+          } else {
+            await updateQueueStatus(item.id, 'failed', `Exhausted 3 retries: ${errMsg}`);
+          }
         }
       }
     }
-  }
 
-  console.log(`[AUTOMATION_JOB_DONE] processed=${claimedIds.length} sent=${sent}`);
-  return sent;
+    console.log(`[AUTOMATION_JOB_DONE] processed=${claimedCount} sent=${sent}`);
+    return sent;
+  } finally {
+    // M4: heartbeat every run (even 0 claimed) so diagnostics can prove the
+    // minute-cron is alive rather than inferring it from queue age.
+    await recordDrainHeartbeat({ claimed: claimedCount, sent });
+  }
 }
 
 // ═══════════════════════════════════════
@@ -366,7 +493,7 @@ export async function cancelLeadAutomations(leadId: string): Promise<void> {
 
   await supabaseAdmin
     .from('automation_queue')
-    .update({ status: 'cancelled' })
+    .update({ status: 'cancelled', error_message: 'Customer replied' })
     .in('id', itemsToCancel.map(i => i.id));
 
   console.log(`[automations] cancelled ${itemsToCancel.length} pending items for lead ${leadId}`);
@@ -379,10 +506,10 @@ export async function cancelLeadAutomations(leadId: string): Promise<void> {
 async function sendAutomationMessage(
   tenant: Tenant,
   lead: { name: string; phone: string },
-  automation: { message_text: string; media_url: string | null; media_type: string | null },
+  automation: SendableAutomation,
   conversationId: string | null,
   variables?: Record<string, string>,
-): Promise<{ messageId: string | null }> {
+): Promise<{ messageId: string | null; variant: 'A' | 'B' | null }> {
   const token = decryptToken(tenant.wa_access_token as string) as string;
   const phoneNumberId = tenant.wa_phone_number_id as string;
 
@@ -392,8 +519,26 @@ async function sendAutomationMessage(
     ...variables,
   };
 
+  // ── L6: condition gating ──
+  // Evaluated against resolved variables. Failing conditions cancel the send
+  // (expected), they don't fail it.
+  const cond = evaluateConditions(automation.conditions ?? null, allVars);
+  if (!cond.passed) {
+    throw new ConditionSkip(cond.reason || 'conditions not satisfied');
+  }
+
+  // ── L7: pick A/B variant deterministically by lead phone ──
+  const picked = pickVariant(
+    {
+      message_text: automation.message_text,
+      message_text_b: automation.message_text_b,
+      ab_split_percent: automation.ab_split_percent,
+    },
+    lead.phone || lead.name || 'anon',
+  );
+
   // ── Pre-send validation: detect unresolved placeholders BEFORE sending ──
-  const { rendered, unresolved, unknownKeys } = renderTemplate(automation.message_text, allVars);
+  const { rendered, unresolved, unknownKeys } = renderTemplate(picked.text, allVars);
 
   if (unknownKeys.length > 0) {
     console.warn(`[AUTOMATION_UNKNOWN_VARS] lead=${lead.phone} unknownKeys=${unknownKeys.join(',')}`);
@@ -413,27 +558,46 @@ async function sendAutomationMessage(
     throw new Error(errMsg);
   }
 
-  console.log(`[AUTOMATION_SENDING] lead=${lead.phone} vars=${JSON.stringify(allVars)} message="${rendered.slice(0, 100)}..."`);
+  console.log(`[AUTOMATION_SENDING] lead=${lead.phone} variant=${picked.variant ?? '-'} vars=${JSON.stringify(allVars)} message="${rendered.slice(0, 100)}..."`);
 
   let metaMsgId: string | null = null;
   let sentMediaUrl: string | null = null;
   let sentMimeType: string | null = null;
   let sentMessageType = 'text';
 
-  if (automation.media_url) {
-    const signedUrl = await toSignedMediaUrl(automation.media_url);
-    const mediaType = (automation.media_type || 'image') as 'image' | 'video' | 'document';
-    const result = await sendMediaMessage(token, phoneNumberId, lead.phone, mediaType, signedUrl, rendered);
-    metaMsgId = result?.messageId ?? null;
-    sentMediaUrl = signedUrl;
-    sentMimeType = mediaType === 'image' ? 'image/jpeg' : mediaType === 'video' ? 'video/mp4' : 'application/octet-stream';
-    sentMessageType = mediaType;
-  } else {
-    const result = await sendTextMessage(token, phoneNumberId, lead.phone, rendered);
-    metaMsgId = result?.messageId ?? null;
+  try {
+    if (automation.media_url) {
+      const signedUrl = await toSignedMediaUrl(automation.media_url);
+      const mediaType = (automation.media_type || 'image') as 'image' | 'video' | 'document';
+      const result = await sendMediaMessage(token, phoneNumberId, lead.phone, mediaType, signedUrl, rendered);
+      metaMsgId = result?.messageId ?? null;
+      sentMediaUrl = signedUrl;
+      sentMimeType = mediaType === 'image' ? 'image/jpeg' : mediaType === 'video' ? 'video/mp4' : 'application/octet-stream';
+      sentMessageType = mediaType;
+    } else {
+      const result = await sendTextMessage(token, phoneNumberId, lead.phone, rendered);
+      metaMsgId = result?.messageId ?? null;
+    }
+  } catch (sendErr) {
+    // ── L10: 24h window closed ──
+    if (isWindowClosedError(sendErr)) {
+      const fallback = await tryWindowFallback(tenant, token, phoneNumberId, lead, automation, allVars);
+      if (fallback.sent) {
+        metaMsgId = fallback.messageId;
+        sentMessageType = 'template';
+        sentMediaUrl = null;
+      } else {
+        throw new Error(
+          `Outside 24h window — customer hasn't messaged in 24h, free-form blocked` +
+          (automation.fallback_template_name ? ` and fallback template "${automation.fallback_template_name}" failed` : `. Set a fallback template to reach them`)
+        );
+      }
+    } else {
+      throw sendErr; // transient/other → classified by caller for retry
+    }
   }
 
-  console.log(`[AUTOMATION_API_RESULT] lead=${lead.phone} msgId=${metaMsgId}`);
+  console.log(`[AUTOMATION_API_RESULT] lead=${lead.phone} msgId=${metaMsgId} type=${sentMessageType}`);
 
   if (conversationId) {
     await supabaseAdmin.from('messages').insert({
@@ -459,10 +623,59 @@ async function sendAutomationMessage(
     tenant_id: tenant.id,
     event_type: 'automation_sent',
     channel: 'whatsapp',
-    metadata: { lead_name: lead.name, automation_message: rendered.slice(0, 100) },
+    metadata: { lead_name: lead.name, automation_message: rendered.slice(0, 100), variant: picked.variant },
   }).then(null, () => {});
 
-  return { messageId: metaMsgId };
+  return { messageId: metaMsgId, variant: picked.variant };
+}
+
+// ── L10 helper: attempt the approved-template fallback when the 24h window is
+// closed. Best-effort: passes the customer's first name as the single body
+// variable (the conventional shape for a simple utility/reminder template).
+// Any failure (no template set, param mismatch, Meta error) returns sent=false
+// so the caller marks the item failed and alerts the operator. ──
+async function tryWindowFallback(
+  tenant: Tenant,
+  token: string,
+  phoneNumberId: string,
+  lead: { name: string; phone: string },
+  automation: SendableAutomation,
+  allVars: Record<string, string>,
+): Promise<{ sent: boolean; messageId: string | null }> {
+  if (!automation.fallback_template_name) {
+    await alertWindowClosed(tenant, lead, automation, false);
+    return { sent: false, messageId: null };
+  }
+  try {
+    const firstName = allVars.first_name || (lead.name || '').split(' ')[0] || allVars.customer_name || 'there';
+    const result = await sendTemplateMessage(token, phoneNumberId, lead.phone, automation.fallback_template_name, [firstName], 'en');
+    console.log(`[AUTOMATION_WINDOW_FALLBACK_OK] lead=${lead.phone} template=${automation.fallback_template_name} msgId=${result.messageId}`);
+    return { sent: true, messageId: result.messageId ?? null };
+  } catch (tplErr) {
+    console.error(`[AUTOMATION_WINDOW_FALLBACK_FAILED] lead=${lead.phone} template=${automation.fallback_template_name}:`, (tplErr as Error).message);
+    await alertWindowClosed(tenant, lead, automation, true);
+    return { sent: false, messageId: null };
+  }
+}
+
+async function alertWindowClosed(
+  tenant: Tenant,
+  lead: { name: string; phone: string },
+  automation: SendableAutomation,
+  fallbackAttempted: boolean,
+): Promise<void> {
+  await notifyAdmin({
+    dedupeKey: `automation_window_closed:${tenant.id}`,
+    subject: `Automation blocked by WhatsApp 24h window`,
+    summary: `An automation for ${tenant.business_name || tenant.id} couldn't reach a customer because the 24h messaging window is closed. ${fallbackAttempted ? 'The fallback template also failed.' : 'No fallback template is configured.'} Configure an approved WhatsApp template to reach customers outside the window.`,
+    context: {
+      tenant_id: tenant.id,
+      lead_phone: lead.phone,
+      automation_id: automation.id,
+      fallback_template: automation.fallback_template_name || null,
+      fallback_attempted: fallbackAttempted,
+    },
+  }).catch(() => {});
 }
 
 function renderTemplate(
@@ -488,6 +701,47 @@ async function updateQueueStatus(id: string, status: string, errorMessage?: stri
     .from('automation_queue')
     .update({ status, error_message: errorMessage || null })
     .eq('id', id);
+}
+
+// ── L9: per-lead daily frequency cap check ──
+async function withinFrequencyCap(automationId: string, leadId: string, cap: number): Promise<boolean> {
+  const since = new Date(Date.now() - 86_400_000).toISOString();
+  const { count } = await supabaseAdmin
+    .from('automation_queue')
+    .select('id', { count: 'exact', head: true })
+    .eq('automation_id', automationId)
+    .eq('lead_id', leadId)
+    .in('status', ['sent', 'pending', 'processing'])
+    .gte('created_at', since);
+  return (count ?? 0) < cap;
+}
+
+// ── H6: per-tenant per-minute send budget (Redis sliding minute bucket) ──
+// Fails OPEN (returns true) when Redis is unavailable — automations must never
+// be silently blocked by a missing cache.
+async function withinTenantRateBudget(tenantId: string): Promise<boolean> {
+  const redis = getRedisClient();
+  if (!redis) return true;
+  try {
+    const bucket = Math.floor(Date.now() / 60_000);
+    const key = `auto_rate:${tenantId}:${bucket}`;
+    const n = await redis.incr(key);
+    if (n === 1) await redis.expire(key, 120);
+    return n <= TENANT_RATE_PER_MIN;
+  } catch {
+    return true; // fail open
+  }
+}
+
+// ── M4: record the drain heartbeat (best-effort) ──
+async function recordDrainHeartbeat(detail: Record<string, unknown>): Promise<void> {
+  try {
+    await supabaseAdmin
+      .from('system_heartbeats')
+      .upsert({ key: 'automation_drain', last_run_at: new Date().toISOString(), detail }, { onConflict: 'key' });
+  } catch {
+    // Heartbeat is advisory; never let it break a drain.
+  }
 }
 
 // Atomically bump both counters in a single statement (no read-then-write race).
