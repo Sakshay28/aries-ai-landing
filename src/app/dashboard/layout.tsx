@@ -43,7 +43,7 @@ export default async function DashboardLayout({
       // Use supabaseAdmin to bypass RLS on users/tenants tables.
       const { data: userData, error: userQueryErr } = await supabaseAdmin
         .from("users")
-        .select("tenant_id, full_name, is_platform_admin, tenants(onboarding_completed)")
+        .select("tenant_id, full_name, is_platform_admin, tenants!tenant_id(onboarding_completed)")
         .eq("auth_id", user.id)
         .maybeSingle();
 
