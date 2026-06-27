@@ -6,7 +6,7 @@ import {
   Building2, Clock, Phone, Mail, Globe, MapPin,
   Users, Zap, Save, CheckCircle2, AlertCircle, Plus, X,
   MessageSquare, BrainCircuit, Bell, Copy, Eye, EyeOff, Key, HelpCircle, ExternalLink, RefreshCw, Star,
-  ChevronDown, ChevronUp, Image as ImageIcon
+  ChevronDown, ChevronUp, Image as ImageIcon, UserCheck, Info, Target,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PhoneInput } from '@/components/ui/phone-input';
@@ -99,6 +99,7 @@ const TABS = [
   { id: 'wabizprofile', label: 'WA Profile', icon: ImageIcon },
   { id: 'aibehavior', label: 'AI Behavior', icon: BrainCircuit },
   { id: 'staff', label: 'Staff & Alerts', icon: Users },
+  { id: 'leads', label: 'Lead Routing', icon: Target },
   { id: 'followup', label: 'Follow-ups', icon: Bell },
   { id: 'offhours', label: 'Off-Hours', icon: Clock },
 ];
@@ -361,6 +362,28 @@ export default function SettingsPage() {
   const [templates, setTemplates] = useState<FollowUpTemplates>({});
   const [expandedFu, setExpandedFu] = useState<Record<string, boolean>>({});
   const [users, setUsers] = useState<any[]>([]);
+  const [salesAgentUpdating, setSalesAgentUpdating] = useState<Record<string, boolean>>({});
+
+  const toggleSalesAgent = useCallback(async (userId: string, currentValue: boolean) => {
+    setSalesAgentUpdating(s => ({ ...s, [userId]: true }));
+    try {
+      const res = await fetch('/api/dashboard/team', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: userId, is_sales_agent: !currentValue }),
+      });
+      if (res.ok) {
+        setUsers(u => u.map(m => m.id === userId ? { ...m, is_sales_agent: !currentValue } : m));
+        toast.success(!currentValue ? 'Added to lead pool' : 'Removed from lead pool');
+      } else {
+        toast.error('Failed to update — try again');
+      }
+    } catch {
+      toast.error('Network error — try again');
+    } finally {
+      setSalesAgentUpdating(s => ({ ...s, [userId]: false }));
+    }
+  }, []);
 
   // Meta Cloud API States
   const [testingConnection, setTestingConnection] = useState(false);
@@ -1106,7 +1129,7 @@ export default function SettingsPage() {
                 rows={7}
                 value={settings.escalation_alert_template || ''}
                 onChange={e => update('escalation_alert_template', e.target.value)}
-                placeholder={`🚨 Escalation Alert — {{business_name}}\n\nCustomer: {{customer_name}}\nPhone: +{{customer_phone}}\nReason: {{reason}}\nMessage: {{message}}\n\n👉 Reply on Live Chat: https://ariesai.in/dashboard/live-chat`}
+                placeholder={`🚨 Escalation Alert — {{business_name}}\n\nCustomer: {{customer_name}}\nPhone: +{{customer_phone}}\nReason: {{reason}}\nMessage: {{message}}\n\n👉 Reply on Live Chat: https://ariesai.in/dashboard/chat`}
                 className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none transition-colors"
                 style={{
                   background: 'var(--input)',
@@ -1224,78 +1247,242 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          {/* Lead Assignment & Email Notification */}
-          <SectionCard title="Lead Assignment & Email Notification" icon={Users}>
-            <p className="text-xs -mt-1 mb-4" style={{ color: 'var(--muted-foreground)' }}>
-              Configure how new leads from Meta Ads are assigned and how email notifications are sent to the assigned staff member.
+        </motion.div>
+      )}
+
+      {/* Tab: Lead Routing */}
+      {activeTab === 'leads' && (
+        <motion.div key="leads" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+
+          {/* Lead Assignment */}
+          <SectionCard title="Lead Assignment" icon={Target}>
+
+            {/* How it works */}
+            <div
+              className="rounded-xl p-4 text-xs space-y-2.5"
+              style={{ background: 'rgba(6,182,212,0.05)', border: '1px solid rgba(6,182,212,0.18)' }}
+            >
+              <div className="flex items-center gap-2">
+                <Info className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                <span className="font-semibold text-sm" style={{ color: 'var(--foreground)' }}>How assignment works</span>
+              </div>
+              <ol className="list-decimal list-inside space-y-1 leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+                <li><strong style={{ color: 'var(--foreground)' }}>Default person set</strong> — every new lead always goes to that person only.</li>
+                <li><strong style={{ color: 'var(--foreground)' }}>No default, lead pool has members</strong> — leads rotate round-robin through the lead pool.</li>
+                <li><strong style={{ color: 'var(--foreground)' }}>No default, empty pool</strong> — all team members share leads equally in rotation.</li>
+              </ol>
+              <p style={{ color: 'var(--muted-foreground)' }}>The assigned person receives an email at their account address. Currently only triggered by Meta Ad (Click-to-WhatsApp) leads.</p>
+            </div>
+
+            {/* Default Assignee */}
+            <Field label="Default Assignee">
+              <select
+                value={settings.default_lead_assignee_id || ''}
+                onChange={e => update('default_lead_assignee_id', e.target.value)}
+                className="w-full h-10 px-3 rounded-xl text-sm outline-none transition-all"
+                style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+              >
+                <option value="">— Round-robin (no fixed default) —</option>
+                {users.map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name ? `${u.full_name} (${u.email})` : u.email} · {u.role}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                If set, this person receives every lead. Leave unset to use round-robin rotation through the lead pool.
+              </p>
+            </Field>
+
+          </SectionCard>
+
+          {/* Lead Pool */}
+          <SectionCard title="Lead Pool" icon={UserCheck}>
+            <p className="text-xs -mt-1" style={{ color: 'var(--muted-foreground)' }}>
+              Toggle who is in the round-robin pool. People outside the pool still exist in your team — they just won't receive auto-assigned leads. Changes save instantly.
             </p>
 
-            <div className="grid grid-cols-1 gap-5">
-              <Field label="Assign Lead To">
-                <select
-                  value={settings.default_lead_assignee_id || ''}
-                  onChange={e => update('default_lead_assignee_id', e.target.value)}
-                  className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none transition-colors"
+            {users.length === 0 ? (
+              <div className="text-sm text-center py-6" style={{ color: 'var(--muted-foreground)' }}>
+                No team members yet. Invite team members from the Team page.
+              </div>
+            ) : (
+              <div className="space-y-2 mt-1">
+                {users.map(u => {
+                  const isDefault = settings.default_lead_assignee_id === u.id;
+                  const inPool = Boolean(u.is_sales_agent);
+                  const updating = Boolean(salesAgentUpdating[u.id]);
+                  const initials = (u.full_name || u.email || '?')
+                    .split(' ')
+                    .slice(0, 2)
+                    .map((w: string) => w[0])
+                    .join('')
+                    .toUpperCase();
+
+                  return (
+                    <div
+                      key={u.id}
+                      className="flex items-center gap-3 px-4 py-3 rounded-xl border transition-all"
+                      style={{
+                        borderColor: inPool ? 'rgba(16,185,129,0.3)' : 'var(--border)',
+                        background: inPool ? 'rgba(16,185,129,0.03)' : 'var(--card)',
+                      }}
+                    >
+                      {/* Avatar */}
+                      <div
+                        className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
+                        style={{
+                          background: inPool ? 'rgba(16,185,129,0.15)' : 'var(--secondary)',
+                          color: inPool ? '#10B981' : 'var(--muted-foreground)',
+                          border: `1px solid ${inPool ? 'rgba(16,185,129,0.3)' : 'var(--border)'}`,
+                        }}
+                      >
+                        {initials}
+                      </div>
+
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium truncate" style={{ color: 'var(--foreground)' }}>
+                            {u.full_name || '(no name)'}
+                          </span>
+                          <span
+                            className="text-[10px] px-1.5 py-0.5 rounded-md font-medium uppercase tracking-wide"
+                            style={{ background: 'var(--secondary)', border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}
+                          >
+                            {u.role}
+                          </span>
+                          {isDefault && (
+                            <span
+                              className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold"
+                              style={{ background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.25)', color: 'rgb(6,182,212)' }}
+                            >
+                              default
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <Mail className="w-3 h-3 shrink-0" style={{ color: 'var(--muted-foreground)' }} />
+                          <span className="text-xs truncate" style={{ color: 'var(--muted-foreground)' }}>{u.email}</span>
+                        </div>
+                      </div>
+
+                      {/* Pool status + toggle */}
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        <span className="text-xs hidden sm:block" style={{ color: inPool ? '#10B981' : 'var(--muted-foreground)' }}>
+                          {inPool ? 'In pool' : 'Not in pool'}
+                        </span>
+                        <button
+                          disabled={updating}
+                          onClick={() => toggleSalesAgent(u.id, inPool)}
+                          className="relative w-10 h-6 rounded-full transition-colors shrink-0"
+                          style={{ background: inPool ? '#10B981' : 'var(--muted)', opacity: updating ? 0.5 : 1 }}
+                          aria-label={inPool ? 'Remove from lead pool' : 'Add to lead pool'}
+                        >
+                          {updating ? (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <div className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                            </div>
+                          ) : (
+                            <div
+                              className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform"
+                              style={{ transform: inPool ? 'translateX(16px)' : 'translateX(0)' }}
+                            />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Summary line */}
+            {users.length > 0 && (() => {
+              const poolMembers = users.filter(u => u.is_sales_agent);
+              const defaultPerson = users.find(u => u.id === settings.default_lead_assignee_id);
+              if (defaultPerson) {
+                return (
+                  <p className="text-xs pt-1" style={{ color: 'var(--muted-foreground)' }}>
+                    All leads go to <strong style={{ color: 'var(--foreground)' }}>{defaultPerson.full_name || defaultPerson.email}</strong> (default assignee).
+                  </p>
+                );
+              }
+              if (poolMembers.length === 0) {
+                return (
+                  <p className="text-xs pt-1" style={{ color: '#F59E0B' }}>
+                    No one in the lead pool — leads will rotate through all {users.length} team member{users.length !== 1 ? 's' : ''}.
+                  </p>
+                );
+              }
+              return (
+                <p className="text-xs pt-1" style={{ color: 'var(--muted-foreground)' }}>
+                  Leads rotate through <strong style={{ color: 'var(--foreground)' }}>{poolMembers.length}</strong> pool member{poolMembers.length !== 1 ? 's' : ''}:{' '}
+                  {poolMembers.map(m => m.full_name || m.email).join(', ')}.
+                </p>
+              );
+            })()}
+          </SectionCard>
+
+          {/* Lead Notification Email Template */}
+          <SectionCard title="Lead Notification Email" icon={Mail}>
+            <p className="text-xs -mt-1 mb-1" style={{ color: 'var(--muted-foreground)' }}>
+              Customize the email sent to the assigned person when a new lead arrives. Leave blank to use the platform default.
+            </p>
+            <Field label="Email Body">
+              <textarea
+                rows={7}
+                value={settings.lead_assigned_email_template || ''}
+                onChange={e => update('lead_assigned_email_template', e.target.value)}
+                placeholder={`A new lead (<strong>{{lead_name}}</strong>) from <strong>{{source}}</strong> has just been assigned to you at <strong>{{business_name}}</strong>.\n\nOpen your AriesAI dashboard to reply and manage this lead.`}
+                className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none transition-colors"
+                style={{
+                  background: 'var(--input)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--foreground)',
+                  fontFamily: 'inherit',
+                  lineHeight: '1.6',
+                }}
+              />
+            </Field>
+            {/* Variable chips */}
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {[
+                { tag: '{{lead_name}}',    label: 'Lead name / phone' },
+                { tag: '{{business_name}}', label: 'Business name' },
+                { tag: '{{source}}',        label: 'Traffic source' },
+              ].map(({ tag, label }) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => update('lead_assigned_email_template', (settings.lead_assigned_email_template || '') + tag)}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono transition-colors cursor-pointer"
                   style={{
-                    background: 'var(--input)',
-                    border: '1px solid var(--border)',
+                    background: 'rgba(6,182,212,0.08)',
+                    border: '1px solid rgba(6,182,212,0.25)',
                     color: 'var(--foreground)',
                   }}
+                  title={`Insert ${label}`}
                 >
-                  <option value="">Round-Robin (Assign to all sales agents / team members)</option>
-                  {users.map(u => (
-                    <option key={u.id} value={u.id}>
-                      {u.full_name || u.email} ({u.role})
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <div className="mt-3">
-                <Field label="Lead Assigned Email Template">
-                  <textarea
-                    rows={6}
-                    value={settings.lead_assigned_email_template || ''}
-                    onChange={e => update('lead_assigned_email_template', e.target.value)}
-                    placeholder={`A new lead (<strong>{{lead_name}}</strong>) from <strong>{{source}}</strong> has just been assigned to you at <strong>{{business_name}}</strong>.\n\nOpen your AriesAI dashboard to reply and manage this lead.`}
-                    className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none transition-colors"
-                    style={{
-                      background: 'var(--input)',
-                      border: '1px solid var(--border)',
-                      color: 'var(--foreground)',
-                      fontFamily: 'inherit',
-                      lineHeight: '1.6',
-                    }}
-                  />
-                </Field>
-                {/* Variable chips */}
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {[
-                    { tag: '{{lead_name}}',     label: 'Lead Identifier' },
-                    { tag: '{{business_name}}',  label: 'Business Name' },
-                    { tag: '{{source}}',         label: 'Traffic Source' },
-                  ].map(({ tag, label }) => (
-                    <button
-                      key={tag}
-                      type="button"
-                      onClick={() => update('lead_assigned_email_template', (settings.lead_assigned_email_template || '') + tag)}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono transition-colors cursor-pointer"
-                      style={{
-                        background: 'rgba(6,182,212,0.08)',
-                        border: '1px solid rgba(6,182,212,0.25)',
-                        color: 'var(--foreground)',
-                      }}
-                      title={`Insert ${label}`}
-                    >
-                      <span style={{ color: 'rgb(6,182,212)' }}>+</span> {tag}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
-                  Click a variable to insert it. Supports HTML tags. Leave blank to use the platform default template.
-                </p>
-              </div>
+                  <span style={{ color: 'rgb(6,182,212)' }}>+</span> {tag}
+                </button>
+              ))}
             </div>
+            <p className="text-xs mt-1.5" style={{ color: 'var(--muted-foreground)' }}>
+              Supports HTML. Sent from <span className="font-mono">notifications@ariesai.in</span> via Resend.
+            </p>
+
+            {/* Preview of default */}
+            {!settings.lead_assigned_email_template && (
+              <div
+                className="mt-4 p-4 rounded-xl text-xs space-y-1.5"
+                style={{ background: 'var(--secondary)', border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}
+              >
+                <div className="font-semibold text-xs uppercase tracking-widest mb-2" style={{ color: 'var(--muted-foreground)' }}>Platform default (what gets sent now)</div>
+                <p style={{ color: 'var(--foreground)' }}>Subject: <strong>New lead assigned — [Lead Name]</strong></p>
+                <p>A new lead from <em>Meta Ad</em> has been assigned to you at <em>[Business Name]</em>. Open your AriesAI dashboard to reply.</p>
+              </div>
+            )}
           </SectionCard>
 
         </motion.div>
