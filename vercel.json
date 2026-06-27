@@ -43,6 +43,10 @@
     {
       "path": "/api/cron/automations",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/lead-decay",
+      "schedule": "0 1 * * *"
     }
   ]
 }

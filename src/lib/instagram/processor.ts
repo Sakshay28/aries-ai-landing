@@ -8,6 +8,8 @@ import { checkRedisRateLimit, getRedisClient } from '@/lib/redis/client';
 import { v4 as uuidv4 } from 'uuid';
 import { randomUUID } from 'crypto';
 import { scheduleFollowUp } from '@/lib/followup/engine';
+import { calculateLeadScore } from '@/lib/scoring/lead-scoring-engine';
+import { logScoringEvents, logStatusChange } from '@/lib/scoring/event-logger';
 import type { Tenant, ConversationContext } from '@/lib/types';
 import * as Sentry from '@/lib/sentry-stub';
 
@@ -105,6 +107,13 @@ export async function processIncomingIGMessage(igPageId: string, senderId: strin
     await handleEscalation(tenant, conversation.id, senderId, aiResponse);
   }
 
+  // Score lead on every message (cumulative, non-blocking)
+  if (conversation.lead_id) {
+    scoreInstagramLead(conversation, messageText, aiResponse).catch(err =>
+      console.error('IG lead scoring error (non-fatal):', err)
+    );
+  }
+
   if (aiResponse.nextStep === 'confirmation' || aiResponse.nextStep === 'completed') {
     try {
       await saveLead(tenant, conversation, updatedContext, senderId);
@@ -200,14 +209,69 @@ async function handleEscalation(
 }
 
 async function saveLead(tenant: Tenant, conversation: Record<string, unknown>, context: ConversationContext, senderId: string) {
-  void tenant; // used for future analytics enrichment
+  void tenant;
   void senderId;
+  // Save contact data only — status is managed by the scoring engine
   await supabaseAdmin.from('leads').update({
     name: context.name, phone: context.phone, email: context.email,
     enquiry_type: context.enquiry_type, guest_count: context.guest_count,
     date_requested: context.date_requested, occasion: context.occasion,
-    lead_status: 'warm', last_message_at: new Date().toISOString(),
+    last_message_at: new Date().toISOString(),
   }).eq('id', conversation.lead_id);
+}
+
+async function scoreInstagramLead(
+  conversation: Record<string, unknown>,
+  messageText: string,
+  aiResponse: Awaited<ReturnType<typeof processMessageWithAI>>,
+) {
+  const tenantId = conversation.tenant_id as string;
+  const leadId   = conversation.lead_id   as string;
+
+  const { data: lead } = await supabaseAdmin
+    .from('leads')
+    .select('lead_score, lead_status, auto_status, manual_status, buying_signals, negative_signals')
+    .eq('id', leadId)
+    .single();
+  if (!lead) return;
+
+  const result = calculateLeadScore({
+    userMessage: messageText,
+    aiResponse,
+    conversation: {
+      message_count: (conversation.message_count as number) ?? 0,
+      created_at:    conversation.created_at as string,
+    },
+    lead: {
+      lead_score:       lead.lead_score ?? 0,
+      lead_status:      lead.lead_status,
+      manual_status:    (lead as any).manual_status ?? null,
+      buying_signals:   (lead as any).buying_signals  ?? [],
+      negative_signals: (lead as any).negative_signals ?? [],
+    },
+  });
+
+  if (result.score_delta !== 0 || result.status_changed) {
+    await supabaseAdmin.from('leads').update({
+      lead_score:        result.lead_score,
+      lead_status:       result.lead_status,
+      auto_status:       result.auto_status,
+      buying_signals:    result.all_buying_signals,
+      negative_signals:  result.all_negative_signals,
+      score_breakdown:   result.score_breakdown,
+      scoring_reasoning: result.scoring_reasoning,
+      last_activity_at:  new Date().toISOString(),
+    }).eq('id', leadId);
+
+    if (result.new_signals.length > 0) {
+      logScoringEvents(tenantId, leadId, result, 'instagram', conversation.id as string)
+        .catch(() => {});
+    }
+    if (result.status_changed) {
+      logStatusChange({ tenantId, leadId, fromStatus: result.prev_status, toStatus: result.lead_status, trigger: 'scoring' })
+        .catch(() => {});
+    }
+  }
 }
 
 async function scheduleFollowUps(tenant: Tenant, conversation: Record<string, unknown>, context: ConversationContext) {

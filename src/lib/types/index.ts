@@ -154,8 +154,16 @@ export interface Lead {
   guest_count: string | null;
   date_requested: string | null;
   occasion: string | null;
-  lead_status: LeadStatus;
+  lead_status: LeadStatus;   // effective status (manual_status wins if set)
+  auto_status: LeadStatus | null;    // engine's recommendation
+  manual_status: LeadStatus | null;  // sales team override
+  manual_status_at: string | null;
   lead_score: number;
+  buying_signals: string[];
+  negative_signals: string[];
+  score_breakdown: Record<string, { label: string; points: number; category: string }>;
+  scoring_reasoning: string | null;
+  last_activity_at: string | null;
   staff_assigned: string | null;
   notes: string | null;
   shopify_customer_id: string | null;
@@ -168,7 +176,7 @@ export interface Lead {
 }
 
 export type Channel = 'whatsapp' | 'instagram_dm' | 'instagram_comment' | 'shopify' | 'website' | 'manual';
-export type LeadStatus = 'new' | 'hot' | 'warm' | 'cold' | 'converted' | 'lost';
+export type LeadStatus = 'new' | 'hot' | 'warm' | 'cold' | 'qualified' | 'converted' | 'lost';
 
 // ── Conversation ──
 export interface Conversation {

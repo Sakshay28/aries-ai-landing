@@ -35,6 +35,9 @@ import { triggerAutomations, cancelLeadAutomations } from '@/lib/automations/eng
 import { resolveBookingVariables } from '@/lib/automations/variables';
 import { zonedDateTimeToUtc } from '@/lib/utils/datetime';
 import * as Sentry from '@/lib/sentry-stub';
+import { calculateLeadScore } from '@/lib/scoring/lead-scoring-engine';
+import { logScoringEvents, logStatusChange } from '@/lib/scoring/event-logger';
+import { normalizeIndustry } from '@/lib/scoring/industry-profiles';
 
 // Infer WhatsApp media type from a stored URL's file extension.
 // Used so scripted replies and the welcome media can carry videos/docs
@@ -509,7 +512,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           phone: leadPhone, // always store with + prefix for consistency
           channel: 'whatsapp',
           lead_status: 'new',
-          lead_score: isFromAd ? 30 : 10,
+          lead_score: 0,
           source_detail: leadSource,
           first_message_at: new Date().toISOString(),
           last_message_at: new Date().toISOString(),
@@ -570,7 +573,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         lead_status: 'new',
         source: leadSource,
         campaign: campaignName,
-        lead_score: isFromAd ? 30 : 10,
+        lead_score: 0,
         created_at: new Date().toISOString(),
       }).catch(e => console.error('⚠️ Sheets append failed (non-fatal):', (e as Error).message));
 
@@ -1794,7 +1797,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       `Phone: +{{customer_phone}}\n` +
       `Reason: {{reason}}\n` +
       `Message: {{message}}\n\n` +
-      `👉 Reply via Live Chat: https://ariesai.in/dashboard/live-chat\n` +
+      `👉 Reply via Live Chat: https://ariesai.in/dashboard/chat\n` +
       `(Bot is now paused for this customer — resume it from Live Chat when done)`;
 
     const templateVars: Record<string, string> = {
@@ -1888,21 +1891,85 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     }
   }
 
-  // 18b. Update Lead Score (non-blocking — doesn't affect reply latency)
-  if (lead?.id && aiResponse.intent) {
-    const scoreMap: Record<string, number> = {
-      human_request: 60, complaint: 30, reserve_table: 80, private_event: 85,
-      corporate_booking: 90, confirm: 95, cancel: 20, pricing: 65,
-      general_enquiry: 40, greeting: 20, unknown: 10,
-    };
-    const newScore = scoreMap[aiResponse.intent] ?? (lead.lead_score as number);
-    const newStatus = newScore >= 80 ? 'hot' : newScore >= 50 ? 'warm' : 'cold';
+  // 18b. Update Lead Score — cumulative, deterministic, explainable, industry-aware
+  if (lead?.id) {
+    try {
+      // Resolve industry profile from business_profiles (non-blocking parallel fetch)
+      const { data: bizProfile } = await supabaseAdmin
+        .from('business_profiles')
+        .select('industry')
+        .eq('tenant_id', tenant.id)
+        .maybeSingle();
 
-    // Awaited: if this dies, lead temperature (hot/warm/cold) silently never updates
-    await supabaseAdmin
-      .from('leads')
-      .update({ lead_score: newScore, lead_status: newStatus })
-      .eq('id', lead.id);
+      const industryProfile = normalizeIndustry(bizProfile?.industry);
+
+      const scoringResult = calculateLeadScore({
+        userMessage: msg.text,
+        aiResponse,
+        conversation: {
+          message_count: conversation.message_count ?? 0,
+          created_at:    conversation.created_at,
+        },
+        lead: {
+          lead_score:       (lead.lead_score as number) ?? 0,
+          lead_status:      lead.lead_status as string,
+          manual_status:    (lead as any).manual_status ?? null,
+          buying_signals:   (lead as any).buying_signals  ?? [],
+          negative_signals: (lead as any).negative_signals ?? [],
+        },
+        industryProfile,
+      });
+
+      const hasScoreChange = scoringResult.score_delta !== 0;
+      const hasStatusChange = scoringResult.status_changed;
+
+      if (hasScoreChange || hasStatusChange) {
+        await supabaseAdmin
+          .from('leads')
+          .update({
+            lead_score:        scoringResult.lead_score,
+            lead_status:       scoringResult.lead_status,
+            auto_status:       scoringResult.auto_status,
+            buying_signals:    scoringResult.all_buying_signals,
+            negative_signals:  scoringResult.all_negative_signals,
+            score_breakdown:   scoringResult.score_breakdown,
+            scoring_reasoning: scoringResult.scoring_reasoning,
+            last_activity_at:  new Date().toISOString(),
+          })
+          .eq('id', lead.id);
+
+        console.log(`🎯 Lead ${lead.id} score: ${lead.lead_score}→${scoringResult.lead_score} (${scoringResult.lead_status}) delta=${scoringResult.score_delta} rule=${scoringResult.rule_score_delta} ai=${scoringResult.ai_score_delta} aiIgnored=${scoringResult.ai_ignored}`);
+
+        // Log signal events (async, non-blocking)
+        if (scoringResult.new_signals.length > 0) {
+          logScoringEvents(
+            tenant.id, lead.id, scoringResult, 'whatsapp',
+            conversation.id, msg.messageId,
+          ).catch(() => {});
+        }
+
+        // Log status transition
+        if (hasStatusChange) {
+          logStatusChange({
+            tenantId:   tenant.id,
+            leadId:     lead.id,
+            fromStatus: scoringResult.prev_status,
+            toStatus:   scoringResult.lead_status,
+            trigger:    'scoring',
+            reason:     scoringResult.scoring_reasoning.slice(0, 500),
+          }).catch(() => {});
+        }
+      } else {
+        // Always update last_activity_at even when score doesn't change
+        supabaseAdmin
+          .from('leads')
+          .update({ last_activity_at: new Date().toISOString() })
+          .eq('id', lead.id)
+          .then(() => {}, () => {});
+      }
+    } catch (err) {
+      console.error('Lead scoring error (non-fatal):', err);
+    }
   }
 
   // 19. Auto-Save AI Booking to Database & Google Sheets
