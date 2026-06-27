@@ -9,3 +9,7 @@ ALTER TABLE users
 -- Business type on tenants (used for sidebar restaurant section gating)
 ALTER TABLE tenants
   ADD COLUMN IF NOT EXISTS business_type TEXT DEFAULT '';
+
+-- Custom monthly price per tenant (overrides plan-based pricing in admin dashboard)
+ALTER TABLE tenants
+  ADD COLUMN IF NOT EXISTS monthly_price INTEGER DEFAULT NULL;
