@@ -176,6 +176,7 @@ function SidebarBody({
   hasRestaurant: boolean;
   isPlatformAdmin: boolean;
 }) {
+  const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -307,6 +308,18 @@ function SidebarBody({
       <div className="space-y-1 border-t border-sidebar-border p-3">
         {isPlatformAdmin && (
           <>
+            {isOpen && (
+              <p className="mb-1 px-3 text-[10px] font-bold tracking-widest text-muted-foreground/60 uppercase select-none">
+                Admin
+              </p>
+            )}
+            {!isOpen && <div className="mb-1 border-t border-sidebar-border/40" />}
+            <NavButton
+              item={{ label: "Admin Dashboard", icon: ShieldCheck, href: "/dashboard/admin" }}
+              isOpen={isOpen}
+              isActive={pathname === "/dashboard/admin"}
+              userPlan={plan}
+            />
             <NavButton
               item={{ label: "Approvals", icon: ShieldCheck, href: "/dashboard/admin/approvals" }}
               isOpen={isOpen}
