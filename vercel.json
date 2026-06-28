@@ -52,9 +52,5 @@
       "path": "/api/cron/ai-scoring",
       "schedule": "0 7 * * *"
     },
-    {
-      "path": "/api/cron/session-keepalive",
-      "schedule": "*/30 * * * *"
-    }
   ]
 }
