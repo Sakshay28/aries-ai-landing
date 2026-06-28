@@ -18,6 +18,27 @@
 
 
 -- ═══════════════════════════════════════════════════════════════════════════
+-- Safety: drop all new tables so partial prior runs don't leave stale schemas.
+-- All tables below are new (Phase B/C); no existing data is lost.
+-- CASCADE handles inter-dependencies automatically.
+-- ═══════════════════════════════════════════════════════════════════════════
+DROP TABLE IF EXISTS ai_analysis_replays       CASCADE;
+DROP TABLE IF EXISTS lead_feedback             CASCADE;
+DROP TABLE IF EXISTS conversation_events       CASCADE;
+DROP TABLE IF EXISTS recommendation_history    CASCADE;
+DROP TABLE IF EXISTS lead_ai_analysis          CASCADE;
+DROP TABLE IF EXISTS conversation_state        CASCADE;
+DROP TABLE IF EXISTS conversation_memory       CASCADE;
+DROP TABLE IF EXISTS lead_profiles             CASCADE;
+DROP TABLE IF EXISTS ai_jobs                   CASCADE;
+DROP TABLE IF EXISTS tenant_signal_weights     CASCADE;
+DROP TABLE IF EXISTS tenant_ai_costs           CASCADE;
+DROP TABLE IF EXISTS scoring_versions          CASCADE;
+DROP TABLE IF EXISTS prompt_registry           CASCADE;
+DROP TABLE IF EXISTS schema_registry           CASCADE;
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- REQ 1A: conversation_state — ephemeral (changes every AI analysis)
 -- Never mix with memory. State describes where we are RIGHT NOW.
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -530,20 +551,23 @@ CREATE TABLE IF NOT EXISTS ai_jobs (
   message_id  TEXT,
   idempotency_key TEXT UNIQUE,
   status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'processing', 'done', 'failed', 'dead', 'skipped')),
+    CHECK (status IN ('pending', 'processing', 'done', 'failed', 'dead', 'skipped', 'retry')),
   skip_reason TEXT CHECK (skip_reason IN ('trivial_message', 'cache_hit', 'no_meaningful_change', 'flags_disabled', 'rate_limited')),
   retry_count    SMALLINT NOT NULL DEFAULT 0,
   max_retries    SMALLINT NOT NULL DEFAULT 3,
+  next_retry_at  TIMESTAMPTZ,
   last_error     TEXT,
   fallback_level SMALLINT NOT NULL DEFAULT 0 CHECK (fallback_level BETWEEN 0 AND 5),
   enqueued_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   started_at   TIMESTAMPTZ,
   completed_at TIMESTAMPTZ,
+  processing_ms INT,
   message_count     INT,
   conversation_hash TEXT,
   trigger_type TEXT NOT NULL DEFAULT 'message'
     CHECK (trigger_type IN ('message', 'manual', 'cron', 'backfill', 'status_change', 'replay')),
-  priority SMALLINT NOT NULL DEFAULT 5 CHECK (priority BETWEEN 1 AND 10)
+  priority SMALLINT NOT NULL DEFAULT 5 CHECK (priority BETWEEN 1 AND 10),
+  payload  JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_ai_jobs_pending ON ai_jobs(priority, enqueued_at)
   WHERE status IN ('pending', 'failed');
