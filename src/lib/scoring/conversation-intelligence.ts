@@ -102,7 +102,7 @@ interface MessageRow {
   id: string;
   content: string | null;
   direction: 'inbound' | 'outbound';
-  sender_name: string | null;
+  sender_id: string | null;
   created_at: string;
 }
 
@@ -154,7 +154,7 @@ export async function runConversationIntelligence(
   // ── STEP 1: Load conversation messages ──────────────────────────────────
   const { data: messages, error: msgErr } = await db
     .from('messages')
-    .select('id, content, direction, sender_name, created_at')
+    .select('id, content, direction, sender_id, created_at')
     .eq('conversation_id', input.conversationId)
     .order('created_at', { ascending: true });
 
@@ -235,7 +235,7 @@ export async function runConversationIntelligence(
 
   const forceRebuild = shouldForceFullRebuild(lastCtx, promptVersion, schemaVersion, currentHash);
   const snapshot = buildConversationSnapshot(
-    messages.map((m: MessageRow) => ({ id: m.id, content: m.content, direction: m.direction, senderName: m.sender_name, createdAt: m.created_at })),
+    messages.map((m: MessageRow) => ({ id: m.id, content: m.content, direction: m.direction, senderName: m.sender_id, createdAt: m.created_at })),
     lastCtx,
     promptVersion,
     schemaVersion,
