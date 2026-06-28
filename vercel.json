@@ -51,6 +51,6 @@
     {
       "path": "/api/cron/ai-scoring",
       "schedule": "0 7 * * *"
-    }
+    },
   ]
 }
