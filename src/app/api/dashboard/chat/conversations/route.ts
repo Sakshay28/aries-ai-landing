@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
       .select('id, last_message_at, is_active, bot_paused, sender_id, lead_id, escalated')
       .eq('tenant_id', tenantId)
       .order('last_message_at', { ascending: false, nullsFirst: false })
-      .limit(300);  // fetch wide; collapsed to one thread per contact (≤100) below
+      .limit(2000); // fetch wide; collapsed to one thread per contact below
 
     if (convErr) {
       console.error('Conversations fetch error:', convErr);
@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
       .in('conversation_id', rawConvIds)
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
-      .limit(2000);
+      .limit(5000);
 
     const MEDIA_LABELS: Record<string, string> = {
       image: '📷 Photo', video: '🎥 Video', audio: '🎵 Audio',
@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
       const cWins = (cHasMsgs !== iHasMsgs) ? cHasMsgs : cRank > iRank;
       if (cWins) bestByContact.set(key, c);
     }
-    const convos = Array.from(bestByContact.values()).slice(0, 100);
+    const convos = Array.from(bestByContact.values());
 
     // ── Batch-fetch leads (single query) ────────────────────────────────────
     const leadIds = convos.map((c: any) => c.lead_id).filter(Boolean);
