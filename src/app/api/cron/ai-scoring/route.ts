@@ -18,7 +18,7 @@ import { shouldEscalateToManualReview } from '@/lib/scoring/failure-strategy';
 import { normalizeIndustry }           from '@/lib/scoring/industry-profiles';
 import { randomUUID }                  from 'crypto';
 
-export const maxDuration = 60;
+export const maxDuration = 10; // Vercel Hobby hard cap
 
 // ── Auth ─────────────────────────────────────────────────────────────────
 
@@ -31,7 +31,7 @@ function isAuthorized(req: NextRequest): boolean {
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
-const BATCH_SIZE      = 150; // jobs per cron tick (handles full backfill in one daily run)
+const BATCH_SIZE      = 3;   // Hobby plan: 10s function limit, ~2-3s per Gemini call
 const MAX_RETRIES     = 3;
 const RETRY_DELAYS_MS = [30_000, 120_000, 300_000] as const;
 
