@@ -31,7 +31,7 @@ function isAuthorized(req: NextRequest): boolean {
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
-const BATCH_SIZE      = 10;  // jobs per cron tick
+const BATCH_SIZE      = 150; // jobs per cron tick (handles full backfill in one daily run)
 const MAX_RETRIES     = 3;
 const RETRY_DELAYS_MS = [30_000, 120_000, 300_000] as const;
 

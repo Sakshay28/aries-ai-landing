@@ -50,7 +50,7 @@
     },
     {
       "path": "/api/cron/ai-scoring",
-      "schedule": "*/2 * * * *"
+      "schedule": "0 7 * * *"
     }
   ]
 }
