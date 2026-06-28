@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Clock, ShieldCheck, Flame, ThermometerSun, Snowflake, Megaphone, Phone, UserCircle2 } from 'lucide-react';
+import { Search, Clock, ShieldCheck, Flame, ThermometerSun, Snowflake, Megaphone, Phone, UserCircle2, Star, UserX } from 'lucide-react';
 import type { Lead } from '@/lib/types';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
@@ -10,11 +10,13 @@ import { useRouter } from 'next/navigation';
 import { MessageCircle, MessageSquare } from 'lucide-react';
 
 const STATUS_COLUMNS = [
-  { id: 'new', label: 'New', color: 'bg-blue-500', icon: Clock },
-  { id: 'hot', label: 'Hot', color: 'bg-red-500', icon: Flame },
-  { id: 'warm', label: 'Warm', color: 'bg-amber-500', icon: ThermometerSun },
-  { id: 'cold', label: 'Cold', color: 'bg-slate-500', icon: Snowflake },
+  { id: 'new',       label: 'New',       color: 'bg-blue-500',    icon: Clock },
+  { id: 'hot',       label: 'Hot',       color: 'bg-red-500',     icon: Flame },
+  { id: 'warm',      label: 'Warm',      color: 'bg-amber-500',   icon: ThermometerSun },
+  { id: 'cold',      label: 'Cold',      color: 'bg-slate-500',   icon: Snowflake },
+  { id: 'qualified', label: 'Qualified', color: 'bg-violet-500',  icon: Star },
   { id: 'converted', label: 'Converted', color: 'bg-emerald-500', icon: ShieldCheck },
+  { id: 'lost',      label: 'Lost',      color: 'bg-rose-400',    icon: UserX },
 ];
 
 type Member = { id: string; full_name: string | null; email: string };
