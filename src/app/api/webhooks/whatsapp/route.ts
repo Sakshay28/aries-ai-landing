@@ -38,6 +38,7 @@ import * as Sentry from '@/lib/sentry-stub';
 import { calculateLeadScore } from '@/lib/scoring/lead-scoring-engine';
 import { logScoringEvents, logStatusChange } from '@/lib/scoring/event-logger';
 import { normalizeIndustry } from '@/lib/scoring/industry-profiles';
+import { shouldRunAIAnalysis } from '@/lib/scoring/cost-optimizer';
 
 // Infer WhatsApp media type from a stored URL's file extension.
 // Used so scripted replies and the welcome media can carry videos/docs
@@ -1969,6 +1970,31 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       }
     } catch (err) {
       console.error('Lead scoring error (non-fatal):', err);
+    }
+  }
+
+  // 18c. Enqueue AI analysis job — non-blocking, returns 200 immediately.
+  // The Vercel Cron at /api/cron/ai-scoring picks this up within ~2 minutes.
+  if (lead?.id && conversation?.id) {
+    try {
+      const costDecision = shouldRunAIAnalysis(msg.text ?? '', {
+        conversationHashChanged: true, // new message always invalidates prior hash
+        messageCount:  conversation.message_count ?? 0,
+        aiEnabled:     true,
+      });
+      if (costDecision.shouldRunAI) {
+        supabaseAdmin.from('ai_jobs').upsert({
+          tenant_id:        tenant.id,
+          lead_id:          lead.id,
+          conversation_id:  conversation.id,
+          status:           'pending',
+          priority:         costDecision.priority ?? 5,
+          enqueued_at:      new Date().toISOString(),
+          idempotency_key:  msg.messageId,
+        }, { onConflict: 'idempotency_key', ignoreDuplicates: true }).then(() => {}, () => {});
+      }
+    } catch {
+      // non-fatal — AI queue failure never blocks the webhook
     }
   }
 

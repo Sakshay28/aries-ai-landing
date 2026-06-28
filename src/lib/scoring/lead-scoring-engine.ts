@@ -16,7 +16,7 @@
 
 import type { AIResponse } from '@/lib/ai/engine';
 import type { LeadStatus } from '@/lib/types';
-import { INDUSTRY_PATTERNS, type IndustryProfile, type IndustryPattern } from './industry-profiles';
+import { INDUSTRY_PATTERNS, INDUSTRY_MODULES, type IndustryProfile, type IndustryPattern } from './industry-profiles';
 
 // ── Score Thresholds ──────────────────────────────────────────────────────────
 export const SCORE_THRESHOLDS = {
@@ -31,21 +31,31 @@ export const SCORE_THRESHOLDS = {
 export const AI_CONFIDENCE_THRESHOLD = 0.55;
 
 // ── Qualification Gate ────────────────────────────────────────────────────────
-// QUALIFIED status requires one of these explicit closing signals.
+// QUALIFIED status requires one of these universal closing signals PLUS any
+// industry-specific gates defined in INDUSTRY_MODULES[industry].qualificationGates.
 // A high score alone (e.g., score=92 from negotiation) is NOT enough.
 // This prevents negotiation-stage leads from being incorrectly marked Qualified.
-export const QUALIFICATION_GATE_SIGNALS = new Set<string>([
+export const UNIVERSAL_QUALIFICATION_GATES = new Set<string>([
   'intent_payment_link',      // customer asked for payment link
   'intent_confirm_booking',   // customer asked if booking is confirmed
   'invoice_request',          // customer asked for invoice/formal quote
   'intent_reserve',           // customer asked to reserve a specific seat/spot
   'ready_to_pay',             // AI extracted requestPayment = true from customer
-  // Industry-specific gates (added by industry module qualification gates)
-  'ind_appointment',          // clinic: appointment booked
-  'ind_site_visit',           // real estate: site visit requested
-  'ind_demo_request',         // saas: demo requested
-  'ind_enroll_intent',        // education: enrollment expressed
 ]);
+
+// Backward-compat alias — tests and external code may reference this
+export const QUALIFICATION_GATE_SIGNALS = UNIVERSAL_QUALIFICATION_GATES;
+
+// Merge universal gates + industry-specific gates at runtime. (Point 14)
+// Industry modules own their own qualification logic — no hardcoding here.
+export function resolveQualificationGates(industry: IndustryProfile): Set<string> {
+  const gates = new Set(UNIVERSAL_QUALIFICATION_GATES);
+  const module = INDUSTRY_MODULES[industry];
+  if (module) {
+    for (const g of module.qualificationGates) gates.add(g);
+  }
+  return gates;
+}
 
 // Sales stage ordering — forward-only progression (Point 9).
 // Gemini returns a salesStage string; the Decision Engine ensures it never regresses.
@@ -553,7 +563,7 @@ export function calculateLeadScore(input: ScoringInput): ScoringResult {
 
   // ── Auto status from score (qualification gate enforced) ──────────────────
   const allAccumulatedSignals = [...existingBuying, ...newSignals];
-  const autoStatus = deriveAutoStatus(newScore, existingStatus, newNegativeSignals, allAccumulatedSignals);
+  const autoStatus = deriveAutoStatus(newScore, existingStatus, newNegativeSignals, allAccumulatedSignals, industryProfile);
 
   // ── Validated transition for auto_status ─────────────────────────────────
   const validatedAutoStatus = isTransitionAllowed(existingStatus, autoStatus)
@@ -602,7 +612,8 @@ function deriveAutoStatus(
   score: number,
   currentStatus: string,
   newNegativeSignals: string[],
-  allSignals: string[],   // all accumulated buying_signals for this lead
+  allSignals: string[],        // all accumulated buying_signals for this lead
+  industry: IndustryProfile = 'general',
 ): LeadStatus {
   // Converted is terminal — never auto-overridden
   if (currentStatus === 'converted') return 'converted';
@@ -611,9 +622,11 @@ function deriveAutoStatus(
   if (newNegativeSignals.includes('not_interested') || newNegativeSignals.includes('wrong_number')) return 'lost';
 
   // QUALIFIED requires both score threshold AND an explicit closing signal.
-  // A negotiation lead with score=92 stays HOT until they ask for payment/invoice.
+  // Gates are resolved dynamically: universal gates ∪ industry-specific gates.
+  // A negotiation lead with score=92 stays HOT until they trigger a closing signal.
   if (score >= SCORE_THRESHOLDS.QUALIFIED) {
-    const hasQualifyingSignal = allSignals.some(s => QUALIFICATION_GATE_SIGNALS.has(s));
+    const gates = resolveQualificationGates(industry);
+    const hasQualifyingSignal = allSignals.some(s => gates.has(s));
     if (hasQualifyingSignal) return 'qualified';
     return 'hot'; // high score but no closing signal → Hot, not Qualified
   }

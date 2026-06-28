@@ -49,7 +49,7 @@ const TRAVEL: IndustryModule = {
   id: 'travel',
   displayName: 'Travel, Trekking & Adventure',
   keywords: ['travel', 'trek', 'tour', 'expedition', 'adventure', 'tourism', 'hiking', 'safari'],
-  qualificationGates: ['ind_expedition_named', 'asked_payment_method', 'intent_payment_link'],
+  qualificationGates: ['asked_payment_method', 'intent_payment_link', 'invoice_request', 'intent_confirm_booking'],
   aiPromptContext: `This is a travel/trekking company. High-value signals include:
 - Asking about a specific expedition name (Zanskar, Ladakh, Kedarkantha, etc.)
 - Asking about permits, altitude training, fitness requirements
