@@ -1,16 +1,18 @@
-// ═══════════════════════════════════════════════════════════
-// 🎯 Lead Scoring Engine v2 — Production Grade
+// ═══════════════════════════════════════════════════════════════════════════
+// Lead Intelligence Platform — Tier 1: Fast Signal Engine
 //
 // Architecture:
 //  - Deterministic rule-based scoring is PRIMARY signal source.
-//  - AI intent contributes supplemental points at lower weight.
-//  - Every signal counted ONCE per lead (deduplicated).
-//  - Industry-specific patterns overlay the universal base set.
-//  - Status transitions are validated to prevent impossible jumps.
-//  - Manual overrides are respected — engine never overwrites them.
+//  - Rule score establishes the FLOOR — AI can only add, never subtract.
+//  - AI intent contributes supplemental points when confidence is high enough.
+//  - Every signal counted ONCE per lead lifetime (deduplicated via buying_signals[]).
+//  - Industry-specific modules overlay the universal base set.
+//  - Status transitions are validated — impossible jumps are silently held.
+//  - Manual overrides are respected — engine never overwrites sales team decisions.
 //  - Multi-language: English + Hindi + Hinglish patterns throughout.
-//  - AI confidence threshold: low-confidence AI intent is ignored.
-// ═══════════════════════════════════════════════════════════
+//  - QUALIFIED requires explicit closing signal — high score alone is not enough.
+//  - Stage progression is forward-only (enforced in transition matrix).
+// ═══════════════════════════════════════════════════════════════════════════
 
 import type { AIResponse } from '@/lib/ai/engine';
 import type { LeadStatus } from '@/lib/types';
@@ -27,6 +29,35 @@ export const SCORE_THRESHOLDS = {
 // AI intent is ignored when confidence drops below this threshold.
 // Keeps rule-based scoring from being polluted by weak AI guesses.
 export const AI_CONFIDENCE_THRESHOLD = 0.55;
+
+// ── Qualification Gate ────────────────────────────────────────────────────────
+// QUALIFIED status requires one of these explicit closing signals.
+// A high score alone (e.g., score=92 from negotiation) is NOT enough.
+// This prevents negotiation-stage leads from being incorrectly marked Qualified.
+export const QUALIFICATION_GATE_SIGNALS = new Set<string>([
+  'intent_payment_link',      // customer asked for payment link
+  'intent_confirm_booking',   // customer asked if booking is confirmed
+  'invoice_request',          // customer asked for invoice/formal quote
+  'intent_reserve',           // customer asked to reserve a specific seat/spot
+  'ready_to_pay',             // AI extracted requestPayment = true from customer
+  // Industry-specific gates (added by industry module qualification gates)
+  'ind_appointment',          // clinic: appointment booked
+  'ind_site_visit',           // real estate: site visit requested
+  'ind_demo_request',         // saas: demo requested
+  'ind_enroll_intent',        // education: enrollment expressed
+]);
+
+// Sales stage ordering — forward-only progression (Point 9).
+// Gemini returns a salesStage string; the Decision Engine ensures it never regresses.
+export const STAGE_ORDER: readonly string[] = [
+  'Awareness', 'Interest', 'Consideration', 'Evaluation',
+  'Negotiation', 'Decision', 'Booked', 'Post-Purchase', 'Advocate',
+];
+
+export function stageIndex(stage: string | null | undefined): number {
+  const idx = STAGE_ORDER.indexOf(stage ?? '');
+  return idx === -1 ? 0 : idx;
+}
 
 // ── Pattern Signal Type ───────────────────────────────────────────────────────
 interface PatternSignal {
@@ -136,6 +167,71 @@ const INTEREST_PATTERNS: PatternSignal[] = [
       /\b(kitna mushkil|mushkil hai|kar sakta|beginner ke liye|experience chahiye)\b/i,
     ],
   },
+
+  // ── NEW: Negotiation signals (previously 100% invisible to the engine) ────
+  {
+    key: 'asked_discount',
+    label: 'Requested discount or negotiating price',
+    points: 25,
+    patterns: [
+      /\b(discount|negotiate|negotiation|deal|special (price|rate|offer))\b/i,
+      /\b(best (price|rate|deal)|can you do better|reduce (the )?(price|cost|rate))\b/i,
+      /\b(lower (the )?(price|cost|rate|fee)|less (price|rate|expensive)|any (offer|promo|rebate))\b/i,
+      /\b(discount milega|kuch kam ho sakta|kam nahi kar sakte|thoda kam karo|offer hai kya)\b/i,
+    ],
+  },
+
+  // ── NEW: Commitment / Readiness signals ───────────────────────────────────
+  {
+    key: 'commitment_signals',
+    label: 'Showing preparation and commitment',
+    points: 20,
+    patterns: [
+      /\b(prepare|preparation|(what|anything).*(bring|carry|pack|wear|need|require))\b/i,
+      /\b(things to (bring|pack|carry)|what should (i|we) (bring|wear|carry|pack))\b/i,
+      /\b(before (the )?(trip|trek|tour|travel|journey|visit))\b/i,
+      /\b(requirements? from (my|our) (side|end)|from (my|our) (side|end))\b/i,
+      /\b(tayyari|kya lana|kya leke jana|kaise tayyar|kya karna hoga pehle)\b/i,
+    ],
+  },
+
+  // ── NEW: Logistics / Meeting-point confirmation (near-decision signal) ─────
+  {
+    key: 'logistics_planning',
+    label: 'Confirmed logistics or meeting details',
+    points: 18,
+    patterns: [
+      /\b(meeting (point|place|spot)|pick.?up (point|location|spot|place))\b/i,
+      /\b(where (do we|should we|will we) (meet|gather|assemble|start))\b/i,
+      /\b(airport (transfer|pickup|meet)|how (do i|do we|to) get (there|to))\b/i,
+      /\b(pickup kahan|meeting point kahan|kahan se chalenge|kahan milna hai)\b/i,
+    ],
+  },
+
+  // ── NEW: Comparison / Competitive evaluation ───────────────────────────────
+  {
+    key: 'comparison_shopping',
+    label: 'Comparing options or competitors',
+    points: 15,
+    patterns: [
+      // "compar\w*" covers: comparing, comparison, compare, compared, comparative
+      /\b(compar\w*|vs\.?|versus|alternative|other (option|package|company|operator|provider|tour|agency))\b/i,
+      /\b(which (is )?(better|best)|any other|someone else|another (company|option|package|provider))\b/i,
+      /\b(doosri company|koi aur|dusra option|compare kar|baaki options?|aur koi hai)\b/i,
+    ],
+  },
+
+  // ── NEW: Urgency / Time pressure ──────────────────────────────────────────
+  {
+    key: 'urgency_signal',
+    label: 'Expressed urgency or time pressure',
+    points: 12,
+    patterns: [
+      /\b(urgent|urgently|asap|as soon as possible|immediately|right (now|away)|today|tomorrow)\b/i,
+      /\b(this week|very soon|quickly|fast|hurry|limited (time|offer|seats?|slots?))\b/i,
+      /\b(jaldi|abhi chahiye|turant|aaj (hi|chahiye)|kal tak|is hafte|jald se jald)\b/i,
+    ],
+  },
 ];
 
 // ── Buying Intent Signals ─────────────────────────────────────────────────────
@@ -188,6 +284,17 @@ const BUYING_INTENT_PATTERNS: PatternSignal[] = [
       /\b(ab book karu|abhi book|turant book|kab book kar sakta)\b/i,
     ],
   },
+  // ── NEW: Invoice / Formal quote request (high-value closing signal) ────────
+  {
+    key: 'invoice_request',
+    label: 'Requested invoice or formal quote',
+    points: 35,
+    patterns: [
+      /\b(invoice|quotation|quote|pro.?forma|formal (offer|document|bill|proposal))\b/i,
+      /\b(send (me )?(an? )?(invoice|quote|bill|proposal)|please (send|share) (quote|invoice))\b/i,
+      /\b(bill bhejo|invoice chahiye|quote bhejo|formal quote|official quote)\b/i,
+    ],
+  },
 ];
 
 // ── Data-Sharing Signals ──────────────────────────────────────────────────────
@@ -205,6 +312,8 @@ const ENGAGEMENT_MILESTONES: Record<string, { label: string; points: number; thr
   messages_5:  { label: 'Conversation >5 messages',  points: 10, threshold: 5  },
   messages_10: { label: 'Conversation >10 messages', points: 15, threshold: 10 },
   messages_15: { label: 'Conversation >15 messages', points: 10, threshold: 15 },
+  messages_20: { label: 'Conversation >20 messages', points: 8,  threshold: 20 },
+  messages_30: { label: 'Conversation >30 messages', points: 5,  threshold: 30 },
 };
 
 // ── AI Intent Contributions ───────────────────────────────────────────────────
@@ -296,6 +405,13 @@ export interface ScoringInput {
     negative_signals?: string[] | null;
   };
   industryProfile?: IndustryProfile; // from business_profiles.industry
+  // Feature flags — per-tenant; falls back to DEFAULT_FLAGS if not provided
+  flags?: {
+    enable_negotiation_detection?: boolean;
+    enable_commitment_detection?: boolean;
+    enable_urgency_detection?: boolean;
+    enable_comparison_detection?: boolean;
+  };
 }
 
 export interface ScoreBreakdownEntry {
@@ -427,13 +543,17 @@ export function calculateLeadScore(input: ScoringInput): ScoringResult {
     }
   }
 
-  // ── Compute scores ────────────────────────────────────────────────────────
-  const totalDelta = ruleDelta + aiDelta;
-  const rawScore   = existingScore + totalDelta;
-  const newScore   = Math.min(100, Math.max(0, rawScore));
+  // ── Compute scores ─────────────────────────────────────────────────────────
+  // AI-as-floor rule (Point 3): AI can only add to the rule score, never reduce it.
+  // The rule engine establishes the minimum. AI supplements upward only.
+  const aiDeltaSafe  = Math.max(0, aiDelta);  // never negative from AI
+  const totalDelta   = ruleDelta + aiDeltaSafe;
+  const rawScore     = existingScore + totalDelta;
+  const newScore     = Math.min(100, Math.max(0, rawScore));
 
-  // ── Auto status from score ────────────────────────────────────────────────
-  const autoStatus = deriveAutoStatus(newScore, existingStatus, newNegativeSignals);
+  // ── Auto status from score (qualification gate enforced) ──────────────────
+  const allAccumulatedSignals = [...existingBuying, ...newSignals];
+  const autoStatus = deriveAutoStatus(newScore, existingStatus, newNegativeSignals, allAccumulatedSignals);
 
   // ── Validated transition for auto_status ─────────────────────────────────
   const validatedAutoStatus = isTransitionAllowed(existingStatus, autoStatus)
@@ -457,7 +577,7 @@ export function calculateLeadScore(input: ScoringInput): ScoringResult {
     auto_status:  validatedAutoStatus,
 
     rule_score_delta: ruleDelta,
-    ai_score_delta:   aiDelta,
+    ai_score_delta:   aiDeltaSafe,
     score_delta:      totalDelta,
     ai_confidence:    aiConfidence,
     ai_intent:        aiResponse.intent,
@@ -482,6 +602,7 @@ function deriveAutoStatus(
   score: number,
   currentStatus: string,
   newNegativeSignals: string[],
+  allSignals: string[],   // all accumulated buying_signals for this lead
 ): LeadStatus {
   // Converted is terminal — never auto-overridden
   if (currentStatus === 'converted') return 'converted';
@@ -489,18 +610,32 @@ function deriveAutoStatus(
   // Explicit rejection → lost
   if (newNegativeSignals.includes('not_interested') || newNegativeSignals.includes('wrong_number')) return 'lost';
 
-  if (score >= SCORE_THRESHOLDS.QUALIFIED) return 'qualified';
-  if (score >= SCORE_THRESHOLDS.HOT)       return 'hot';
-  if (score >= SCORE_THRESHOLDS.WARM)      return 'warm';
+  // QUALIFIED requires both score threshold AND an explicit closing signal.
+  // A negotiation lead with score=92 stays HOT until they ask for payment/invoice.
+  if (score >= SCORE_THRESHOLDS.QUALIFIED) {
+    const hasQualifyingSignal = allSignals.some(s => QUALIFICATION_GATE_SIGNALS.has(s));
+    if (hasQualifyingSignal) return 'qualified';
+    return 'hot'; // high score but no closing signal → Hot, not Qualified
+  }
+
+  if (score >= SCORE_THRESHOLDS.HOT)  return 'hot';
+  if (score >= SCORE_THRESHOLDS.WARM) return 'warm';
   return 'cold';
 }
 
 function inferIntentLevel(score: number, newSignals: string[]): 'high' | 'medium' | 'low' {
   const HIGH_INTENT = new Set([
+    // Universal closing signals
     'intent_book', 'intent_reserve', 'intent_payment_link',
     'intent_confirm_booking', 'intent_when_book', 'ready_to_pay',
+    'invoice_request',
+    // New negotiation/commitment signals
+    'asked_discount', 'commitment_signals', 'logistics_planning',
+    // AI intent signals
     'ai_intent:confirm', 'ai_intent:reserve_table',
     'ai_intent:private_event', 'ai_intent:corporate_booking',
+    // Industry-specific qualifying signals
+    'ind_site_visit', 'ind_demo_request', 'ind_enroll_intent', 'ind_appointment',
   ]);
   if (newSignals.some(s => HIGH_INTENT.has(s)) || score >= SCORE_THRESHOLDS.HOT) return 'high';
   if (score >= SCORE_THRESHOLDS.WARM) return 'medium';

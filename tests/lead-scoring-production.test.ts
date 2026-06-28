@@ -7,9 +7,9 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { describe, it, expect } from 'vitest';
-import { calculateLeadScore, AI_CONFIDENCE_THRESHOLD, SCORE_THRESHOLDS } from '@/lib/scoring/lead-scoring-engine';
+import { calculateLeadScore, AI_CONFIDENCE_THRESHOLD, SCORE_THRESHOLDS, QUALIFICATION_GATE_SIGNALS, STAGE_ORDER, stageIndex } from '@/lib/scoring/lead-scoring-engine';
 import { calculateDecayPoints, shouldForceCold, DEFAULT_DECAY_THRESHOLDS } from '@/lib/scoring/lead-decay';
-import { normalizeIndustry } from '@/lib/scoring/industry-profiles';
+import { normalizeIndustry, INDUSTRY_MODULES } from '@/lib/scoring/industry-profiles';
 import type { ScoringInput } from '@/lib/scoring/lead-scoring-engine';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -633,5 +633,422 @@ describe('Score Threshold Constants', () => {
   it('AI_CONFIDENCE_THRESHOLD is between 0 and 1', () => {
     expect(AI_CONFIDENCE_THRESHOLD).toBeGreaterThan(0);
     expect(AI_CONFIDENCE_THRESHOLD).toBeLessThan(1);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════
+// PHASE A: LEAD INTELLIGENCE PLATFORM — New Signal Tests
+// ══════════════════════════════════════════════════════════════════
+
+// ── 13. Negotiation Signals ───────────────────────────────────────
+
+describe('Negotiation Signals (Phase A)', () => {
+  it('detects "Any discount for 2 people?" — the Zanskar lead scenario', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Any discount for 2 people?' }));
+    expect(r.all_buying_signals).toContain('asked_discount');
+    expect(r.score_delta).toBeGreaterThanOrEqual(25);
+  });
+
+  it('detects English negotiation: "can you negotiate the price?"', () => {
+    const r = calculateLeadScore(input({ userMessage: 'can you negotiate the price at all?' }));
+    expect(r.all_buying_signals).toContain('asked_discount');
+  });
+
+  it('detects "best price" negotiation', () => {
+    const r = calculateLeadScore(input({ userMessage: 'What is your best price for a group?' }));
+    expect(r.all_buying_signals).toContain('asked_discount');
+  });
+
+  it('detects "reduce the rate" negotiation', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Can you reduce the rate a bit?' }));
+    expect(r.all_buying_signals).toContain('asked_discount');
+  });
+
+  it('detects Hindi: "discount milega?"', () => {
+    const r = calculateLeadScore(input({ userMessage: 'bhai kuch discount milega?' }));
+    expect(r.all_buying_signals).toContain('asked_discount');
+  });
+
+  it('detects Hindi: "thoda kam karo"', () => {
+    const r = calculateLeadScore(input({ userMessage: 'thoda kam nahi kar sakte kya price?' }));
+    expect(r.all_buying_signals).toContain('asked_discount');
+  });
+
+  it('detects "special offer" inquiry', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Do you have any special offer for October batch?' }));
+    expect(r.all_buying_signals).toContain('asked_discount');
+  });
+
+  it('does NOT count discount signal twice (dedup)', () => {
+    const first = calculateLeadScore(input({ userMessage: 'Any discount available?' }));
+    const second = calculateLeadScore(input({
+      userMessage: 'Can you give me a deal?',
+      lead: { lead_score: first.lead_score, lead_status: first.lead_status, buying_signals: first.all_buying_signals, negative_signals: [] },
+    }));
+    expect(second.all_buying_signals.filter(s => s === 'asked_discount').length).toBe(1);
+    expect(second.score_delta).toBe(0); // already counted
+  });
+});
+
+// ── 14. Commitment / Readiness Signals ───────────────────────────
+
+describe('Commitment / Preparation Signals (Phase A)', () => {
+  it('detects "Any preparation from my side?" — critical missed signal', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Any preparation from my side?' }));
+    expect(r.all_buying_signals).toContain('commitment_signals');
+    expect(r.score_delta).toBeGreaterThanOrEqual(20);
+  });
+
+  it('detects "what should I bring?"', () => {
+    const r = calculateLeadScore(input({ userMessage: 'What should I bring for the trek?' }));
+    expect(r.all_buying_signals).toContain('commitment_signals');
+  });
+
+  it('detects "what to pack" variant', () => {
+    const r = calculateLeadScore(input({ userMessage: 'what to pack for the Zanskar trip?' }));
+    expect(r.all_buying_signals).toContain('commitment_signals');
+  });
+
+  it('detects "requirements from my end"', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Any requirements from my end?' }));
+    expect(r.all_buying_signals).toContain('commitment_signals');
+  });
+
+  it('detects "how to prepare before the trek"', () => {
+    const r = calculateLeadScore(input({ userMessage: 'how do I prepare before the trek?' }));
+    expect(r.all_buying_signals).toContain('commitment_signals');
+  });
+
+  it('detects Hindi: "kya lana hai"', () => {
+    const r = calculateLeadScore(input({ userMessage: 'bhaiya kya lana hai mere saath?' }));
+    expect(r.all_buying_signals).toContain('commitment_signals');
+  });
+});
+
+// ── 15. Logistics / Meeting Point Signals ────────────────────────
+
+describe('Logistics / Meeting Point Signals (Phase A)', () => {
+  it('detects "meeting point" confirmation', () => {
+    const r = calculateLeadScore(input({ userMessage: 'What is the meeting point?' }));
+    expect(r.all_buying_signals).toContain('logistics_planning');
+    expect(r.score_delta).toBeGreaterThanOrEqual(18);
+  });
+
+  it('detects "pickup point" inquiry', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Where is the pickup point in Leh?' }));
+    expect(r.all_buying_signals).toContain('logistics_planning');
+  });
+
+  it('detects "where do we meet?"', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Where do we meet on day 1?' }));
+    expect(r.all_buying_signals).toContain('logistics_planning');
+  });
+
+  it('detects "airport pickup"', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Will there be airport pickup from Leh airport?' }));
+    expect(r.all_buying_signals).toContain('logistics_planning');
+  });
+
+  it('detects Hindi: "kahan milna hai"', () => {
+    const r = calculateLeadScore(input({ userMessage: 'bhai kahan milna hai pehle din?' }));
+    expect(r.all_buying_signals).toContain('logistics_planning');
+  });
+});
+
+// ── 16. Comparison Shopping Signals ──────────────────────────────
+
+describe('Comparison / Competitive Signals (Phase A)', () => {
+  it('detects "comparing with other companies"', () => {
+    const r = calculateLeadScore(input({ userMessage: 'I am comparing with other travel companies' }));
+    expect(r.all_buying_signals).toContain('comparison_shopping');
+    expect(r.score_delta).toBeGreaterThanOrEqual(15);
+  });
+
+  it('detects "which is better" inquiry', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Which is better, your group trek or private?' }));
+    expect(r.all_buying_signals).toContain('comparison_shopping');
+  });
+
+  it('detects "vs" comparison', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Your package vs IndiaHikes — what is the difference?' }));
+    expect(r.all_buying_signals).toContain('comparison_shopping');
+  });
+
+  it('detects "any other options" inquiry', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Do you have any other options for the same budget?' }));
+    expect(r.all_buying_signals).toContain('comparison_shopping');
+  });
+});
+
+// ── 17. Urgency Signals ───────────────────────────────────────────
+
+describe('Urgency Signals (Phase A)', () => {
+  it('detects "urgent" flag', () => {
+    const r = calculateLeadScore(input({ userMessage: 'This is urgent, please respond asap' }));
+    expect(r.all_buying_signals).toContain('urgency_signal');
+    expect(r.score_delta).toBeGreaterThanOrEqual(12);
+  });
+
+  it('detects "need to know today"', () => {
+    const r = calculateLeadScore(input({ userMessage: 'I need to decide today, limited seats right?' }));
+    expect(r.all_buying_signals).toContain('urgency_signal');
+  });
+
+  it('detects Hindi urgency: "jaldi batao"', () => {
+    const r = calculateLeadScore(input({ userMessage: 'bhai jaldi batao, aaj hi decide karna hai' }));
+    expect(r.all_buying_signals).toContain('urgency_signal');
+  });
+});
+
+// ── 18. Invoice / Quote Request ───────────────────────────────────
+
+describe('Invoice / Quote Request Signals (Phase A)', () => {
+  it('detects "send invoice" request', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Please send me an invoice for the booking' }));
+    expect(r.all_buying_signals).toContain('invoice_request');
+    expect(r.score_delta).toBeGreaterThanOrEqual(35);
+  });
+
+  it('detects formal quotation request', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Can you send a formal quotation?' }));
+    expect(r.all_buying_signals).toContain('invoice_request');
+  });
+
+  it('detects Hindi: "invoice chahiye"', () => {
+    const r = calculateLeadScore(input({ userMessage: 'bhai invoice chahiye mujhe' }));
+    expect(r.all_buying_signals).toContain('invoice_request');
+  });
+});
+
+// ── 19. Qualification Gate (Point 1 from architecture review) ─────
+
+describe('Qualification Gate — QUALIFIED requires closing signal', () => {
+  it('lead with score=90+ but only negotiation signals stays HOT, not QUALIFIED', () => {
+    // This is the Zanskar lead scenario: deep negotiation but no payment/booking signal
+    const r = calculateLeadScore(input({
+      userMessage: 'Any discount for 2 people? Also what to pack?',
+      lead: {
+        lead_score: 82, // already high from prior signals
+        lead_status: 'hot',
+        buying_signals: ['asked_dates', 'asked_difficulty', 'messages_10', 'messages_15', 'ind_expedition_named', 'commitment_signals'],
+        negative_signals: [],
+      },
+    }));
+    // Score will hit 90+ but no qualifying closing signal
+    expect(r.lead_score).toBeGreaterThanOrEqual(90);
+    expect(r.lead_status).toBe('hot');      // NOT qualified — no payment/booking signal
+    expect(r.auto_status).toBe('hot');
+  });
+
+  it('lead gets QUALIFIED when invoice is requested (closing signal)', () => {
+    const r = calculateLeadScore(input({
+      userMessage: 'Please send me an invoice for the Zanskar trek',
+      lead: {
+        lead_score: 75,
+        lead_status: 'hot',
+        buying_signals: ['asked_dates', 'asked_discount', 'commitment_signals', 'ind_expedition_named'],
+        negative_signals: [],
+      },
+    }));
+    expect(r.all_buying_signals).toContain('invoice_request');
+    expect(r.lead_score).toBeGreaterThanOrEqual(90);
+    expect(r.lead_status).toBe('qualified');
+  });
+
+  it('lead gets QUALIFIED when payment link is requested', () => {
+    const r = calculateLeadScore(input({
+      userMessage: 'Send me the payment link please',
+      lead: {
+        lead_score: 80,
+        lead_status: 'hot',
+        buying_signals: ['asked_dates', 'asked_discount', 'ind_expedition_named'],
+        negative_signals: [],
+      },
+    }));
+    expect(r.lead_status).toBe('qualified');
+  });
+
+  it('lead gets QUALIFIED when booking confirmation is requested', () => {
+    const r = calculateLeadScore(input({
+      userMessage: 'Is my booking confirmed? Please confirm',
+      lead: {
+        lead_score: 80,
+        lead_status: 'hot',
+        buying_signals: ['asked_dates', 'asked_discount'],
+        negative_signals: [],
+      },
+    }));
+    expect(r.lead_status).toBe('qualified');
+  });
+
+  it('QUALIFICATION_GATE_SIGNALS contains all expected closing signals', () => {
+    expect(QUALIFICATION_GATE_SIGNALS.has('intent_payment_link')).toBe(true);
+    expect(QUALIFICATION_GATE_SIGNALS.has('intent_confirm_booking')).toBe(true);
+    expect(QUALIFICATION_GATE_SIGNALS.has('invoice_request')).toBe(true);
+    expect(QUALIFICATION_GATE_SIGNALS.has('intent_reserve')).toBe(true);
+    expect(QUALIFICATION_GATE_SIGNALS.has('ready_to_pay')).toBe(true);
+  });
+});
+
+// ── 20. AI-as-Floor Rule (Point 3) ────────────────────────────────
+
+describe('AI-as-Floor Rule — AI never reduces deterministic score', () => {
+  it('ai_score_delta is never negative', () => {
+    const r = calculateLeadScore(input({
+      userMessage: 'want to book',
+      aiResponse: { intent: 'complaint', extractedData: {}, confidence: 0.99 },
+    }));
+    expect(r.ai_score_delta).toBeGreaterThanOrEqual(0);
+  });
+
+  it('negative AI intent does not subtract from rule score', () => {
+    const withComplaint = calculateLeadScore(input({
+      userMessage: 'I want to book the Zanskar expedition',
+      aiResponse: { intent: 'complaint', extractedData: {}, confidence: 0.99 },
+    }));
+    const withNeutral = calculateLeadScore(input({
+      userMessage: 'I want to book the Zanskar expedition',
+      aiResponse: { intent: 'general_enquiry', extractedData: {}, confidence: 0.99 },
+    }));
+    // complaint AI intent should not produce lower score than general_enquiry
+    expect(withComplaint.lead_score).toBeGreaterThanOrEqual(withNeutral.lead_score);
+  });
+});
+
+// ── 21. Stage Progression Ordering ───────────────────────────────
+
+describe('Stage Progression (Point 9)', () => {
+  it('STAGE_ORDER is defined and in correct sequence', () => {
+    expect(STAGE_ORDER).toContain('Awareness');
+    expect(STAGE_ORDER).toContain('Negotiation');
+    expect(STAGE_ORDER).toContain('Decision');
+    expect(stageIndex('Awareness')).toBeLessThan(stageIndex('Negotiation'));
+    expect(stageIndex('Negotiation')).toBeLessThan(stageIndex('Decision'));
+    expect(stageIndex('Decision')).toBeLessThan(stageIndex('Booked'));
+  });
+
+  it('unknown stage returns index 0 (Awareness)', () => {
+    expect(stageIndex('UnknownStage')).toBe(0);
+    expect(stageIndex(null)).toBe(0);
+    expect(stageIndex(undefined)).toBe(0);
+  });
+});
+
+// ── 22. Industry Module Registry ──────────────────────────────────
+
+describe('Industry Module Registry (Point 11)', () => {
+  it('all 10 expected industry modules are defined', () => {
+    const expected = ['travel', 'restaurant', 'hotel', 'clinic', 'real_estate', 'retail', 'education', 'automotive', 'saas', 'general'];
+    for (const id of expected) {
+      expect(INDUSTRY_MODULES).toHaveProperty(id);
+    }
+  });
+
+  it('each module has qualificationGates, stages, aiPromptContext', () => {
+    for (const [id, mod] of Object.entries(INDUSTRY_MODULES)) {
+      if (id === 'general') continue;
+      expect(Array.isArray(mod.qualificationGates)).toBe(true);
+      expect(Array.isArray(mod.stages)).toBe(true);
+      expect(typeof mod.aiPromptContext).toBe('string');
+      expect(mod.aiPromptContext.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('normalizeIndustry detects education industry', () => {
+    expect(normalizeIndustry('IELTS Coaching Institute')).toBe('education');
+  });
+
+  it('normalizeIndustry detects automotive industry', () => {
+    expect(normalizeIndustry('Hyundai Car Dealership')).toBe('automotive');
+  });
+
+  it('normalizeIndustry detects SaaS industry', () => {
+    expect(normalizeIndustry('CRM Software Platform')).toBe('saas');
+  });
+
+  it('education module fires enrollment signal', () => {
+    const r = calculateLeadScore(input({ userMessage: 'How do I enroll in the IELTS course?', industryProfile: 'education' }));
+    expect(r.all_buying_signals).toContain('ind_enroll_intent');
+  });
+
+  it('automotive module fires test drive signal', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Can I do a test drive this weekend?', industryProfile: 'automotive' }));
+    expect(r.all_buying_signals).toContain('ind_test_drive');
+  });
+
+  it('saas module fires demo request signal', () => {
+    const r = calculateLeadScore(input({ userMessage: 'Can I book a product demo with your team?', industryProfile: 'saas' }));
+    expect(r.all_buying_signals).toContain('ind_demo_request');
+  });
+});
+
+// ── 23. Extended Engagement Milestones ────────────────────────────
+
+describe('Extended Engagement Milestones (Phase A)', () => {
+  it('awards messages_20 milestone at 20+ messages', () => {
+    const r = calculateLeadScore(input({
+      userMessage: 'ok',
+      conversation: { message_count: 20, created_at: '' },
+      lead: { lead_score: 48, lead_status: 'warm', buying_signals: ['messages_5', 'messages_10', 'messages_15'], negative_signals: [] },
+    }));
+    expect(r.all_buying_signals).toContain('messages_20');
+    expect(r.score_delta).toBeGreaterThanOrEqual(8);
+  });
+
+  it('awards messages_30 milestone at 30+ messages', () => {
+    const r = calculateLeadScore(input({
+      userMessage: 'ok',
+      conversation: { message_count: 30, created_at: '' },
+      lead: { lead_score: 56, lead_status: 'warm', buying_signals: ['messages_5', 'messages_10', 'messages_15', 'messages_20'], negative_signals: [] },
+    }));
+    expect(r.all_buying_signals).toContain('messages_30');
+  });
+});
+
+// ── 24. The Zanskar Lead — Full Replay ────────────────────────────
+
+describe('The Zanskar Lead — Full Conversation Replay (Root Cause Fix)', () => {
+  it('scores correctly with all Phase A signals applied (should be HOT not WARM)', () => {
+    // Simulates the actual +91 95997 77574 conversation replay
+    // with the new patterns in place
+    const messages = [
+      { msg: 'Tell me about your Zanskar expedition', conv: 2 },
+      { msg: 'How difficult is it? Any fitness requirements?', conv: 4 },
+      { msg: 'What months is it available?', conv: 6 },
+      { msg: 'What does the itinerary look like?', conv: 8 },
+      { msg: 'Is alcohol allowed? Any smoking restrictions?', conv: 10 },
+      { msg: 'What is included in the package price?', conv: 12 },
+      { msg: 'Where is the pickup point, Leh airport?', conv: 14 },
+      { msg: 'Any preparation from my side?', conv: 16 },
+      { msg: 'What about accommodation quality?', conv: 18 },
+      { msg: 'Can we get a group discount? 2 people coming.', conv: 20 },
+    ];
+
+    let score = 0;
+    let status: string = 'new';
+    let buyingSignals: string[] = [];
+    let negativeSignals: string[] = [];
+
+    for (const { msg, conv } of messages) {
+      const r = calculateLeadScore(input({
+        userMessage: msg,
+        industryProfile: 'travel',
+        conversation: { message_count: conv, created_at: '' },
+        lead: { lead_score: score, lead_status: status as any, buying_signals: buyingSignals, negative_signals: negativeSignals },
+      }));
+      score = r.lead_score;
+      status = r.lead_status;
+      buyingSignals = r.all_buying_signals;
+      negativeSignals = r.all_negative_signals;
+    }
+
+    // New engine should detect: expedition (+20), difficulty (+8), dates (+15), itinerary (+10),
+    // logistics/pickup (+18), commitment/preparation (+20), discount (+25), milestones (+10+15+10+8)
+    expect(buyingSignals).toContain('ind_expedition_named');
+    expect(buyingSignals).toContain('commitment_signals');
+    expect(buyingSignals).toContain('asked_discount');
+    expect(buyingSignals).toContain('logistics_planning');
+    expect(score).toBeGreaterThanOrEqual(70);   // HOT or above
+    expect(status).toBe('hot');                   // HOT, not WARM (the bug is fixed)
   });
 });
