@@ -78,8 +78,7 @@ async function handler(req: NextRequest): Promise<NextResponse> {
     .from('ai_jobs')
     .update({ status: 'processing', started_at: now })
     .in('id', jobIds)
-    .eq('status', 'pending')   // only claim truly-pending (avoids double-claim race)
-    .or('status.eq.retry')     // also claim retry-eligible
+    .or('status.eq.pending,status.eq.retry') // atomic claim — OR so status can be either
     .select('id');
 
   if (claimErr) {
