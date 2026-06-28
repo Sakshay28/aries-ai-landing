@@ -497,3 +497,61 @@ export async function syncCustomerToExcel(tenantId: string, phone: string): Prom
   const latencyMs = Date.now() - t0;
   return { action, latencyMs };
 }
+
+// ── Bulk Sync: write ALL tenant leads to Excel (clean rewrite) ──
+export async function syncAllLeadsToExcel(tenantId: string): Promise<{ synced: number }> {
+  const { config } = await getExcelConfig(tenantId);
+  const workbookId = config.spreadsheet_id;
+  const sheetName = config.sheet_name || 'Leads';
+
+  const { data: leads, error } = await supabaseAdmin
+    .from('leads')
+    .select('name, phone, channel, lead_status, tags, created_at, assigned_at, updated_at, last_message_at, assigned_user:assigned_to(full_name, email)')
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: true });
+
+  if (error) throw new Error(`Failed to fetch leads: ${error.message}`);
+  if (!leads || leads.length === 0) return { synced: 0 };
+
+  await ensureSheetExists(tenantId, workbookId, sheetName);
+
+  const headers = Object.keys(DEFAULT_COLUMN_MAPPINGS);
+  const colCount = headers.length;
+  const lastCol = getColumnLetter(colCount - 1);
+
+  // Build all rows (header + data)
+  const rows: string[][] = [headers];
+  for (const lead of leads) {
+    const l = lead as any;
+    const row = [
+      l.name || 'Unknown',
+      l.phone || '',
+      l.channel === 'whatsapp' ? 'WhatsApp' : l.channel === 'meta_ctwa' ? 'Meta Ad' : l.channel || 'Manual',
+      l.lead_status || 'new',
+      l.assigned_user?.full_name || l.assigned_user?.email || '',
+      l.assigned_at ? new Date(l.assigned_at).toISOString().slice(0, 19).replace('T', ' ') : '',
+      l.created_at ? new Date(l.created_at).toISOString().slice(0, 19).replace('T', ' ') : '',
+      new Date(Math.max(
+        l.updated_at ? new Date(l.updated_at).getTime() : 0,
+        l.last_message_at ? new Date(l.last_message_at).getTime() : 0,
+      )).toISOString().slice(0, 19).replace('T', ' '),
+      '',
+      l.tags ? l.tags.join(', ') : '',
+    ];
+    rows.push(row);
+  }
+
+  // Clear the sheet then write all rows in one PATCH
+  const rangeAddr = `A1:${lastCol}${rows.length}`;
+  const writeUrl = `https://graph.microsoft.com/v1.0/me/drive/items/${workbookId}/workbook/worksheets/${encodeURIComponent(sheetName)}/range(address='${rangeAddr}')`;
+
+  const res = await fetchWithRetry(tenantId, writeUrl, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values: rows }),
+  });
+
+  if (!res.ok) throw new Error(`Excel bulk write failed: ${await res.text()}`);
+  console.log(`✅ [EXCEL bulk sync] wrote ${leads.length} leads to "${sheetName}" for tenant ${tenantId}`);
+  return { synced: leads.length };
+}

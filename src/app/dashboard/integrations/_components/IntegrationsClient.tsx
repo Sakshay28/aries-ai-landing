@@ -62,6 +62,23 @@ const INTEGRATIONS: IntegrationDef[] = [
     ],
   },
   {
+    id: 'microsoft_excel',
+    name: 'Microsoft Excel',
+    description: 'Leads auto-sync to your Microsoft Excel Online spreadsheet in OneDrive in real-time.',
+    icon: FileSpreadsheet,
+    color: 'text-[#107C41]',
+    bgColor: 'bg-[#107C41]/10',
+    docsUrl: 'https://learn.microsoft.com/en-us/graph/api/resources/excel',
+    eventBadges: ['New lead', 'Real-time sync'],
+    isOAuth: true,
+    oauthRoute: '/api/integrations/microsoft-excel/auth',
+    oauthSpreadsheetParam: true,
+    syncUrl: '/api/dashboard/microsoft-excel/sync',
+    fields: [
+      { key: 'spreadsheet_id', label: 'Workbook URL or ID', type: 'url', placeholder: 'https://onedrive.live.com/...', required: true, hint: 'Paste the full OneDrive link of your Excel file or its item ID.' },
+    ],
+  },
+  {
     id: 'googlecalendar',
     name: 'Google Calendar',
     description: 'AI checks availability and books appointments directly into your Google Calendar during WhatsApp conversations.',
@@ -171,10 +188,25 @@ function IntegrationModal({
 
   const handleOAuthConnect = () => {
     const rawId = form['spreadsheet_id']?.trim();
-    if (!rawId) { toast.error('Please enter your Google Sheet URL or ID'); return; }
-    // Extract the ID from a full URL if needed
-    const match = rawId.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
-    const spreadsheetId = match ? match[1] : rawId;
+    if (!rawId) {
+      toast.error(integration.id === 'microsoft_excel'
+        ? 'Please enter your OneDrive workbook URL or item ID'
+        : 'Please enter your Google Sheet URL or ID');
+      return;
+    }
+
+    let spreadsheetId = rawId;
+    if (integration.id === 'microsoft_excel') {
+      // Extract OneDrive item ID from resid= param (e.g. https://onedrive.live.com/edit?resid=ABC!123)
+      const residMatch = rawId.match(/[?&]resid=([^&]+)/i);
+      if (residMatch) spreadsheetId = decodeURIComponent(residMatch[1]);
+      // Otherwise pass the raw value as-is (user may have entered the item ID directly)
+    } else {
+      // Google Sheets: extract ID from full URL
+      const match = rawId.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+      if (match) spreadsheetId = match[1];
+    }
+
     window.location.href = `${integration.oauthRoute}?spreadsheet_id=${encodeURIComponent(spreadsheetId)}`;
   };
 
@@ -185,7 +217,7 @@ function IntegrationModal({
       const res = await fetch(integration.syncUrl, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(`Synced ${data.synced} leads to Google Sheets`);
+      toast.success(`Synced ${data.synced} leads to ${integration.name}`);
     } catch (e) {
       toast.error((e as Error).message || 'Sync failed');
     } finally {
@@ -345,10 +377,16 @@ function IntegrationModal({
               <button
                 onClick={handleOAuthConnect}
                 disabled={saving}
-                className="px-5 py-2 text-sm rounded-lg bg-[#0F9D58] hover:bg-[#0F9D58]/90 text-white font-medium transition-colors disabled:opacity-60 flex items-center gap-2"
+                className={`px-5 py-2 text-sm rounded-lg text-white font-medium transition-colors disabled:opacity-60 flex items-center gap-2 ${
+                  integration.id === 'microsoft_excel'
+                    ? 'bg-[#107C41] hover:bg-[#107C41]/90'
+                    : 'bg-[#0F9D58] hover:bg-[#0F9D58]/90'
+                }`}
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
-                {existing ? 'Reconnect with Google' : 'Connect with Google'}
+                {integration.id === 'microsoft_excel'
+                  ? (existing ? 'Reconnect with Microsoft' : 'Connect with Microsoft')
+                  : (existing ? 'Reconnect with Google' : 'Connect with Google')}
               </button>
             ) : (
               <button
@@ -393,7 +431,10 @@ export function IntegrationsClient() {
     if (success === 'google_sheets') {
       toast.success('Google Sheets connected! Leads will sync automatically.');
       window.history.replaceState({}, '', '/dashboard/integrations');
-      // Hard reload so the CONNECTED badge renders with fresh data
+      setTimeout(() => window.location.reload(), 800);
+    } else if (success === 'microsoft_excel') {
+      toast.success('Microsoft Excel connected! Leads will sync automatically.');
+      window.history.replaceState({}, '', '/dashboard/integrations');
       setTimeout(() => window.location.reload(), 800);
     } else if (error === 'google_sheets_denied') {
       toast.error('Google authorization was denied.');
@@ -401,6 +442,13 @@ export function IntegrationsClient() {
     } else if (error === 'google_sheets_failed') {
       const detail = searchParams.get('detail');
       toast.error(`Google Sheets failed: ${detail || 'unknown error'}`, { duration: 8000 });
+      window.history.replaceState({}, '', '/dashboard/integrations');
+    } else if (error === 'microsoft_excel_denied') {
+      toast.error('Microsoft authorization was denied.');
+      window.history.replaceState({}, '', '/dashboard/integrations');
+    } else if (error === 'microsoft_excel_failed') {
+      const detail = searchParams.get('detail');
+      toast.error(`Microsoft Excel failed: ${detail || 'unknown error'}`, { duration: 8000 });
       window.history.replaceState({}, '', '/dashboard/integrations');
     }
   }, [searchParams, load]);
@@ -434,13 +482,20 @@ export function IntegrationsClient() {
           {INTEGRATIONS.map((integration, i) => {
             const Icon = integration.icon;
             const conn = getConnected(integration.id);
+            const isSuspended = conn && (conn.integration_id === 'google_sheets' || conn.integration_id === 'microsoft_excel') && (conn.config as any)?.auth_error;
             return (
               <motion.div
                 key={integration.id}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.05 }}
-                className={`p-6 rounded-2xl bg-card border transition-all ${conn ? 'border-emerald-500/30 shadow-[0_0_0_1px_rgba(16,185,129,0.1)]' : 'border-border hover:border-border/80'} shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex flex-col h-full`}
+                className={`p-6 rounded-2xl bg-card border transition-all ${
+                  isSuspended 
+                    ? 'border-rose-500/30 shadow-[0_0_0_1px_rgba(244,63,94,0.1)]' 
+                    : conn 
+                      ? 'border-emerald-500/30 shadow-[0_0_0_1px_rgba(16,185,129,0.1)]' 
+                      : 'border-border hover:border-border/80'
+                } shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex flex-col h-full`}
               >
                 <div className="flex items-start justify-between mb-4">
                   <div className={`p-3 rounded-xl ${integration.bgColor} ${integration.color}`}>
@@ -449,15 +504,37 @@ export function IntegrationsClient() {
 
                   {conn ? (
                     <div className="flex items-center gap-2">
-                      <div className="px-2 py-1 text-[10px] font-bold tracking-wider rounded-md border bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> CONNECTED
-                      </div>
-                      <button
-                        onClick={() => setActiveModal(integration.id)}
-                        className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        Edit
-                      </button>
+                      {isSuspended ? (
+                        <div className="px-2 py-1 text-[10px] font-bold tracking-wider rounded-md border bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/20 flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3 text-rose-500" /> SUSPENDED
+                        </div>
+                      ) : (
+                        <div className="px-2 py-1 text-[10px] font-bold tracking-wider rounded-md border bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> CONNECTED
+                        </div>
+                      )}
+                      {integration.id === 'google_sheets' ? (
+                        <a
+                          href="/dashboard/integrations/google-sheets"
+                          className="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold"
+                        >
+                          Manage
+                        </a>
+                      ) : integration.id === 'microsoft_excel' ? (
+                        <a
+                          href="/dashboard/integrations/microsoft-excel"
+                          className="text-xs text-indigo-500 hover:text-indigo-600 transition-colors font-semibold"
+                        >
+                          Manage
+                        </a>
+                      ) : (
+                        <button
+                          onClick={() => setActiveModal(integration.id)}
+                          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          Edit
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <button
