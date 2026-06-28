@@ -33,7 +33,8 @@ export type TriggerEvent =
   | 'new_lead'
   | 'escalation_triggered'
   | 'escalation_resolved'
-  | 'payment_received';
+  | 'payment_received'
+  | 'session_window_expiring';
 
 export interface AutomationPayload {
   tenantId: string;

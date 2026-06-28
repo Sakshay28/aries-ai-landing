@@ -22,6 +22,8 @@ import { BroadcastEngineService } from '@/lib/broadcast/services/broadcast-engin
 import { SchedulerService } from '@/lib/broadcast/services/scheduler.service';
 import { TokenBucket, safeThroughputPerSecond } from '@/lib/broadcast/services/rate-limiter';
 import { notifyAdmin } from '@/lib/alerts/admin';
+import { GoogleSheetsWorkerService } from '@/lib/integrations/google-sheets-worker';
+import { MicrosoftExcelWorkerService } from '@/lib/integrations/microsoft-excel-worker';
 
 const WORKER_ID = process.env.WORKER_ID || `broadcast-worker-${os.hostname()}-${process.pid}`;
 const TICK_MS = Number(process.env.BROADCAST_TICK_MS || 1000);
@@ -132,6 +134,12 @@ async function main(): Promise<void> {
       if (now - lastStallCheck >= 120_000) { await checkStall(); lastStallCheck = now; }
 
       await dispatchLanes();
+      await GoogleSheetsWorkerService.processQueue(WORKER_ID, 20).catch(err => {
+        console.error('❌ Google Sheets Worker error:', err.message || err);
+      });
+      await MicrosoftExcelWorkerService.processQueue(WORKER_ID, 20).catch(err => {
+        console.error('❌ Microsoft Excel Worker error:', err.message || err);
+      });
     } catch (err) {
       console.error('❌ Worker tick error:', (err as Error).message);
     }

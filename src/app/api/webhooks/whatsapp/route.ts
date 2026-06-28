@@ -1831,6 +1831,27 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     }
     console.log(`🚨 [${tenant.business_name}] Escalation fired for ${leadName} — delivered: ${alertResults.filter(r => r.ok).length}/${alertResults.length}`);
 
+    // ── Cancellation-specific alert — richer than the generic escalation ping ──
+    // Fires only when the AI classified the intent as 'cancel' AND there is a
+    // known booking on record. Gives staff the full booking detail so they can
+    // action it immediately without opening the dashboard.
+    if (aiResponse.intent === 'cancel' && existingBookingRow) {
+      const eb = existingBookingRow as any;
+      const cancelAlert =
+        `🚫 *CANCELLATION REQUEST — ${tenant.business_name || 'Your Restaurant'}*\n\n` +
+        `👤 ${leadName}\n` +
+        `📞 +${cleanPhone}\n` +
+        `🆔 ${eb.reservation_id || 'N/A'}\n` +
+        `📅 ${eb.booking_date || 'N/A'}\n` +
+        `⏰ ${eb.slot_time || 'N/A'}\n` +
+        `👥 ${eb.party_size || '?'} guest${(eb.party_size || 1) > 1 ? 's' : ''}\n\n` +
+        `Please confirm cancellation via Live Chat: https://ariesai.in/dashboard/chat`;
+      sendStaffAlert(tenant, cancelAlert).catch(e =>
+        console.error('❌ Cancellation alert failed:', (e as Error).message)
+      );
+      console.log(`🚫 [${tenant.business_name}] Cancellation alert sent for reservation ${eb.reservation_id}`);
+    }
+
     triggerAutomations({
       tenantId: tenant.id, event: 'escalation_triggered', leadId: lead?.id,
       conversationId: conversation.id, phone: cleanPhone,

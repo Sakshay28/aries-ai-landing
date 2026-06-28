@@ -116,4 +116,19 @@ DROP POLICY IF EXISTS "no_client_access_heartbeats" ON system_heartbeats;
 CREATE POLICY "no_client_access_heartbeats" ON system_heartbeats
   FOR ALL USING (false) WITH CHECK (false);
 
+-- ── session_window_expiring trigger type ──
+-- Allows creating automation rules that fire ~22h after the customer's last
+-- message so a proactive nudge keeps the 24h WhatsApp session window alive.
+ALTER TABLE automations DROP CONSTRAINT IF EXISTS automations_trigger_event_check;
+ALTER TABLE automations ADD CONSTRAINT automations_trigger_event_check
+  CHECK (trigger_event IN (
+    'booking_confirmed',
+    'booking_reminder',
+    'new_lead',
+    'escalation_triggered',
+    'escalation_resolved',
+    'payment_received',
+    'session_window_expiring'
+  ));
+
 COMMIT;

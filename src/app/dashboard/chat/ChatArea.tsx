@@ -3,7 +3,7 @@
 import {
   Send, Bot, User, Check, CheckCheck, Clock, AlertCircle, ArrowDown, Paperclip, Smile,
   Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal, X, Loader2, Trash2, HelpCircle,
-  ArrowLeft, Smartphone,
+  ArrowLeft, Smartphone, FileText, ChevronRight,
 } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from "framer-motion";
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from "react";
@@ -59,6 +59,12 @@ function dateSeparatorLabel(dateStr: string): string {
   if (isSameDay(d, today)) return 'Today';
   if (isSameDay(d, yesterday)) return 'Yesterday';
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function getTemplateVarIndices(bodyText: string): number[] {
+  const indices = new Set<number>();
+  for (const m of bodyText.matchAll(/\{\{(\d+)\}\}/g)) indices.add(parseInt(m[1]));
+  return Array.from(indices).sort((a, b) => a - b);
 }
 
 interface MessageGroup {
@@ -204,7 +210,17 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const [messageMenuRect, setMessageMenuRect] = useState<DOMRect | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [deleteConfirmMsg, setDeleteConfirmMsg] = useState<Message | null>(null);
-  
+
+  // ── 24h session-expired template picker ──
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [templatesList, setTemplatesList] = useState<any[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<any | null>(null);
+  const [templateVarValues, setTemplateVarValues] = useState<Record<number, string>>({});
+  const [sendingTemplate, setSendingTemplate] = useState(false);
+  // Tracks conversation IDs where a template was sent — suppresses banner until next failed msg
+  const [templateSentForConv, setTemplateSentForConv] = useState<string | null>(null);
+
   // Save Contact Zustand store states
   const { 
     saveContactModalOpen, 
@@ -678,6 +694,65 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       ));
       setInputMsg(text);
     } finally { setSending(false); }
+  };
+
+  // True when the most recent outbound failure was a 24h-window error
+  const sessionExpired = useMemo(() => {
+    if (templateSentForConv === conversationId) return false;
+    const lastFailedOutbound = [...messages]
+      .reverse()
+      .find(m => m.direction === 'outbound' && m.status === 'failed');
+    return lastFailedOutbound?.error_message === 'SESSION_EXPIRED';
+  }, [messages, conversationId, templateSentForConv]);
+
+  const openTemplatePicker = async () => {
+    setTemplatePickerOpen(true);
+    setSelectedTemplate(null);
+    setTemplateVarValues({});
+    if (templatesList.length > 0) return;
+    setLoadingTemplates(true);
+    try {
+      const res = await fetch('/api/dashboard/templates');
+      const data = await res.json();
+      const approved = (data.data ?? []).filter((t: any) => t.status === 'APPROVED');
+      setTemplatesList(approved);
+    } catch {
+      toast.error('Failed to load templates');
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
+
+  const handleSendTemplate = async () => {
+    if (!selectedTemplate || !conversationId || sendingTemplate) return;
+    setSendingTemplate(true);
+    try {
+      // Collect ordered variable values from templateVarValues
+      const varIndices = getTemplateVarIndices(selectedTemplate.body || '');
+      const variables = varIndices.map(i => templateVarValues[i] ?? '');
+
+      const res = await fetch('/api/dashboard/chat/send-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId,
+          templateName: selectedTemplate.name,
+          variables,
+          language: selectedTemplate.language || 'en',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed');
+      toast.success('Template sent');
+      setTemplatePickerOpen(false);
+      setSelectedTemplate(null);
+      setTemplateVarValues({});
+      setTemplateSentForConv(conversationId);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to send template');
+    } finally {
+      setSendingTemplate(false);
+    }
   };
 
   const handleResend = async (msg: Message) => {
@@ -1714,6 +1789,31 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         )}
       </AnimatePresence>
 
+      {/* ── 24h session-expired banner ── */}
+      <AnimatePresence>
+        {sessionExpired && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6 }}
+            transition={{ duration: 0.15 }}
+            className="flex-shrink-0 flex items-center gap-3 px-4 py-2.5 bg-amber-50 dark:bg-amber-950/30 border-t border-amber-200/70 dark:border-amber-800/50"
+          >
+            <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span className="text-[12.5px] text-amber-800 dark:text-amber-300 flex-1 leading-tight">
+              WhatsApp 24h session expired — free-form messages are blocked by Meta.
+            </span>
+            <button
+              onClick={openTemplatePicker}
+              className="flex items-center gap-1 text-[12px] font-semibold text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100 bg-amber-100 dark:bg-amber-900/40 hover:bg-amber-200 dark:hover:bg-amber-800/50 px-3 py-1.5 rounded-lg transition-colors shrink-0"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              Send Template
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Composer ── */}
       <div className="flex-shrink-0 px-4 pb-4 pt-3 relative">
         {/* AI Assist floating panel */}
@@ -1947,6 +2047,155 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                   Cancel
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Template Picker Modal (24h session expired) ── */}
+      <AnimatePresence>
+        {templatePickerOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !sendingTemplate && setTemplatePickerOpen(false)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-xs cursor-default"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ type: 'spring', stiffness: 450, damping: 30 }}
+              className="relative w-full max-w-[420px] bg-white dark:bg-[#1C2333] border border-border rounded-2xl overflow-hidden shadow-2xl flex flex-col"
+              style={{ maxHeight: '80vh' }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+                <div>
+                  <h3 className="text-[15px] font-bold text-foreground">Send a Template</h3>
+                  <p className="text-[12px] text-muted-foreground mt-0.5">
+                    24h session expired — only approved templates can reach this customer.
+                  </p>
+                </div>
+                <button
+                  disabled={sendingTemplate}
+                  onClick={() => setTemplatePickerOpen(false)}
+                  className="p-1.5 hover:bg-secondary rounded-lg transition-colors text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Template list / variable inputs */}
+              <div className="overflow-y-auto flex-1">
+                {loadingTemplates ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : templatesList.length === 0 ? (
+                  <div className="text-center py-12 px-6">
+                    <FileText className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
+                    <p className="text-[13px] text-muted-foreground">No approved templates found.</p>
+                    <p className="text-[11px] text-muted-foreground/60 mt-1">Create and get a template approved in Settings → Templates.</p>
+                  </div>
+                ) : !selectedTemplate ? (
+                  <div className="divide-y divide-border">
+                    {templatesList.map((t: any) => {
+                      const varIndices = getTemplateVarIndices(t.body || '');
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => { setSelectedTemplate(t); setTemplateVarValues({}); }}
+                          className="w-full flex items-start gap-3 px-5 py-3.5 hover:bg-secondary/50 transition-colors text-left group"
+                        >
+                          <FileText className="w-4 h-4 text-muted-foreground/60 shrink-0 mt-0.5 group-hover:text-foreground transition-colors" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[13px] font-semibold text-foreground truncate">{t.name}</span>
+                              {varIndices.length > 0 && (
+                                <span className="text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-full shrink-0">
+                                  {varIndices.length} var{varIndices.length > 1 ? 's' : ''}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[12px] text-muted-foreground line-clamp-2 mt-0.5 leading-relaxed">
+                              {t.body || '(no body)'}
+                            </p>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-muted-foreground/40 shrink-0 mt-0.5 group-hover:text-foreground transition-colors" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  /* Variable inputs for selected template */
+                  <div className="px-5 py-4">
+                    <button
+                      onClick={() => setSelectedTemplate(null)}
+                      className="flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground mb-4 transition-colors"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" /> Back to templates
+                    </button>
+
+                    <div className="bg-secondary/40 rounded-xl p-3 mb-5">
+                      <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">{selectedTemplate.name}</p>
+                      <p className="text-[13px] text-foreground leading-relaxed whitespace-pre-wrap">
+                        {/* Highlight variable placeholders */}
+                        {(selectedTemplate.body || '').split(/(\{\{\d+\}\})/).map((part: string, i: number) => (
+                          /^\{\{\d+\}\}$/.test(part)
+                            ? <span key={i} className="bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded px-0.5">{part}</span>
+                            : <span key={i}>{part}</span>
+                        ))}
+                      </p>
+                    </div>
+
+                    {getTemplateVarIndices(selectedTemplate.body || '').length > 0 ? (
+                      <div className="flex flex-col gap-3">
+                        <p className="text-[12px] text-muted-foreground">Fill in the variable values:</p>
+                        {getTemplateVarIndices(selectedTemplate.body || '').map((idx: number) => (
+                          <div key={idx}>
+                            <label className="text-[11px] font-semibold text-muted-foreground mb-1 block">
+                              Variable {idx}
+                            </label>
+                            <input
+                              type="text"
+                              value={templateVarValues[idx] ?? ''}
+                              onChange={e => setTemplateVarValues(prev => ({ ...prev, [idx]: e.target.value }))}
+                              placeholder={`Value for {{${idx}}}`}
+                              className="w-full h-9 px-3 rounded-lg border border-border bg-background text-[13px] text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-2 focus:ring-[#00A884]/30 focus:border-[#00A884] transition-colors"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[12px] text-muted-foreground">This template has no variables — it will be sent as-is.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer — only shown when a template is selected */}
+              {selectedTemplate && (
+                <div className="px-5 py-4 border-t border-border shrink-0 flex gap-2">
+                  <button
+                    onClick={() => setTemplatePickerOpen(false)}
+                    disabled={sendingTemplate}
+                    className="flex-1 h-10 rounded-xl bg-secondary hover:bg-secondary/80 text-foreground text-[13px] font-semibold transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSendTemplate}
+                    disabled={sendingTemplate || getTemplateVarIndices(selectedTemplate.body || '').some((i: number) => !templateVarValues[i]?.trim())}
+                    className="flex-1 h-10 rounded-xl bg-[#00A884] hover:bg-[#009874] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[13px] font-semibold transition-colors flex items-center justify-center gap-2"
+                  >
+                    {sendingTemplate ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    {sendingTemplate ? 'Sending…' : 'Send Template'}
+                  </button>
+                </div>
+              )}
             </motion.div>
           </div>
         )}

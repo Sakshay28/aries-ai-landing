@@ -2,7 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
-import { sendTextMessage } from '@/lib/meta/service';
+import { sendTextMessage, MetaApiError } from '@/lib/meta/service';
 import { sendInstagramMessage } from '@/lib/instagram/service';
 import { decryptToken } from '@/lib/utils/crypto';
 
@@ -123,10 +123,15 @@ export async function POST(req: NextRequest) {
           .eq('id', insertedMsg.id);
       } catch (apiErr) {
         console.error('Async Meta send failed:', apiErr);
+        const is24hWindow = apiErr instanceof MetaApiError && apiErr.code === 131047;
         // Realtime pushes this UPDATE to the client — tick flips to ❌
+        // SESSION_EXPIRED signals the UI to show a "send template" banner.
         await supabaseAdmin
           .from('messages')
-          .update({ status: 'failed' })
+          .update({
+            status: 'failed',
+            ...(is24hWindow ? { error_message: 'SESSION_EXPIRED' } : {}),
+          })
           .eq('id', insertedMsg.id);
       }
 

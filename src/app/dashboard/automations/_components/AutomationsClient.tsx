@@ -104,7 +104,8 @@ const TRIGGER_LABELS: Record<string, { label: string; desc: string }> = {
   new_lead:              { label: 'New Lead',               desc: 'When a new customer messages for the first time' },
   escalation_triggered:  { label: 'Escalation Started',     desc: 'When a conversation is escalated to staff' },
   escalation_resolved:   { label: 'Escalation Resolved',    desc: 'When staff resolves an escalated conversation' },
-  payment_received:      { label: 'Payment Received',       desc: 'When a payment is confirmed via Razorpay' },
+  payment_received:        { label: 'Payment Received',           desc: 'When a payment is confirmed via Razorpay' },
+  session_window_expiring: { label: 'WhatsApp Session Expiring',  desc: "Fires ~22h after the customer's last message — keeps the 24h window alive so staff can always reply freely" },
 };
 
 // Triggers that schedule relative to a FUTURE event (delay = time BEFORE it),
