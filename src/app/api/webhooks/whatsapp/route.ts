@@ -1570,6 +1570,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // 15. Send reply via Meta
   let metaMsgId: string | null = null;
   let sendFailureMsg: string | null = null;
+  // Set to true when the welcome image is saved to DB inside the block below,
+  // so the generic text insert at step 16 is skipped (avoids duplicate rows).
+  let welcomeImageSavedToDB = false;
   if (!decryptedAccessToken || !tenant.wa_phone_number_id) {
     sendFailureMsg = !decryptedAccessToken
       ? 'missing/undecryptable wa_access_token'
@@ -1583,7 +1586,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       if (isFirstMessageForAI && tenantConfig.welcomeImageUrl) {
         const welcomeMediaType = mediaTypeFromUrl(tenantConfig.welcomeImageUrl);
         const welcomeSignedUrl = await toSignedMediaUrl(tenantConfig.welcomeImageUrl);
-        let mediaSent = false;
+        let welcomeMediaResult: { messageId: string; status: string } | null = null;
         await sendMediaMessage(
           decryptedAccessToken,
           tenant.wa_phone_number_id,
@@ -1592,12 +1595,40 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           welcomeSignedUrl,
           // Videos/documents don't support captions on WhatsApp — send text separately
           welcomeMediaType === 'image' ? aiResponse.reply : undefined
-        ).then(() => { mediaSent = true; }).catch(mediaErr => {
+        ).then((r) => { welcomeMediaResult = r; }).catch(mediaErr => {
           console.error(`⚠️ Meta: welcome ${welcomeMediaType} send failed, falling back to text only:`, (mediaErr as Error).message);
         });
-        // For images: caption delivered with media — skip standalone text.
+        // For images: caption is delivered with the media as one WhatsApp message.
+        // Save the image row to DB immediately with the REAL wamid so:
+        //   (a) it appears in the dashboard (with the image thumbnail), and
+        //   (b) the unique index on wa_message_id is satisfied by a real per-message ID
+        //       (the old hardcoded 'welcome-image-with-caption' string collided on every
+        //       second first-contact and silently blocked the DB insert — messages were
+        //       sent via Meta but never appeared in the AriesAI inbox).
+        if (welcomeMediaResult && welcomeMediaType === 'image') {
+          const realWamid = (welcomeMediaResult as { messageId: string }).messageId || null;
+          const { error: imgInsertErr } = await supabaseAdmin.from('messages').insert({
+            tenant_id: tenant.id,
+            conversation_id: conversation.id,
+            direction: 'outbound',
+            content: aiResponse.reply,
+            message_type: 'image',
+            channel: 'whatsapp',
+            sender_id: null,
+            status: 'sent',
+            ai_generated: true,
+            wa_message_id: realWamid,
+            media_url: tenantConfig.welcomeImageUrl,
+            media_caption: aiResponse.reply,
+          });
+          if (imgInsertErr) {
+            console.error('❌ Meta: failed to save welcome image message:', imgInsertErr.message);
+          } else {
+            welcomeImageSavedToDB = true;
+            metaMsgId = realWamid ?? 'sent';
+          }
+        }
         // For video/document: caption not supported, fall through to send text too.
-        if (mediaSent && welcomeMediaType === 'image') metaMsgId = 'welcome-image-with-caption';
       }
 
       if (!metaMsgId) {
@@ -1749,20 +1780,24 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   }
 
   // Run BOTH DB writes in parallel — saves ~30-60ms
+  // welcomeImageSavedToDB: image row already inserted inside step 15 with the real
+  // wamid; skip this text insert to avoid a duplicate outbound row.
   const [{ error: aiMsgErr }] = await Promise.all([
-    supabaseAdmin.from('messages').insert({
-      tenant_id: tenant.id,
-      conversation_id: conversation.id,
-      direction: 'outbound',
-      content: aiResponse.reply,
-      message_type: 'text',
-      channel: 'whatsapp',
-      sender_id: null,
-      status: metaMsgId ? 'sent' : 'failed',
-      ai_generated: true,
-      wa_message_id: metaMsgId,
-      error_message: sendFailureMsg,
-    }),
+    welcomeImageSavedToDB
+      ? Promise.resolve({ error: null })
+      : supabaseAdmin.from('messages').insert({
+          tenant_id: tenant.id,
+          conversation_id: conversation.id,
+          direction: 'outbound',
+          content: aiResponse.reply,
+          message_type: 'text',
+          channel: 'whatsapp',
+          sender_id: null,
+          status: metaMsgId ? 'sent' : 'failed',
+          ai_generated: true,
+          wa_message_id: metaMsgId,
+          error_message: sendFailureMsg,
+        }),
     supabaseAdmin.rpc('update_conversation_after_ai', {
       p_conv_id:             conversation.id,
       p_context_delta:       contextDelta,
