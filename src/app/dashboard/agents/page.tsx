@@ -256,6 +256,7 @@ export default function AISettingsPage() {
     "What services do you provide?"
   ]);
   const [newQuestionInput, setNewQuestionInput] = useState('');
+  const [uspInput, setUspInput] = useState('');
 
   // Load custom sample questions from localStorage on data mount/change
   useEffect(() => {
@@ -1221,19 +1222,34 @@ export default function AISettingsPage() {
                     </div>
                     <div className="flex gap-2">
                       <input
+                        value={uspInput}
+                        onChange={e => setUspInput(e.target.value)}
                         onKeyDown={e => {
                           if (e.key === 'Enter') {
                             e.preventDefault();
-                            const val = (e.target as HTMLInputElement).value.trim();
+                            const val = uspInput.trim();
                             if (val && !draft.usps.includes(val)) {
                               update('usps', [...draft.usps, val]);
-                              (e.target as HTMLInputElement).value = '';
+                              setUspInput('');
                             }
                           }
                         }}
                         placeholder="Type USP (e.g. Free Valet Parking) and press Enter"
                         className="flex-1 h-9 px-3 rounded-xl text-sm border border-border bg-background outline-none transition-all focus:border-foreground/30"
                       />
+                      <button
+                        onClick={() => {
+                          const val = uspInput.trim();
+                          if (val && !draft.usps.includes(val)) {
+                            update('usps', [...draft.usps, val]);
+                            setUspInput('');
+                          }
+                        }}
+                        className="h-9 px-3 rounded-xl text-sm font-medium flex items-center gap-1.5 transition-colors"
+                        style={{ background: 'var(--secondary)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add
+                      </button>
                     </div>
                   </div>
                 </div>
