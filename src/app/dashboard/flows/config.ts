@@ -90,6 +90,7 @@ export const BUSINESS_TYPE_CONFIG: Record<string, any> = {
     color: '#06B6D4',
     description: 'Orders, reservations, delivery, menu management',
     templates: [
+      { id: 'mezo-booking', name: '🌿 Mezo Booking Flow', description: 'Full premium booking flow — 20% WhatsApp discount, group size check, Call & Instagram buttons.' },
       { id: 'order-taker', name: 'Order Taker', description: 'Conversational menu browsing and ordering.' },
       { id: 'reservation', name: 'Table Reservation', description: 'Real-time table booking and waitlist management.' },
       { id: 'delivery-tracker', name: 'Delivery Tracker', description: 'Live updates for food preparation and delivery.' },

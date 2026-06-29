@@ -30,6 +30,10 @@ export function getPrebuiltFlow(templateId: string, businessType: string): { nod
     return { nodes: [], edges: [] };
   }
 
+  if (templateId === 'mezo-booking') {
+    return getMezoBookingFlow();
+  }
+
   if (templateId === 'clock-tower') {
     const nodes: AppNode[] = [
       { id: 'ct1',  type: 'trigger',      position: { x: 400,  y: 50   }, data: { label: 'Inbound Message',         triggerType: 'keyword', keywords: ['hi','hello','book','table','reserve','menu','dine','lunch','dinner','hours','location','help'] } },
@@ -586,6 +590,204 @@ export function getPrebuiltFlow(templateId: string, businessType: string): { nod
     generateEdge('webhook_1', 'memory_1', 'error'),
     generateEdge('knowledge_1', 'message_2'),
     generateEdge('message_2', 'end_2')
+  ];
+
+  return { nodes, edges };
+}
+
+export function getMezoBookingFlow(): { nodes: AppNode[], edges: Edge[] } {
+  const nodes: AppNode[] = [
+    // ── TRIGGER ──────────────────────────────────────────────────────────────
+    {
+      id: 'mz1', type: 'trigger', position: { x: 500, y: 40 },
+      data: { label: 'Inbound Message', triggerType: 'keyword', keywords: ['hi','hello','hey','book','table','reserve','reservation','party','event','weekend','happening','menu','dine','dinner','lunch','cocktail','drinks','discount','offer','location','parking','valet','timing','hours'] }
+    },
+    // ── WELCOME ───────────────────────────────────────────────────────────────
+    {
+      id: 'mz2', type: 'standard', position: { x: 500, y: 200 },
+      data: { label: 'Welcome Message', content: "🌿 *Welcome to Mezo — The Tropical Paradise* 🐆✨\n\nThank you for reaching out! We're thrilled to have you here.\n\n🎁 *Exclusive WhatsApp Offer:* Book directly with us and enjoy *20% OFF* your entire bill — a better deal than Swiggy or Zomato, straight from us!\n\nHow can I make your Mezo experience extraordinary today? 🌴" }
+    },
+    // ── MAIN MENU BUTTONS ─────────────────────────────────────────────────────
+    {
+      id: 'mz3', type: 'send_buttons', position: { x: 500, y: 390 },
+      data: { label: 'Main Menu', message: 'Choose an option below ✨', buttons: [{ id: 'b1', label: '📅 Book a Table', value: 'book_table' }, { id: 'b2', label: '🎉 Events & Parties', value: 'events' }, { id: 'b3', label: '🍹 Menu & Info', value: 'menu_info' }] }
+    },
+    // ── BRANCH: BOOKING ───────────────────────────────────────────────────────
+    {
+      id: 'mz4', type: 'condition', position: { x: 500, y: 570 },
+      data: { label: 'Book a Table?', field: 'button_value', operator: '==', value: 'book_table' }
+    },
+    // ── INTAKE FORM ───────────────────────────────────────────────────────────
+    {
+      id: 'mz5', type: 'intake_form', position: { x: 140, y: 760 },
+      data: { label: 'Collect Booking Details', fields: [
+        { id: 'f1', name: 'Your Name', type: 'text', required: true, saveAs: 'guest_name', placeholder: 'e.g. Rahul Sharma' },
+        { id: 'f2', name: 'Date of Visit', type: 'text', required: true, saveAs: 'booking_date', placeholder: 'e.g. 5 July 2025' },
+        { id: 'f3', name: 'Arrival Time', type: 'text', required: true, saveAs: 'arrival_time', placeholder: 'e.g. 8:00 PM' },
+        { id: 'f4', name: 'Number of Guests', type: 'number', required: true, saveAs: 'party_size', placeholder: 'e.g. 4' },
+        { id: 'f5', name: 'Any Special Request?', type: 'text', required: false, saveAs: 'special_request', placeholder: 'Birthday, anniversary, dietary needs…' }
+      ]}
+    },
+    // ── CHECK PARTY SIZE ──────────────────────────────────────────────────────
+    {
+      id: 'mz6', type: 'condition', position: { x: 140, y: 1040 },
+      data: { label: 'More than 6 guests?', field: 'party_size', operator: '>', value: '6' }
+    },
+    // ── CONFIRMED (≤ 6 guests) ────────────────────────────────────────────────
+    {
+      id: 'mz7', type: 'standard', position: { x: -160, y: 1240 },
+      data: { label: '✅ Booking Confirmed', content: "✅ *Your Table is Confirmed at Mezo!* 🌿\n\n👤 *Name:* {{guest_name}}\n📅 *Date:* {{booking_date}}\n⏰ *Time:* {{arrival_time}}\n👥 *Guests:* {{party_size}}\n💬 *Special Request:* {{special_request}}\n\n🎁 Your *20% discount* is locked in for this booking!\n\n📍 *Finding Us:* Behind Radisson Blu Hotel, Tonk Road, Jaipur — we have our own entrance 🌴 (do not enter via Radisson lobby)\n\n🚗 *Valet parking* available\n🎶 *Live events* every weekend\n\nWe can't wait to welcome you to Mezo! 🐆✨" }
+    },
+    // ── NOTIFY TEAM ───────────────────────────────────────────────────────────
+    {
+      id: 'mz8', type: 'handoff', position: { x: -160, y: 1460 },
+      data: { label: 'Notify Mezo Team', message: '🔔 *New Reservation — Mezo*\n👤 Guest: {{guest_name}}\n📅 Date: {{booking_date}}\n⏰ Time: {{arrival_time}}\n👥 Party Size: {{party_size}}\n💬 Special: {{special_request}}' }
+    },
+    { id: 'mz9', type: 'end', position: { x: -160, y: 1640 }, data: { label: 'End' } },
+
+    // ── LARGE GROUP (> 6) ─────────────────────────────────────────────────────
+    {
+      id: 'mz10', type: 'standard', position: { x: 440, y: 1240 },
+      data: { label: 'Large Group — Contact Team', content: "🌿 For groups of *7 or more*, our events team will personally ensure everything is absolutely perfect for you!\n\nPlease get in touch with us directly and we'll take care of every detail 🐆✨" }
+    },
+    {
+      id: 'mz11', type: 'send_buttons', position: { x: 440, y: 1430 },
+      data: { label: 'Contact Options', message: 'How would you like to reach us? 📲', buttons: [{ id: 'c1', label: '📞 Call Our Team', value: 'call_team' }, { id: 'c2', label: '📸 Instagram', value: 'show_instagram' }] }
+    },
+    {
+      id: 'mz12', type: 'condition', position: { x: 440, y: 1610 },
+      data: { label: 'Call Team?', field: 'button_value', operator: '==', value: 'call_team' }
+    },
+    // ── CALL DETAILS ──────────────────────────────────────────────────────────
+    {
+      id: 'mz13', type: 'standard', position: { x: 240, y: 1800 },
+      data: { label: 'Share Phone Number', content: "📞 *Call or WhatsApp Us Directly:*\n\n👉 *9091559090*\n\nOur team is available daily *12 PM – 12 AM* and will personally handle your large group booking to make it a truly unforgettable experience! 🌿🐆\n\n_We look forward to hosting you at Mezo!_ ✨" }
+    },
+    { id: 'mz14', type: 'end', position: { x: 240, y: 1990 }, data: { label: 'End' } },
+    // ── INSTAGRAM (from large group) ──────────────────────────────────────────
+    {
+      id: 'mz15', type: 'standard', position: { x: 680, y: 1800 },
+      data: { label: 'Share Instagram', content: "📸 *Follow us on Instagram for the latest updates:*\n\n👉 https://www.instagram.com/mezo_jaipur/\n\nYou'll find our latest weekend events, parties, DJ nights & exclusive offers there first! 🎶🌴\n\nFor bookings, feel free to call us at *9091559090* 🐆✨" }
+    },
+    { id: 'mz16', type: 'end', position: { x: 680, y: 1990 }, data: { label: 'End' } },
+
+    // ── EVENTS PATH ───────────────────────────────────────────────────────────
+    {
+      id: 'mz17', type: 'condition', position: { x: 860, y: 570 },
+      data: { label: 'Events?', field: 'button_value', operator: '==', value: 'events' }
+    },
+    {
+      id: 'mz18', type: 'standard', position: { x: 900, y: 760 },
+      data: { label: 'Events & Parties Info', content: "🎉 *Events & Private Parties at Mezo!* 🌿\n\nWe host incredible experiences every weekend — DJ nights, live music, themed parties, and more! 🎶\n\nWe also specialise in:\n🎂 Birthday Celebrations\n💍 Anniversary Dinners\n🏢 Corporate Events & Team Outings\n💃 Bachelorette & Stag Parties\n\nFor the *latest weekend events*, check our Instagram 📸\n👉 https://www.instagram.com/mezo_jaipur/\n\nFor *private bookings*, our team will curate the perfect experience for you! 🐆✨" }
+    },
+    {
+      id: 'mz19', type: 'send_buttons', position: { x: 900, y: 1000 },
+      data: { label: 'Events Contact Options', message: 'Ready to make it happen? 🌴', buttons: [{ id: 'e1', label: '📞 Call to Book', value: 'call_events' }, { id: 'e2', label: '📸 View on Instagram', value: 'instagram_events' }] }
+    },
+    {
+      id: 'mz20', type: 'condition', position: { x: 900, y: 1180 },
+      data: { label: 'Call for Events?', field: 'button_value', operator: '==', value: 'call_events' }
+    },
+    {
+      id: 'mz21', type: 'standard', position: { x: 720, y: 1370 },
+      data: { label: 'Events Phone', content: "📞 *Call or WhatsApp Our Events Team:*\n\n👉 *9091559090*\n\nAvailable daily *12 PM – 12 AM*\n\nOur team will personally plan every detail to make your event absolutely extraordinary at Mezo! 🌿🐆✨" }
+    },
+    { id: 'mz22', type: 'end', position: { x: 720, y: 1560 }, data: { label: 'End' } },
+    {
+      id: 'mz23', type: 'standard', position: { x: 1100, y: 1370 },
+      data: { label: 'Events Instagram', content: "📸 *Follow Mezo on Instagram for all upcoming events:*\n\n👉 https://www.instagram.com/mezo_jaipur/\n\nWe post our weekend parties, DJ nights & exclusive events first on Instagram! 🎶🌴\n\nTo book a private event, call us at *9091559090* 🐆✨" }
+    },
+    { id: 'mz24', type: 'end', position: { x: 1100, y: 1560 }, data: { label: 'End' } },
+
+    // ── MENU & INFO PATH ──────────────────────────────────────────────────────
+    {
+      id: 'mz25', type: 'condition', position: { x: 1200, y: 570 },
+      data: { label: 'Menu & Info?', field: 'button_value', operator: '==', value: 'menu_info' }
+    },
+    {
+      id: 'mz26', type: 'standard', position: { x: 1260, y: 760 },
+      data: { label: 'Menu Highlights & Info', content: "🌿 *Mezo — The Tropical Paradise* 🐆\n\n*Our Cuisines:* North Indian 🍛 | Continental | Mediterranean | Oriental | Pizza 🍕 | Biryani | Sushi & More!\n\n🍹 *Signature Cocktails* from ₹775\n🍽️ *Starters* from ₹450 | *Mains* from ₹575\n🍕 *Thin Crust Pizzas* from ₹850\n🍮 *Desserts* from ₹565\n☕ *Coffee & Cold Brews* from ₹125\n\n💰 *Average cost for two:* ₹1,400 – ₹2,300\n\n📍 Behind Radisson Blu Hotel, Tonk Road, Jaipur\n⏰ Open daily *12 PM – 12 AM*\n🚗 Valet Parking available\n🎶 Live events every weekend\n\n🎁 *Book via WhatsApp for 20% OFF!* 🌴✨" }
+    },
+    {
+      id: 'mz27', type: 'send_buttons', position: { x: 1260, y: 1010 },
+      data: { label: 'After Menu Options', message: 'What would you like to do next? 🌴', buttons: [{ id: 'm1', label: '📅 Book Now', value: 'book_table_from_menu' }, { id: 'm2', label: '📸 Instagram', value: 'instagram_menu' }] }
+    },
+    {
+      id: 'mz28', type: 'condition', position: { x: 1260, y: 1190 },
+      data: { label: 'Book from Menu?', field: 'button_value', operator: '==', value: 'book_table_from_menu' }
+    },
+    {
+      id: 'mz29', type: 'intake_form', position: { x: 1100, y: 1390 },
+      data: { label: 'Collect Booking Details', fields: [
+        { id: 'g1', name: 'Your Name', type: 'text', required: true, saveAs: 'guest_name', placeholder: 'e.g. Priya Gupta' },
+        { id: 'g2', name: 'Date of Visit', type: 'text', required: true, saveAs: 'booking_date', placeholder: 'e.g. 5 July 2025' },
+        { id: 'g3', name: 'Arrival Time', type: 'text', required: true, saveAs: 'arrival_time', placeholder: 'e.g. 8:00 PM' },
+        { id: 'g4', name: 'Number of Guests', type: 'number', required: true, saveAs: 'party_size', placeholder: 'e.g. 2' },
+        { id: 'g5', name: 'Special Request?', type: 'text', required: false, saveAs: 'special_request', placeholder: 'Birthday, dietary needs…' }
+      ]}
+    },
+    {
+      id: 'mz30', type: 'standard', position: { x: 1100, y: 1660 },
+      data: { label: '✅ Booking Confirmed (from menu)', content: "✅ *Your Table is Confirmed at Mezo!* 🌿\n\n👤 *Name:* {{guest_name}}\n📅 *Date:* {{booking_date}}\n⏰ *Time:* {{arrival_time}}\n👥 *Guests:* {{party_size}}\n\n🎁 Your *20% discount* is confirmed!\n\n📍 Behind Radisson Blu Hotel, Tonk Road — our own entrance 🌴\n🚗 Valet parking available\n\nWe can't wait to welcome you to Mezo! 🐆✨" }
+    },
+    {
+      id: 'mz31', type: 'handoff', position: { x: 1100, y: 1870 },
+      data: { label: 'Notify Mezo Team', message: '🔔 *New Reservation — Mezo*\n👤 Guest: {{guest_name}}\n📅 Date: {{booking_date}}\n⏰ Time: {{arrival_time}}\n👥 Party: {{party_size}}\n💬 Special: {{special_request}}' }
+    },
+    { id: 'mz32', type: 'end', position: { x: 1100, y: 2050 }, data: { label: 'End' } },
+    {
+      id: 'mz33', type: 'standard', position: { x: 1440, y: 1390 },
+      data: { label: 'Instagram from Menu', content: "📸 *Follow Mezo on Instagram:*\n\n👉 https://www.instagram.com/mezo_jaipur/\n\nSee our latest events, food, cocktails & weekend parties! 🎶🌴🐆" }
+    },
+    { id: 'mz34', type: 'end', position: { x: 1440, y: 1580 }, data: { label: 'End' } },
+    // Fallback for unmatched main menu
+    {
+      id: 'mz35', type: 'handoff', position: { x: 1600, y: 760 },
+      data: { label: 'Connect to Mezo Team', message: 'A guest needs assistance — please attend to them at your earliest. 🌿' }
+    },
+    { id: 'mz36', type: 'end', position: { x: 1600, y: 940 }, data: { label: 'End' } },
+  ];
+
+  const edges: Edge[] = [
+    generateEdge('mz1',  'mz2'),
+    generateEdge('mz2',  'mz3'),
+    generateEdge('mz3',  'mz4'),
+    // Booking path
+    generateEdge('mz4',  'mz5',  'true'),
+    generateEdge('mz5',  'mz6'),
+    generateEdge('mz6',  'mz7',  'false'),   // ≤6 guests → confirm
+    generateEdge('mz7',  'mz8'),
+    generateEdge('mz8',  'mz9'),
+    generateEdge('mz6',  'mz10', 'true'),    // >6 guests → contact team
+    generateEdge('mz10', 'mz11'),
+    generateEdge('mz11', 'mz12'),
+    generateEdge('mz12', 'mz13', 'true'),    // call
+    generateEdge('mz13', 'mz14'),
+    generateEdge('mz12', 'mz15', 'false'),   // instagram
+    generateEdge('mz15', 'mz16'),
+    // Events path
+    generateEdge('mz4',  'mz17', 'false'),
+    generateEdge('mz17', 'mz18', 'true'),
+    generateEdge('mz18', 'mz19'),
+    generateEdge('mz19', 'mz20'),
+    generateEdge('mz20', 'mz21', 'true'),    // call for events
+    generateEdge('mz21', 'mz22'),
+    generateEdge('mz20', 'mz23', 'false'),   // instagram for events
+    generateEdge('mz23', 'mz24'),
+    // Menu & Info path
+    generateEdge('mz17', 'mz25', 'false'),
+    generateEdge('mz25', 'mz26', 'true'),
+    generateEdge('mz26', 'mz27'),
+    generateEdge('mz27', 'mz28'),
+    generateEdge('mz28', 'mz29', 'true'),    // book from menu
+    generateEdge('mz29', 'mz30'),
+    generateEdge('mz30', 'mz31'),
+    generateEdge('mz31', 'mz32'),
+    generateEdge('mz28', 'mz33', 'false'),   // instagram from menu
+    generateEdge('mz33', 'mz34'),
+    // Fallback
+    generateEdge('mz25', 'mz35', 'false'),
+    generateEdge('mz35', 'mz36'),
   ];
 
   return { nodes, edges };
