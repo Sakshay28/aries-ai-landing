@@ -153,39 +153,6 @@ export default function FlowsDashboardPage() {
             </p>
           </div>
 
-          {/* ── Industry Templates ───────────────────────────── */}
-          <div className="mb-8">
-            <h2 className="text-[11px] font-bold tracking-widest text-white/35 uppercase mb-4">
-              Start from a Template
-            </h2>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-10">
-              {mainCards.map(t => {
-                const Icon = t.Icon;
-                return (
-                  <div
-                    key={t.id}
-                    onClick={() => handleSelect(t.id)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSelect(t.id); }}
-                    className="relative flex flex-col bg-[#111111] border border-white/[0.05] rounded-xl p-5 cursor-pointer group transition-all duration-200 hover:bg-[#151515] hover:border-[#06B6D4]/30 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_-8px_rgba(6,182,212,0.15)] outline-none focus-visible:border-[#06B6D4]/50"
-                  >
-                    {loadingType === t.id && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0A]/80 backdrop-blur-sm z-10 rounded-xl">
-                        <Loader2 className="w-5 h-5 animate-spin text-[#06B6D4]" />
-                      </div>
-                    )}
-                    <div className="w-9 h-9 rounded-lg bg-white/[0.03] flex items-center justify-center border border-white/[0.05] group-hover:bg-[#06B6D4]/10 group-hover:border-[#06B6D4]/20 transition-all duration-200 mb-3">
-                      <Icon className="w-4 h-4 text-white/50 group-hover:text-[#06B6D4] transition-colors duration-200" />
-                    </div>
-                    <p className="text-[13px] font-semibold text-white/80 tracking-tight leading-tight">{t.name}</p>
-                    <p className="text-[11px] text-white/35 mt-1 leading-snug line-clamp-2">{t.description}</p>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
           <div className="mb-8">
             <h2 className="text-[11px] font-bold tracking-widest text-white/35 uppercase mb-4">
               Start from Scratch
