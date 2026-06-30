@@ -241,6 +241,8 @@ export interface Message {
   file_size?: number | null;
   mime_type?: string | null;
   media_caption?: string | null;
+  // Duration in seconds for voice/audio messages (added 20260701)
+  duration_secs?: number | null;
   reply_to_message_id?: string | null;
   reaction?: string | null;
   // Coexistence: 'whatsapp_app' = the owner sent this from the WhatsApp Business

@@ -3,7 +3,7 @@
 import {
   Send, Bot, User, Check, CheckCheck, Clock, AlertCircle, ArrowDown, Paperclip, Smile,
   Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal, X, Loader2, Trash2, HelpCircle,
-  ArrowLeft, Smartphone, FileText, ChevronRight,
+  ArrowLeft, Smartphone, FileText, ChevronRight, LayoutList, Plus, Minus,
 } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from "framer-motion";
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from "react";
@@ -210,6 +210,19 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const [messageMenuRect, setMessageMenuRect] = useState<DOMRect | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [deleteConfirmMsg, setDeleteConfirmMsg] = useState<Message | null>(null);
+
+  // ── Interactive message composer ──
+  const [interactiveComposerOpen, setInteractiveComposerOpen] = useState(false);
+  const [interactiveType, setInteractiveType] = useState<'button' | 'list'>('button');
+  const [interactiveBody, setInteractiveBody] = useState('');
+  const [interactiveHeader, setInteractiveHeader] = useState('');
+  const [interactiveFooter, setInteractiveFooter] = useState('');
+  const [interactiveButtons, setInteractiveButtons] = useState([{ id: 'btn_1', title: '' }]);
+  const [interactiveListButton, setInteractiveListButton] = useState('View options');
+  const [interactiveSections, setInteractiveSections] = useState([
+    { title: '', rows: [{ id: 'row_1', title: '', description: '' }] },
+  ]);
+  const [sendingInteractive, setSendingInteractive] = useState(false);
 
   // ── 24h session-expired template picker ──
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
@@ -752,6 +765,75 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       toast.error(err.message || 'Failed to send template');
     } finally {
       setSendingTemplate(false);
+    }
+  };
+
+  const handleSendInteractive = async () => {
+    if (!conversationId || sendingInteractive || !interactiveBody.trim()) return;
+    const validButtons = interactiveButtons.filter(b => b.title.trim());
+    if (interactiveType === 'button' && validButtons.length === 0) {
+      toast.error('Add at least one button title');
+      return;
+    }
+    const validSections = interactiveSections
+      .map(s => ({
+        ...(s.title.trim() ? { title: s.title.trim() } : {}),
+        rows: s.rows
+          .filter(r => r.title.trim())
+          .map(r => ({
+            id: r.id,
+            title: r.title.trim(),
+            ...(r.description.trim() ? { description: r.description.trim() } : {}),
+          })),
+      }))
+      .filter(s => s.rows.length > 0);
+    if (interactiveType === 'list' && validSections.length === 0) {
+      toast.error('Add at least one row');
+      return;
+    }
+
+    setSendingInteractive(true);
+    try {
+      const payload: Record<string, unknown> = {
+        conversationId,
+        type: interactiveType,
+        bodyText: interactiveBody.trim(),
+        ...(interactiveHeader.trim() ? { headerText: interactiveHeader.trim() } : {}),
+        ...(interactiveFooter.trim() ? { footerText: interactiveFooter.trim() } : {}),
+      };
+      if (interactiveType === 'button') {
+        payload.buttons = validButtons.map(b => ({ id: b.id, title: b.title.trim() }));
+      } else {
+        payload.listButton = interactiveListButton.trim() || 'View options';
+        payload.sections = validSections;
+      }
+
+      const res = await fetch('/api/dashboard/chat/send-interactive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to send');
+
+      const realMsg: Message = data.message;
+      setMessages(prev => {
+        if (prev.some(m => m.id === realMsg.id)) return prev;
+        return [...prev, realMsg];
+      });
+      setTimeout(() => scrollToBottom(true), 50);
+      toast.success('Interactive message sent');
+      setInteractiveComposerOpen(false);
+      setInteractiveBody('');
+      setInteractiveHeader('');
+      setInteractiveFooter('');
+      setInteractiveButtons([{ id: 'btn_1', title: '' }]);
+      setInteractiveListButton('View options');
+      setInteractiveSections([{ title: '', rows: [{ id: 'row_1', title: '', description: '' }] }]);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to send interactive message');
+    } finally {
+      setSendingInteractive(false);
     }
   };
 
@@ -1455,16 +1537,18 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                         >
                           {replyPreviewCard}
                           <AttachmentBubble
+                            messageId={msg.id}
                             mediaUrl={msg.media_url}
                             fileName={msg.file_name || msg.content || 'file'}
                             fileSize={msg.file_size}
+                            durationSecs={msg.duration_secs}
                             mimeType={
                               msg.mime_type ||
                               // Older rows stored media without mime_type — infer from
                               // message_type so images render inline, not as file chips
                               (msg.message_type === 'image' ? 'image/jpeg'
                                 : msg.message_type === 'video' ? 'video/mp4'
-                                : msg.message_type === 'audio' || msg.message_type === 'voice' ? 'audio/ogg'
+                                : msg.message_type === 'audio' || msg.message_type === 'voice' ? 'audio/ogg; codecs=opus'
                                 : 'application/octet-stream')
                             }
                             caption={msg.media_caption}
@@ -1893,6 +1977,18 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             <Paperclip className="w-4 h-4" />
           </button>
           <button
+            onClick={() => { setInteractiveComposerOpen(v => !v); setEmojiOpen(false); setAiPanelOpen(false); }}
+            title="Send interactive message with buttons"
+            className={cn(
+              "w-8 h-8 rounded-full flex items-center justify-center transition-all flex-shrink-0 mb-0.5",
+              interactiveComposerOpen
+                ? "bg-teal-100 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400 shadow-[0_0_0_2px_rgba(20,184,166,0.2)]"
+                : "text-teal-500/70 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/30"
+            )}
+          >
+            <LayoutList className="w-4 h-4" />
+          </button>
+          <button
             onClick={() => { setAiPanelOpen(v => !v); setEmojiOpen(false); }}
             title="AI Assistant ✨"
             className={cn(
@@ -2303,6 +2399,318 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Interactive Message Composer Modal ── */}
+      <AnimatePresence>
+        {interactiveComposerOpen && (
+          <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !sendingInteractive && setInteractiveComposerOpen(false)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-xs cursor-default"
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 40 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+              className="relative w-full max-w-[520px] bg-white dark:bg-[#1C2333] border border-border rounded-t-3xl sm:rounded-2xl overflow-hidden shadow-2xl flex flex-col"
+              style={{ maxHeight: '90vh' }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-teal-100 dark:bg-teal-950/40 flex items-center justify-center">
+                    <LayoutList className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-[14px] font-bold text-foreground leading-none">Interactive Message</h3>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Sends within the 24h session window</p>
+                  </div>
+                </div>
+                <button
+                  disabled={sendingInteractive}
+                  onClick={() => setInteractiveComposerOpen(false)}
+                  className="p-1.5 hover:bg-secondary rounded-lg transition-colors text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Type tabs */}
+              <div className="flex border-b border-border shrink-0 bg-black/[0.02] dark:bg-white/[0.02]">
+                {(['button', 'list'] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setInteractiveType(t)}
+                    className={cn(
+                      "flex-1 py-2.5 text-[12.5px] font-semibold transition-colors",
+                      interactiveType === t
+                        ? "text-teal-600 dark:text-teal-400 border-b-2 border-teal-500 bg-teal-50/50 dark:bg-teal-950/20"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {t === 'button' ? 'Reply Buttons' : 'List Picker'}
+                    <span className="ml-1.5 text-[10px] opacity-60 font-normal">
+                      {t === 'button' ? 'up to 3' : 'up to 10 rows'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Body */}
+              <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
+
+                {/* Message body */}
+                <div>
+                  <label className="text-[10.5px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
+                    Message Body *
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={interactiveBody}
+                    onChange={e => setInteractiveBody(e.target.value)}
+                    placeholder="What would you like to ask or tell the customer?"
+                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-[13px] text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-2 focus:ring-teal-500/25 focus:border-teal-500/60 transition-all resize-none"
+                  />
+                </div>
+
+                {/* Optional header */}
+                <div>
+                  <label className="text-[10.5px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
+                    Header <span className="font-normal normal-case opacity-60">(optional, max 60 chars)</span>
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={60}
+                    value={interactiveHeader}
+                    onChange={e => setInteractiveHeader(e.target.value)}
+                    placeholder="Bold title shown above the body"
+                    className="w-full h-9 px-3 rounded-xl border border-border bg-background text-[13px] text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-2 focus:ring-teal-500/25 focus:border-teal-500/60 transition-all"
+                  />
+                </div>
+
+                {/* Optional footer */}
+                <div>
+                  <label className="text-[10.5px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
+                    Footer <span className="font-normal normal-case opacity-60">(optional, max 60 chars)</span>
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={60}
+                    value={interactiveFooter}
+                    onChange={e => setInteractiveFooter(e.target.value)}
+                    placeholder="Small grey text below the buttons"
+                    className="w-full h-9 px-3 rounded-xl border border-border bg-background text-[13px] text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-2 focus:ring-teal-500/25 focus:border-teal-500/60 transition-all"
+                  />
+                </div>
+
+                {/* ── Button type UI ── */}
+                {interactiveType === 'button' && (
+                  <div>
+                    <label className="text-[10.5px] font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
+                      Buttons ({interactiveButtons.length}/3)
+                    </label>
+                    <div className="space-y-2">
+                      {interactiveButtons.map((btn, i) => (
+                        <div key={btn.id} className="flex items-center gap-2">
+                          <div className="w-5 h-5 rounded-full bg-teal-500/10 flex items-center justify-center flex-shrink-0">
+                            <span className="text-[10px] font-bold text-teal-600 dark:text-teal-400">{i + 1}</span>
+                          </div>
+                          <input
+                            type="text"
+                            maxLength={20}
+                            value={btn.title}
+                            onChange={e => setInteractiveButtons(prev =>
+                              prev.map((b, j) => j === i ? { ...b, title: e.target.value } : b)
+                            )}
+                            placeholder={`Button ${i + 1} label (max 20 chars)`}
+                            className="flex-1 h-9 px-3 rounded-xl border border-border bg-background text-[13px] text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-2 focus:ring-teal-500/25 focus:border-teal-500/60 transition-all"
+                          />
+                          <span className={cn("text-[10px] flex-shrink-0 tabular-nums", btn.title.length >= 18 ? "text-amber-500" : "text-muted-foreground/40")}>
+                            {btn.title.length}/20
+                          </span>
+                          {interactiveButtons.length > 1 && (
+                            <button
+                              onClick={() => setInteractiveButtons(prev => prev.filter((_, j) => j !== i))}
+                              className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/50 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors flex-shrink-0"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {interactiveButtons.length < 3 && (
+                      <button
+                        onClick={() => setInteractiveButtons(prev => [
+                          ...prev,
+                          { id: `btn_${prev.length + 1}`, title: '' },
+                        ])}
+                        className="mt-2.5 flex items-center gap-1.5 text-[12px] font-semibold text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teal-300 transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add button
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* ── List type UI ── */}
+                {interactiveType === 'list' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-[10.5px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
+                        Button Label <span className="font-normal normal-case opacity-60">(max 20 chars)</span>
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={20}
+                        value={interactiveListButton}
+                        onChange={e => setInteractiveListButton(e.target.value)}
+                        placeholder="e.g. View options"
+                        className="w-full h-9 px-3 rounded-xl border border-border bg-background text-[13px] text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-2 focus:ring-teal-500/25 focus:border-teal-500/60 transition-all"
+                      />
+                    </div>
+
+                    {interactiveSections.map((section, si) => (
+                      <div key={si} className="rounded-xl border border-border overflow-hidden">
+                        {/* Section header */}
+                        <div className="flex items-center gap-2 px-3 py-2.5 bg-black/[0.02] dark:bg-white/[0.03] border-b border-border">
+                          <input
+                            type="text"
+                            maxLength={24}
+                            value={section.title}
+                            onChange={e => setInteractiveSections(prev =>
+                              prev.map((s, j) => j === si ? { ...s, title: e.target.value } : s)
+                            )}
+                            placeholder={`Section ${si + 1} title (optional)`}
+                            className="flex-1 bg-transparent text-[12px] font-semibold text-foreground placeholder:text-muted-foreground/40 outline-none"
+                          />
+                          {interactiveSections.length > 1 && (
+                            <button
+                              onClick={() => setInteractiveSections(prev => prev.filter((_, j) => j !== si))}
+                              className="text-[11px] text-muted-foreground/50 hover:text-red-500 transition-colors"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Rows */}
+                        <div className="divide-y divide-border">
+                          {section.rows.map((row, ri) => (
+                            <div key={row.id} className="px-3 py-2.5 flex gap-2">
+                              <div className="flex-1 space-y-1.5">
+                                <input
+                                  type="text"
+                                  maxLength={24}
+                                  value={row.title}
+                                  onChange={e => setInteractiveSections(prev =>
+                                    prev.map((s, j) => j !== si ? s : {
+                                      ...s,
+                                      rows: s.rows.map((r, k) => k === ri ? { ...r, title: e.target.value } : r),
+                                    })
+                                  )}
+                                  placeholder="Row title (max 24 chars) *"
+                                  className="w-full h-8 px-2.5 rounded-lg border border-border bg-background text-[12.5px] text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-2 focus:ring-teal-500/25 focus:border-teal-500/60 transition-all"
+                                />
+                                <input
+                                  type="text"
+                                  maxLength={72}
+                                  value={row.description}
+                                  onChange={e => setInteractiveSections(prev =>
+                                    prev.map((s, j) => j !== si ? s : {
+                                      ...s,
+                                      rows: s.rows.map((r, k) => k === ri ? { ...r, description: e.target.value } : r),
+                                    })
+                                  )}
+                                  placeholder="Description (optional, max 72 chars)"
+                                  className="w-full h-8 px-2.5 rounded-lg border border-border bg-background text-[12px] text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-2 focus:ring-teal-500/25 focus:border-teal-500/60 transition-all"
+                                />
+                              </div>
+                              {section.rows.length > 1 && (
+                                <button
+                                  onClick={() => setInteractiveSections(prev =>
+                                    prev.map((s, j) => j !== si ? s : {
+                                      ...s,
+                                      rows: s.rows.filter((_, k) => k !== ri),
+                                    })
+                                  )}
+                                  className="w-6 h-6 self-center rounded-full flex items-center justify-center text-muted-foreground/40 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors flex-shrink-0"
+                                >
+                                  <Minus className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Add row */}
+                        {interactiveSections.reduce((n, s) => n + s.rows.length, 0) < 10 && (
+                          <button
+                            onClick={() => setInteractiveSections(prev =>
+                              prev.map((s, j) => j !== si ? s : {
+                                ...s,
+                                rows: [...s.rows, {
+                                  id: `row_${Date.now()}`,
+                                  title: '',
+                                  description: '',
+                                }],
+                              })
+                            )}
+                            className="w-full py-2 text-[11.5px] font-semibold text-teal-600 dark:text-teal-400 hover:bg-teal-50/50 dark:hover:bg-teal-950/20 transition-colors flex items-center justify-center gap-1.5 border-t border-border"
+                          >
+                            <Plus className="w-3 h-3" /> Add row
+                          </button>
+                        )}
+                      </div>
+                    ))}
+
+                    {/* Add section */}
+                    {interactiveSections.reduce((n, s) => n + s.rows.length, 0) < 10 && (
+                      <button
+                        onClick={() => setInteractiveSections(prev => [
+                          ...prev,
+                          { title: '', rows: [{ id: `row_${Date.now()}`, title: '', description: '' }] },
+                        ])}
+                        className="flex items-center gap-1.5 text-[12px] font-semibold text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teal-300 transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add section
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer actions */}
+              <div className="px-5 py-4 border-t border-border shrink-0 flex gap-2">
+                <button
+                  onClick={() => setInteractiveComposerOpen(false)}
+                  disabled={sendingInteractive}
+                  className="flex-1 h-10 rounded-xl bg-secondary hover:bg-secondary/80 text-foreground text-[13px] font-semibold transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendInteractive}
+                  disabled={
+                    sendingInteractive ||
+                    !interactiveBody.trim() ||
+                    (interactiveType === 'button' && !interactiveButtons.some(b => b.title.trim())) ||
+                    (interactiveType === 'list' && !interactiveSections.some(s => s.rows.some(r => r.title.trim())))
+                  }
+                  className="flex-1 h-10 rounded-xl bg-teal-500 hover:bg-teal-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[13px] font-semibold transition-colors flex items-center justify-center gap-2"
+                >
+                  {sendingInteractive ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  {sendingInteractive ? 'Sending…' : 'Send'}
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

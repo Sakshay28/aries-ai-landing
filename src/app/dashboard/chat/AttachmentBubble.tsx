@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import {
   FileText, FileArchive, File, Music, Video, Download,
-  Play, Pause, ExternalLink, Maximize2, X, ImageOff,
+  ExternalLink, Maximize2, X, ImageOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import VoiceMessageBubble from "./VoiceMessageBubble";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 export function formatBytes(bytes: number): string {
@@ -69,79 +70,30 @@ function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClos
   );
 }
 
-// ─── Audio Player ─────────────────────────────────────────────────────────────
-function AudioPlayer({ src, isOutbound }: { src: string; isOutbound: boolean }) {
-  const [playing, setPlaying] = useState(false);
-  const [progress, setProgress] = useState(0); // 0–100, drives the seek bar fill
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  const ensureAudio = () => {
-    if (audioRef.current) return audioRef.current;
-    const a = new Audio(src);
-    a.onended = () => { setPlaying(false); setProgress(0); };
-    a.ontimeupdate = () => {
-      if (a.duration > 0) setProgress((a.currentTime / a.duration) * 100);
-    };
-    audioRef.current = a;
-    return a;
-  };
-
-  const toggle = () => {
-    const a = ensureAudio();
-    if (playing) {
-      a.pause();
-      setPlaying(false);
-    } else {
-      a.play();
-      setPlaying(true);
-    }
-  };
-
-  // Stop playback if the bubble unmounts (e.g. switching conversations).
-  useEffect(() => {
-    return () => { audioRef.current?.pause(); audioRef.current = null; };
-  }, []);
-
-  return (
-    <div className="flex items-center gap-2 py-1">
-      <button
-        onClick={toggle}
-        className={cn(
-          "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-colors",
-          "bg-black/[0.07] hover:bg-black/[0.12] text-[#54656F] dark:bg-white/15 dark:hover:bg-white/25 dark:text-[#E9EDEF]",
-          isOutbound && "dark:bg-white/20"
-        )}
-      >
-        {playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 ml-0.5" />}
-      </button>
-      <div className="flex-1 h-1 rounded-full bg-black/10 dark:bg-white/15">
-        <div
-          className="h-full rounded-full bg-current transition-all"
-          style={{ width: `${progress}%` }}
-        />
-      </div>
-      <Music className="w-3.5 h-3.5 flex-shrink-0 text-[#667781] dark:text-[#8696A0]" />
-    </div>
-  );
-}
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 interface AttachmentBubbleProps {
+  /** DB message ID — used by VoiceMessageBubble for authenticated streaming */
+  messageId?: string | null;
   mediaUrl: string;
   fileName: string;
   fileSize?: number | null;
   mimeType: string;
   caption?: string | null;
+  /** Duration in seconds for voice/audio messages */
+  durationSecs?: number | null;
   isOutbound: boolean;
   isOptimistic?: boolean;
 }
 
 export default function AttachmentBubble({
+  messageId,
   mediaUrl,
   fileName,
   fileSize,
   mimeType,
   caption,
+  durationSecs,
   isOutbound,
   isOptimistic,
 }: AttachmentBubbleProps) {
@@ -255,15 +207,27 @@ export default function AttachmentBubble({
     );
   }
 
-  // ── Audio ──────────────────────────────────────────────────────────────────
+  // ── Audio / Voice ──────────────────────────────────────────────────────────
   if (category === 'audio') {
+    // Optimistic bubbles (local file preview before server confirms) don't have
+    // a real message ID yet — fall back to a static waveform only.
+    const isRealMessage = !!messageId && !messageId.startsWith('__optimistic__');
+
     return (
-      <div className={cn("w-[200px] px-1 py-0.5", isOptimistic && "opacity-60")}>
-        <AudioPlayer src={mediaUrl} isOutbound={isOutbound} />
-        <p className="text-[11px] mt-0.5 truncate text-[#667781] dark:text-[#8696A0]">
-          {fileName}
-          {fileSize ? ` · ${formatBytes(fileSize)}` : ''}
-        </p>
+      <div className="py-0.5">
+        <VoiceMessageBubble
+          messageId={isRealMessage ? messageId : (messageId || 'placeholder')}
+          mimeType={mimeType}
+          fileName={fileName}
+          durationSecs={durationSecs}
+          isOutbound={isOutbound}
+          isOptimistic={isOptimistic || !isRealMessage}
+        />
+        {caption && (
+          <p className="text-[13px] leading-relaxed mt-1 px-1 [word-break:normal] break-words">
+            {caption}
+          </p>
+        )}
       </div>
     );
   }
