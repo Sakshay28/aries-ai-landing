@@ -269,7 +269,50 @@ export async function processNotificationRetries(): Promise<{ claimed: number; r
   return { claimed: claimed.length, retried };
 }
 
-// ── Internal Helpers ────────────────────────────────────────────────────────
+export async function resolveOrCreateConversation(tenantId: string, phone: string, role: 'staff' | 'manager'): Promise<string | null> {
+  try {
+    const { data: existing } = await supabaseAdmin
+      .from('conversations')
+      .select('id, is_active')
+      .eq('tenant_id', tenantId)
+      .eq('sender_id', phone)
+      .maybeSingle();
+
+    if (existing) {
+      if (!existing.is_active) {
+        await supabaseAdmin
+          .from('conversations')
+          .update({ is_active: true, updated_at: new Date().toISOString() })
+          .eq('id', existing.id);
+      }
+      return existing.id;
+    }
+
+    const { data: created, error } = await supabaseAdmin
+      .from('conversations')
+      .insert({
+        tenant_id: tenantId,
+        sender_id: phone,
+        sender_name: role === 'manager' ? 'Manager (Portal)' : 'Staff (Portal)',
+        channel: 'whatsapp',
+        is_active: true,
+        created_at: new Date().toISOString(),
+        last_message_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single();
+
+    if (error) {
+      console.error('[resolveOrCreateConversation] failed to create:', error.message);
+      return null;
+    }
+
+    return created?.id ?? null;
+  } catch (err) {
+    console.error('[resolveOrCreateConversation] unexpected error:', (err as Error).message);
+    return null;
+  }
+}
 
 async function attemptDelivery(
   tenant: Tenant | null,
@@ -313,11 +356,14 @@ async function attemptDelivery(
     const session = await getSessionState(tenantId, recipient.phone);
     console.log(`[TRACE:${traceId}] Dispatching to ${recipient.role} (${recipient.phone}). SessionOpen=${session.windowOpen}`);
 
+    // Ensure we have a conversation record in database so that it appears in Live Chat dashboard!
+    const conversationId = session.conversationId || await resolveOrCreateConversation(tenantId, recipient.phone, recipient.role);
+
     if (session.windowOpen) {
       try {
         const sendResult = await sendTextMessage(token, tenant.wa_phone_number_id, recipient.phone, body);
         results.push({ phone: recipient.phone, role: recipient.role, status: 'sent_session', wa_message_id: sendResult.messageId });
-        if (session.conversationId) await logOutboundMessage(tenantId, session.conversationId, body, 'text', sendResult.messageId);
+        if (conversationId) await logOutboundMessage(tenantId, conversationId, body, 'text', sendResult.messageId);
         continue;
       } catch (err) {
         if (!isWindowClosedError(err)) {
@@ -358,7 +404,7 @@ async function attemptDelivery(
       const positional = mapVariablesToPositional(template.variableMap, resolvedVars);
       const sendResult = await sendTemplateMessage(token, tenant.wa_phone_number_id, recipient.phone, template.name, positional, template.language);
       results.push({ phone: recipient.phone, role: recipient.role, status: 'sent_template', wa_message_id: sendResult.messageId });
-      if (session.conversationId) await logOutboundMessage(tenantId, session.conversationId, `[Template: ${template.name}]`, 'template', sendResult.messageId, template.name);
+      if (conversationId) await logOutboundMessage(tenantId, conversationId, `[Template: ${template.name}]`, 'template', sendResult.messageId, template.name);
     } catch (tplErr) {
       results.push({ phone: recipient.phone, role: recipient.role, status: 'failed', error: (tplErr as Error).message });
     }

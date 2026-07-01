@@ -70,19 +70,32 @@ export async function POST(req: NextRequest) {
       competitorDeflectionReply: draftConfig.competitor_deflection_reply || tenant.competitor_deflection_reply || '',
     };
 
-    // 3b. Check scripted replies — exact keyword intercepts that bypass AI.
-    // Must mirror the webhook behaviour exactly (simulator parity).
-    const { data: scriptedRepliesRows } = await supabaseAdmin
+    let scriptedRepliesRows: any[] | null = null;
+    let { data: initialRows, error: srErr } = await supabaseAdmin
       .from('scripted_replies')
-      .select('keywords, reply, media_url')
+      .select('keywords, reply, media_url, media_urls')
       .eq('tenant_id', tenantId)
       .eq('is_active', true);
 
+    scriptedRepliesRows = initialRows;
+
+    if (srErr && /column|does not exist/i.test(srErr.message || '')) {
+      const { data: fallbackRows } = await supabaseAdmin
+        .from('scripted_replies')
+        .select('keywords, reply, media_url')
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true);
+      scriptedRepliesRows = fallbackRows;
+    }
+
     if (scriptedRepliesRows && scriptedRepliesRows.length > 0) {
-      type ScriptedRow = { keywords: string[]; reply: string; media_url?: string | null };
+      type ScriptedRow = { keywords: string[]; reply: string; media_url?: string | null; media_urls?: string[] | null };
       const matchedScript = pickScriptedReply(scriptedRepliesRows as ScriptedRow[], message);
       if (matchedScript) {
-        const mUrl = matchedScript.media_url || null;
+        const mUrls = matchedScript.media_urls && matchedScript.media_urls.length > 0
+          ? matchedScript.media_urls
+          : (matchedScript.media_url ? [matchedScript.media_url] : []);
+        const mUrl = mUrls[0] || null;
         const mType = mUrl
           ? /\.(mp4|mov|webm|m4v|avi)$/i.test(mUrl.split('?')[0]) ? 'video'
           : /\.(pdf|doc|docx|xls|xlsx|ppt|pptx)$/i.test(mUrl.split('?')[0]) ? 'document'
@@ -93,6 +106,7 @@ export async function POST(req: NextRequest) {
           data: {
             reply: matchedScript.reply,
             mediaUrl: mUrl,
+            mediaUrls: mUrls,
             mediaType: mType,
             intent: 'scripted',
             sentiment: 'neutral',
@@ -165,6 +179,7 @@ export async function POST(req: NextRequest) {
         intent: aiResponse.intent,
         sentiment: aiResponse.sentiment,
         nextStep: aiResponse.nextStep,
+        buttons: aiResponse.buttons,
       },
       // When an AI Flows agent overrode the base config, tell the UI so the
       // user understands why the reply may differ from their AI Assistant setup.

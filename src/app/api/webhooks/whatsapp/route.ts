@@ -12,8 +12,8 @@ import { isDuplicateMessage, getRedisClient, acquireOffHoursLock, acquireOnceNot
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
 import { appendLeadRow, appendBookingRow } from '@/lib/integrations/google-sheets';
-import { parseMetaWebhook, sendTextMessage, sendMediaMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
-import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus } from '@/lib/whatsapp/businessNotify';
+import { parseMetaWebhook, sendTextMessage, sendMediaMessage, sendInteractiveButtonsMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
+import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus, resolveOrCreateConversation } from '@/lib/whatsapp/businessNotify';
 import { normalizePhoneNumber, isSamePhoneNumber } from '@/lib/whatsapp/phone';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 import { processMessageWithAI, isHumanHandoffRequest } from '@/lib/ai/engine';
@@ -351,10 +351,30 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   // Early Intercept for Staff Alert Acknowledgements & Keepalives
   if (isStaffMessage) {
+    const role = (cleanPhone === staffPhone) ? 'staff' : 'manager';
+    const conversationId = await resolveOrCreateConversation(tenant.id, cleanPhone, role);
+
+    // 1. Log incoming staff message to database so it shows in Live Chat
+    if (conversationId) {
+      await supabaseAdmin.from('messages').insert({
+        tenant_id: tenant.id,
+        conversation_id: conversationId,
+        direction: 'inbound',
+        content: content || '[Staff Interaction]',
+        message_type: msg.type === 'interactive' || msg.type === 'button' ? 'interactive' : 'text',
+        channel: 'whatsapp',
+        sender_id: cleanPhone,
+        status: 'delivered',
+        ai_generated: false,
+        wa_message_id: msg.messageId,
+      }).then(null, (e) => console.error('[webhook] failed to log staff inbound:', e.message));
+    }
+
+    let replyText = '';
+
     if (msg.buttonId && msg.buttonId.startsWith('ack_notification:')) {
       const notificationId = msg.buttonId.split(':')[1];
       if (notificationId) {
-        const role = (cleanPhone === staffPhone) ? 'staff' : 'manager';
         const { data: updatedNotif, error: ackErr } = await supabaseAdmin
           .from('business_notifications')
           .update({
@@ -370,28 +390,40 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           console.error('[webhook] Acknowledging notification failed:', ackErr.message);
         } else if (updatedNotif) {
           console.log(`[webhook] Notification ${notificationId} acknowledged by ${role} (${cleanPhone})`);
-          if (decryptedAccessToken && tenant.wa_phone_number_id) {
-            const replyText = `✅ *Alert Acknowledged*\n\nThank you! You have acknowledged the alert: "${updatedNotif.title}".\n\nNo further escalations will be triggered.`;
-            await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id, cleanPhone, replyText).catch(() => {});
-          }
+          replyText = `✅ *Alert Acknowledged*\n\nThank you! You have acknowledged the alert: "${updatedNotif.title}".\n\nNo further escalations will be triggered.`;
         }
       }
     } else if (msg.buttonId === 'staff_keepalive_confirm' || msg.buttonId === 'got_it' || msg.text?.toLowerCase() === 'got it') {
-      if (decryptedAccessToken && tenant.wa_phone_number_id) {
-        const replyText = `✅ *Keepalive Confirmed*\n\nYour alert session is active. You will continue to receive real-time updates.`;
-        await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id, cleanPhone, replyText).catch(() => {});
-      }
+      replyText = `✅ *Keepalive Confirmed*\n\nYour alert session is active. You will continue to receive real-time updates.`;
     } else {
-      if (decryptedAccessToken && tenant.wa_phone_number_id) {
-        const businessName = (tenant as any).business_name || 'your business';
-        const staffReply =
-          `👋 Hi! You're connected to the *${businessName}* staff portal.\n\n` +
-          `🔔 *Booking alerts are active* — you'll receive a WhatsApp message here every time a customer confirms a reservation.\n\n` +
-          `You're all set! No action needed. 🎉`;
-        await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id, cleanPhone, staffReply).catch(() => {});
+      const businessName = (tenant as any).business_name || 'your business';
+      replyText =
+        `👋 Hi! You're connected to the *${businessName}* staff portal.\n\n` +
+        `🔔 *Booking alerts are active* — you'll receive a WhatsApp message here every time a customer confirms a reservation.\n\n` +
+        `You're all set! No action needed. 🎉`;
+    }
+
+    // 2. Send text message back to staff and log outbound reply to database
+    if (replyText && decryptedAccessToken && tenant.wa_phone_number_id) {
+      try {
+        const sendResult = await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id, cleanPhone, replyText);
+        if (conversationId && sendResult.messageId) {
+          await supabaseAdmin.from('messages').insert({
+            tenant_id: tenant.id,
+            conversation_id: conversationId,
+            direction: 'outbound',
+            content: replyText,
+            message_type: 'text',
+            channel: 'whatsapp',
+            status: 'sent',
+            wa_message_id: sendResult.messageId,
+            ai_generated: false,
+          });
+        }
+      } catch (e) {
+        console.error('[webhook] staff reply failed:', (e as Error).message);
       }
     }
-    // Absolutely do NOT create a customer lead or conversation for staff
     return;
   }
 
@@ -1111,56 +1143,88 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   //
   // Skipped entirely while a flow is mid-execution — see hasActiveFlow().
   if (msg.text && !hasActiveFlow(conversation?.context as Record<string, unknown> | undefined)) {
-    const { data: earlyScriptedRows } = await supabaseAdmin
+    let earlyScriptedRows: any[] | null = null;
+    let { data: initialRows, error: srErr } = await supabaseAdmin
       .from('scripted_replies')
-      .select('keywords, reply, media_url, secondary_reply')
+      .select('keywords, reply, media_url, media_urls')
       .eq('tenant_id', tenant.id)
       .eq('is_active', true);
 
+    earlyScriptedRows = initialRows;
+
+    if (srErr && /column|does not exist/i.test(srErr.message || '')) {
+      const { data: fallbackRows } = await supabaseAdmin
+        .from('scripted_replies')
+        .select('keywords, reply, media_url')
+        .eq('tenant_id', tenant.id)
+        .eq('is_active', true);
+      earlyScriptedRows = fallbackRows;
+    }
+
     if (earlyScriptedRows && earlyScriptedRows.length > 0) {
-      type ESRow = { keywords: string[]; reply: string; media_url?: string | null; secondary_reply?: string | null };
-      // Matching rules (short-keyword start anchor, longest-keyword-wins) live
-      // in @/lib/webhook/decisions — unit-tested in tests/webhook-decisions.test.ts
+      type ESRow = { keywords: string[]; reply: string; media_url?: string | null; media_urls?: string[] | null };
       const matchedEarly = pickScriptedReply(earlyScriptedRows as ESRow[], msg.text);
       if (matchedEarly) {
         console.log(`⚡ Scripted reply (early) matched for tenant ${tenant.id}: "${matchedEarly.keywords.join(', ')}"`);
         if (decryptedAccessToken && tenant.wa_phone_number_id) {
-          const srMediaType = matchedEarly.media_url ? mediaTypeFromUrl(matchedEarly.media_url) : null;
-          const srMediaUrl = matchedEarly.media_url ? await toSignedMediaUrl(matchedEarly.media_url) : null;
-          const sendResult = srMediaUrl
-            ? await sendMediaMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, srMediaType!, srMediaUrl, matchedEarly.reply || undefined)
-                .catch((e: Error) => { console.error(`❌ Scripted reply ${srMediaType} send failed:`, e.message); return null; })
-            : await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, matchedEarly.reply)
-                .catch((e: Error) => { console.error('❌ Scripted reply send failed:', e.message); return null; });
-          const { error: scriptedMsgErr } = await supabaseAdmin.from('messages').insert({
-            tenant_id: tenant.id, conversation_id: conversation.id,
-            direction: 'outbound',
-            content: matchedEarly.reply || matchedEarly.media_url || '',
-            message_type: srMediaType ?? 'text',
-            channel: 'whatsapp', status: sendResult ? 'sent' : 'failed',
-            ai_generated: false, wa_message_id: sendResult?.messageId ?? null,
-            ...(matchedEarly.media_url && {
-              media_url: matchedEarly.media_url,
-              media_caption: matchedEarly.reply || null,
-            }),
-          });
-          if (scriptedMsgErr) {
-            console.error('❌ Scripted reply message insert failed:', scriptedMsgErr.message);
-          }
+          const mediaUrls = matchedEarly.media_urls && matchedEarly.media_urls.length > 0
+            ? matchedEarly.media_urls
+            : (matchedEarly.media_url ? [matchedEarly.media_url] : []);
 
-          // Secondary reply — sent immediately after the first (e.g. bar menu after food menu)
-          if (matchedEarly.secondary_reply) {
-            const sendResult2 = await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, matchedEarly.secondary_reply)
-              .catch((e: Error) => { console.error('❌ Scripted secondary reply send failed:', e.message); return null; });
-            await supabaseAdmin.from('messages').insert({
+          if (mediaUrls.length > 1) {
+            if (matchedEarly.reply) {
+              const textResult = await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, matchedEarly.reply)
+                .catch((e: Error) => { console.error('❌ Scripted reply text send failed:', e.message); return null; });
+              
+              await supabaseAdmin.from('messages').insert({
+                tenant_id: tenant.id, conversation_id: conversation.id,
+                direction: 'outbound',
+                content: matchedEarly.reply,
+                message_type: 'text',
+                channel: 'whatsapp', status: textResult ? 'sent' : 'failed',
+                ai_generated: false, wa_message_id: textResult?.messageId ?? null,
+              }).then(({ error: e }) => { if (e) console.error('❌ Scripted reply text message DB insert failed:', e.message); });
+            }
+
+            for (const url of mediaUrls) {
+              const mType = mediaTypeFromUrl(url);
+              const signedUrl = await toSignedMediaUrl(url);
+              const mediaResult = await sendMediaMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, mType, signedUrl)
+                .catch((e: Error) => { console.error(`❌ Scripted reply sequential ${mType} send failed:`, e.message); return null; });
+
+              await supabaseAdmin.from('messages').insert({
+                tenant_id: tenant.id, conversation_id: conversation.id,
+                direction: 'outbound',
+                content: url,
+                message_type: mType,
+                channel: 'whatsapp', status: mediaResult ? 'sent' : 'failed',
+                ai_generated: false, wa_message_id: mediaResult?.messageId ?? null,
+                media_url: url,
+              }).then(({ error: e }) => { if (e) console.error(`❌ Scripted reply sequential ${mType} DB insert failed:`, e.message); });
+            }
+          } else {
+            const srMediaType = mediaUrls[0] ? mediaTypeFromUrl(mediaUrls[0]) : null;
+            const srMediaUrl = mediaUrls[0] ? await toSignedMediaUrl(mediaUrls[0]) : null;
+            const sendResult = srMediaUrl
+              ? await sendMediaMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, srMediaType!, srMediaUrl, matchedEarly.reply || undefined)
+                  .catch((e: Error) => { console.error(`❌ Scripted reply ${srMediaType} send failed:`, e.message); return null; })
+              : await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, matchedEarly.reply)
+                  .catch((e: Error) => { console.error('❌ Scripted reply send failed:', e.message); return null; });
+            const { error: scriptedMsgErr } = await supabaseAdmin.from('messages').insert({
               tenant_id: tenant.id, conversation_id: conversation.id,
               direction: 'outbound',
-              content: matchedEarly.secondary_reply,
-              message_type: 'text',
-              channel: 'whatsapp', status: sendResult2 ? 'sent' : 'failed',
-              ai_generated: false, wa_message_id: sendResult2?.messageId ?? null,
-            }).then(({ error: e }) => { if (e) console.error('❌ Scripted secondary reply DB insert failed:', e.message); });
-            console.log(`⚡ Scripted secondary reply sent to ${cleanPhone}`);
+              content: matchedEarly.reply || mediaUrls[0] || '',
+              message_type: srMediaType ?? 'text',
+              channel: 'whatsapp', status: sendResult ? 'sent' : 'failed',
+              ai_generated: false, wa_message_id: sendResult?.messageId ?? null,
+              ...(mediaUrls[0] && {
+                media_url: mediaUrls[0],
+                media_caption: matchedEarly.reply || null,
+              }),
+            });
+            if (scriptedMsgErr) {
+              console.error('❌ Scripted reply message insert failed:', scriptedMsgErr.message);
+            }
           }
         }
         // Scripted reply exits before step 18, so schedule follow-ups here.
@@ -1634,6 +1698,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // welcomeImageSavedToDB: image row is in DB — step 16 text insert must be skipped.
   let welcomeImageSentToMeta = false;
   let welcomeImageSavedToDB = false;
+  let buttonsSentSuccessfully = false;
   if (!decryptedAccessToken || !tenant.wa_phone_number_id) {
     sendFailureMsg = !decryptedAccessToken
       ? 'missing/undecryptable wa_access_token'
@@ -1697,13 +1762,37 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
       // Only send a text message if the image was NOT already delivered to the customer.
       if (!metaMsgId && !welcomeImageSentToMeta) {
-        const result = await sendTextMessage(
-          decryptedAccessToken,
-          tenant.wa_phone_number_id,
-          cleanPhone,
-          aiResponse.reply
-        );
-        metaMsgId = result.messageId;
+        if (aiResponse.buttons && aiResponse.buttons.length > 0) {
+          try {
+            const result = await sendInteractiveButtonsMessage(
+              decryptedAccessToken,
+              tenant.wa_phone_number_id,
+              cleanPhone,
+              aiResponse.reply,
+              aiResponse.buttons
+            );
+            metaMsgId = result.messageId;
+            buttonsSentSuccessfully = true;
+          } catch (btnErr) {
+            console.error('⚠️ Meta: failed to send AI reply as interactive buttons, falling back to text:', (btnErr as Error).message);
+            // Fall back to text message
+            const result = await sendTextMessage(
+              decryptedAccessToken,
+              tenant.wa_phone_number_id,
+              cleanPhone,
+              aiResponse.reply
+            );
+            metaMsgId = result.messageId;
+          }
+        } else {
+          const result = await sendTextMessage(
+            decryptedAccessToken,
+            tenant.wa_phone_number_id,
+            cleanPhone,
+            aiResponse.reply
+          );
+          metaMsgId = result.messageId;
+        }
       }
     } catch (sendErr) {
       sendFailureMsg = (sendErr as Error).message;
@@ -1858,7 +1947,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           conversation_id: conversation.id,
           direction: 'outbound',
           content: aiResponse.reply,
-          message_type: 'text',
+          message_type: buttonsSentSuccessfully ? 'interactive' : 'text',
           channel: 'whatsapp',
           sender_id: null,
           status: (metaMsgId || welcomeImageSentToMeta) ? 'sent' : 'failed',
@@ -1866,6 +1955,12 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           ai_latency_ms: aiLatencyMs,
           wa_message_id: metaMsgId, // null when image sent but its DB insert failed
           error_message: sendFailureMsg,
+          ...(buttonsSentSuccessfully ? {
+            metadata: {
+              interactive_type: 'button',
+              buttons: aiResponse.buttons
+            }
+          } : {})
         }),
     supabaseAdmin.rpc('update_conversation_after_ai', {
       p_conv_id:             conversation.id,

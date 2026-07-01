@@ -28,6 +28,7 @@ export interface AIResponse {
   escalationReason?: string;
   nextStep: string;
   confidence: number;
+  buttons?: Array<{ id: string; title: string }>;
 }
 
 export interface ExtractedData {
@@ -382,6 +383,14 @@ ESCALATION KEYWORDS: If the customer's message contains any of these words or ph
 ${tenantConfig.systemPrompt}
 ` : ''}
 
+QUICK-REPLY BUTTONS RULES (Optional):
+- You can optionally attach 1 to 3 quick-reply buttons to your reply in the "buttons" field.
+- Do NOT use buttons on every response. Use them only when offering clear pathways/choices (e.g., "Reserve a Table", "View Menu", "Talk to Staff", "Modify Booking", "Cancel Booking", "Speak to Team").
+- Each button must be an object with:
+  1. "id": A unique alphanumeric ID (e.g., "opt_reserve", "opt_menu", "opt_support").
+  2. "title": A short, clear label STRICTLY 20 characters or less (e.g., "Book a Table", "View Menu", "Talk to Human"). This 20-character limit is absolute.
+- If no buttons are appropriate, set "buttons" to null or omit the field.
+
 You must respond with ONLY a JSON object (no markdown, no backticks) in this exact format:
 {
   "reply": "Your message to the customer",
@@ -404,7 +413,11 @@ You must respond with ONLY a JSON object (no markdown, no backticks) in this exa
     "mediaToSend": null
   },
   "nextStep": "what info to collect next: greeting, ask_intent, ask_guests, ask_date, ask_occasion, ask_name, ask_phone, ask_email, confirmation, completed, escalated",
-  "confidence": 0.95
+  "confidence": 0.95,
+  "buttons": [
+    { "id": "btn_1", "title": "Reserve Table" },
+    { "id": "btn_2", "title": "See Menu" }
+  ]
 }${SYSTEM_PROMPT_SAFETY_APPENDIX}`;
 }
 
@@ -681,6 +694,22 @@ function parseAIResponse(text: string): AIResponse {
 
     const parsed = JSON.parse(cleaned);
 
+    // Safely extract and validate dynamic buttons (strictly 1-3, titles <= 20 chars)
+    let buttons = undefined;
+    if (Array.isArray(parsed.buttons) && parsed.buttons.length > 0) {
+      buttons = parsed.buttons
+        .map((b: any, index: number) => {
+          const title = String(b?.title || '').trim().slice(0, 20);
+          const id = String(b?.id || `ai_btn_${index}`).trim().replace(/[^a-zA-Z0-9_-]/g, '');
+          return { id, title };
+        })
+        .filter((b: any) => b.title.length > 0)
+        .slice(0, 3);
+      if (buttons.length === 0) {
+        buttons = undefined;
+      }
+    }
+
     return {
       reply: parsed.reply || "Got it! How can I help?",
       extractedData: parsed.extractedData || {},
@@ -690,6 +719,7 @@ function parseAIResponse(text: string): AIResponse {
       escalationReason: parsed.escalationReason,
       nextStep: parsed.nextStep || 'ask_intent',
       confidence: parsed.confidence || 0.5,
+      buttons,
     };
   } catch {
     // Try to extract the reply field using regex if JSON is malformed/truncated

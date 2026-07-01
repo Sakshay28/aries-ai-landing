@@ -25,7 +25,8 @@ export async function GET() {
     supabaseAdmin.from('messages').select('id', { count: 'exact', head: true }),
   ]);
 
-  const tenants = tenantsRes.data || [];
+  const rawTenants = tenantsRes.data || [];
+  const tenants = rawTenants.filter(t => !!t.wa_phone_number_id);
   const totalLeads = leadsRes.count || 0;
   const totalMessages = messagesRes.count || 0;
 

@@ -25,6 +25,7 @@ interface ScriptedReply {
   keywords: string[];
   reply: string;
   media_url?: string | null;
+  media_urls?: string[] | null;
   is_active: boolean;
   created_at: string;
 }
@@ -58,6 +59,7 @@ interface ChatMessage {
   mediaType?: 'image' | 'video' | 'document' | null;
   timestamp: Date;
   isError?: boolean;
+  buttons?: Array<{ id: string; title: string }>;
 }
 
 function mediaTypeFromUrl(url: string): 'image' | 'video' | 'document' {
@@ -224,8 +226,7 @@ export default function AISettingsPage() {
   const [scriptedReplies, setScriptedReplies] = useState<ScriptedReply[]>([]);
   const [newSrKeywords, setNewSrKeywords] = useState('');
   const [newSrReply, setNewSrReply] = useState('');
-  const [newSrMediaUrl, setNewSrMediaUrl] = useState('');
-  const [newSrMediaType, setNewSrMediaType] = useState<'image' | 'video' | 'document' | null>(null);
+  const [newSrMediaUrls, setNewSrMediaUrls] = useState<string[]>([]);
   const [uploadingSrMedia, setUploadingSrMedia] = useState(false);
   const [addingSr, setAddingSr] = useState(false);
   const srMediaInputRef = useRef<HTMLInputElement>(null);
@@ -488,23 +489,21 @@ export default function AISettingsPage() {
   const handleAddScriptedReply = async () => {
     const keywords = newSrKeywords.split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
     const reply = newSrReply.trim();
-    const mediaUrl = newSrMediaUrl.trim() || null;
     if (keywords.length === 0) { toast.error('Add at least one trigger keyword'); return; }
-    if (!reply && !mediaUrl) { toast.error('Reply text or image URL is required'); return; }
+    if (!reply && newSrMediaUrls.length === 0) { toast.error('Reply text or at least one attachment is required'); return; }
     setAddingSr(true);
     try {
       const res = await fetch('/api/dashboard/scripted-replies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keywords, reply, media_url: mediaUrl }),
+        body: JSON.stringify({ keywords, reply, media_urls: newSrMediaUrls }),
       });
       const json = await res.json();
       if (json.data) {
         setScriptedReplies(prev => [...prev, json.data]);
         setNewSrKeywords('');
         setNewSrReply('');
-        setNewSrMediaUrl('');
-        setNewSrMediaType(null);
+        setNewSrMediaUrls([]);
         toast.success('Scripted reply added!');
       } else {
         toast.error(json.error || 'Failed to add');
@@ -558,8 +557,7 @@ export default function AISettingsPage() {
     try {
       const result = await uploadViaPresignedUrl(file);
       if (result) {
-        setNewSrMediaUrl(result.url);
-        setNewSrMediaType(result.mediaType);
+        setNewSrMediaUrls(prev => [...prev, result.url]);
         const label = result.mediaType === 'video' ? 'Video' : result.mediaType === 'document' ? 'Document' : 'Image';
         toast.success(`${label} uploaded!`);
       }
@@ -781,15 +779,40 @@ export default function AISettingsPage() {
       setTimeout(() => {
         if (json.success && json.data) {
           const newMessages: ChatMessage[] = [];
-          const replyMsg: ChatMessage = {
-            id: `a-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-            role: 'assistant',
-            content: json.data.reply,
-            mediaUrl: json.data.mediaUrl || null,
-            mediaType: json.data.mediaType || null,
-            timestamp: new Date()
-          };
-          newMessages.push(replyMsg);
+          if (json.data.mediaUrls && json.data.mediaUrls.length > 1) {
+            if (json.data.reply) {
+              newMessages.push({
+                id: `a-text-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                role: 'assistant',
+                content: json.data.reply,
+                timestamp: new Date()
+              });
+            }
+            json.data.mediaUrls.forEach((url: string, index: number) => {
+              const isLast = index === json.data.mediaUrls.length - 1;
+              newMessages.push({
+                id: `a-media-${index}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                role: 'assistant',
+                content: '',
+                mediaUrl: url,
+                mediaType: mediaTypeFromUrl(url),
+                timestamp: new Date(),
+                buttons: isLast ? (json.data.buttons || undefined) : undefined
+              });
+            });
+          } else {
+            const replyMediaUrl = json.data.mediaUrl || (json.data.mediaUrls && json.data.mediaUrls[0]) || null;
+            const replyMsg: ChatMessage = {
+              id: `a-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              role: 'assistant',
+              content: json.data.reply,
+              mediaUrl: replyMediaUrl,
+              mediaType: json.data.mediaType || (replyMediaUrl ? mediaTypeFromUrl(replyMediaUrl) : null),
+              timestamp: new Date(),
+              buttons: json.data.buttons || undefined
+            };
+            newMessages.push(replyMsg);
+          }
 
           // If the AI provider is down, display the warning/error in the chat as well
           if (json.providerStatus && !json.providerStatus.available && json.providerStatus.lastError) {
@@ -1499,23 +1522,34 @@ export default function AISettingsPage() {
                                   </span>
                                 ))}
                               </div>
-                              {sr.media_url && (() => {
-                                const mt = mediaTypeFromUrl(sr.media_url);
+                              {(() => {
+                                const urls = sr.media_urls && sr.media_urls.length > 0
+                                  ? sr.media_urls
+                                  : (sr.media_url ? [sr.media_url] : []);
+                                if (urls.length === 0) return null;
                                 return (
-                                  <div className="flex items-center gap-2">
-                                    {mt === 'video' ? (
-                                      <video src={sr.media_url} className="h-16 w-24 object-cover rounded-lg border border-border" muted />
-                                    ) : mt === 'document' ? (
-                                      <div className="h-16 w-24 rounded-lg border border-border bg-secondary/40 flex flex-col items-center justify-center gap-1">
-                                        <span className="text-xl">📄</span>
-                                        <span className="text-[9px] text-muted-foreground font-medium uppercase">{sr.media_url.split('.').pop()?.slice(0, 4)}</span>
-                                      </div>
-                                    ) : (
-                                      <img src={sr.media_url} alt="scripted reply" className="h-16 w-24 object-cover rounded-lg border border-border" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                                    )}
-                                    <span className="text-[10px] text-muted-foreground/60 font-medium">
-                                      {mt === 'video' ? '🎬 Video attached' : mt === 'document' ? '📄 Document attached' : '📷 Image attached'}
-                                    </span>
+                                  <div className="flex flex-wrap gap-2 mt-1">
+                                    {urls.map((url, ui) => {
+                                      const mt = mediaTypeFromUrl(url);
+                                      return (
+                                        <div key={ui} className="flex items-center gap-2 bg-secondary/30 p-1.5 rounded-lg border border-border/40 max-w-[200px]">
+                                          {mt === 'video' ? (
+                                            <video src={url} className="h-10 w-14 object-cover rounded border border-border shrink-0" muted />
+                                          ) : mt === 'document' ? (
+                                            <div className="h-10 w-14 rounded border border-border bg-secondary/50 flex flex-col items-center justify-center shrink-0">
+                                              <span className="text-base">📄</span>
+                                              <span className="text-[7px] text-muted-foreground font-semibold uppercase">{url.split('.').pop()?.slice(0, 3)}</span>
+                                            </div>
+                                          ) : (
+                                            <img src={url} alt="scripted reply" className="h-10 w-14 object-cover rounded border border-border shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                          )}
+                                          <div className="min-w-0 flex-1">
+                                            <p className="text-[9px] font-bold text-foreground capitalize truncate">{mt}</p>
+                                            <p className="text-[8px] text-muted-foreground truncate">{url.split('/').pop()?.split('-').slice(1).join('-') || 'file'}</p>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
                                   </div>
                                 );
                               })()}
@@ -1584,46 +1618,51 @@ export default function AISettingsPage() {
                       </div>
                       <div>
                         <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
-                          Attachment <span className="normal-case font-normal text-muted-foreground/50">(optional — image, video, or document)</span>
+                          Attachments <span className="normal-case font-normal text-muted-foreground/50">(optional — images, videos, or documents)</span>
                         </label>
-                        {newSrMediaUrl ? (
-                          <div className="flex items-start gap-3">
-                            {newSrMediaType === 'video' ? (
-                              <video src={newSrMediaUrl} className="h-20 w-28 object-cover rounded-xl border border-border" muted />
-                            ) : newSrMediaType === 'document' ? (
-                              <div className="h-20 w-28 rounded-xl border border-border bg-secondary/40 flex flex-col items-center justify-center gap-1">
-                                <span className="text-2xl">📄</span>
-                                <span className="text-[9px] text-muted-foreground font-medium uppercase">{newSrMediaUrl.split('.').pop()?.slice(0, 4)}</span>
-                              </div>
-                            ) : (
-                              <img src={newSrMediaUrl} alt="preview" className="h-20 w-28 object-cover rounded-xl border border-border" />
-                            )}
-                            <div className="flex flex-col gap-1.5 pt-1">
-                              <span className="text-[11px] text-emerald-600 font-bold">
-                                ✓ {newSrMediaType === 'video' ? 'Video' : newSrMediaType === 'document' ? 'Document' : 'Image'} ready
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => { setNewSrMediaUrl(''); setNewSrMediaType(null); }}
-                                className="text-[10px] text-muted-foreground hover:text-red-500 flex items-center gap-1"
-                              >
-                                <X className="w-3 h-3" /> Remove
-                              </button>
-                            </div>
+                        {newSrMediaUrls.length > 0 && (
+                          <div className="grid grid-cols-2 gap-2 mb-2">
+                            {newSrMediaUrls.map((url, index) => {
+                              const mt = mediaTypeFromUrl(url);
+                              return (
+                                <div key={index} className="flex items-start gap-2 p-2 rounded-lg border border-border bg-background relative group">
+                                  {mt === 'video' ? (
+                                    <video src={url} className="h-10 w-14 object-cover rounded border border-border shrink-0" muted />
+                                  ) : mt === 'document' ? (
+                                    <div className="h-10 w-14 rounded border border-border bg-secondary/50 flex flex-col items-center justify-center shrink-0">
+                                      <span className="text-base">📄</span>
+                                      <span className="text-[7px] text-muted-foreground font-bold uppercase">{url.split('.').pop()?.slice(0, 3)}</span>
+                                    </div>
+                                  ) : (
+                                    <img src={url} alt="preview" className="h-10 w-14 object-cover rounded border border-border shrink-0" />
+                                  )}
+                                  <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                    <span className="text-[9px] text-emerald-600 font-bold truncate">✓ Ready</span>
+                                    <span className="text-[7px] text-muted-foreground truncate">{url.split('/').pop()?.split('-').slice(1).join('-') || 'file'}</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewSrMediaUrls(prev => prev.filter((_, i) => i !== index))}
+                                    className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600 transition-colors"
+                                  >
+                                    <X className="w-2.5 h-2.5" />
+                                  </button>
+                                </div>
+                              );
+                            })}
                           </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => srMediaInputRef.current?.click()}
-                            disabled={uploadingSrMedia}
-                            className="flex items-center gap-2 h-9 px-4 rounded-xl text-xs font-bold border border-dashed border-border bg-secondary/30 hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-all disabled:opacity-50"
-                          >
-                            {uploadingSrMedia
-                              ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading…</>
-                              : <><UploadCloud className="w-3.5 h-3.5" /> Upload Image / Video / Document</>
-                            }
-                          </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => srMediaInputRef.current?.click()}
+                          disabled={uploadingSrMedia}
+                          className="flex items-center gap-2 h-9 px-4 rounded-xl text-xs font-bold border border-dashed border-border bg-secondary/30 hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-all disabled:opacity-50"
+                        >
+                          {uploadingSrMedia
+                            ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading…</>
+                            : <><UploadCloud className="w-3.5 h-3.5" /> Upload Image / Video / Document</>
+                          }
+                        </button>
                         <input
                           ref={srMediaInputRef}
                           type="file"
@@ -1639,7 +1678,7 @@ export default function AISettingsPage() {
                       </div>
                       <button
                         onClick={handleAddScriptedReply}
-                        disabled={addingSr || !newSrKeywords.trim() || (!newSrReply.trim() && !newSrMediaUrl)}
+                        disabled={addingSr || !newSrKeywords.trim() || (!newSrReply.trim() && newSrMediaUrls.length === 0)}
                         className="flex items-center gap-1.5 h-8 px-4 rounded-lg text-xs font-bold bg-foreground text-background hover:opacity-90 disabled:opacity-40 transition-all ml-auto"
                       >
                         {addingSr ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
@@ -2023,6 +2062,22 @@ export default function AISettingsPage() {
                           style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}
                         >
                           {m.content}
+                        </div>
+                      )}
+
+                      {/* Render dynamic quick-reply buttons in simulator */}
+                      {m.role === 'assistant' && m.buttons && m.buttons.length > 0 && (
+                        <div className="flex flex-col gap-1.5 mt-1 max-w-[280px]">
+                          {m.buttons.map(btn => (
+                            <button
+                              key={btn.id}
+                              disabled={sendingMsg}
+                              onClick={() => handleSendMessage(undefined, btn.title)}
+                              className="text-center py-2 px-3 text-xs font-semibold rounded-xl transition-colors border border-emerald-600/25 bg-emerald-50/30 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                            >
+                              {btn.title}
+                            </button>
+                          ))}
                         </div>
                       )}
                     </div>

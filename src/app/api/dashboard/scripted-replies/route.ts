@@ -16,14 +16,33 @@ export async function GET() {
   const tenantId = await getTenantId();
   if (!tenantId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { data, error } = await supabaseAdmin
+  let data: any[] | null = null;
+  let { data: initialData, error } = await supabaseAdmin
     .from('scripted_replies')
-    .select('id, keywords, reply, media_url, is_active, created_at')
+    .select('id, keywords, reply, media_url, media_urls, is_active, created_at')
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: true });
 
+  data = initialData;
+
+  if (error && /column|does not exist/i.test(error.message || '')) {
+    const { data: fallbackData, error: fallbackError } = await supabaseAdmin
+      .from('scripted_replies')
+      .select('id, keywords, reply, media_url, is_active, created_at')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: true });
+    data = fallbackData;
+    error = fallbackError;
+  }
+
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ data: data ?? [] });
+
+  const mapped = (data ?? []).map(row => ({
+    ...row,
+    media_urls: row.media_urls ?? (row.media_url ? [row.media_url] : [])
+  }));
+
+  return NextResponse.json({ data: mapped });
 }
 
 export async function POST(req: NextRequest) {
@@ -35,17 +54,49 @@ export async function POST(req: NextRequest) {
     .map((k: string) => k.trim().toLowerCase())
     .filter(Boolean);
   const reply: string = (body?.reply ?? '').trim();
-  const mediaUrl: string | null = (body?.media_url ?? '').trim() || null;
+  
+  let mediaUrls: string[] = [];
+  if (Array.isArray(body?.media_urls)) {
+    mediaUrls = body.media_urls.map((u: string) => u.trim()).filter(Boolean);
+  } else if (body?.media_url) {
+    mediaUrls = [body.media_url.trim()];
+  }
+  const mediaUrl = mediaUrls[0] || null;
 
   if (keywords.length === 0) return NextResponse.json({ error: 'At least one keyword is required' }, { status: 400 });
-  if (!reply && !mediaUrl) return NextResponse.json({ error: 'Reply text or image is required' }, { status: 400 });
+  if (!reply && mediaUrls.length === 0) return NextResponse.json({ error: 'Reply text or attachment is required' }, { status: 400 });
 
-  const { data, error } = await supabaseAdmin
+  const insertPayload: any = {
+    tenant_id: tenantId,
+    keywords,
+    reply: reply || '',
+    media_url: mediaUrl,
+    media_urls: mediaUrls,
+    is_active: true
+  };
+
+  let { data, error } = await supabaseAdmin
     .from('scripted_replies')
-    .insert({ tenant_id: tenantId, keywords, reply: reply || '', media_url: mediaUrl, is_active: true })
-    .select('id, keywords, reply, media_url, is_active, created_at')
+    .insert(insertPayload)
+    .select('id, keywords, reply, media_url, media_urls, is_active, created_at')
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ data });
+  if (error && /column|does not exist/i.test(error.message || '')) {
+    delete insertPayload.media_urls;
+    ({ data, error } = await supabaseAdmin
+      .from('scripted_replies')
+      .insert(insertPayload)
+      .select('id, keywords, reply, media_url, is_active, created_at')
+      .single());
+  }
+
+  if (error || !data) return NextResponse.json({ error: error?.message || 'Failed to create scripted reply' }, { status: 500 });
+
+  const result = {
+    ...data,
+    media_urls: data.media_urls ?? (data.media_url ? [data.media_url] : [])
+  };
+
+  return NextResponse.json({ data: result });
 }
+

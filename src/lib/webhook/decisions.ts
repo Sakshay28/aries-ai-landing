@@ -39,6 +39,7 @@ export interface ScriptedReplyRow {
   keywords: string[];
   reply: string;
   media_url?: string | null;
+  media_urls?: string[] | null;
 }
 
 /** Context-check: is the scripted reply actually relevant to what the
