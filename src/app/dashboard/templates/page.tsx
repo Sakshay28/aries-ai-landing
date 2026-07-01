@@ -16,7 +16,7 @@ import {
 import TemplateList from './_components/TemplateList';
 import TemplateLibrary from './_components/TemplateLibrary';
 import TemplateStudio from './_components/TemplateStudio';
-import type { WaTemplate, TemplateFormState, TemplateStatus } from './_components/types';
+import type { WaTemplate, TemplateFormState, TemplateStatus, SystemEventType } from './_components/types';
 import { DEFAULT_FORM_STATE } from './_components/constants';
 
 // Helper to parse Meta's components array format into form state fields
@@ -231,6 +231,31 @@ export default function TemplatesPage() {
     }
   };
 
+  // Bind/unbind an APPROVED template to a system event (guaranteed-delivery
+  // fallback selection — see src/lib/whatsapp/templateManager.ts). Optimistic
+  // update with rollback on failure so the dropdown feels instant.
+  const handleEventTypeChange = async (template: WaTemplate, eventType: SystemEventType | null) => {
+    if (!template.localId) return;
+    const previous = template.eventType ?? null;
+    setTemplates((prev) => prev.map((t) => (t.localId === template.localId ? { ...t, eventType } : t)));
+    try {
+      const res = await fetch(`/api/dashboard/templates/${template.localId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventType }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setTemplates((prev) => prev.map((t) => (t.localId === template.localId ? { ...t, eventType: previous } : t)));
+        alert(json.error || 'Failed to update event binding');
+      }
+    } catch (err) {
+      console.error('Event binding error:', err);
+      setTemplates((prev) => prev.map((t) => (t.localId === template.localId ? { ...t, eventType: previous } : t)));
+      alert('Network error. Failed to update event binding.');
+    }
+  };
+
   // Handle saved draft or submission from Studio
   const handleStudioSaved = () => {
     setStudioOpen(false);
@@ -349,6 +374,7 @@ export default function TemplatesPage() {
               onDelete={handleDelete}
               onSync={handleSyncStatus}
               onCreateNew={handleCreateNew}
+              onEventTypeChange={handleEventTypeChange}
             />
           ) : (
             <TemplateLibrary onImport={handleImportFromLibrary} />

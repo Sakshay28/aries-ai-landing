@@ -33,7 +33,7 @@ import { currentVersionSnapshot }    from './versions';
 import { normalizeIndustry }         from './industry-profiles';
 
 import type {
-  GeminiConversationAnalysis, ConversationState, ConversationMemory,
+  GeminiConversationAnalysis, GeminiConversationAnalysisV2, ConversationState, ConversationMemory,
   FallbackLevel, TriggerType,
 } from './types';
 import type { RichRecommendationOutput } from './recommendations';
@@ -69,7 +69,7 @@ export interface ConversationIntelligenceResult {
   decision:      DecisionEngineResult | null;
 
   // Full AI output (null on total failure)
-  aiAnalysis:    GeminiConversationAnalysis | null;
+  aiAnalysis:    GeminiConversationAnalysis | GeminiConversationAnalysisV2 | null;
 
   // Downstream outputs
   explainability:    ExplainabilityOutput | null;
@@ -115,6 +115,15 @@ interface LeadRow {
   manual_status: string | null;
   ai_confidence: number | null;
   is_repeat_customer?: boolean;
+  channel?: string;
+  source_detail?: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  tags?: string[];
+  manual_override?: boolean;
+  manual_stage?: string;
+  last_activity_at?: string;
 }
 
 interface ConversationRow {
@@ -138,9 +147,9 @@ export async function runConversationIntelligence(
   const db          = (input.db ?? supabaseAdmin) as SupabaseClient;
 
   const versions = currentVersionSnapshot();
-  const promptVersion = 'v1';
+  const promptVersion = 'v2';
   const schemaKey     = 'lead_analysis';
-  const schemaVersion = getLatestSchemaVersion(schemaKey);
+  const schemaVersion = 'v2';
 
   const queueWaitMs = input.jobEnqueuedAt
     ? Date.now() - new Date(input.jobEnqueuedAt).getTime()
@@ -167,26 +176,81 @@ export async function runConversationIntelligence(
     messages.map((m: MessageRow) => ({ id: m.id, content: m.content, direction: m.direction }))
   );
 
-  // ── STEP 2: Load lead + conversation rows ────────────────────────────────
-  const [leadResult, convResult, profileResult] = await Promise.all([
-    db.from('leads').select('id, lead_score, lead_status, buying_signals, negative_signals, manual_status, ai_confidence').eq('id', input.leadId).single(),
+  // ── STEP 2: Load lead + conversation rows + metadata ─────────────────────
+  const [leadResult, convResult, profileResult, knowledgeDocsRes, bookingsRes, shopifyRes] = await Promise.all([
+    db.from('leads').select('id, lead_score, lead_status, buying_signals, negative_signals, manual_status, ai_confidence, channel, source_detail, name, phone, email, tags, manual_override, manual_stage, last_activity_at').eq('id', input.leadId).single(),
     db.from('conversations').select('id, message_count, created_at').eq('id', input.conversationId).single(),
     db.from('lead_profiles').select('is_repeat_customer').eq('lead_id', input.leadId).maybeSingle(),
+    db.from('knowledge_docs').select('filename, content_text').eq('tenant_id', input.tenantId),
+    db.from('bookings').select('booking_date, booking_time, guest_count, status').eq('lead_id', input.leadId).order('booking_date', { ascending: false }),
+    db.from('shopify_events').select('event_type, order_value, created_at').eq('lead_id', input.leadId).order('created_at', { ascending: false }),
   ]);
 
   const lead: LeadRow = leadResult.data ?? { id: input.leadId, lead_score: 0, lead_status: 'cold', buying_signals: [], negative_signals: [], manual_status: null, ai_confidence: null };
   const conv: ConversationRow = convResult.data ?? { id: input.conversationId, message_count: messageCount, created_at: new Date().toISOString() };
   const isRepeatCustomer = profileResult.data?.is_repeat_customer ?? false;
 
+  const knowledgeBase = knowledgeDocsRes.data?.map(k => `[File: ${k.filename}]\n${k.content_text}`).join('\n\n') || 'No business knowledge docs loaded.';
+  const pastHistoryBookings = bookingsRes.data?.map(b => `- Date: ${b.booking_date} ${b.booking_time}, Guest count: ${b.guest_count}, Status: ${b.status}`).join('\n') || 'None';
+  const pastHistoryOrders = shopifyRes.data?.map(s => `- Event: ${s.event_type}, Value: ${s.order_value}, Date: ${s.created_at}`).join('\n') || 'None';
+  const pastHistory = `Bookings:\n${pastHistoryBookings}\n\nOrders/Shopify Events:\n${pastHistoryOrders}`;
+  const campaignSource = `Channel: ${lead.channel || 'unknown'}, Detail: ${lead.source_detail || 'none'}`;
+  const customerMetadata = `Name: ${lead.name || 'Unknown'}, Phone: ${lead.phone || 'Unknown'}, Email: ${lead.email || 'Unknown'}, Tags: ${JSON.stringify(lead.tags || [])}`;
+
+  // Calculate average response delay
+  let avgDelayMins = null;
+  let totalDelayMs = 0;
+  let delayCount = 0;
+  for (let i = 1; i < messages.length; i++) {
+    const prev = new Date(messages[i-1].created_at).getTime();
+    const curr = new Date(messages[i].created_at).getTime();
+    if (messages[i].direction === 'inbound' && messages[i-1].direction === 'outbound') {
+      totalDelayMs += (curr - prev);
+      delayCount++;
+    }
+  }
+  if (delayCount > 0) {
+    avgDelayMins = Math.round(totalDelayMs / (delayCount * 60000));
+  }
+  const messageTiming = `Total Messages: ${messages.length}, Avg Response Delay: ${avgDelayMins !== null ? avgDelayMins + ' minutes' : 'Unknown'}`;
+
   // ── STEP 3: Load industry profile ────────────────────────────────────────
   const { data: bizProfile } = await db.from('business_profiles').select('industry').eq('tenant_id', input.tenantId).maybeSingle();
   const industryProfile = normalizeIndustry(bizProfile?.industry);
 
-  // ── STEP 4: Run Tier 1 Rule Engine (no user message — full signal re-eval not applicable here;
-  //   rule engine already ran in webhook. We just need existing scores.) ────
-  const ruleScore      = lead.lead_score;
-  const allSignals     = lead.buying_signals ?? [];
-  const ruleStatus     = (lead.lead_status as LeadStatus) ?? 'cold';
+  // ── STEP 4: Run Tier 1 Rule Engine ───────────────────────────────────────
+  // Run rule engine with latest loaded metadata to compute the score delta correctly
+  const ruleEngineResult = calculateLeadScore({
+    userMessage: messages[messages.length - 1]?.content ?? '',
+    aiResponse: {
+      stage: lead.lead_status as any,
+      score: lead.lead_score ?? 0,
+      confidence: lead.ai_confidence ?? 0,
+      intent: 'unknown',
+    },
+    conversation: {
+      message_count: messageCount,
+      created_at: conv.created_at,
+    },
+    lead: {
+      lead_score: lead.lead_score,
+      lead_status: lead.lead_status,
+      manual_status: lead.manual_status,
+      manual_override: lead.manual_override,
+      manual_stage: lead.manual_stage,
+      buying_signals: lead.buying_signals,
+      negative_signals: lead.negative_signals,
+      tags: lead.tags,
+      is_repeat_customer: isRepeatCustomer,
+      past_bookings_count: bookingsRes.data?.length || 0,
+      last_activity_at: lead.last_activity_at,
+    },
+    industryProfile,
+  });
+
+  const ruleScore      = ruleEngineResult.lead_score;
+  const allSignals     = ruleEngineResult.all_buying_signals;
+  const ruleStatus     = ruleEngineResult.lead_status;
 
   // ── STEP 5: Load existing AI state for incremental analysis ─────────────
   const { data: lastAnalysis } = await db
@@ -254,7 +318,8 @@ export async function runConversationIntelligence(
   const promptRecord = getPrompt(industryProfile, 'conversation_analysis', promptVersion);
 
   // ── STEP 10: Call AI provider ────────────────────────────────────────────
-  let aiAnalysis:       GeminiConversationAnalysis | null = null;
+  let aiAnalysis:       GeminiConversationAnalysis | GeminiConversationAnalysisV2 | null = null;
+  let isV2              = false;
   let aiLatencyMs       = 0;
   let tokensIn          = 0;
   let tokensOut         = 0;
@@ -283,6 +348,12 @@ export async function runConversationIntelligence(
       industry:              industryProfile,
       promptVersion,
       promptKey:             'conversation_analysis',
+      businessType:          industryProfile,
+      knowledgeBase,
+      pastHistory,
+      campaignSource,
+      customerMetadata,
+      messageTiming,
     });
 
     aiLatencyMs      = aiResponse.latencyMs;
@@ -293,10 +364,12 @@ export async function runConversationIntelligence(
     cacheHit         = aiResponse.cacheHit;
     aiAnalysis       = aiResponse.parsed;
 
+    isV2 = !!(aiAnalysis && 'stage' in aiAnalysis);
     safeLog(executionId, 'AI complete', {
       latencyMs: aiLatencyMs, tokens: tokensIn + tokensOut,
-      cost: estimatedCostUsd.toFixed(5), stage: aiAnalysis?.salesStage,
-      buyingIntent: aiAnalysis?.buyingIntent,
+      cost: estimatedCostUsd.toFixed(5), 
+      stage: isV2 ? (aiAnalysis as any).stage : (aiAnalysis as any)?.salesStage,
+      buyingIntent: isV2 ? (aiAnalysis as any).score : (aiAnalysis as any)?.buyingIntent,
     });
 
   } catch (err) {
@@ -369,9 +442,8 @@ export async function runConversationIntelligence(
   // ── STEP 13: Generate recommendation ────────────────────────────────────
   const recommendation = getRecommendation(
     industryProfile, allSignals, decision.finalStatus,
-    decision.finalScore, aiAnalysis?.momentum ?? 'Stable',
+    decision.finalScore, isV2 ? 'Stable' : (aiAnalysis as GeminiConversationAnalysis)?.momentum ?? 'Stable',
   );
-
   // ── STEP 14: Compute momentum trend ─────────────────────────────────────
   const { data: recentIntents } = await db
     .from('lead_ai_analysis')
@@ -382,8 +454,32 @@ export async function runConversationIntelligence(
     .limit(5);
 
   const intentValues = (recentIntents ?? []).map((r: { buying_intent: number }) => r.buying_intent).reverse();
-  if (aiAnalysis) intentValues.push(aiAnalysis.buyingIntent);
+  if (aiAnalysis) intentValues.push(isV2 ? (aiAnalysis as GeminiConversationAnalysisV2).score : (aiAnalysis as GeminiConversationAnalysis).buyingIntent);
   const computedMomentum = computeMomentum(intentValues);
+
+  const v1 = isV2 ? null : (aiAnalysis as GeminiConversationAnalysis);
+  const v2 = isV2 ? (aiAnalysis as GeminiConversationAnalysisV2) : null;
+
+  const buyingIntentVal = isV2 ? v2!.score : v1?.buyingIntent ?? 0;
+  const urgencyVal = isV2 ? 0 : v1?.urgency ?? 0;
+  const trustVal = isV2 ? 0 : v1?.trust ?? 0;
+  const engagementVal = isV2 ? v2!.score : v1?.engagement ?? 0;
+  const budgetVal = isV2 ? 0 : v1?.budgetScore ?? 0;
+  const commitmentVal = isV2 ? 0 : v1?.commitment ?? 0;
+  const negotiationVal = isV2 ? 0 : v1?.negotiation ?? 0;
+  const qualityVal = isV2 ? 0 : v1?.conversationQuality ?? 0;
+  const conversionVal = isV2 ? v2!.booking_probability : v1?.conversionProbability ?? 0;
+  const salesStageVal = isV2 ? v2!.stage : v1?.salesStage ?? 'Unknown';
+  const intentHistoryVal = isV2 ? [v2!.intent] : v1?.intentHistory ?? [];
+  const objectionsVal = isV2 ? [] : v1?.objections ?? [];
+  const detectedSignalsVal = isV2 ? [] : v1?.detectedSignals ?? [];
+  const missingSignalsVal = isV2 ? [] : v1?.missingSignals ?? [];
+  const keyMomentsVal = isV2 ? [] : v1?.keyMoments ?? [];
+  const groupBookingVal = false;
+  const groupSizeVal = null;
+  const explanationVal = isV2 ? v2!.explanation : v1?.explanation ?? '';
+  const confidenceVal = isV2 ? v2!.confidence : v1?.confidence ?? 0;
+  const negotiationStateVal = isV2 ? 'none' : v1?.negotiationState ?? 'none';
 
   // ── STEP 15: Persist lead_ai_analysis ───────────────────────────────────
   try {
@@ -394,40 +490,40 @@ export async function runConversationIntelligence(
       analysis_type:   'conversation' as const,
       analysis_trigger: input.triggeredBy,
 
-      buying_intent:          aiAnalysis?.buyingIntent          ?? 0,
-      urgency_score:          aiAnalysis?.urgency               ?? 0,
-      trust_score:            aiAnalysis?.trust                 ?? 0,
-      engagement_score:       aiAnalysis?.engagement            ?? 0,
-      budget_score:           aiAnalysis?.budgetScore           ?? 0,
-      commitment_score:       aiAnalysis?.commitment            ?? 0,
-      negotiation_score:      aiAnalysis?.negotiation           ?? 0,
-      conversation_quality:   aiAnalysis?.conversationQuality   ?? 0,
-      conversion_probability: aiAnalysis?.conversionProbability ?? 0,
+      buying_intent:          buyingIntentVal,
+      urgency_score:          urgencyVal,
+      trust_score:            trustVal,
+      engagement_score:       engagementVal,
+      budget_score:           budgetVal,
+      commitment_score:       commitmentVal,
+      negotiation_score:      negotiationVal,
+      conversation_quality:   qualityVal,
+      conversion_probability: conversionVal,
 
-      budget_sensitivity: aiAnalysis?.budgetSensitivity ?? 'Unknown',
-      sales_stage:        aiAnalysis?.salesStage        ?? 'Unknown',
+      budget_sensitivity: 'Unknown',
+      sales_stage:        salesStageVal,
       momentum:           computedMomentum,
 
-      intent_history:    aiAnalysis?.intentHistory   ?? [],
-      objections:        aiAnalysis?.objections      ?? [],
-      detected_signals:  aiAnalysis?.detectedSignals ?? [],
-      missing_signals:   aiAnalysis?.missingSignals  ?? [],
-      key_moments:       aiAnalysis?.keyMoments      ?? [],
-      group_booking:     aiAnalysis?.groupBooking    ?? false,
-      group_size:        aiAnalysis?.groupSize       ?? null,
+      intent_history:    intentHistoryVal,
+      objections:        objectionsVal,
+      detected_signals:  detectedSignalsVal,
+      missing_signals:   missingSignalsVal,
+      key_moments:       keyMomentsVal,
+      group_booking:     groupBookingVal,
+      group_size:        groupSizeVal,
 
-      explanation:       aiAnalysis?.explanation      ?? explainability.sales_summary,
+      explanation:       explanationVal || explainability.sales_summary,
       recommendation:    recommendation.summary,
       why_hot:           explainability.why_hot,
       why_not_qualified: explainability.why_not_qualified,
       sales_summary:     explainability.sales_summary,
 
-      confidence:                   aiAnalysis?.confidence                ?? 0,
-      intent_confidence:            aiAnalysis?.intentConfidence          ?? 0,
-      stage_confidence:             aiAnalysis?.stageConfidence           ?? 0,
-      recommendation_confidence:    aiAnalysis?.recommendationConfidence  ?? 0,
-      buying_intent_confidence:     aiAnalysis?.buyingIntentConfidence    ?? 0,
-      entity_extraction_confidence: aiAnalysis?.entityExtractionConfidence ?? 0,
+      confidence:                   confidenceVal,
+      intent_confidence:            isV2 ? confidenceVal : v1?.intentConfidence ?? 0,
+      stage_confidence:             isV2 ? confidenceVal : v1?.stageConfidence ?? 0,
+      recommendation_confidence:    isV2 ? confidenceVal : v1?.recommendationConfidence ?? 0,
+      buying_intent_confidence:     isV2 ? confidenceVal : v1?.buyingIntentConfidence ?? 0,
+      entity_extraction_confidence: isV2 ? confidenceVal : v1?.entityExtractionConfidence ?? 0,
       decision_confidence:          Math.round(decision.aiWeightApplied * 100),
 
       ...versions,
@@ -444,32 +540,19 @@ export async function runConversationIntelligence(
       was_incremental:            snapshot.useIncremental,
       incremental_message_count:  snapshot.incrementalMessages.length,
       full_context_message_count: messageCount,
-
-      conversation_hash: currentHash,
-      cache_hit:         cacheHit,
-      fallback_level:    fallbackLevel,
-
-      execution_id:   executionId,
-      queue_wait_ms:  queueWaitMs,
-      processing_ms:  Date.now() - startTs,
-      retry_count:    0,
-      parsing_errors: parsingErrors,
-      is_replay:      false,
+      is_replay:                  false,
     };
 
-    const { data: inserted, error: insertErr } = await db
+    const { data: row, error: insertErr } = await db
       .from('lead_ai_analysis')
       .insert(analysisRow)
       .select('id')
       .single();
 
-    if (insertErr) {
-      safeLog(executionId, `lead_ai_analysis insert error: ${insertErr.message}`);
-    } else {
-      analysisId = inserted.id;
-    }
+    if (insertErr) throw insertErr;
+    analysisId = row.id;
   } catch (e) {
-    safeLog(executionId, `lead_ai_analysis persist error: ${(e as Error).message}`);
+    safeLog(executionId, `lead_ai_analysis insert error: ${(e as Error).message}`);
   }
 
   // ── STEP 16: Update conversation_state (ephemeral — overwrite) ──────────
@@ -478,13 +561,13 @@ export async function runConversationIntelligence(
       tenant_id:       input.tenantId,
       lead_id:         input.leadId,
       conversation_id: input.conversationId,
-      current_stage:   aiAnalysis?.salesStage        ?? convState?.current_stage ?? 'Awareness',
+      current_stage:   salesStageVal ?? convState?.current_stage ?? 'Awareness',
       current_momentum: computedMomentum,
       momentum_trend:  intentValues.slice(-5),
-      current_intent:  aiAnalysis?.intentHistory?.[0] ?? null,
-      current_buying_intent: aiAnalysis?.buyingIntent ?? 0,
-      negotiation_state:    aiAnalysis?.negotiationState ?? 'none',
-      current_objections:   aiAnalysis?.objections      ?? [],
+      current_intent:  intentHistoryVal[0] ?? null,
+      current_buying_intent: buyingIntentVal,
+      negotiation_state:    negotiationStateVal,
+      current_objections:   objectionsVal,
       last_analysis_id:     analysisId,
       last_analyzed_at:     new Date().toISOString(),
       conversation_hash:    currentHash,
@@ -496,9 +579,9 @@ export async function runConversationIntelligence(
   }
 
   // ── STEP 17: Update conversation_memory (accumulate — never overwrite) ───
-  if (aiAnalysis?.memoryUpdates && Object.keys(aiAnalysis.memoryUpdates).length > 0) {
+  if (!isV2 && v1?.memoryUpdates && Object.keys(v1.memoryUpdates).length > 0) {
     try {
-      const mu = aiAnalysis.memoryUpdates;
+      const mu = v1.memoryUpdates;
       const memPatch: Record<string, unknown> = {
         tenant_id:       input.tenantId,
         lead_id:         input.leadId,
@@ -529,24 +612,61 @@ export async function runConversationIntelligence(
 
   // ── STEP 18: Update leads AI summary columns ─────────────────────────────
   try {
+    isV2 = !!(aiAnalysis && 'stage' in aiAnalysis);
+    const v2_stage = isV2 ? (aiAnalysis as any).stage : (aiAnalysis as any)?.salesStage;
+    const v2_score = isV2 ? (aiAnalysis as any).score : decision.finalScore;
+    const v2_confidence = isV2 ? (aiAnalysis as any).confidence : aiConfidence;
+    const v2_reason = isV2 ? (aiAnalysis as any).reason : decision.reasoning;
+    const v2_summary = isV2 ? (aiAnalysis as any).summary : (aiAnalysis as any)?.salesSummary;
+    const v2_intent = isV2 ? (aiAnalysis as any).intent : ((aiAnalysis as any)?.intentHistory?.[0] || '');
+    const v2_sentiment = isV2 ? (aiAnalysis as any).sentiment : 'neutral';
+    const v2_qualification = isV2 ? (aiAnalysis as any).qualification : ((aiAnalysis as any)?.whyNotQualified || 'unqualified');
+    const v2_next_action = isV2 ? (aiAnalysis as any).next_action : (aiAnalysis as any)?.recommendation;
+    const v2_booking_probability = isV2 ? (aiAnalysis as any).booking_probability : (aiAnalysis as any)?.conversionProbability;
+    const v2_human_probability = isV2 ? (aiAnalysis as any).human_probability : 0;
+    const v2_engagement_score = isV2 ? v2_score : (aiAnalysis as any)?.engagement;
+
+    const lastMsg = messages[messages.length - 1];
+    const lastActivityType = lastMsg ? (lastMsg.direction === 'inbound' ? 'inbound' : 'outbound') : 'system';
+    const lastCustomerMsg = [...messages].reverse().find(m => m.direction === 'inbound')?.content || null;
+
     await db.from('leads').update({
-      lead_score:              decision.finalScore,
+      lead_score:              v2_score,
       lead_status:             decision.finalStatus,
       auto_status:             decision.finalStatus,
-      ai_buying_intent:        aiAnalysis?.buyingIntent          ?? null,
-      ai_urgency:              aiAnalysis?.urgency               ?? null,
-      ai_trust:                aiAnalysis?.trust                 ?? null,
-      ai_engagement:           aiAnalysis?.engagement            ?? null,
-      ai_conversion_probability: aiAnalysis?.conversionProbability ?? null,
-      ai_sales_stage:          aiAnalysis?.salesStage            ?? null,
-      ai_confidence:           aiConfidence,
-      ai_momentum:             computedMomentum,
-      ai_objections:           aiAnalysis?.objections            ?? null,
-      ai_recommendation:       recommendation.summary,
-      ai_explanation:          aiAnalysis?.explanation           ?? null,
+      ai_buying_intent:        isV2 ? (aiAnalysis as any).score : (aiAnalysis as any)?.buyingIntent,
+      ai_urgency:              isV2 ? 0 : (aiAnalysis as any)?.urgency,
+      ai_trust:                isV2 ? 0 : (aiAnalysis as any)?.trust,
+      ai_engagement:           v2_engagement_score,
+      ai_conversion_probability: v2_booking_probability,
+      ai_sales_stage:          v2_stage,
+      ai_confidence:           v2_confidence,
+      ai_momentum:             isV2 ? 'Stable' : computedMomentum,
+      ai_objections:           isV2 ? [] : (aiAnalysis as any)?.objections,
+      ai_recommendation:       v2_next_action,
+      ai_explanation:          isV2 ? (aiAnalysis as any).explanation : (aiAnalysis as any)?.explanation,
       ai_last_analyzed_at:     new Date().toISOString(),
-      ai_group_booking:        aiAnalysis?.groupBooking          ?? null,
-      ai_group_size:           aiAnalysis?.groupSize             ?? null,
+      ai_group_booking:        isV2 ? false : (aiAnalysis as any)?.groupBooking,
+      ai_group_size:           isV2 ? null : (aiAnalysis as any)?.groupSize,
+      
+      // New Enterprise CRM AI Columns
+      ai_score:                v2_score,
+      ai_summary:              v2_summary,
+      ai_reason:               v2_reason,
+      buying_intent:           isV2 ? (aiAnalysis as any).score : (aiAnalysis as any)?.buyingIntent,
+      last_intent:             v2_intent,
+      last_ai_scan:            new Date().toISOString(),
+      recommended_action:      v2_next_action,
+      qualification_status:    v2_qualification,
+      booking_probability:     v2_booking_probability,
+      human_intervention_probability: v2_human_probability,
+      last_activity_type:      lastActivityType,
+      last_customer_message:   lastCustomerMsg,
+      sentiment:               v2_sentiment,
+      engagement_score:        v2_score,
+      conversation_depth:      messageCount,
+      ai_stage:                decision.finalStatus,
+      classification_version:  '2.0',
       last_activity_at:        new Date().toISOString(),
     }).eq('id', input.leadId);
   } catch (e) {
@@ -588,10 +708,7 @@ export async function runConversationIntelligence(
       event_category:  'ai',
       score_delta:     decision.finalScore - ruleScore,
       new_score:       decision.finalScore,
-      old_score:       ruleScore,
-      new_value:       decision.finalStatus,
-      old_value:       lead.lead_status,
-      label:           `AI analysis: ${aiAnalysis?.salesStage ?? 'Unknown'} stage, intent=${aiAnalysis?.buyingIntent ?? 0}`,
+      label:           `AI analysis: ${isV2 ? (aiAnalysis as any).stage : (aiAnalysis as any)?.salesStage ?? 'Unknown'} stage, intent=${isV2 ? (aiAnalysis as any).score : (aiAnalysis as any)?.buyingIntent ?? 0}`,
       metadata:        { executionId, compositeMethod: decision.compositeMethod, aiConfidence, analysisId, fallbackLevel },
       triggered_by:    'ai' as const,
       signal_engine_version:   versions.signal_engine_version,
@@ -623,7 +740,7 @@ export async function runConversationIntelligence(
     ruleScore,
     finalScore:       decision.finalScore,
     finalStatus:      decision.finalStatus,
-    buyingIntent:     aiAnalysis?.buyingIntent ?? 0,
+    buyingIntent:     isV2 ? (aiAnalysis as any).score : (aiAnalysis as any)?.buyingIntent ?? 0,
     decision,
     aiAnalysis,
     explainability,
@@ -694,20 +811,22 @@ function failResult(
 function buildSkippedResult(
   executionId: string, startTs: number, queueWaitMs: number | null,
   ruleScore: number, ruleStatus: LeadStatus, lead: LeadRow,
-  aiAnalysis: GeminiConversationAnalysis | null,
+  aiAnalysis: GeminiConversationAnalysis | GeminiConversationAnalysisV2 | null,
   industryProfile: import('./industry-profiles').IndustryProfile,
   isRepeatCustomer: boolean, allSignals: string[], messageCount: number, cacheHit: boolean,
 ): ConversationIntelligenceResult {
+  const isV2 = aiAnalysis && 'stage' in aiAnalysis;
   const decision = runDecisionEngine({
     ruleScore, ruleStatus, allBuyingSignals: allSignals, prevFinalStatus: lead.lead_status,
-    aiAnalysis, aiConfidence: aiAnalysis?.confidence ?? 0,
+    aiAnalysis, aiConfidence: isV2 ? (aiAnalysis as any).confidence : (aiAnalysis as any)?.confidence ?? 0,
     industryProfile, isRepeatCustomer, messageCount,
   });
-  const recommendation = getRecommendation(industryProfile, allSignals, decision.finalStatus, decision.finalScore, aiAnalysis?.momentum ?? 'Stable');
+  const computedMomentum = isV2 ? 'Stable' : (aiAnalysis as any)?.momentum ?? 'Stable';
+  const recommendation = getRecommendation(industryProfile, allSignals, decision.finalStatus, decision.finalScore, computedMomentum);
   return {
     success: true, executionId, fallbackLevel: 1,
     ruleScore, finalScore: decision.finalScore, finalStatus: decision.finalStatus,
-    buyingIntent: aiAnalysis?.buyingIntent ?? 0,
+    buyingIntent: isV2 ? (aiAnalysis as any).score : (aiAnalysis as any)?.buyingIntent ?? 0,
     decision, aiAnalysis, explainability: null, recommendation,
     analysisId: null, recommendationId: null,
     totalLatencyMs: Date.now() - startTs, aiLatencyMs: 0, queueWaitMs,

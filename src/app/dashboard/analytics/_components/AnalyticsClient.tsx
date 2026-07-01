@@ -74,42 +74,9 @@ export function AnalyticsClient() {
         </header>
 
         {/* Top Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           <motion.div 
             initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-            className="p-6 rounded-2xl bg-card border border-border shadow-sm"
-          >
-            <div className="flex justify-between items-start mb-4">
-              <div className="p-3 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl">
-                <MessageSquare className="w-5 h-5" />
-              </div>
-              <span className="flex items-center text-emerald-500 text-xs font-semibold">
-                <TrendingUp className="w-3 h-3 mr-1" /> +12%
-              </span>
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-3xl font-bold">{data.summary.totalMessages.toLocaleString()}</h3>
-              <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider">Total Messages</p>
-            </div>
-          </motion.div>
-
-          <motion.div 
-            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-            className="p-6 rounded-2xl bg-card border border-border shadow-sm"
-          >
-            <div className="flex justify-between items-start mb-4">
-              <div className="p-3 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-xl">
-                <Bot className="w-5 h-5" />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-3xl font-bold">{data.summary.aiHandled}%</h3>
-              <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider">AI Resolution Rate</p>
-            </div>
-          </motion.div>
-
-          <motion.div 
-            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
             className="p-6 rounded-2xl bg-card border border-border shadow-sm"
           >
             <div className="flex justify-between items-start mb-4">
@@ -120,6 +87,81 @@ export function AnalyticsClient() {
             <div className="space-y-1">
               <h3 className="text-3xl font-bold">{data.summary.totalLeads.toLocaleString()}</h3>
               <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider">Total Leads</p>
+            </div>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+            className="p-6 rounded-2xl bg-card border border-border shadow-sm"
+          >
+            <div className="flex justify-between items-start mb-4">
+              <div className="p-3 bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl">
+                <TrendingUp className="w-5 h-5" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-3xl font-bold">{data.summary.avgLeadScore}/100</h3>
+              <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider">Avg Lead Score</p>
+            </div>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+            className="p-6 rounded-2xl bg-card border border-border shadow-sm"
+          >
+            <div className="flex justify-between items-start mb-4">
+              <div className="p-3 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-xl">
+                <Bot className="w-5 h-5" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-3xl font-bold">{data.summary.avgConfidence}%</h3>
+              <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider">AI Match Confidence</p>
+            </div>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
+            className="p-6 rounded-2xl bg-card border border-border shadow-sm"
+          >
+            <div className="flex justify-between items-start mb-4">
+              <div className="p-3 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl">
+                <Activity className="w-5 h-5" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-3xl font-bold">{data.summary.avgBookingProb}%</h3>
+              <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider">Booking Probability</p>
+            </div>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
+            className="p-6 rounded-2xl bg-card border border-border shadow-sm"
+          >
+            <div className="flex justify-between items-start mb-4">
+              <div className="p-3 bg-purple-50 dark:bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-xl">
+                <MessageSquare className="w-5 h-5" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-3xl font-bold">{data.summary.totalMessages.toLocaleString()}</h3>
+              <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider">Total Messages</p>
+            </div>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}
+            className="p-6 rounded-2xl bg-card border border-border shadow-sm"
+          >
+            <div className="flex justify-between items-start mb-4">
+              <div className="p-3 bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400 rounded-xl">
+                <Bot className="w-5 h-5" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-3xl font-bold">{data.summary.aiHandled}%</h3>
+              <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider">AI Resolution Rate</p>
             </div>
           </motion.div>
         </div>

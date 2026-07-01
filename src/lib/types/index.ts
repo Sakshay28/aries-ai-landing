@@ -176,7 +176,7 @@ export interface Lead {
 }
 
 export type Channel = 'whatsapp' | 'instagram_dm' | 'instagram_comment' | 'shopify' | 'website' | 'manual';
-export type LeadStatus = 'new' | 'hot' | 'warm' | 'cold' | 'qualified' | 'converted' | 'lost';
+export type LeadStatus = 'new' | 'hot' | 'warm' | 'cold' | 'qualified' | 'converted' | 'lost' | 'interested';
 
 // ── Conversation ──
 export interface Conversation {

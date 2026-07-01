@@ -15,7 +15,7 @@
 //   ≥ 95%:  ai_led        (aiWeight = 0.70)
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { GeminiConversationAnalysis, Momentum } from './types';
+import type { GeminiConversationAnalysis, GeminiConversationAnalysisV2, Momentum } from './types';
 import type { IndustryProfile }                      from './industry-profiles';
 import { resolveQualificationGates }                 from './lead-scoring-engine';
 import type { LeadStatus }                           from '@/lib/types';
@@ -30,7 +30,7 @@ export interface DecisionEngineInput {
   prevFinalStatus:  string | null; // current status in DB (before this run)
 
   // From AI Analysis (null when no AI ran or AI failed)
-  aiAnalysis:       GeminiConversationAnalysis | null;
+  aiAnalysis:       GeminiConversationAnalysis | GeminiConversationAnalysisV2 | null;
   aiConfidence:     number;        // 0-100 (overall confidence, from multi-dim)
 
   // Lead context
@@ -100,18 +100,35 @@ export function runDecisionEngine(input: DecisionEngineInput): DecisionEngineRes
     isRepeatCustomer, messageCount,
   } = input;
 
-  // ── Step 1: Determine blending weight ───────────────────────────────────
+  // ── Step 1: Detect if V2 analysis is provided ───────────────────────────
+  if (aiAnalysis && 'stage' in aiAnalysis) {
+    const v2 = aiAnalysis as GeminiConversationAnalysisV2;
+    const finalStatus = (v2.stage.toLowerCase()) as LeadStatus;
+    return {
+      finalScore:       v2.score ?? ruleScore,
+      finalStatus:      finalStatus,
+      compositeMethod:  'ai_led',
+      aiWeightApplied:  1.0,
+      aiConfidence:     v2.confidence ?? 0,
+      qualificationMet: finalStatus === 'qualified',
+      gateSignal:       null,
+      reasoning:        v2.reason || v2.explanation || '',
+    };
+  }
+
+  // ── Step 1: Determine blending weight (V1 fallback) ────────────────────
   const { weight: aiWeight, method: compositeMethod } = resolveAIWeight(aiConfidence);
 
   // ── Step 2: Compute composite base score ────────────────────────────────
   let compositeScore = ruleScore;
   if (aiAnalysis && aiWeight > 0) {
     // AI-as-floor: AI can never bring score below the rule engine floor
-    const aiBuyingIntent = Math.max(0, Math.min(100, aiAnalysis.buyingIntent));
+    const aiBuyingIntent = Math.max(0, Math.min(100, (aiAnalysis as GeminiConversationAnalysis).buyingIntent));
     const blended = ruleScore * (1 - aiWeight) + aiBuyingIntent * aiWeight;
     // Honor the floor: composite is always >= ruleScore
     compositeScore = Math.max(ruleScore, Math.round(blended));
   }
+
 
   // ── Step 3: Stage bonus (only when AI confident about stage) ────────────
   if (aiAnalysis && aiConfidence >= 70) {

@@ -69,17 +69,17 @@ export async function runDecayCron(): Promise<{ processed: number; decayed: numb
   let decayed = 0;
   let errors = 0;
 
-  // Fetch all leads that are not converted and have no manual_status lock
+  // Fetch all leads that are not converted or lost and have no manual locks
   // and have been inactive for at least 3 days
   const cutoff = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString();
 
   const { data: leads, error } = await supabaseAdmin
     .from('leads')
-    .select('id, tenant_id, lead_score, lead_status, auto_status, manual_status, last_activity_at')
-    .not('lead_status', 'in', '("converted")')
+    .select('id, tenant_id, lead_score, lead_status, auto_status, manual_status, manual_override, manual_stage, last_activity_at')
+    .not('lead_status', 'in', '("converted","lost")')
+    .or('manual_override.eq.false,manual_override.is.null')
     .is('manual_status', null)
-    .lt('last_activity_at', cutoff)
-    .gt('lead_score', 0); // skip already-at-zero leads
+    .lt('last_activity_at', cutoff);
 
   if (error) {
     console.error('[decay-cron] query error:', error.message);
@@ -89,15 +89,27 @@ export async function runDecayCron(): Promise<{ processed: number; decayed: numb
   for (const lead of leads ?? []) {
     processed++;
     try {
-      const decayPoints = calculateDecayPoints(lead.last_activity_at, now);
-      const forceCold = shouldForceCold(lead.last_activity_at, now);
+      if (!lead.last_activity_at) continue;
 
-      if (decayPoints === 0 && !forceCold) continue;
+      const diffMs = now.getTime() - new Date(lead.last_activity_at).getTime();
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
 
-      const scoreBefore = lead.lead_score as number;
-      const rawScore = forceCold ? 0 : Math.max(0, scoreBefore + decayPoints);
-      const newScore = Math.min(100, rawScore);
-      const newStatus: LeadStatus = forceCold ? 'cold' : deriveStatusFromScore(newScore);
+      let newStatus: LeadStatus = lead.lead_status as LeadStatus;
+      let reason = '';
+      let scoreBefore = lead.lead_score ?? 0;
+      let newScore = scoreBefore;
+
+      if (diffDays >= 30) {
+        newStatus = 'lost';
+        newScore = 0;
+        reason = 'No activity for 30+ days';
+      } else if (diffDays >= 3) {
+        if (['interested', 'warm', 'qualified', 'hot'].includes(lead.lead_status)) {
+          newStatus = 'cold';
+          newScore = Math.max(0, scoreBefore - 15); // Decay score
+          reason = 'No activity for 3+ days';
+        }
+      }
 
       if (newScore === scoreBefore && newStatus === lead.lead_status) continue;
 
@@ -107,21 +119,23 @@ export async function runDecayCron(): Promise<{ processed: number; decayed: numb
           lead_score:  newScore,
           lead_status: newStatus,
           auto_status: newStatus,
+          ai_stage:    newStatus,
+          ai_score:    newScore,
         })
         .eq('id', lead.id);
 
-      // Log individual decay event
+      // Log decay event
       await logSingleEvent({
         tenant_id:    lead.tenant_id,
         lead_id:      lead.id,
-        signal:       forceCold ? 'decay_force_cold' : 'decay_inactivity',
-        label:        forceCold ? 'Inactive 30+ days — reset to cold' : `Inactivity decay (${Math.abs(decayPoints)} pts)`,
-        points:       forceCold ? -scoreBefore : decayPoints,
+        signal:       newStatus === 'lost' ? 'decay_force_lost' : 'decay_inactivity',
+        label:        reason,
+        points:       newScore - scoreBefore,
         score_before: scoreBefore,
         score_after:  newScore,
         category:     'decay',
         source:       'decay_cron',
-        metadata:     { last_activity_at: lead.last_activity_at },
+        metadata:     { last_activity_at: lead.last_activity_at, days_inactive: Math.floor(diffDays) },
       });
 
       if (newStatus !== lead.lead_status) {
@@ -131,9 +145,7 @@ export async function runDecayCron(): Promise<{ processed: number; decayed: numb
           fromStatus: lead.lead_status,
           toStatus:   newStatus,
           trigger:    'decay',
-          reason:     forceCold
-            ? 'No activity for 30+ days'
-            : `Score decayed from ${scoreBefore} to ${newScore}`,
+          reason:     reason,
         });
       }
 

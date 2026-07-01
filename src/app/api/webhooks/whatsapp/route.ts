@@ -13,7 +13,8 @@ import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
 import { appendLeadRow, appendBookingRow } from '@/lib/integrations/google-sheets';
 import { parseMetaWebhook, sendTextMessage, sendMediaMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
-import { sendBusinessEvent } from '@/lib/whatsapp/businessNotify';
+import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus } from '@/lib/whatsapp/businessNotify';
+import { normalizePhoneNumber, isSamePhoneNumber } from '@/lib/whatsapp/phone';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 import { processMessageWithAI, isHumanHandoffRequest } from '@/lib/ai/engine';
 import { kwWordMatch, pickScriptedReply, allowStatusUpdate, hasActiveFlow } from '@/lib/webhook/decisions';
@@ -343,10 +344,57 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     content = `[unsupported]: ${msg.errorReason}`;
   }
 
-  // 4. Resolve/Create Lead — ATOMIC upsert prevents duplicate-lead race condition.
-  // The UNIQUE(tenant_id, phone) DB constraint + ON CONFLICT ensures only one row
-  // per phone number per tenant, even with 3 concurrent webhook deliveries.
-  const cleanPhone = msg.fromPhone.replace(/\D/g, '');
+  const cleanPhone = normalizePhoneNumber(msg.fromPhone);
+  const staffPhone = normalizePhoneNumber(tenant.staff_phone);
+  const managerPhone = normalizePhoneNumber(tenant.manager_phone);
+  const isStaffMessage = cleanPhone && (cleanPhone === staffPhone || cleanPhone === managerPhone);
+
+  // Early Intercept for Staff Alert Acknowledgements & Keepalives
+  if (isStaffMessage) {
+    if (msg.buttonId && msg.buttonId.startsWith('ack_notification:')) {
+      const notificationId = msg.buttonId.split(':')[1];
+      if (notificationId) {
+        const role = (cleanPhone === staffPhone) ? 'staff' : 'manager';
+        const { data: updatedNotif, error: ackErr } = await supabaseAdmin
+          .from('business_notifications')
+          .update({
+            acknowledged_at: new Date().toISOString(),
+            acknowledged_by: cleanPhone,
+            escalation_stage: 'acknowledged',
+          })
+          .eq('id', notificationId)
+          .select('id, title')
+          .maybeSingle();
+
+        if (ackErr) {
+          console.error('[webhook] Acknowledging notification failed:', ackErr.message);
+        } else if (updatedNotif) {
+          console.log(`[webhook] Notification ${notificationId} acknowledged by ${role} (${cleanPhone})`);
+          if (decryptedAccessToken && tenant.wa_phone_number_id) {
+            const replyText = `✅ *Alert Acknowledged*\n\nThank you! You have acknowledged the alert: "${updatedNotif.title}".\n\nNo further escalations will be triggered.`;
+            await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id, cleanPhone, replyText).catch(() => {});
+          }
+        }
+      }
+    } else if (msg.buttonId === 'staff_keepalive_confirm' || msg.buttonId === 'got_it' || msg.text?.toLowerCase() === 'got it') {
+      if (decryptedAccessToken && tenant.wa_phone_number_id) {
+        const replyText = `✅ *Keepalive Confirmed*\n\nYour alert session is active. You will continue to receive real-time updates.`;
+        await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id, cleanPhone, replyText).catch(() => {});
+      }
+    } else {
+      if (decryptedAccessToken && tenant.wa_phone_number_id) {
+        const businessName = (tenant as any).business_name || 'your business';
+        const staffReply =
+          `👋 Hi! You're connected to the *${businessName}* staff portal.\n\n` +
+          `🔔 *Booking alerts are active* — you'll receive a WhatsApp message here every time a customer confirms a reservation.\n\n` +
+          `You're all set! No action needed. 🎉`;
+        await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id, cleanPhone, staffReply).catch(() => {});
+      }
+    }
+    // Absolutely do NOT create a customer lead or conversation for staff
+    return;
+  }
+
   let lead: Record<string, any> | null = null;
 
   const isFromAd = !!msg.referral && msg.referral.source_type === 'ad';
@@ -942,22 +990,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     return;
   }
 
-  // Staff/manager phone detection — skip customer AI, send a meaningful staff reply.
-  // This also opens the Meta 24-hour window so booking alerts can be delivered to them.
-  const normStaff   = (tenant.staff_phone   || '').replace(/\D/g, '');
-  const normManager = (tenant.manager_phone || '').replace(/\D/g, '');
-  if (cleanPhone && (cleanPhone === normStaff || cleanPhone === normManager)) {
-    if (decryptedAccessToken && tenant.wa_phone_number_id) {
-      const businessName = (tenant as any).business_name || 'your business';
-      const staffReply =
-        `👋 Hi! You're connected to the *${businessName}* staff portal.\n\n` +
-        `🔔 *Booking alerts are active* — you'll receive a WhatsApp message here every time a customer confirms a reservation.\n\n` +
-        `You're all set! No action needed. 🎉`;
-      sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, staffReply)
-        .catch(e => console.error('[staff-detect] reply failed:', (e as Error).message));
-    }
-    return;
-  }
+
 
   // bot_paused = hard stop (human agent has taken over — never override)
   if (conversation.bot_paused) {
@@ -1861,40 +1894,14 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     const reason   = aiResponse.escalationReason || 'Customer requested human assistance';
     const preview  = msg.text ? msg.text.slice(0, 200) : '[media message]';
 
-    // Per-tenant template with variable interpolation.
-    // Variables: {{customer_name}} {{customer_phone}} {{reason}} {{message}} {{business_name}}
-    const DEFAULT_ESCALATION_TEMPLATE =
-      `🚨 New Escalation Alert | {{business_name}}\n\n` +
-      `👤 Customer: {{customer_name}}\n` +
-      `📌 Escalation Reason:\n` +
-      `{{reason}}\n\n` +
-      `💬 Customer Message:\n` +
-      `{{message}}\n\n` +
-      `⚡ Action Required:\n` +
-      `Please respond to the customer as soon as possible. The AI conversation has been paused pending staff assistance.`;
-
-    const templateVars: Record<string, string> = {
-      customer_name:  leadName,
-      customer_phone: cleanPhone,
-      reason,
-      message:        preview,
-      business_name:  tenant.business_name || 'Your Business',
-    };
-
-    const rawTemplate = tenant.escalation_alert_template?.trim() || DEFAULT_ESCALATION_TEMPLATE;
-    const alertMsg = rawTemplate.replace(/\{\{(\w+)\}\}/g, (_: string, key: string) => templateVars[key] ?? '');
-
-    // Guaranteed delivery: durable dashboard record written first, then
-    // WhatsApp session-or-template send with automatic retry — see
-    // src/lib/whatsapp/businessNotify.ts.
-    const eventResult = await sendBusinessEvent({
+    const eventResult = await triggerEscalationAlert({
       tenantId: tenant.id,
-      eventType: 'human_assistance',
-      title: `Escalation — ${leadName}`,
-      body: alertMsg,
-      variables: templateVars,
       conversationId: conversation.id,
       leadId: lead?.id ?? null,
+      customerPhone: cleanPhone,
+      customerName: leadName,
+      reason,
+      lastMessage: preview,
     });
     console.log(`🚨 [${tenant.business_name}] Escalation fired for ${leadName} — waStatus=${eventResult.waStatus}`);
 
@@ -2014,6 +2021,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           manual_status:    (lead as any).manual_status ?? null,
           buying_signals:   (lead as any).buying_signals  ?? [],
           negative_signals: (lead as any).negative_signals ?? [],
+          manual_override:  (lead as any).manual_override ?? false,
+          manual_stage:     (lead as any).manual_stage ?? null,
+          tags:             (lead as any).tags ?? [],
+          last_activity_at: (lead as any).last_activity_at ?? null,
         },
         industryProfile,
       });
@@ -2701,6 +2712,39 @@ async function handleStatusUpdate(msg: NonNullable<ReturnType<typeof parseMetaWe
     }
   } catch (reconcileErr) {
     console.error('❌ Failed to reconcile broadcast deliveries:', reconcileErr);
+  }
+
+  // ── Sync to business_notifications recipients status ──
+  try {
+    const { data: notif, error: fetchNotifErr } = await supabaseAdmin
+      .from('business_notifications')
+      .select('id, wa_status, recipients')
+      .contains('recipients', [{ wa_message_id: msg.messageId }])
+      .maybeSingle();
+
+    if (notif && !fetchNotifErr) {
+      const recipients = (notif.recipients as any[]).map(r => {
+        if (r.wa_message_id === msg.messageId) {
+          return { ...r, status: mappedStatus };
+        }
+        return r;
+      });
+      
+      const newStatus = summarizeStatus(recipients);
+
+      await supabaseAdmin
+        .from('business_notifications')
+        .update({
+          recipients,
+          wa_status: newStatus,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', notif.id);
+      
+      console.log(`📬 Synced Meta delivery report to business_notifications ${notif.id} status=${newStatus}`);
+    }
+  } catch (syncErr) {
+    console.error('❌ Failed to sync status to business_notifications:', syncErr);
   }
 }
 

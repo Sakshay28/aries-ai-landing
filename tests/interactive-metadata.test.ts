@@ -217,7 +217,7 @@ describe('webhook metadata shape', () => {
   });
 
   it('non-interactive message gets no metadata', () => {
-    const msgType = 'text';
+    const msgType: string = 'text';
     const buttonId = undefined;
     const contextMessageId = undefined;
 
@@ -231,7 +231,7 @@ describe('webhook metadata shape', () => {
   });
 
   it('text reply to a context message still stores reply_to_wa_message_id', () => {
-    const msgType = 'text';
+    const msgType: string = 'text';
     const buttonId = undefined;
     const contextMessageId = 'wamid.reply_to_this';
 

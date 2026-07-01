@@ -1129,7 +1129,7 @@ export default function SettingsPage() {
                 rows={7}
                 value={settings.escalation_alert_template || ''}
                 onChange={e => update('escalation_alert_template', e.target.value)}
-                placeholder={`🚨 Escalation Alert — {{business_name}}\n\nCustomer: {{customer_name}}\nPhone: +{{customer_phone}}\nReason: {{reason}}\nMessage: {{message}}\n\n👉 Reply on Live Chat: https://ariesai.in/dashboard/chat`}
+                placeholder={`🚨 New Escalation Alert | {{business_name}}\n\n👤 Customer: {{customer_name}}\n📌 Escalation Reason:\n{{reason}}\n\n💬 Customer Message:\n{{message}}\n\n⚡ Action Required:\nPlease respond to the customer as soon as possible. The AI conversation has been paused pending staff assistance.`}
                 className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none transition-colors"
                 style={{
                   background: 'var(--input)',

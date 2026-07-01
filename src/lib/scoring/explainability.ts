@@ -9,7 +9,7 @@
 //          Key Buying Signals, Timeline Summary, Sales Summary
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { GeminiConversationAnalysis, Momentum } from './types';
+import type { GeminiConversationAnalysis, GeminiConversationAnalysisV2, Momentum } from './types';
 
 // ── Input Types ──────────────────────────────────────────────────────────
 
@@ -124,7 +124,7 @@ const MISSING_SIGNAL_LABELS: Record<string, string> = {
 
 export function buildExplainability(
   rule:     RuleEngineContext,
-  ai:       GeminiConversationAnalysis | null,
+  ai:       GeminiConversationAnalysis | GeminiConversationAnalysisV2 | null,
   decision: DecisionEngineContext,
   messageCount: number,
 ): ExplainabilityOutput {
@@ -132,11 +132,19 @@ export function buildExplainability(
   const score   = decision.final_score;
   const signals = new Set(rule.all_buying_signals);
 
+  const isV2 = ai && 'stage' in ai;
+  const v2Ai = isV2 ? (ai as GeminiConversationAnalysisV2) : null;
+  const v1Ai = isV2 ? null : (ai as GeminiConversationAnalysis);
+
   // ── Why Hot ─────────────────────────────────────────────────────────────
-  const why_hot = buildWhyHot(rule, ai, decision, status);
+  const why_hot = isV2
+    ? (v2Ai?.explanation || `Lead score is ${score}/100.`)
+    : buildWhyHot(rule, v1Ai, decision, status);
 
   // ── Why Not Qualified ────────────────────────────────────────────────────
-  const why_not_qualified = buildWhyNotQualified(rule, ai, decision, signals);
+  const why_not_qualified = isV2
+    ? (status === 'qualified' ? 'Qualification criteria met.' : `Lead not yet qualified. Status is ${status}.`)
+    : buildWhyNotQualified(rule, v1Ai, decision, signals);
 
   // ── What Changed ────────────────────────────────────────────────────────
   const what_changed = buildWhatChanged(rule);
@@ -153,7 +161,7 @@ export function buildExplainability(
     }));
 
   // ── Missing Signals ──────────────────────────────────────────────────────
-  const missing_signals: SignalBadge[] = buildMissingSignals(signals, ai, status);
+  const missing_signals: SignalBadge[] = buildMissingSignals(signals, v1Ai, status);
 
   // ── Negative Signals ─────────────────────────────────────────────────────
   const negative_signals: SignalBadge[] = Object.entries(rule.score_breakdown)
@@ -161,25 +169,31 @@ export function buildExplainability(
     .map(([k, v]) => ({ key: k, label: v.label, points: v.points, category: v.category }));
 
   // ── Next Best Action ─────────────────────────────────────────────────────
-  const next_best_action = ai?.recommendation ?? buildDefaultRecommendation(status, score, signals);
+  const next_best_action = isV2
+    ? (v2Ai?.next_action || buildDefaultRecommendation(status, score, signals))
+    : (v1Ai?.recommendation || buildDefaultRecommendation(status, score, signals));
 
   // ── Timeline Summary ─────────────────────────────────────────────────────
-  const timeline_summary = buildTimelineSummary(ai, rule, messageCount);
+  const timeline_summary = isV2
+    ? `${messageCount}-message conversation reached ${v2Ai?.stage} stage with score ${v2Ai?.score}.`
+    : buildTimelineSummary(v1Ai, rule, messageCount);
 
   // ── Sales Summary ────────────────────────────────────────────────────────
-  const sales_summary = ai?.explanation ?? buildDefaultSalesSummary(rule, status);
+  const sales_summary = isV2
+    ? (v2Ai?.summary || buildDefaultSalesSummary(rule, status))
+    : (v1Ai?.salesSummary || buildDefaultSalesSummary(rule, status));
 
   // ── Dimension Scores ─────────────────────────────────────────────────────
-  const dimension_scores = buildDimensionScores(rule, ai);
+  const dimension_scores = buildDimensionScores(rule, v1Ai, v2Ai);
 
   // ── Confidence ───────────────────────────────────────────────────────────
-  const confidence      = ai?.confidence ?? Math.min(50, score);
+  const confidence      = isV2 ? (v2Ai?.confidence ?? 50) : (v1Ai?.confidence ?? Math.min(50, score));
   const confidence_note = ai
     ? `Based on ${messageCount} messages + Gemini AI analysis (${confidence}% confident)`
     : `Based on ${messageCount} messages + deterministic rule engine (no AI analysis yet)`;
 
   // ── Momentum ─────────────────────────────────────────────────────────────
-  const momentum       = (ai?.momentum ?? 'Stable') as Momentum;
+  const momentum       = (isV2 ? 'Stable' : (v1Ai?.momentum ?? 'Stable')) as Momentum;
   const momentum_label = buildMomentumLabel(momentum);
 
   return {
@@ -315,16 +329,29 @@ function buildDefaultSalesSummary(rule: RuleEngineContext, status: string): stri
   return `Lead scored ${rule.lead_score}/100 (${status}). Top signals: ${topSignals || 'basic engagement'}.`;
 }
 
-function buildDimensionScores(rule: RuleEngineContext, ai: GeminiConversationAnalysis | null): DimensionScore[] {
+function buildDimensionScores(
+  rule: RuleEngineContext, 
+  v1Ai: GeminiConversationAnalysis | null,
+  v2Ai: GeminiConversationAnalysisV2 | null
+): DimensionScore[] {
   const ruleNormalized = Math.min(100, rule.lead_score);
+  if (v2Ai) {
+    return [
+      { label: 'Buying Intent',         key: 'buying_intent',        score: v2Ai.score,        bar_color: 'bg-indigo-500' },
+      { label: 'Urgency',               key: 'urgency',              score: v2Ai.score > 70 ? 80 : 40,              bar_color: 'bg-red-500'    },
+      { label: 'Trust',                 key: 'trust',                score: v2Ai.confidence,                bar_color: 'bg-emerald-500'},
+      { label: 'Engagement',            key: 'engagement',           score: Math.min(100, rule.all_buying_signals.length * 15), bar_color: 'bg-blue-500' },
+      { label: 'Conversion Probability',key: 'conversion_probability',score: v2Ai.booking_probability, bar_color: 'bg-green-500' },
+    ];
+  }
   return [
-    { label: 'Buying Intent',         key: 'buying_intent',        score: ai?.buyingIntent        ?? ruleNormalized, bar_color: 'bg-indigo-500' },
-    { label: 'Urgency',               key: 'urgency',              score: ai?.urgency             ?? 0,              bar_color: 'bg-red-500'    },
-    { label: 'Trust',                 key: 'trust',                score: ai?.trust               ?? 0,              bar_color: 'bg-emerald-500'},
-    { label: 'Engagement',            key: 'engagement',           score: ai?.engagement          ?? Math.min(100, rule.all_buying_signals.length * 10), bar_color: 'bg-blue-500' },
-    { label: 'Commitment',            key: 'commitment',           score: ai?.commitment          ?? 0,              bar_color: 'bg-amber-500'  },
-    { label: 'Negotiation',           key: 'negotiation',          score: ai?.negotiation         ?? 0,              bar_color: 'bg-violet-500' },
-    { label: 'Conversion Probability',key: 'conversion_probability',score: ai?.conversionProbability ?? ruleNormalized, bar_color: 'bg-green-500' },
+    { label: 'Buying Intent',         key: 'buying_intent',        score: v1Ai?.buyingIntent        ?? ruleNormalized, bar_color: 'bg-indigo-500' },
+    { label: 'Urgency',               key: 'urgency',              score: v1Ai?.urgency             ?? 0,              bar_color: 'bg-red-500'    },
+    { label: 'Trust',                 key: 'trust',                score: v1Ai?.trust               ?? 0,              bar_color: 'bg-emerald-500'},
+    { label: 'Engagement',            key: 'engagement',           score: v1Ai?.engagement          ?? Math.min(100, rule.all_buying_signals.length * 10), bar_color: 'bg-blue-500' },
+    { label: 'Commitment',            key: 'commitment',           score: v1Ai?.commitment          ?? 0,              bar_color: 'bg-amber-500'  },
+    { label: 'Negotiation',           key: 'negotiation',          score: v1Ai?.negotiation         ?? 0,              bar_color: 'bg-violet-500' },
+    { label: 'Conversion Probability',key: 'conversion_probability',score: v1Ai?.conversionProbability ?? ruleNormalized, bar_color: 'bg-green-500' },
   ];
 }
 

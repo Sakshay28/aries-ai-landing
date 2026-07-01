@@ -35,6 +35,7 @@ import { sendFlowEmail } from '@/lib/email/service';
 import type { Tenant } from '@/lib/types';
 import { getFlowVariables } from './variables';
 import { logTrace, logFlowExecution, type FlowExecutionLog } from '@/lib/observability/trace';
+import { triggerEscalationAlert } from '@/lib/whatsapp/businessNotify';
 
 // ── Types ────────────────────────────────────────────────────
 interface FlowNode {
@@ -1039,8 +1040,19 @@ async function executeNode(
         .from('conversations')
         .update({ bot_paused: true })
         .eq('id', ctx.conversationId);
+
+      // Trigger staff alert WhatsApp/dashboard notification
+      await triggerEscalationAlert({
+        tenantId: ctx.tenantId,
+        conversationId: ctx.conversationId,
+        leadId: ctx.leadId,
+        customerPhone: ctx.phone,
+        customerName: ctx.leadName,
+        reason: 'Flow completed (handoff initiated)',
+        lastMessage: ctx.messageText || '[Media/Choice selection]'
+      });
     } catch (e) {
-      console.error('Flow engine: handoff pause failed:', e);
+      console.error('Flow engine: handoff pause or alert failed:', e);
     }
     return { nextId: getNextNode(node.id, null, edges) };
   }

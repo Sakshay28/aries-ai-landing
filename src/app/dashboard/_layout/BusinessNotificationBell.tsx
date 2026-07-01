@@ -194,7 +194,7 @@ export function BusinessNotificationBell() {
       {open && (
         <div
           ref={panelRef}
-          className="absolute right-0 top-10 z-50 w-80 rounded-xl border border-border bg-card shadow-2xl overflow-hidden"
+          className="absolute right-0 lg:right-auto lg:left-0 top-10 z-50 w-80 rounded-xl border border-border bg-card shadow-2xl overflow-hidden"
         >
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <div className="flex items-center gap-2">

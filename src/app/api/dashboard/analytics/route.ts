@@ -22,7 +22,7 @@ export async function GET() {
   // 2. Fetch Leads
   const { data: leads } = await supabase
     .from('leads')
-    .select('lead_status')
+    .select('lead_status, lead_score, ai_confidence, booking_probability, human_intervention_probability')
     .eq('tenant_id', tenantId);
 
   // 3. Process Message Data into daily chart format
@@ -53,21 +53,63 @@ export async function GET() {
 
   const volumeData = Object.values(volumeDataMap);
 
-  // 4. Process Lead Data
-  let hot = 0, warm = 0, cold = 0;
+  // 4. Process Lead Data into 7 CRM stages
+  let newCount = 0;
+  let interestedCount = 0;
+  let qualifiedCount = 0;
+  let hotCount = 0;
+  let convertedCount = 0;
+  let coldCount = 0;
+  let lostCount = 0;
+
+  let totalScore = 0;
+  let totalConfidence = 0;
+  let totalBookingProb = 0;
+  let totalHumanProb = 0;
+  let leadsWithAI = 0;
+
   if (leads) {
     leads.forEach(l => {
-      if (l.lead_status === 'hot') hot++;
-      else if (l.lead_status === 'warm') warm++;
-      else cold++; // cold or new
+      const status = l.lead_status;
+      if (status === 'new') newCount++;
+      else if (status === 'interested' || status === 'warm') interestedCount++;
+      else if (status === 'qualified') qualifiedCount++;
+      else if (status === 'hot') hotCount++;
+      else if (status === 'converted') convertedCount++;
+      else if (status === 'cold') coldCount++;
+      else if (status === 'lost') lostCount++;
+
+      if (l.lead_score !== null) {
+        totalScore += l.lead_score;
+      }
+      if (l.ai_confidence !== null) {
+        totalConfidence += l.ai_confidence;
+        leadsWithAI++;
+      }
+      if (l.booking_probability !== null) {
+        totalBookingProb += l.booking_probability;
+      }
+      if (l.human_intervention_probability !== null) {
+        totalHumanProb += l.human_intervention_probability;
+      }
     });
   }
 
   const pipelineData = [
-    { name: 'Hot', value: hot, color: '#EF4444' }, // Red
-    { name: 'Warm', value: warm, color: '#F59E0B' }, // Amber
-    { name: 'Cold', value: cold, color: '#3B82F6' }, // Blue
+    { name: 'New', value: newCount, color: '#3B82F6' },
+    { name: 'Interested', value: interestedCount, color: '#FB923C' },
+    { name: 'Qualified', value: qualifiedCount, color: '#8B5CF6' },
+    { name: 'Hot', value: hotCount, color: '#EF4444' },
+    { name: 'Converted', value: convertedCount, color: '#10B981' },
+    { name: 'Cold', value: coldCount, color: '#64748B' },
+    { name: 'Lost', value: lostCount, color: '#F87171' },
   ];
+
+  const totalLeads = leads?.length || 0;
+  const avgLeadScore = totalLeads ? Math.round(totalScore / totalLeads) : 0;
+  const avgConfidence = leadsWithAI ? Math.round(totalConfidence / leadsWithAI) : 0;
+  const avgBookingProb = totalLeads ? Math.round(totalBookingProb / totalLeads) : 0;
+  const avgHumanProb = totalLeads ? Math.round(totalHumanProb / totalLeads) : 0;
 
   return NextResponse.json({
     success: true,
@@ -76,8 +118,12 @@ export async function GET() {
       pipelineData,
       summary: {
         totalMessages: messages?.length || 0,
-        totalLeads: leads?.length || 0,
-        aiHandled: messages?.length ? Math.round((totalAiMessages / messages.filter(m => m.direction === 'outbound').length) * 100) || 0 : 0
+        totalLeads,
+        aiHandled: messages?.length ? Math.round((totalAiMessages / messages.filter(m => m.direction === 'outbound').length) * 100) || 0 : 0,
+        avgLeadScore,
+        avgConfidence,
+        avgBookingProb,
+        avgHumanProb,
       }
     }
   });

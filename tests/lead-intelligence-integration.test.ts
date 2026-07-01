@@ -260,11 +260,12 @@ describe('Full Pipeline — Zanskar Trek Lead', () => {
       promptKey:             'conversation_analysis',
     });
 
-    expect(aiResult.parsed.buyingIntent).toBe(88);
-    expect(aiResult.parsed.salesStage).toBe('Decision');
-    expect(aiResult.parsed.momentum).toBe('Spiking');
-    expect(aiResult.parsed.memoryUpdates?.groupSize).toBe(4);
-    expect(aiResult.parsed.memoryUpdates?.preferredDestination).toBe('Zanskar Valley');
+    const p = aiResult.parsed as GeminiConversationAnalysis;
+    expect(p.buyingIntent).toBe(88);
+    expect(p.salesStage).toBe('Decision');
+    expect(p.momentum).toBe('Spiking');
+    expect(p.memoryUpdates?.groupSize).toBe(4);
+    expect(p.memoryUpdates?.preferredDestination).toBe('Zanskar Valley');
   });
 
   it('decision engine produces HOT status for Zanskar lead with AI analysis', () => {
@@ -657,9 +658,10 @@ describe('Mock Provider', () => {
       tenantId: 't1', leadId: 'l1', conversationId: 'c1',
       industry: 'general', promptVersion: 'v1', promptKey: 'conversation_analysis',
     });
-    expect(resp.parsed.salesStage).toBe('Consideration');
-    expect(resp.parsed.buyingIntent).toBe(55);
-    expect(resp.parsed.confidence).toBe(80);
+    const p1 = resp.parsed as GeminiConversationAnalysis;
+    expect(p1.salesStage).toBe('Consideration');
+    expect(p1.buyingIntent).toBe(55);
+    expect(p1.confidence).toBe(80);
     expect(mockProvider.callCount).toBe(1);
   });
 
@@ -674,8 +676,9 @@ describe('Mock Provider', () => {
       tenantId: 't1', leadId: 'l1', conversationId: 'c1',
       industry: 'general', promptVersion: 'v1', promptKey: 'conversation_analysis',
     });
-    expect(resp.parsed.buyingIntent).toBe(99);
-    expect(resp.parsed.salesStage).toBe('Decision');
+    const p2 = resp.parsed as GeminiConversationAnalysis;
+    expect(p2.buyingIntent).toBe(99);
+    expect(p2.salesStage).toBe('Decision');
   });
 
   it('simulates errors correctly', async () => {

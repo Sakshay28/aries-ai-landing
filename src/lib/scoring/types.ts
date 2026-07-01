@@ -503,3 +503,20 @@ export interface GeminiConversationAnalysis {
   automationEligible:        boolean;
   estimatedCloseProbImprovement: number;
 }
+
+export interface GeminiConversationAnalysisV2 {
+  stage: 'New' | 'Interested' | 'Qualified' | 'Hot' | 'Converted' | 'Cold' | 'Lost';
+  score: number;
+  confidence: number;
+  reason: string;
+  summary: string;
+  intent: string;
+  sentiment: 'positive' | 'neutral' | 'negative' | 'angry';
+  qualification: string;
+  next_action: string;
+  booking_probability: number;
+  human_probability: number;
+  follow_up_priority: 'critical' | 'high' | 'medium' | 'low';
+  explanation: string;
+}
+

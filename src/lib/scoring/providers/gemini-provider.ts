@@ -53,8 +53,14 @@ export class GeminiProvider implements AIProvider {
     const userPrompt = renderPrompt(request.userPromptTemplate, {
       conversation:      conversationText,
       memory:            memoryText,
-      industry_context:  '',  // already baked into userPromptTemplate by prompt-registry
-      signals:           '',  // TODO: Phase C will pass detected signals here
+      industry_context:  '',
+      signals:           '',
+      business_type:     request.businessType ?? 'General',
+      knowledge_base:    request.knowledgeBase ?? 'None',
+      past_history:      request.pastHistory ?? 'None',
+      campaign_source:   request.campaignSource ?? 'None',
+      customer_metadata: request.customerMetadata ?? 'None',
+      message_timing:    request.messageTiming ?? 'None',
     });
 
     const payload = {
@@ -115,14 +121,27 @@ export class GeminiProvider implements AIProvider {
     const parsed = validation.parsed;
     const latencyMs = Date.now() - start;
 
-    const confidence: MultiDimensionalConfidence = {
-      overall:           parsed.confidence,
-      intent:            parsed.intentConfidence,
-      stage:             parsed.stageConfidence,
-      recommendation:    parsed.recommendationConfidence,
-      buying_intent:     parsed.buyingIntentConfidence,
-      entity_extraction: parsed.entityExtractionConfidence,
-    };
+    let confidence: MultiDimensionalConfidence;
+    if (parsed && 'stage' in parsed) {
+      const v2 = parsed as any;
+      confidence = {
+        overall:           v2.confidence ?? 0,
+        intent:            v2.confidence ?? 0,
+        stage:             v2.confidence ?? 0,
+        recommendation:    v2.confidence ?? 0,
+        buying_intent:     v2.confidence ?? 0,
+        entity_extraction: v2.confidence ?? 0,
+      };
+    } else {
+      confidence = {
+        overall:           parsed.confidence,
+        intent:            parsed.intentConfidence,
+        stage:             parsed.stageConfidence,
+        recommendation:    parsed.recommendationConfidence,
+        buying_intent:     parsed.buyingIntentConfidence,
+        entity_extraction: parsed.entityExtractionConfidence,
+      };
+    }
 
     return {
       parsed,

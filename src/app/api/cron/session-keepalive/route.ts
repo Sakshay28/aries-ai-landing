@@ -30,6 +30,8 @@ import { notifyAdmin } from '@/lib/alerts/admin';
 import { notifyTenant } from '@/lib/alerts/tenantAlert';
 import { getSessionState, shouldPingForKeepalive } from '@/lib/whatsapp/session';
 import { resolveEventTemplate, mapVariablesToPositional } from '@/lib/whatsapp/templateManager';
+import { ensureRequiredTemplates } from '@/lib/whatsapp/templateProvisioner';
+import { normalizePhoneNumber } from '@/lib/whatsapp/phone';
 
 const WINDOW_OPEN_HOURS  = 22;    // nudge customer at 22h — window still open
 const WINDOW_CLOSE_HOURS = 23.5;  // stop after 23.5h — too late, window closed
@@ -85,12 +87,13 @@ async function runStaffKeepalive(): Promise<{ pinged: number; skipped: number; f
     const token = decryptToken(tenant.wa_access_token);
     if (!token) { skipped++; continue; }
 
+    // Idempotent check-and-create required alert templates
+    await ensureRequiredTemplates(tenant.id);
+
     const phones = [...new Set(
       [tenant.staff_phone, tenant.manager_phone]
-        .filter(Boolean)
-        .map((p: string) => p.replace(/\D/g, ''))
-        .map((p: string) => p.length === 10 ? '91' + p : p)
-        .filter((p: string) => p.length >= 10),
+        .map(p => normalizePhoneNumber(p))
+        .filter(p => p !== ''),
     )] as string[];
 
     if (!phones.length) { skipped++; continue; }

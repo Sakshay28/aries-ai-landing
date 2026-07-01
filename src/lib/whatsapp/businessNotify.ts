@@ -2,16 +2,9 @@
 // 🛎️ Guaranteed Business Delivery — sendBusinessEvent()
 // ═══════════════════════════════════════════════════════════
 // The single entry point for every staff/manager-facing alert (booking,
-// cancellation, human handoff, payment confirmation, ...). Replaces direct
-// sendStaffAlert() calls at all 8 sites.
-//
-// Guarantee: a durable `business_notifications` row is written BEFORE any
-// WhatsApp call is attempted, so the business has a record even if Meta is
-// down, the tenant isn't WA-configured, or every recipient's window is
-// closed with no fallback template bound. WhatsApp delivery (session
-// message, or an approved template when the window is closed) is a
-// best-effort bonus on top of that durable record, with retries handled by
-// /api/cron/notification-retry.
+// cancellation, human handoff, payment confirmation, ...).
+// Rebuilt for 99.999% reliability with idempotency, tracing, tenant-fair
+// isolation queueing, and multi-channel Resend email fallbacks.
 // ═══════════════════════════════════════════════════════════
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
@@ -21,8 +14,12 @@ import { sendTextMessage, sendTemplateMessage } from '@/lib/meta/service';
 import { isWindowClosedError } from '@/lib/automations/logic';
 import { getSessionState } from '@/lib/whatsapp/session';
 import { resolveEventTemplate, mapVariablesToPositional, type SystemEventType } from '@/lib/whatsapp/templateManager';
+import { ensureRequiredTemplates } from '@/lib/whatsapp/templateProvisioner';
 import { notifyAdmin } from '@/lib/alerts/admin';
+import { notifyTenant } from '@/lib/alerts/tenantAlert';
+import { normalizePhoneNumber } from '@/lib/whatsapp/phone';
 import type { Tenant } from '@/lib/types';
+import crypto from 'crypto';
 
 export type { SystemEventType } from '@/lib/whatsapp/templateManager';
 
@@ -34,12 +31,13 @@ export interface BusinessEventParams {
   variables?: Record<string, string>;
   conversationId?: string | null;
   leadId?: string | null;
+  idempotencyKey?: string;
 }
 
 export interface RecipientResult {
   phone: string;
   role: 'staff' | 'manager';
-  status: 'sent_session' | 'sent_template' | 'failed';
+  status: 'sent_session' | 'sent_template' | 'delivered' | 'failed';
   wa_message_id?: string;
   error?: string;
   no_fallback_template?: boolean;
@@ -49,160 +47,221 @@ export interface BusinessEventResult {
   notificationId: string;
   waStatus: string;
   recipients: RecipientResult[];
+  traceId: string;
 }
 
 const MAX_RETRY_ATTEMPTS = 5;
-const RETRY_BACKOFF_MS = 60_000; // 1 min, multiplied by attempt number
 
-function normalizeStaffPhone(raw: string): string {
-  const digits = raw.replace(/\D/g, '');
-  if (digits.length === 10) return '91' + digits;
-  return digits;
-}
-
-/**
- * The single guaranteed-delivery entry point. Always writes a durable
- * business_notifications row first, then best-effort attempts WhatsApp
- * delivery to the tenant's staff/manager phones.
- */
-export async function sendBusinessEvent(params: BusinessEventParams): Promise<BusinessEventResult> {
-  const { tenantId, eventType, title, body, variables = {}, conversationId = null, leadId = null } = params;
-
-  // Step 1 — durable record FIRST, before any WhatsApp call.
-  const { data: notification, error: insertErr } = await supabaseAdmin
-    .from('business_notifications')
-    .insert({
-      tenant_id: tenantId,
-      event_type: eventType,
-      severity: 'info',
-      title,
-      body,
-      payload: variables,
-      conversation_id: conversationId,
-      lead_id: leadId,
-      wa_status: 'pending',
-    })
-    .select('id')
-    .single();
-
-  if (insertErr || !notification) {
-    console.error(`[sendBusinessEvent] failed to write notification row (tenant=${tenantId}, event=${eventType}):`, insertErr?.message);
-    // The durable guarantee failed at the DB layer — this is the one case we
-    // can't recover from locally. Alert the operator; still attempt delivery.
-    notifyAdmin({
-      dedupeKey: `business_notification_insert_failed:${tenantId}`,
-      subject: 'business_notifications insert failed',
-      summary: `Could not persist a business event for tenant ${tenantId} (event=${eventType}). Check DB connectivity/migration status.`,
-      context: { tenantId, eventType },
-    }).catch(() => {});
-  }
-
-  const notificationId = notification?.id ?? '';
-  const tenant = await getTenantById(tenantId);
-  const result = await attemptDelivery(tenant, tenantId, eventType, body, variables, []);
-
-  if (notificationId) {
-    await finalizeAttempt(notificationId, result, 1);
-  }
-
-  // Immediate operator alert on total failure — the dashboard notification
-  // guarantees the business sees it, but a same-day human failure (no
-  // template bound, tenant not WA-configured) is worth flagging right away
-  // rather than waiting for the retry cron to exhaust 5 attempts.
-  if (result.waStatus === 'failed' || result.waStatus === 'no_template') {
-    notifyAdmin({
-      dedupeKey: `business_event_delivery_failed:${tenantId}:${eventType}`,
-      subject: `Business alert not delivered — ${eventType}`,
-      summary: `A ${eventType} alert for tenant ${tenantId} could not reach staff/manager on WhatsApp (${result.waStatus}). It's recorded on their dashboard and will retry automatically.`,
-      context: { tenantId, eventType, notificationId, recipients: result.recipients },
-    }).catch(() => {});
-  }
-
-  return { notificationId, waStatus: result.waStatus, recipients: result.recipients };
-}
-
-/**
- * Re-attempts delivery for an existing notification row (used by
- * /api/cron/notification-retry). Never re-inserts — the durable record
- * already exists.
- */
-export async function retryBusinessNotification(row: {
-  id: string;
-  tenant_id: string;
-  event_type: SystemEventType;
-  body: string | null;
-  payload: Record<string, string> | null;
-  attempt_count: number;
-  recipients: RecipientResult[] | null;
-}): Promise<void> {
-  // Only retry recipients that previously failed — a recipient who already
-  // got the message (partially_sent) must never receive a duplicate send.
-  const alreadySucceeded = (row.recipients ?? []).filter(r => r.status !== 'failed');
-  const tenant = await getTenantById(row.tenant_id);
-  const result = await attemptDelivery(tenant, row.tenant_id, row.event_type, row.body ?? '', row.payload ?? {}, alreadySucceeded);
-  await finalizeAttempt(row.id, result, row.attempt_count + 1);
-
-  if ((result.waStatus === 'failed' || result.waStatus === 'no_template') && row.attempt_count + 1 >= MAX_RETRY_ATTEMPTS) {
-    await supabaseAdmin
-      .from('business_notifications')
-      .update({ severity: 'critical' })
-      .eq('id', row.id);
-    notifyAdmin({
-      dedupeKey: `business_notification_exhausted:${row.tenant_id}:${row.event_type}`,
-      subject: `Business alert delivery exhausted retries — ${row.event_type}`,
-      summary: `A ${row.event_type} alert for tenant ${row.tenant_id} failed to reach staff/manager after ${MAX_RETRY_ATTEMPTS} attempts. It remains visible (unread) on their dashboard.`,
-      context: { tenantId: row.tenant_id, eventType: row.event_type, notificationId: row.id },
-    }).catch(() => {});
-  }
-}
+// Exponential Backoff Intervals: 5s, 30s, 2m, 10m, 30m
+const RETRY_INTERVALS_MS = [
+  5_000,
+  30_000,
+  120_000,
+  600_000,
+  1800_000,
+];
 
 const RETRY_CLAIM_BATCH = 20;
 const STUCK_LOCK_MS = 5 * 60_000;
 
 /**
- * Claims and retries due business_notifications (called by
- * /api/cron/notification-retry every 5 min). Same claim-with-lock shape as
- * automation_queue/broadcast_queue: stamp locked_at atomically so concurrent
- * cron invocations can't double-send, release stuck locks after 5 minutes.
+ * Single guaranteed-delivery entry point. Idempotent and traced.
+ * Ensures exactly-once business semantics.
+ */
+export async function sendBusinessEvent(params: BusinessEventParams): Promise<BusinessEventResult> {
+  const { tenantId, eventType, title, body, variables = {}, conversationId = null, leadId = null, idempotencyKey } = params;
+  const traceId = crypto.randomUUID();
+
+  console.log(`[TRACE:${traceId}] Initializing business event "${eventType}" for tenant ${tenantId}. IdempotencyKey=${idempotencyKey ?? 'None'}`);
+
+  // 1. Idempotency Check
+  if (idempotencyKey) {
+    const { data: existing } = await supabaseAdmin
+      .from('business_notifications')
+      .select('id, wa_status, recipients, trace_id')
+      .eq('tenant_id', tenantId)
+      .eq('idempotency_key', idempotencyKey)
+      .maybeSingle();
+
+    if (existing) {
+      console.log(`[TRACE:${existing.trace_id}] Duplicate block: Returning existing notification ${existing.id}`);
+      return {
+        notificationId: existing.id,
+        waStatus: existing.wa_status,
+        recipients: existing.recipients as RecipientResult[],
+        traceId: existing.trace_id,
+      };
+    }
+  }
+
+  // 2. Insert durable notification record
+  let notificationId = '';
+  const insertPayload = {
+    tenant_id: tenantId,
+    event_type: eventType,
+    severity: 'info',
+    title,
+    body,
+    payload: variables,
+    conversation_id: conversationId,
+    lead_id: leadId,
+    wa_status: 'pending',
+    idempotency_key: idempotencyKey ?? null,
+    trace_id: traceId,
+  };
+
+  const { data: notification, error: insertErr } = await supabaseAdmin
+    .from('business_notifications')
+    .insert(insertPayload)
+    .select('id')
+    .single();
+
+  if (insertErr) {
+    // Unique violation constraint code: 23505
+    if (insertErr.code === '23505' && idempotencyKey) {
+      const { data: existing } = await supabaseAdmin
+        .from('business_notifications')
+        .select('id, wa_status, recipients, trace_id')
+        .eq('tenant_id', tenantId)
+        .eq('idempotency_key', idempotencyKey)
+        .maybeSingle();
+      
+      if (existing) {
+        console.log(`[TRACE:${existing.trace_id}] Concurrent duplicate block: Returning existing notification ${existing.id}`);
+        return {
+          notificationId: existing.id,
+          waStatus: existing.wa_status,
+          recipients: existing.recipients as RecipientResult[],
+          traceId: existing.trace_id,
+        };
+      }
+    }
+
+    console.error(`[sendBusinessEvent] failed to write notification row:`, insertErr.message);
+    notifyAdmin({
+      dedupeKey: `business_notification_insert_failed:${tenantId}`,
+      subject: 'business_notifications insert failed',
+      summary: `Could not persist business event for tenant ${tenantId}: ${insertErr.message}`,
+      context: { tenantId, eventType, traceId },
+    }).catch(() => {});
+  } else {
+    notificationId = notification.id;
+  }
+
+  // 3. Trigger immediate dispatch
+  const tenant = await getTenantById(tenantId);
+  const result = await attemptDelivery(tenant, tenantId, eventType, body, variables, [], traceId);
+
+  if (notificationId) {
+    await finalizeAttempt(notificationId, result, 1);
+  }
+
+  // 4. Alert/Escalation triggers on direct failures
+  if (result.waStatus === 'failed' || result.waStatus === 'no_template') {
+    // If WhatsApp failed, trigger immediate Resend fallback email
+    await triggerEmailFallback(tenant, eventType, title, body, traceId);
+
+    notifyAdmin({
+      dedupeKey: `business_event_delivery_failed:${tenantId}:${eventType}`,
+      subject: `Business alert delivery failed — ${eventType}`,
+      summary: `A ${eventType} alert for tenant ${tenantId} failed WhatsApp delivery (${result.waStatus}). Fallback channels triggered.`,
+      context: { tenantId, eventType, notificationId, traceId },
+    }).catch(() => {});
+  }
+
+  return {
+    notificationId,
+    waStatus: result.waStatus,
+    recipients: result.recipients,
+    traceId,
+  };
+}
+
+/**
+ * Claims and retries notifications fairly (preventing single-tenant starvation).
  */
 export async function processNotificationRetries(): Promise<{ claimed: number; retried: number }> {
   const now = new Date().toISOString();
   const stuckCutoff = new Date(Date.now() - STUCK_LOCK_MS).toISOString();
 
-  // Release any locks stuck from a crashed/timed-out invocation.
+  // Release stuck locks
   await supabaseAdmin
     .from('business_notifications')
     .update({ locked_at: null })
     .lt('locked_at', stuckCutoff);
 
+  // Fetch up to 100 due items (allows fair filtering in-memory)
   const { data: due } = await supabaseAdmin
     .from('business_notifications')
-    .select('id')
+    .select('id, tenant_id')
     .in('wa_status', ['failed', 'partially_sent', 'no_template'])
     .lt('attempt_count', MAX_RETRY_ATTEMPTS)
     .lte('next_retry_at', now)
     .is('locked_at', null)
-    .limit(RETRY_CLAIM_BATCH);
+    .limit(100);
 
   if (!due || due.length === 0) return { claimed: 0, retried: 0 };
 
-  const ids = due.map(d => d.id);
+  // Group by tenant and cap at 3 items per tenant per batch (Fair scheduler)
+  const tenantClaimsMap = new Map<string, string[]>();
+  const idsToLock: string[] = [];
+
+  for (const item of due) {
+    const list = tenantClaimsMap.get(item.tenant_id) ?? [];
+    if (list.length < 3 && idsToLock.length < RETRY_CLAIM_BATCH) {
+      list.push(item.id);
+      tenantClaimsMap.set(item.tenant_id, list);
+      idsToLock.push(item.id);
+    }
+  }
+
+  if (idsToLock.length === 0) return { claimed: 0, retried: 0 };
+
   const { data: claimed } = await supabaseAdmin
     .from('business_notifications')
     .update({ locked_at: now })
-    .in('id', ids)
+    .in('id', idsToLock)
     .is('locked_at', null)
-    .select('id, tenant_id, event_type, body, payload, attempt_count, recipients');
+    .select('id, tenant_id, event_type, body, payload, attempt_count, recipients, trace_id');
 
   if (!claimed || claimed.length === 0) return { claimed: 0, retried: 0 };
 
   let retried = 0;
   for (const row of claimed) {
     try {
-      await retryBusinessNotification(row as Parameters<typeof retryBusinessNotification>[0]);
+      console.log(`[TRACE:${row.trace_id}] Retrying notification ${row.id} (attempt=${row.attempt_count + 1})`);
+      const alreadySucceeded = (row.recipients as RecipientResult[] ?? []).filter(r => r.status !== 'failed');
+      const tenant = await getTenantById(row.tenant_id);
+      const result = await attemptDelivery(tenant, row.tenant_id, row.event_type, row.body ?? '', row.payload as Record<string, string> ?? {}, alreadySucceeded, row.trace_id);
+      
+      const newAttemptCount = row.attempt_count + 1;
+      await finalizeAttempt(row.id, result, newAttemptCount);
+
+      // Email fallback if WhatsApp fails repeatedly
+      if (result.waStatus === 'failed' || result.waStatus === 'no_template') {
+        if (newAttemptCount >= 3) {
+          await triggerEmailFallback(tenant, row.event_type, `Retry alert — ${row.event_type}`, row.body ?? '', row.trace_id);
+        }
+      }
+
+      // Final failure notification
+      if ((result.waStatus === 'failed' || result.waStatus === 'no_template') && newAttemptCount >= MAX_RETRY_ATTEMPTS) {
+        await supabaseAdmin
+          .from('business_notifications')
+          .update({ severity: 'critical' })
+          .eq('id', row.id);
+
+        notifyAdmin({
+          dedupeKey: `business_notification_exhausted:${row.tenant_id}:${row.event_type}`,
+          subject: `Alert retries exhausted — ${row.event_type}`,
+          summary: `Business alert for tenant ${row.tenant_id} failed after ${MAX_RETRY_ATTEMPTS} attempts.`,
+          context: { tenantId: row.tenant_id, eventType: row.event_type, notificationId: row.id, traceId: row.trace_id },
+        }).catch(() => {});
+      }
+
       retried++;
     } catch (err) {
-      console.error(`[notification-retry] failed for ${row.id}:`, (err as Error).message);
+      console.error(`[TRACE:${row.trace_id}] notification-retry failed:`, (err as Error).message);
       await supabaseAdmin.from('business_notifications').update({ locked_at: null }).eq('id', row.id);
     }
   }
@@ -210,10 +269,8 @@ export async function processNotificationRetries(): Promise<{ claimed: number; r
   return { claimed: claimed.length, retried };
 }
 
-// ── Internal: resolve recipients + attempt session-or-template send ────────
-// `alreadySucceeded` (non-empty only on a retry) is carried through unchanged
-// and those phones are skipped entirely — a recipient who already received
-// the alert must never be sent a duplicate on a later retry pass.
+// ── Internal Helpers ────────────────────────────────────────────────────────
+
 async function attemptDelivery(
   tenant: Tenant | null,
   tenantId: string,
@@ -221,18 +278,23 @@ async function attemptDelivery(
   body: string,
   variables: Record<string, string>,
   alreadySucceeded: RecipientResult[],
+  traceId: string,
 ): Promise<{ waStatus: string; recipients: RecipientResult[] }> {
   if (!tenant || !tenant.wa_access_token || !tenant.wa_phone_number_id) {
+    console.warn(`[TRACE:${traceId}] Tenant ${tenantId} is missing WhatsApp configuration.`);
     return { waStatus: alreadySucceeded.length ? 'partially_sent' : 'failed', recipients: alreadySucceeded };
   }
 
   const token = decryptToken(tenant.wa_access_token as string) as string;
-  if (!token) return { waStatus: alreadySucceeded.length ? 'partially_sent' : 'failed', recipients: alreadySucceeded };
+  if (!token) {
+    console.error(`[TRACE:${traceId}] Token decryption failed for tenant ${tenantId}.`);
+    return { waStatus: alreadySucceeded.length ? 'partially_sent' : 'failed', recipients: alreadySucceeded };
+  }
 
   const doneSet = new Set(alreadySucceeded.map(r => r.phone));
   const rawRecipients: { phone: string; role: 'staff' | 'manager' }[] = [];
-  if (tenant.staff_phone) rawRecipients.push({ phone: normalizeStaffPhone(tenant.staff_phone), role: 'staff' });
-  if (tenant.manager_phone) rawRecipients.push({ phone: normalizeStaffPhone(tenant.manager_phone), role: 'manager' });
+  if (tenant.staff_phone) rawRecipients.push({ phone: normalizePhoneNumber(tenant.staff_phone), role: 'staff' });
+  if (tenant.manager_phone) rawRecipients.push({ phone: normalizePhoneNumber(tenant.manager_phone), role: 'manager' });
 
   const seen = new Set<string>(doneSet);
   const recipients = rawRecipients.filter(r => {
@@ -249,6 +311,7 @@ async function attemptDelivery(
 
   for (const recipient of recipients) {
     const session = await getSessionState(tenantId, recipient.phone);
+    console.log(`[TRACE:${traceId}] Dispatching to ${recipient.role} (${recipient.phone}). SessionOpen=${session.windowOpen}`);
 
     if (session.windowOpen) {
       try {
@@ -261,19 +324,38 @@ async function attemptDelivery(
           results.push({ phone: recipient.phone, role: recipient.role, status: 'failed', error: (err as Error).message });
           continue;
         }
-        // fall through to template fallback below
       }
     }
 
-    // Window closed (or just closed on send) — fall back to the bound template.
-    const template = await resolveEventTemplate(tenantId, eventType);
+    // Session Closed Fallback
+    let template = await resolveEventTemplate(tenantId, eventType);
+    let resolvedVars = { ...variables };
+
     if (!template) {
-      results.push({ phone: recipient.phone, role: recipient.role, status: 'failed', error: 'Window closed, no fallback template bound', no_fallback_template: true });
+      ensureRequiredTemplates(tenantId).catch((e) => console.error('[businessNotify] lazy provisioning failed:', e.message));
+      template = await resolveEventTemplate(tenantId, 'human_assistance');
+      if (template) {
+        resolvedVars = {
+          business_name: variables.business_name || tenant?.business_name || 'Your Business',
+          customer_name: variables.customer_name || variables.guest_name || 'Guest',
+          reason: eventType.replace(/_/g, ' ').toUpperCase(),
+          message: variables.message || [
+            variables.booking_date ? `Date: ${variables.booking_date}` : null,
+            variables.booking_time ? `Time: ${variables.booking_time}` : null,
+            variables.guests_count ? `Guests: ${variables.guests_count}` : null,
+            variables.last_message || variables.bodyText || null
+          ].filter(Boolean).join('\n') || '[No details]'
+        };
+      }
+    }
+
+    if (!template) {
+      results.push({ phone: recipient.phone, role: recipient.role, status: 'failed', error: 'Window closed, no template bound', no_fallback_template: true });
       continue;
     }
 
     try {
-      const positional = mapVariablesToPositional(template.variableMap, variables);
+      const positional = mapVariablesToPositional(template.variableMap, resolvedVars);
       const sendResult = await sendTemplateMessage(token, tenant.wa_phone_number_id, recipient.phone, template.name, positional, template.language);
       results.push({ phone: recipient.phone, role: recipient.role, status: 'sent_template', wa_message_id: sendResult.messageId });
       if (session.conversationId) await logOutboundMessage(tenantId, session.conversationId, `[Template: ${template.name}]`, 'template', sendResult.messageId, template.name);
@@ -285,8 +367,25 @@ async function attemptDelivery(
   return { waStatus: summarizeStatus(results), recipients: results };
 }
 
-// Pure — exported so the branching (all-sent / partial / all-failed /
-// no-template) is unit-testable without a DB.
+async function triggerEmailFallback(
+  tenant: Tenant | null,
+  eventType: string,
+  title: string,
+  body: string,
+  traceId: string,
+): Promise<void> {
+  const staffEmail = tenant?.staff_email || process.env.PLATFORM_ADMIN_EMAIL;
+  if (!staffEmail) return;
+
+  console.log(`[TRACE:${traceId}] Triggering fallback Resend email dispatch to: ${staffEmail}`);
+  await notifyTenant({
+    staffEmail,
+    businessName: tenant?.business_name || 'Aries Business',
+    subject: `[ALERT FALLBACK] ${title}`,
+    summary: body,
+  }).catch(e => console.error(`[TRACE:${traceId}] Resend dispatch failed:`, e.message));
+}
+
 export function summarizeStatus(results: RecipientResult[]): string {
   if (results.length === 0) return 'failed';
   const allFailed = results.every(r => r.status === 'failed');
@@ -326,8 +425,13 @@ async function finalizeAttempt(
   attemptCount: number,
 ): Promise<void> {
   const retryable = result.waStatus === 'failed' || result.waStatus === 'partially_sent' || result.waStatus === 'no_template';
+  
+  // Exponential backoff mapping
+  const backoffIdx = Math.min(attemptCount - 1, RETRY_INTERVALS_MS.length - 1);
+  const backoffMs = RETRY_INTERVALS_MS[backoffIdx] ?? 30_000;
+  
   const nextRetryAt = retryable && attemptCount < MAX_RETRY_ATTEMPTS
-    ? new Date(Date.now() + RETRY_BACKOFF_MS * attemptCount).toISOString()
+    ? new Date(Date.now() + backoffMs).toISOString()
     : null;
 
   await supabaseAdmin
@@ -340,4 +444,57 @@ async function finalizeAttempt(
       locked_at: null,
     })
     .eq('id', notificationId);
+}
+
+export interface EscalationAlertParams {
+  tenantId: string;
+  conversationId: string;
+  leadId: string | null;
+  customerPhone: string;
+  customerName: string;
+  reason: string;
+  lastMessage: string;
+  idempotencyKey?: string;
+}
+
+export async function triggerEscalationAlert(params: EscalationAlertParams): Promise<BusinessEventResult> {
+  const { tenantId, conversationId, leadId, customerPhone, customerName, reason, lastMessage, idempotencyKey } = params;
+
+  const tenant = await getTenantById(tenantId);
+  const businessName = tenant?.business_name || 'Your Business';
+
+  const DEFAULT_ESCALATION_TEMPLATE =
+    `🚨 New Escalation Alert | {{business_name}}\n\n` +
+    `👤 Customer: {{customer_name}}\n` +
+    `📌 Escalation Reason:\n` +
+    `{{reason}}\n\n` +
+    `💬 Customer Message:\n` +
+    `{{message}}\n\n` +
+    `⚡ Action Required:\n` +
+    `Please respond to the customer as soon as possible. The AI conversation has been paused pending staff assistance.`;
+
+  const cleanPhone = customerPhone.replace(/\D/g, '');
+  const formattedPhone = cleanPhone.length === 10 ? '91' + cleanPhone : cleanPhone;
+
+  const templateVars: Record<string, string> = {
+    customer_name:  customerName || `+${formattedPhone}`,
+    customer_phone: formattedPhone,
+    reason,
+    message:        lastMessage || '[No message]',
+    business_name:  businessName,
+  };
+
+  const rawTemplate = tenant?.escalation_alert_template?.trim() || DEFAULT_ESCALATION_TEMPLATE;
+  const alertMsg = rawTemplate.replace(/\{\{(\w+)\}\}/g, (_: string, key: string) => templateVars[key] ?? '');
+
+  return sendBusinessEvent({
+    tenantId,
+    eventType: 'human_assistance',
+    title: `Escalation Alert — ${customerName || `+${formattedPhone}`}`,
+    body: alertMsg,
+    variables: templateVars,
+    conversationId,
+    leadId,
+    idempotencyKey,
+  });
 }

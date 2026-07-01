@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { AutomationRule } from '@/app/dashboard/broadcast/types';
+import { triggerEscalationAlert } from '@/lib/whatsapp/businessNotify';
 
 export class AutomationEngineService {
   /**
@@ -48,6 +49,20 @@ export class AutomationEngineService {
           }
 
         } else if (rule.action_type === 'assign_human') {
+          // Fetch conversation and lead details to trigger alert
+          const { data: conv } = await supabaseAdmin
+            .from('conversations')
+            .select('id')
+            .eq('lead_id', contactId)
+            .eq('tenant_id', tenantId)
+            .maybeSingle();
+
+          const { data: lead } = await supabaseAdmin
+            .from('leads')
+            .select('name')
+            .eq('id', contactId)
+            .maybeSingle();
+
           // Pause bot responses on conversation and escalate
           await supabaseAdmin
             .from('conversations')
@@ -59,6 +74,19 @@ export class AutomationEngineService {
             })
             .eq('lead_id', contactId)
             .eq('tenant_id', tenantId);
+
+          if (conv) {
+            const customerName = lead?.name || `+${phone}`;
+            await triggerEscalationAlert({
+              tenantId,
+              conversationId: conv.id,
+              leadId: contactId,
+              customerPhone: phone,
+              customerName,
+              reason: `Broadcast automation triggered: ${triggerType}`,
+              lastMessage: `[Automation trigger: ${triggerType}]`
+            }).catch(e => console.error('Automation engine staff alert failed:', e));
+          }
 
         } else if (rule.action_type === 'trigger_flow') {
           // Trigger custom conversation flow automation

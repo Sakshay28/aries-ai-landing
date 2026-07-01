@@ -6,7 +6,7 @@
 // Swapping providers requires zero changes to business logic.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { GeminiConversationAnalysis, MultiDimensionalConfidence, FallbackLevel } from './types';
+import type { GeminiConversationAnalysis, GeminiConversationAnalysisV2, MultiDimensionalConfidence, FallbackLevel } from './types';
 import type { IndustryProfile } from './industry-profiles';
 import type { ConversationMemory } from './types';
 
@@ -44,13 +44,19 @@ export interface AIAnalysisRequest {
   promptVersion:     string;
   promptKey:         string;
   maxTokens?:        number;
+  businessType?:     string;
+  knowledgeBase?:    string;
+  pastHistory?:      string;
+  campaignSource?:   string;
+  customerMetadata?: string;
+  messageTiming?:    string;
 }
 
 // ── Response ──────────────────────────────────────────────────────────────
 
 export interface AIAnalysisResponse {
   /** Parsed and validated AI output */
-  parsed:          GeminiConversationAnalysis;
+  parsed:          GeminiConversationAnalysis | GeminiConversationAnalysisV2;
   /** Multi-dimensional confidence (REQ 9) */
   confidence:      MultiDimensionalConfidence;
   tokensIn:        number;

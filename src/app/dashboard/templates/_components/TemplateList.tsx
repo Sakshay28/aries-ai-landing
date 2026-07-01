@@ -11,7 +11,8 @@ import {
   RefreshCw,
   Inbox
 } from 'lucide-react';
-import type { WaTemplate, TemplateCategory, TemplateStatus } from './types';
+import type { WaTemplate, TemplateCategory, TemplateStatus, SystemEventType } from './types';
+import { SYSTEM_EVENT_OPTIONS } from './types';
 import StatusBadge from './StatusBadge';
 import WhatsAppPreview from './WhatsAppPreview';
 
@@ -23,6 +24,7 @@ interface Props {
   onDelete: (id: string, name: string) => void;
   onSync: () => void;
   onCreateNew: () => void;
+  onEventTypeChange?: (template: WaTemplate, eventType: SystemEventType | null) => void;
 }
 
 // Premium relative date formatter
@@ -53,6 +55,7 @@ export default function TemplateList({
   onDuplicate,
   onSync,
   onCreateNew,
+  onEventTypeChange,
 }: Props) {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
@@ -225,6 +228,27 @@ export default function TemplateList({
                       </div>
                     </div>
                   </div>
+
+                  {/* Guaranteed-delivery event binding — only meaningful once Meta has
+                      approved the template; picks which business event this template
+                      auto-serves as the fallback for when the 24h session window is closed. */}
+                  {template.status === 'APPROVED' && template.localId && onEventTypeChange && (
+                    <div onClick={(e) => e.stopPropagation()} className="mt-3">
+                      <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                        Use for system event
+                      </label>
+                      <select
+                        value={template.eventType || ''}
+                        onChange={(e) => onEventTypeChange(template, (e.target.value || null) as SystemEventType | null)}
+                        className="mt-1 w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all cursor-pointer"
+                      >
+                        <option value="">Not bound</option>
+                        {SYSTEM_EVENT_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   {/* Horizontal separating line */}
                   <div className="h-px bg-border/40 my-4" />

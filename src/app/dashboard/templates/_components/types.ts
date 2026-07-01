@@ -97,7 +97,40 @@ export interface WaTemplate {
   body?: string;
   footer?: string;
   variableMap?: VariableMap;
+  // Guaranteed-delivery binding — which system event auto-selects this
+  // template as the fallback when a business-facing WhatsApp send is
+  // blocked by the 24h window. Only meaningful for APPROVED templates.
+  eventType?: SystemEventType | null;
 }
+
+// Mirrors src/lib/whatsapp/templateManager.ts SystemEventType — kept as a
+// plain union here to avoid importing server-only code into a client component.
+export type SystemEventType =
+  | 'booking_confirmation'
+  | 'booking_reminder'
+  | 'human_assistance'
+  | 'support_response'
+  | 'lead_follow_up'
+  | 'callback_request'
+  | 'order_update'
+  | 'reservation_update'
+  | 'thank_you'
+  | 'payment_confirmation'
+  | 'staff_keepalive';
+
+export const SYSTEM_EVENT_OPTIONS: { value: SystemEventType; label: string }[] = [
+  { value: 'booking_confirmation', label: 'Booking confirmation' },
+  { value: 'booking_reminder',     label: 'Booking reminder' },
+  { value: 'reservation_update',   label: 'Reservation / cancellation update' },
+  { value: 'human_assistance',     label: 'Human assistance / handoff' },
+  { value: 'support_response',     label: 'Support response' },
+  { value: 'lead_follow_up',       label: 'Lead follow-up' },
+  { value: 'callback_request',     label: 'Callback request' },
+  { value: 'order_update',         label: 'Order update' },
+  { value: 'thank_you',            label: 'Thank you' },
+  { value: 'payment_confirmation', label: 'Payment confirmation' },
+  { value: 'staff_keepalive',      label: 'Staff keepalive (internal)' },
+];
 
 // ── Meta API component shape ──────────────────
 export interface MetaComponent {

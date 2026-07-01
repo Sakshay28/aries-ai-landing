@@ -5,7 +5,7 @@ import {
   Phone, Tag, Bot, User,
   MessageSquare, ChevronDown, Plus, Trash2,
   UserPlus, StickyNote, Workflow, Loader2, Check,
-  Mail, Clock,
+  Mail, Clock, Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -36,6 +36,16 @@ import { formatPhoneDisplay } from "@/lib/utils/phone";
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "—";
   return new Date(dateStr).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function formatNoteTime(dateStr: string | null): string {
+  if (!dateStr) return "";
+  try {
+    const date = new Date(dateStr);
+    return date.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true });
+  } catch {
+    return "";
+  }
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -100,7 +110,15 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 
 // ── note type ────────────────────────────────────────────────────────
-interface Note { id: string; text: string; createdAt: string; }
+interface Note {
+  id: string;
+  text: string;
+  createdAt: string;
+  createdBy?: string;
+  status?: 'saved' | 'saving' | 'failed';
+  error?: string | null;
+  idempotencyKey?: string;
+}
 
 // ── main component ──────────────────────────────────────────────────
 interface CRMPanelProps {
@@ -111,6 +129,9 @@ interface CRMPanelProps {
 export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [noteInput, setNoteInput] = useState("");
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState("");
   const [localLead, setLocalLead] = useState<any>(null);
   const [team, setTeam] = useState<any[]>([]);
   const [loadingTeam, setLoadingTeam] = useState(false);
@@ -130,7 +151,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const [modalEditNotes, setModalEditNotes] = useState("");
   const [modalSaving, setModalSaving] = useState(false);
 
-  const noteInputRef = useRef<HTMLInputElement>(null);
+  const noteInputRef = useRef<HTMLTextAreaElement>(null);
   const agentSelectRef = useRef<HTMLSelectElement>(null);
   const notesSectionRef = useRef<HTMLDivElement>(null);
   const [tagsOpen, setTagsOpen] = useState(false);
@@ -298,27 +319,368 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
     }
   };
 
-  // Load notes from localStorage keyed by conversation id
-  useEffect(() => {
-    if (!meta?.id) { setNotes([]); return; }
+  // Helper to read offline queue from localStorage
+  const getOfflineQueue = (convId: string): any[] => {
+    if (typeof window === 'undefined') return [];
     try {
-      const raw = localStorage.getItem(`crm-notes-${meta.id}`);
-      setNotes(raw ? JSON.parse(raw) : []);
-    } catch { setNotes([]); }
-  }, [meta?.id]);
-
-  const saveNotes = (updated: Note[]) => {
-    setNotes(updated);
-    if (meta?.id) localStorage.setItem(`crm-notes-${meta.id}`, JSON.stringify(updated));
+      const raw = localStorage.getItem(`crm-notes-queue-${convId}`);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
   };
 
+  // Helper to save offline queue to localStorage
+  const saveOfflineQueue = (convId: string, queue: any[]) => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(`crm-notes-queue-${convId}`, JSON.stringify(queue));
+    } catch (err) {
+      console.error('Failed to save offline queue:', err);
+    }
+  };
+
+  // Online/Offline status window listeners
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      syncOfflineQueue();
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [meta?.id]);
+
+  // Sync offline queue to server
+  const syncOfflineQueue = () => {
+    if (!meta?.id) return;
+    const queue = getOfflineQueue(meta.id);
+    if (queue.length === 0) return;
+
+    toast.success("Connection restored! Syncing queued notes...");
+    queue.forEach((item: any) => {
+      const resetItem = { ...item, retryCount: 0 };
+      saveNoteToServer(resetItem);
+    });
+  };
+
+  // Load notes from DB & listen to realtime updates via Supabase Channel
+  useEffect(() => {
+    if (!meta?.id) { setNotes([]); return; }
+
+    let active = true;
+
+    const fetchNotes = async () => {
+      try {
+        const res = await fetch(`/api/dashboard/notes?conversationId=${meta.id}`);
+        const data = await res.json();
+        if (data.success && active) {
+          const apiNotes = data.notes.map((n: any) => ({ ...n, status: 'saved' }));
+
+          // Get any locally queued notes
+          const queue = getOfflineQueue(meta.id);
+          const queueNotes = queue.map((qn: any) => ({
+            id: qn.id,
+            text: qn.text,
+            createdAt: qn.createdAt,
+            createdBy: 'You',
+            status: qn.retryCount >= 3 ? 'failed' : 'saving',
+            error: qn.retryCount >= 3 ? 'Could not save note. Please try again.' : `Saving (Retry ${qn.retryCount}/3)...`,
+            idempotencyKey: qn.idempotencyKey
+          }));
+
+          // Filter out queued notes that are already in the DB response
+          const filteredQueueNotes = queueNotes.filter(
+            (qn: any) => !apiNotes.some((an: any) => an.text === qn.text || (qn.idempotencyKey && an.idempotencyKey === qn.idempotencyKey))
+          );
+
+          setNotes([...apiNotes, ...filteredQueueNotes]);
+        }
+      } catch (err) {
+        console.error('Failed to fetch notes:', err);
+      }
+    };
+
+    fetchNotes();
+
+    const supabase = createBrowserSupabaseClient();
+    const channelName = `realtime-notes-${meta.id}-${Date.now()}`;
+    const channel = supabase
+      .channel(channelName)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'notes',
+        filter: `conversation_id=eq.${meta.id}`
+      }, (payload) => {
+        if (!active) return;
+
+        if (payload.eventType === 'INSERT') {
+          const incoming = payload.new as any;
+          setNotes(prev => {
+            const matchIndex = prev.findIndex(n => n.id === incoming.id || (incoming.idempotency_key && n.idempotencyKey === incoming.idempotency_key));
+            if (matchIndex !== -1) {
+              return prev.map((n, idx) =>
+                idx === matchIndex
+                  ? { ...n, id: incoming.id, status: 'saved', createdAt: incoming.created_at, createdBy: incoming.created_by_name }
+                  : n
+              );
+            }
+            return [...prev, {
+              id: incoming.id,
+              text: incoming.text,
+              createdAt: incoming.created_at,
+              createdBy: incoming.created_by_name,
+              status: 'saved'
+            }];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const incoming = payload.new as any;
+          setNotes(prev => prev.map(n =>
+            n.id === incoming.id
+              ? { ...n, text: incoming.text, createdAt: incoming.created_at, createdBy: incoming.created_by_name, status: 'saved' }
+              : n
+          ));
+        } else if (payload.eventType === 'DELETE') {
+          const deletedId = payload.old.id;
+          setNotes(prev => prev.filter(n => n.id !== deletedId));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
+  }, [meta?.id]);
+
+  // POST note saving implementation
+  const saveNoteToServer = async (item: any) => {
+    if (!navigator.onLine) {
+      return; // Offline: item remains in queue, UI already displays Saving/Retry
+    }
+
+    try {
+      const res = await fetch('/api/dashboard/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: item.conversationId,
+          contactId: item.contactId,
+          text: item.text,
+          idempotencyKey: item.idempotencyKey
+        })
+      });
+
+      const data = await res.json();
+
+      if (res.ok && (data.id || data.text)) {
+        // Update UI
+        setNotes(prev => prev.map(n =>
+          (n.id === item.id || (item.idempotencyKey && n.idempotencyKey === item.idempotencyKey))
+            ? { ...n, id: data.id, status: 'saved', createdAt: data.createdAt, createdBy: data.createdBy }
+            : n
+        ));
+
+        // Remove from local storage queue
+        const currentQueue = getOfflineQueue(item.conversationId);
+        saveOfflineQueue(item.conversationId, currentQueue.filter((q: any) => q.id !== item.id));
+      } else {
+        throw new Error(data.error || 'Failed to save');
+      }
+    } catch (err: any) {
+      console.warn('[NOTE_SAVE_FAILED_RETRYING]', item.id, err.message);
+      handleSaveFailure(item);
+    }
+  };
+
+  // Automatic retry implementation
+  const handleSaveFailure = (item: any) => {
+    const nextRetryCount = item.retryCount + 1;
+    const delays = [1000, 2000, 5000]; // Retries at 1s, 2s, 5s
+
+    if (nextRetryCount <= 3) {
+      const delay = delays[nextRetryCount - 1];
+
+      // Update local storage queue
+      const currentQueue = getOfflineQueue(item.conversationId);
+      const updatedQueue = currentQueue.map((q: any) =>
+        q.id === item.id ? { ...q, retryCount: nextRetryCount } : q
+      );
+      saveOfflineQueue(item.conversationId, updatedQueue);
+
+      // Update UI Status
+      setNotes(prev => prev.map(n =>
+        n.id === item.id
+          ? { ...n, status: 'saving', error: `Saving (Retry ${nextRetryCount}/3)...` }
+          : n
+      ));
+
+      // Retry query
+      setTimeout(() => {
+        const freshQueue = getOfflineQueue(item.conversationId);
+        const freshItem = freshQueue.find((q: any) => q.id === item.id);
+        if (freshItem) {
+          saveNoteToServer(freshItem);
+        }
+      }, delay);
+    } else {
+      // Retries exhausted: Mark failed, toast error, restore text to input if it's currently empty
+      setNotes(prev => prev.map(n =>
+        n.id === item.id
+          ? { ...n, status: 'failed', error: 'Couldn\'t save note. Please try again.' }
+          : n
+      ));
+      
+      // If the note input is currently empty (meaning they just submitted it), restore it
+      setNoteInput(prev => prev.trim() === '' ? item.text : prev);
+      
+      toast.error("Couldn't save note. Please try again.");
+    }
+  };
+
+  // Manual Retry Handler
+  const handleManualRetry = (id: string) => {
+    if (!meta?.id) return;
+    const queue = getOfflineQueue(meta.id);
+    const item = queue.find((q: any) => q.id === id);
+    if (item) {
+      // Reset retry count to 0
+      const resetItem = { ...item, retryCount: 0 };
+      
+      // Update queue
+      const updatedQueue = queue.map((q: any) =>
+        q.id === id ? resetItem : q
+      );
+      saveOfflineQueue(meta.id, updatedQueue);
+
+      // Update UI status to saving
+      setNotes(prev => prev.map(n =>
+        n.id === id ? { ...n, status: 'saving', error: 'Saving...' } : n
+      ));
+
+      saveNoteToServer(resetItem);
+    }
+  };
+
+  // Add Note Handler (triggered by enter / button click)
   const addNote = () => {
     const text = noteInput.trim();
     if (!text) return;
-    saveNotes([...notes, { id: Date.now().toString(), text, createdAt: new Date().toISOString() }]);
-    setNoteInput("");
+    if (!meta?.id || !meta?.leads?.id) {
+      toast.error("No contact linked to this conversation");
+      return;
+    }
+
+    const tempId = `opt_${Math.random().toString(36).substring(2, 9)}`;
+    const idempotencyKey = `idem_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`;
+
+    const newNote: Note = {
+      id: tempId,
+      text,
+      createdAt: new Date().toISOString(),
+      createdBy: 'You',
+      status: 'saving',
+      idempotencyKey
+    };
+
+    // Add optimistic note to UI list
+    setNotes(prev => [...prev, newNote]);
+    setNoteInput(""); // Clear controlled textarea
+
+    // Add note to local storage queue
+    const queueItem = {
+      id: tempId,
+      text,
+      conversationId: meta.id,
+      contactId: meta.leads.id,
+      idempotencyKey,
+      createdAt: newNote.createdAt,
+      retryCount: 0
+    };
+    const currentQueue = getOfflineQueue(meta.id);
+    saveOfflineQueue(meta.id, [...currentQueue, queueItem]);
+
+    // Send note to backend
+    saveNoteToServer(queueItem);
   };
-  const deleteNote = (id: string) => saveNotes(notes.filter(n => n.id !== id));
+
+  // Edit Note logic
+  const startEditingNote = (id: string, text: string) => {
+    setEditingNoteId(id);
+    setEditingNoteText(text);
+  };
+
+  const saveEditedNote = async (id: string) => {
+    const text = editingNoteText.trim();
+    if (!text) {
+      toast.error("Note text cannot be empty");
+      return;
+    }
+
+    const previousNotes = [...notes];
+    
+    // Optimistic UI update
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, text } : n));
+    setEditingNoteId(null);
+
+    try {
+      const res = await fetch('/api/dashboard/notes', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, text })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to edit note');
+      }
+      toast.success("Note edited successfully");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to edit note");
+      setNotes(previousNotes); // Revert state
+    }
+  };
+
+  // Delete Note logic
+  const deleteNote = async (id: string) => {
+    const previousNotes = [...notes];
+
+    // Check if it is a locally queued failed/saving note
+    if (id.startsWith('opt_')) {
+      // Remove from UI
+      setNotes(prev => prev.filter(n => n.id !== id));
+      // Remove from offline queue
+      if (meta?.id) {
+        const queue = getOfflineQueue(meta.id);
+        saveOfflineQueue(meta.id, queue.filter((q: any) => q.id !== id));
+      }
+      toast.success("Queued note removed");
+      return;
+    }
+
+    // Optimistic UI update
+    setNotes(prev => prev.filter(n => n.id !== id));
+
+    try {
+      const res = await fetch(`/api/dashboard/notes?id=${id}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to delete note');
+      }
+      toast.success("Note deleted successfully");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete note");
+      setNotes(previousNotes); // Revert state
+    }
+  };
 
   const lead = meta?.leads;
   const rawPhone = lead?.phone || meta?.sender_id || meta?.sender_name || "";
@@ -331,6 +693,34 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const aiCount = messages.filter(m => m.ai_generated).length;
   const firstMsg = messages[0];
   const lastMsg = messages.at(-1);
+
+  const quickActions = meta ? [
+    {
+      icon: UserPlus, label: 'Assign', dataAttr: 'data-assign-trigger',
+      action: () => {
+        agentSelectRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => agentSelectRef.current?.focus(), 300);
+      }
+    },
+    {
+      icon: Tag, label: 'Tag', dataAttr: 'data-tag-trigger',
+      action: () => setTagsOpen(v => !v)
+    },
+    {
+      icon: StickyNote, label: 'Note',
+      action: () => {
+        setNotesOpen(true);
+        setTimeout(() => {
+          notesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          setTimeout(() => noteInputRef.current?.focus(), 300);
+        }, 100);
+      }
+    },
+    {
+      icon: Workflow, label: 'Flow',
+      action: () => { window.location.href = '/dashboard/flows'; }
+    },
+  ] : [];
 
   return (
     <div className={cn(
@@ -446,33 +836,8 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
       {meta && (
         <div className="px-4 pb-3">
           <div className="grid grid-cols-4 gap-1.5">
-            {([
-              {
-                icon: UserPlus, label: 'Assign', dataAttr: 'data-assign-trigger',
-                action: () => {
-                  agentSelectRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  setTimeout(() => agentSelectRef.current?.focus(), 300);
-                }
-              },
-              {
-                icon: Tag, label: 'Tag', dataAttr: 'data-tag-trigger',
-                action: () => setTagsOpen(v => !v)
-              },
-              {
-                icon: StickyNote, label: 'Note',
-                action: () => {
-                  setNotesOpen(true);
-                  setTimeout(() => {
-                    notesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    setTimeout(() => noteInputRef.current?.focus(), 300);
-                  }, 100);
-                }
-              },
-              {
-                icon: Workflow, label: 'Flow',
-                action: () => window.location.href = '/dashboard/flows'
-              },
-            ]).map(({ icon: Icon, label, action, dataAttr }: any) => (
+            {/* eslint-disable-next-line react-hooks/refs */}
+            {quickActions.map(({ icon: Icon, label, action, dataAttr }: any) => (
               <button
                 key={label}
                 onClick={action}
@@ -717,30 +1082,119 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
               {notes.length === 0 && (
                 <p className="text-[12px] text-muted-foreground">No notes yet.</p>
               )}
-              {notes.map(n => (
-                <div key={n.id} className="group flex items-start gap-2 bg-muted/40 rounded-xl px-3 py-2.5">
-                  <p className="flex-1 text-[12px] text-foreground leading-relaxed">{n.text}</p>
-                  <button
-                    onClick={() => deleteNote(n.id)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-0.5"
-                  >
-                    <Trash2 className="w-3 h-3 text-muted-foreground hover:text-destructive transition-colors" />
-                  </button>
-                </div>
-              ))}
-              <div className="flex gap-2 mt-1">
-                <input
+              <div className="space-y-2">
+                {notes.map(n => (
+                  <div key={n.id} className="group flex flex-col gap-1.5 bg-muted/40 rounded-xl px-3 py-2.5">
+                    <div className="flex items-start gap-2">
+                      {editingNoteId === n.id ? (
+                        <textarea
+                          value={editingNoteText}
+                          onChange={e => setEditingNoteText(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              saveEditedNote(n.id);
+                            } else if (e.key === 'Escape') {
+                              setEditingNoteId(null);
+                            }
+                          }}
+                          className="flex-1 bg-background rounded border border-border p-1.5 text-[12px] text-foreground outline-none resize-none"
+                          rows={2}
+                          autoFocus
+                        />
+                      ) : (
+                        <p className="flex-1 text-[12px] text-foreground leading-relaxed whitespace-pre-wrap">{n.text}</p>
+                      )}
+
+                      <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-0.5">
+                        {editingNoteId === n.id ? (
+                          <>
+                            <button
+                              onClick={() => saveEditedNote(n.id)}
+                              className="p-0.5 text-muted-foreground hover:text-green-500 transition-colors"
+                              title="Save note"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setEditingNoteId(null)}
+                              className="p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+                              title="Cancel"
+                            >
+                              <Plus className="w-3.5 h-3.5 rotate-45" />
+                            </button>
+                          </>
+                        ) : (
+                          n.status !== 'saving' && (
+                            <>
+                              <button
+                                onClick={() => startEditingNote(n.id, n.text)}
+                                className="p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+                                title="Edit note"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => deleteNote(n.id)}
+                                className="p-0.5 text-muted-foreground hover:text-destructive transition-colors"
+                                title="Delete note"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </>
+                          )
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[9px] text-muted-foreground/60">
+                      <div className="flex items-center gap-1.5">
+                        {n.status === 'saving' && (
+                          <span className="flex items-center gap-1 text-orange-500/80 font-medium animate-pulse">
+                            <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                            {n.error || 'Saving...'}
+                          </span>
+                        )}
+                        {n.status === 'failed' && (
+                          <span className="flex items-center gap-1 text-destructive font-medium">
+                            <span>⚠️ {n.error || 'Failed'}</span>
+                            <button
+                              onClick={() => handleManualRetry(n.id)}
+                              className="underline hover:text-destructive-foreground transition-colors font-semibold"
+                            >
+                              Retry
+                            </button>
+                          </span>
+                        )}
+                        {n.status === 'saved' && (
+                          <span>By {n.createdBy || 'Agent'}</span>
+                        )}
+                      </div>
+                      {n.createdAt && <span>{formatNoteTime(n.createdAt)}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-2 mt-2 items-end">
+                <textarea
                   ref={noteInputRef}
                   value={noteInput}
                   onChange={e => setNoteInput(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && addNote()}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      addNote();
+                    }
+                  }}
                   placeholder="Add a note…"
-                  className="flex-1 bg-muted/50 rounded-lg px-3 py-2 text-[12px] text-foreground placeholder:text-muted-foreground outline-none focus:bg-muted transition-colors"
+                  rows={2}
+                  className="flex-1 bg-muted/50 rounded-lg px-3 py-2 text-[12px] text-foreground placeholder:text-muted-foreground outline-none focus:bg-muted transition-colors resize-none leading-relaxed"
                 />
                 <button
                   onClick={addNote}
                   disabled={!noteInput.trim()}
-                  className="w-8 h-8 rounded-lg bg-foreground text-background flex items-center justify-center disabled:opacity-30 transition-opacity flex-shrink-0"
+                  className="w-8 h-8 rounded-lg bg-foreground text-background flex items-center justify-center disabled:opacity-30 transition-opacity flex-shrink-0 mb-1"
                 >
                   <Plus className="w-3.5 h-3.5" />
                 </button>

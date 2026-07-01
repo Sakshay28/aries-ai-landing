@@ -26,6 +26,9 @@ export type AuditAction =
   | 'webhook_configured'
   | 'knowledge_doc_uploaded'
   | 'knowledge_doc_deleted'
+  | 'note_created'
+  | 'note_deleted'
+  | 'note_edited'
   | 'settings_updated';
 
 export interface AuditEntry {

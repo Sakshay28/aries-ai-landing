@@ -6,7 +6,7 @@
 // Schemas evolve independently from prompts.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { GeminiConversationAnalysis } from './types';
+import type { GeminiConversationAnalysis, GeminiConversationAnalysisV2 } from './types';
 
 export interface SchemaRecord {
   schemaKey:   string;
@@ -18,7 +18,7 @@ export interface SchemaRecord {
 
 export interface ValidationResult {
   valid:   boolean;
-  parsed?: GeminiConversationAnalysis;
+  parsed?: GeminiConversationAnalysis | GeminiConversationAnalysisV2;
   errors:  string[];
   warnings: string[];
 }
@@ -180,6 +180,70 @@ function validateLeadAnalysisV1(data: unknown): ValidationResult {
   return { valid: errors.length === 0, parsed, errors, warnings };
 }
 
+// ── Schema v2: LeadAnalysis V2 ─────────────────────────────────────────────
+
+const VALID_V2_STAGES = new Set(['New', 'Interested', 'Qualified', 'Hot', 'Converted', 'Cold', 'Lost']);
+const VALID_V2_SENTIMENTS = new Set(['positive', 'neutral', 'negative']);
+const VALID_V2_PRIORITIES = new Set(['critical', 'high', 'medium', 'low']);
+
+function validateLeadAnalysisV2(data: unknown): ValidationResult {
+  const errors:   string[] = [];
+  const warnings: string[] = [];
+
+  if (!data || typeof data !== 'object') {
+    return { valid: false, errors: ['Response is not an object'], warnings };
+  }
+
+  const raw = data as Record<string, unknown>;
+
+  const stage = validateEnum(raw.stage, VALID_V2_STAGES, 'stage', 'New', errors) as any;
+  const score = clampScore(raw.score, 'score', errors);
+  const confidence = clampScore(raw.confidence, 'confidence', errors);
+  
+  const reason = typeof raw.reason === 'string' ? raw.reason : '';
+  if (!reason) warnings.push('reason: empty string');
+
+  const summary = typeof raw.summary === 'string' ? raw.summary : '';
+  if (!summary) warnings.push('summary: empty string');
+
+  const intent = typeof raw.intent === 'string' ? raw.intent : '';
+  if (!intent) warnings.push('intent: empty string');
+
+  const sentiment = validateEnum(raw.sentiment, VALID_V2_SENTIMENTS, 'sentiment', 'neutral', errors) as any;
+  
+  const qualification = typeof raw.qualification === 'string' ? raw.qualification : 'unqualified';
+  
+  const next_action = typeof raw.next_action === 'string' ? raw.next_action : '';
+  if (!next_action) warnings.push('next_action: empty string');
+
+  const booking_probability = clampScore(raw.booking_probability, 'booking_probability', errors);
+  const human_probability = clampScore(raw.human_probability, 'human_probability', errors);
+  
+  const follow_up_priority = validateEnum(raw.follow_up_priority, VALID_V2_PRIORITIES, 'follow_up_priority', 'medium', warnings) as any;
+  
+  const explanation = typeof raw.explanation === 'string' ? raw.explanation : '';
+  if (!explanation) warnings.push('explanation: empty string');
+
+  const parsed: GeminiConversationAnalysisV2 = {
+    stage,
+    score,
+    confidence,
+    reason,
+    summary,
+    intent,
+    sentiment,
+    qualification,
+    next_action,
+    booking_probability,
+    human_probability,
+    follow_up_priority,
+    explanation,
+  };
+
+  return { valid: errors.length === 0, parsed, errors, warnings };
+}
+
+
 // ── Schema Store ──────────────────────────────────────────────────────────
 
 const SCHEMA_STORE: Map<string, SchemaRecord> = new Map([
@@ -190,7 +254,15 @@ const SCHEMA_STORE: Map<string, SchemaRecord> = new Map([
     isActive:    true,
     validate:    validateLeadAnalysisV1,
   }],
+  ['lead_analysis:v2', {
+    schemaKey:   'lead_analysis',
+    version:     'v2',
+    description: 'Enterprise Lead Engine v2: Simplified CRM AI classification schema',
+    isActive:    true,
+    validate:    validateLeadAnalysisV2,
+  }],
 ]);
+
 
 // ── Public API ────────────────────────────────────────────────────────────
 

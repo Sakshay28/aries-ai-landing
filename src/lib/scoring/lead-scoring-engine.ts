@@ -16,6 +16,7 @@
 
 import type { AIResponse } from '@/lib/ai/engine';
 import type { LeadStatus } from '@/lib/types';
+import type { GeminiConversationAnalysisV2 } from './types';
 import { INDUSTRY_PATTERNS, INDUSTRY_MODULES, type IndustryProfile, type IndustryPattern } from './industry-profiles';
 
 // ── Score Thresholds ──────────────────────────────────────────────────────────
@@ -380,29 +381,18 @@ const NEGATIVE_PATTERNS: PatternSignal[] = [
 ];
 
 // ── Validated Status Transitions ──────────────────────────────────────────────
-// Defines which automatic transitions the engine is allowed to make.
-// Manual overrides bypass this matrix.
-const ALLOWED_AUTO_TRANSITIONS: Record<string, Set<LeadStatus>> = {
-  new:       new Set(['cold', 'warm', 'hot', 'qualified', 'lost']),
-  cold:      new Set(['warm', 'hot', 'qualified', 'lost']),
-  warm:      new Set(['cold', 'hot', 'qualified', 'lost']),  // cold via decay
-  hot:       new Set(['warm', 'qualified', 'lost']),          // warm via decay
-  qualified: new Set(['hot', 'converted', 'lost']),           // hot via decay
-  converted: new Set(),                                        // terminal
-  lost:      new Set(['cold', 'warm', 'hot', 'qualified']),   // re-engageable
-};
 
-function isTransitionAllowed(from: string, to: LeadStatus): boolean {
-  const allowed = ALLOWED_AUTO_TRANSITIONS[from];
-  if (!allowed) return true; // unknown status — allow
-  return allowed.has(to);
-}
 
 // ── Public Types ──────────────────────────────────────────────────────────────
 
 export interface ScoringInput {
   userMessage: string | null | undefined;
-  aiResponse: Pick<AIResponse, 'intent' | 'extractedData' | 'confidence'>;
+  aiResponse: Partial<GeminiConversationAnalysisV2> & {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    extractedData?: any;
+    intent?: string;
+    confidence?: number;
+  };
   conversation: {
     message_count: number;
     created_at: string;
@@ -410,18 +400,17 @@ export interface ScoringInput {
   lead: {
     lead_score: number | null;
     lead_status: LeadStatus | string | null;
-    manual_status?: string | null;  // if set, engine updates auto_status only
+    manual_status?: string | null;  // legacy manual stage
+    manual_override?: boolean | null;
+    manual_stage?: string | null;
     buying_signals?: string[] | null;
     negative_signals?: string[] | null;
+    tags?: string[] | null;
+    is_repeat_customer?: boolean | null;
+    past_bookings_count?: number | null;
+    last_activity_at?: string | null;
   };
-  industryProfile?: IndustryProfile; // from business_profiles.industry
-  // Feature flags — per-tenant; falls back to DEFAULT_FLAGS if not provided
-  flags?: {
-    enable_negotiation_detection?: boolean;
-    enable_commitment_detection?: boolean;
-    enable_urgency_detection?: boolean;
-    enable_comparison_detection?: boolean;
-  };
+  industryProfile?: IndustryProfile;
 }
 
 export interface ScoreBreakdownEntry {
@@ -431,30 +420,25 @@ export interface ScoreBreakdownEntry {
 }
 
 export interface ScoringResult {
-  // Final resolved values
   lead_score:   number;
-  lead_status:  LeadStatus;  // effective status (manual wins if set)
-  auto_status:  LeadStatus;  // engine's recommendation (always updated)
+  lead_status:  LeadStatus;  // effective status
+  auto_status:  LeadStatus;  // recommendation
 
-  // Score components (for explainability)
-  rule_score_delta: number;  // points from keyword/rule patterns only
-  ai_score_delta:   number;  // supplemental points from AI intent
-  score_delta:      number;  // total (rule + ai)
+  rule_score_delta: number;
+  ai_score_delta:   number;
+  score_delta:      number;
   ai_confidence:    number;
   ai_intent:        string;
-  ai_ignored:       boolean; // true when AI confidence < threshold
+  ai_ignored:       boolean;
 
-  // Signal tracking
-  new_signals:         string[];
+  new_signals:          string[];
   all_buying_signals:  string[];
   all_negative_signals: string[];
 
-  // Explainability
   score_breakdown:   Record<string, ScoreBreakdownEntry>;
   scoring_reasoning: string;
   intent_level:      'high' | 'medium' | 'low';
 
-  // Transition metadata
   status_changed: boolean;
   prev_status:    string;
 }
@@ -462,197 +446,181 @@ export interface ScoringResult {
 // ── Main Scoring Function ─────────────────────────────────────────────────────
 
 export function calculateLeadScore(input: ScoringInput): ScoringResult {
-  const { userMessage, aiResponse, conversation, lead, industryProfile = 'general' } = input;
+  const { userMessage, aiResponse, conversation, lead } = input;
 
   const text = userMessage ?? '';
-  const existingScore     = typeof lead.lead_score === 'number' ? lead.lead_score : 0;
-  const existingStatus    = (lead.lead_status ?? 'new') as string;
-  const hasManualOverride = !!lead.manual_status;
-  const existingBuying    = lead.buying_signals    ?? [];
-  const existingNegative  = lead.negative_signals  ?? [];
-  const allCounted        = new Set([...existingBuying, ...existingNegative]);
-
-  let ruleDelta = 0;
-  let aiDelta   = 0;
-  const newSignals:         string[] = [];
-  const newNegativeSignals: string[] = [];
+  const existingScore = typeof lead.lead_score === 'number' ? lead.lead_score : 0;
+  const existingStatus = (lead.lead_status ?? 'new') as string;
+  const hasManualOverride = !!lead.manual_override || !!lead.manual_status;
+  
+  let score = 0;
   const breakdown: Record<string, ScoreBreakdownEntry> = {};
+  const newSignals: string[] = [];
+  const newNegativeSignals: string[] = [];
 
-  function addSignal(key: string, label: string, points: number, category: ScoreBreakdownEntry['category'], isAI = false) {
-    if (points === 0 || !label) return;
-    if (isAI) aiDelta   += points;
-    else       ruleDelta += points;
+  function addSignal(key: string, label: string, points: number, category: ScoreBreakdownEntry['category']) {
+    score += points;
     breakdown[key] = { label, points, category };
     if (points > 0) newSignals.push(key);
-    else            newNegativeSignals.push(key);
-    allCounted.add(key);
+    else newNegativeSignals.push(key);
   }
 
-  // 1. Universal interest patterns
-  for (const { key, label, points, patterns } of INTEREST_PATTERNS) {
-    if (!allCounted.has(key) && patterns.some(p => p.test(text))) {
-      addSignal(key, label, points, 'interest');
+  // ── 1. Buying Intent (+25) ──
+  const hasBuyingIntent = 
+    ['Qualified', 'Hot', 'Converted', 'qualified', 'hot', 'converted'].includes(aiResponse.stage ?? '') ||
+    /(book|reserv|confirm|appoint|order|buy|purchas)/i.test(aiResponse.intent ?? '') ||
+    (aiResponse.booking_probability ?? 0) > 50;
+  if (hasBuyingIntent) {
+    addSignal('buying_intent', 'Buying intent detected', 25, 'intent');
+  }
+
+  // ── 2. Asked Pricing (+10) ──
+  const matchesPricing = 
+    /\b(prices?|pricing|costs?|charges?|fees?|how much|rates?|tariff|amounts?|budget|kitna|kaas|daam|lagat|paisa|rupee|rs\.|₹)\b/i.test(text) ||
+    /(price|cost|fee|charge|rate|negotiat|discount)/i.test(aiResponse.intent ?? '');
+  if (matchesPricing) {
+    addSignal('asked_pricing', 'Asked about pricing', 10, 'interest');
+  }
+
+  // ── 3. Asked Availability (+10) ──
+  const matchesAvailability = 
+    /\b(availab|seats?|slots?|spots?|capacity|vacancy|space|dates?|when|kab|schedule|calendar|timing)\b/i.test(text) ||
+    /(availab|date|time|schedule|slot|spot)/i.test(aiResponse.intent ?? '');
+  if (matchesAvailability) {
+    addSignal('asked_availability', 'Asked about availability', 10, 'interest');
+  }
+
+  // ── 4. Requested Booking (+20) ──
+  const matchesBookingRequest = 
+    /\b(book|reserve|confirm|appoint|karna hai)\b/i.test(text) ||
+    /(book|reserv|appoint|confirm)/i.test(aiResponse.intent ?? '');
+  if (matchesBookingRequest) {
+    addSignal('requested_booking', 'Requested booking/appointment', 20, 'intent');
+  }
+
+  // ── 5. Positive Sentiment (+10) ──
+  if (aiResponse.sentiment === 'positive') {
+    addSignal('positive_sentiment', 'Positive sentiment', 10, 'interest');
+  }
+
+  // ── 6. Responds Quickly (+5) ──
+  const messageCount = conversation.message_count ?? 0;
+  if (messageCount > 0) {
+    addSignal('responds_quickly', 'Responds quickly and engages', 5, 'engagement');
+  }
+
+  // ── 7. Multiple Conversations (+10) ──
+  if (messageCount > 5) {
+    addSignal('multiple_conversations', 'Multiple messages exchanged (> 5)', 10, 'engagement');
+  }
+
+  // ── 8. Returning Customer (+10) ──
+  if (lead.is_repeat_customer) {
+    addSignal('returning_customer', 'Returning customer profile', 10, 'engagement');
+  }
+
+  // ── 9. Repeated Visits (+10) ──
+  if ((lead.past_bookings_count ?? 0) > 1) {
+    addSignal('repeated_visits', 'Repeated visits or bookings history', 10, 'engagement');
+  }
+
+  // ── 10. Ghosted over 14 days (-20) ──
+  if (lead.last_activity_at) {
+    const diffMs = Date.now() - new Date(lead.last_activity_at).getTime();
+    const diffDays = diffMs / (1000 * 60 * 60 * 24);
+    if (diffDays >= 14) {
+      addSignal('ghosted_14_days', 'Ghosted over 14 days', -20, 'negative');
     }
   }
 
-  // 2. Buying intent patterns
-  for (const { key, label, points, patterns } of BUYING_INTENT_PATTERNS) {
-    if (!allCounted.has(key) && patterns.some(p => p.test(text))) {
-      addSignal(key, label, points, 'intent');
-    }
+  // ── 11. Negative Sentiment (-15) ──
+  if (aiResponse.sentiment === 'negative') {
+    addSignal('negative_sentiment', 'Negative customer sentiment', -15, 'negative');
   }
 
-  // 3. Industry-specific patterns
-  const industryPatterns: IndustryPattern[] = INDUSTRY_PATTERNS[industryProfile] ?? [];
-  for (const { key, label, points, patterns } of industryPatterns) {
-    if (!allCounted.has(key) && patterns.some(p => p.test(text))) {
-      addSignal(key, label, points, 'industry');
-    }
+  // ── 12. Cancelled Booking (-25) ──
+  const hasCancelled = lead.tags?.includes('cancelled') || lead.tags?.includes('cancelled_booking');
+  if (hasCancelled) {
+    addSignal('cancelled_booking', 'Cancelled booking history', -25, 'negative');
   }
 
-  // 4. Data-sharing from AI extraction
-  const extracted = aiResponse.extractedData ?? {};
-  if (extracted.email       && !allCounted.has('shared_email'))       addSignal('shared_email',       DATA_SIGNALS.shared_email.label,       DATA_SIGNALS.shared_email.points,       'data');
-  if (extracted.phone       && !allCounted.has('shared_phone'))       addSignal('shared_phone',       DATA_SIGNALS.shared_phone.label,       DATA_SIGNALS.shared_phone.points,       'data');
-  if (extracted.name        && !allCounted.has('shared_name'))        addSignal('shared_name',        DATA_SIGNALS.shared_name.label,        DATA_SIGNALS.shared_name.points,        'data');
-  if (extracted.date        && !allCounted.has('shared_date'))        addSignal('shared_date',        DATA_SIGNALS.shared_date.label,        DATA_SIGNALS.shared_date.points,        'data');
-  if (extracted.guestCount  && !allCounted.has('shared_guest_count')) addSignal('shared_guest_count', DATA_SIGNALS.shared_guest_count.label, DATA_SIGNALS.shared_guest_count.points, 'data');
-  if (extracted.requestPayment === 'true' && !allCounted.has('ready_to_pay')) addSignal('ready_to_pay', DATA_SIGNALS.ready_to_pay.label, DATA_SIGNALS.ready_to_pay.points, 'intent');
-
-  // 5. AI intent contribution — only when confidence meets threshold
-  const aiConfidence = aiResponse.confidence ?? 0;
-  const aiIgnored    = aiConfidence < AI_CONFIDENCE_THRESHOLD;
-  const intentKey    = `ai_intent:${aiResponse.intent}`;
-  const intentContrib = AI_INTENT_CONTRIBUTIONS[aiResponse.intent];
-
-  if (!aiIgnored && intentContrib && intentContrib.points > 0 && !allCounted.has(intentKey)) {
-    addSignal(intentKey, intentContrib.label, intentContrib.points, 'intent', true /* isAI */);
+  // ── 13. Competitor Mention (-10) ──
+  const mentionsCompetitor = /\b(competitor|other vendor|other clinic|another company|vs|cheaper elsewhere)\b/i.test(text);
+  if (mentionsCompetitor) {
+    addSignal('competitor_mention', 'Mentioned competitor or alternatives', -10, 'negative');
   }
 
-  // 6. Engagement milestones
-  const msgCount = conversation.message_count ?? 0;
-  for (const [sigKey, { label, points, threshold }] of Object.entries(ENGAGEMENT_MILESTONES)) {
-    if (msgCount >= threshold && !allCounted.has(sigKey)) {
-      addSignal(sigKey, label, points, 'engagement');
-    }
+  // ── 14. Spam (-100) ──
+  if (lead.tags?.includes('spam')) {
+    addSignal('spam_lead', 'Classified as spam', -100, 'negative');
   }
 
-  // 7. Greeting-only penalty — first message only
-  if (msgCount <= 1) {
-    const trimmed = text.trim();
-    const isGreetingOnly = /^(hi+|hello|hey|hii+|hola|namaskar|namaste|hy|helo|heya|sup|yo|heys?|hai|haan|haa)\.?!?\s*$/i.test(trimmed);
-    if (isGreetingOnly && !allCounted.has('only_greeting')) {
-      addSignal('only_greeting', 'Sent greeting only', -10, 'negative');
-    }
+  // ── 15. Duplicate (-100) ──
+  if (lead.tags?.includes('duplicate')) {
+    addSignal('duplicate_lead', 'Duplicate contact detected', -100, 'negative');
   }
 
-  // 8. Negative signals
-  for (const { key, label, points, patterns } of NEGATIVE_PATTERNS) {
-    if (!allCounted.has(key) && patterns.some(p => p.test(text))) {
-      addSignal(key, label, points, 'negative');
-    }
-  }
+  const finalScore = Math.min(100, Math.max(0, score));
 
-  // ── Compute scores ─────────────────────────────────────────────────────────
-  // AI-as-floor rule (Point 3): AI can only add to the rule score, never reduce it.
-  // The rule engine establishes the minimum. AI supplements upward only.
-  const aiDeltaSafe  = Math.max(0, aiDelta);  // never negative from AI
-  const totalDelta   = ruleDelta + aiDeltaSafe;
-  const rawScore     = existingScore + totalDelta;
-  const newScore     = Math.min(100, Math.max(0, rawScore));
+  // Determine stage based on AI response
+  const aiSuggestedStage: LeadStatus = (aiResponse.stage?.toLowerCase() as LeadStatus) || 'new';
+  
+  // Transition safety check
+  const validatedAutoStatus = isTransitionAllowed(existingStatus, aiSuggestedStage)
+    ? aiSuggestedStage
+    : (existingStatus as LeadStatus);
 
-  // ── Auto status from score (qualification gate enforced) ──────────────────
-  const allAccumulatedSignals = [...existingBuying, ...newSignals];
-  const autoStatus = deriveAutoStatus(newScore, existingStatus, newNegativeSignals, allAccumulatedSignals, industryProfile);
-
-  // ── Validated transition for auto_status ─────────────────────────────────
-  const validatedAutoStatus = isTransitionAllowed(existingStatus, autoStatus)
-    ? autoStatus
-    : (existingStatus as LeadStatus); // silently hold — log a warning in prod
-
-  // ── Effective lead_status (manual wins) ──────────────────────────────────
   const effectiveStatus: LeadStatus = hasManualOverride
-    ? (lead.manual_status as LeadStatus)
+    ? ((lead.manual_stage || lead.manual_status || existingStatus) as LeadStatus)
     : validatedAutoStatus;
 
-  // ── Reasoning ────────────────────────────────────────────────────────────
   const positives = Object.values(breakdown).filter(s => s.points > 0).map(s => `✓ ${s.label}`);
   const negatives = Object.values(breakdown).filter(s => s.points < 0).map(s => `✗ ${s.label}`);
   const scoring_reasoning =
-    [...positives, ...negatives].join('; ') || 'No new signals detected in this message';
+    [...positives, ...negatives].join('; ') || 'No new signals detected';
 
   return {
-    lead_score:   newScore,
+    lead_score:   finalScore,
     lead_status:  effectiveStatus,
     auto_status:  validatedAutoStatus,
 
-    rule_score_delta: ruleDelta,
-    ai_score_delta:   aiDeltaSafe,
-    score_delta:      totalDelta,
-    ai_confidence:    aiConfidence,
-    ai_intent:        aiResponse.intent,
-    ai_ignored:       aiIgnored,
+    rule_score_delta: score,
+    ai_score_delta:   0,
+    score_delta:      score,
+    ai_confidence:    aiResponse.confidence ?? 0,
+    ai_intent:        aiResponse.intent ?? 'unknown',
+    ai_ignored:       false,
 
     new_signals:          [...newSignals, ...newNegativeSignals],
-    all_buying_signals:   [...existingBuying,   ...newSignals],
-    all_negative_signals: [...existingNegative, ...newNegativeSignals],
+    all_buying_signals:   [...(lead.buying_signals || []), ...newSignals],
+    all_negative_signals: [...(lead.negative_signals || []), ...newNegativeSignals],
 
     score_breakdown:   breakdown,
     scoring_reasoning,
-    intent_level:      inferIntentLevel(newScore, newSignals),
+    intent_level:      finalScore > 70 ? 'high' : finalScore > 30 ? 'medium' : 'low',
 
     status_changed: effectiveStatus !== existingStatus,
     prev_status:    existingStatus,
   };
 }
 
-// ── Status Derivation ─────────────────────────────────────────────────────────
+// ── Status Transitions ────────────────────────────────────────────────────────
 
-function deriveAutoStatus(
-  score: number,
-  currentStatus: string,
-  newNegativeSignals: string[],
-  allSignals: string[],        // all accumulated buying_signals for this lead
-  industry: IndustryProfile = 'general',
-): LeadStatus {
-  // Converted is terminal — never auto-overridden
-  if (currentStatus === 'converted') return 'converted';
+const ALLOWED_AUTO_TRANSITIONS: Record<string, Set<LeadStatus>> = {
+  new:       new Set(['interested', 'warm', 'cold', 'hot', 'qualified', 'converted', 'lost']),
+  cold:      new Set(['interested', 'warm', 'hot', 'qualified', 'lost']),
+  warm:      new Set(['interested', 'cold', 'hot', 'qualified', 'lost']),
+  interested: new Set(['cold', 'hot', 'qualified', 'converted', 'lost']),
+  hot:       new Set(['interested', 'warm', 'cold', 'qualified', 'converted', 'lost']),
+  qualified: new Set(['cold', 'hot', 'converted', 'lost']),
+  converted: new Set(),
+  lost:      new Set(['new', 'interested', 'warm', 'cold', 'qualified', 'hot', 'converted']),
+};
 
-  // Explicit rejection → lost
-  if (newNegativeSignals.includes('not_interested') || newNegativeSignals.includes('wrong_number')) return 'lost';
-
-  // QUALIFIED requires both score threshold AND an explicit closing signal.
-  // Gates are resolved dynamically: universal gates ∪ industry-specific gates.
-  // A negotiation lead with score=92 stays HOT until they trigger a closing signal.
-  if (score >= SCORE_THRESHOLDS.QUALIFIED) {
-    const gates = resolveQualificationGates(industry);
-    const hasQualifyingSignal = allSignals.some(s => gates.has(s));
-    if (hasQualifyingSignal) return 'qualified';
-    return 'hot'; // high score but no closing signal → Hot, not Qualified
-  }
-
-  if (score >= SCORE_THRESHOLDS.HOT)  return 'hot';
-  if (score >= SCORE_THRESHOLDS.WARM) return 'warm';
-  return 'cold';
-}
-
-function inferIntentLevel(score: number, newSignals: string[]): 'high' | 'medium' | 'low' {
-  const HIGH_INTENT = new Set([
-    // Universal closing signals
-    'intent_book', 'intent_reserve', 'intent_payment_link',
-    'intent_confirm_booking', 'intent_when_book', 'ready_to_pay',
-    'invoice_request',
-    // New negotiation/commitment signals
-    'asked_discount', 'commitment_signals', 'logistics_planning',
-    // AI intent signals
-    'ai_intent:confirm', 'ai_intent:reserve_table',
-    'ai_intent:private_event', 'ai_intent:corporate_booking',
-    // Industry-specific qualifying signals
-    'ind_site_visit', 'ind_demo_request', 'ind_enroll_intent', 'ind_appointment',
-  ]);
-  if (newSignals.some(s => HIGH_INTENT.has(s)) || score >= SCORE_THRESHOLDS.HOT) return 'high';
-  if (score >= SCORE_THRESHOLDS.WARM) return 'medium';
-  return 'low';
+function isTransitionAllowed(from: string, to: LeadStatus): boolean {
+  const allowed = ALLOWED_AUTO_TRANSITIONS[from];
+  if (!allowed) return true;
+  return allowed.has(to);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -660,8 +628,8 @@ function inferIntentLevel(score: number, newSignals: string[]): 'high' | 'medium
 export const INITIAL_LEAD_SCORE = 0;
 
 export function scoreLabel(score: number): string {
-  if (score >= SCORE_THRESHOLDS.QUALIFIED) return 'Qualified';
-  if (score >= SCORE_THRESHOLDS.HOT)       return 'Hot';
-  if (score >= SCORE_THRESHOLDS.WARM)      return 'Warm';
+  if (score >= 70) return 'Hot';
+  if (score >= 30) return 'Interested';
   return 'Cold';
 }
+

@@ -44,6 +44,44 @@ SCORING CALIBRATION:
 QUALIFICATION GATE:
 - A lead is only "Decision" stage or above if they have asked for a payment link, invoice, booking confirmation, or explicit confirmation of purchase intent. High buying intent alone does NOT qualify.`;
 
+const CORE_SYSTEM_PROMPT_V2 = `You are a Lead Intelligence AI CRM engine similar to Salesforce Einstein, HubSpot AI, and Pipedrive AI.
+Your job is to deeply analyze the WhatsApp conversation and metadata for a lead and return structured JSON classification.
+
+CRITICAL RULES:
+1. Return ONLY valid JSON. No markdown wrappers (like \`\`\`json), no extra text.
+2. All scores and probabilities must be integers from 0 to 100.
+3. Reject malformed JSON. Keep it strictly compliant.
+4. stage must be exactly one of: New, Interested, Qualified, Hot, Converted, Cold, Lost.
+5. sentiment must be exactly one of: positive, neutral, negative.
+6. follow_up_priority must be exactly one of: critical, high, medium, low.
+7. Respond in the customer's language of communication (Hindi, English, Hinglish - matching the tone and language used).
+
+SCORING WEIGHTED SIGNALS (Deterministic check):
+- Buying intent (intent is booking/reservation): +25
+- Asked pricing: +10
+- Asked availability: +10
+- Requested booking: +20
+- Positive sentiment: +10
+- Responds quickly: +5
+- Multiple conversations: +10
+- Returning customer: +10
+- Repeated visits: +10
+- Ghosted over 14 days: -20
+- Negative sentiment: -15
+- Cancelled booking: -25
+- Competitor mention: -10
+- Spam: -100
+- Duplicate: -100
+
+LEAD STAGES:
+- New: No meaningful conversation, no qualification, no questions, no intent detected.
+- Interested: Customer asked pricing, menu, location, availability, services, packages, hours.
+- Qualified: Customer fits business context (e.g. wants booking tonight, haircut details, specific medical appointment).
+- Hot: Ready to confirm/book immediately ("Book now", "Confirm", "Send payment link").
+- Converted: Reservation done, appointment confirmed, order placed, payment received.
+- Cold: Disappeared, stopped replying, conversation inactive.
+- Lost: Rejected explicit offer, chose competitor, cancelled, blocked, said no.`;
+
 // ── Industry-Specific Prompt Extensions ──────────────────────────────────
 
 const INDUSTRY_CONTEXT: Record<string, string> = {
@@ -204,6 +242,39 @@ Return a JSON object with this exact schema:
   }
 }`;
 
+const CONVERSATION_ANALYSIS_TEMPLATE_V2 = `{{industry_context}}
+
+INPUT METADATA:
+- Business Type: {{business_type}}
+- Knowledge Base Context: {{knowledge_base}}
+- Past History / Bookings / Orders: {{past_history}}
+- Campaign Source / Referral: {{campaign_source}}
+- Customer Metadata (Tags, etc.): {{customer_metadata}}
+- Message Timing/Delays: {{message_timing}}
+
+KNOWN CUSTOMER FACTS:
+{{memory}}
+
+CONVERSATION TRANSCRIPT:
+{{conversation}}
+
+Return a JSON object with this exact schema:
+{
+  "stage": "New|Interested|Qualified|Hot|Converted|Cold|Lost",
+  "score": <0-100 calculated using the weighted signals>,
+  "confidence": <0-100 prediction confidence percentage>,
+  "reason": "Brief checklist or reason list of why this stage/score was selected",
+  "summary": "Brief 1-sentence summary of the conversation",
+  "intent": "The customer's expressed intent (e.g. reservation, price check)",
+  "sentiment": "positive|neutral|negative",
+  "qualification": "qualified|unqualified",
+  "next_action": "Recommended next manual action for staff",
+  "booking_probability": <0-100 conversion probability percentage>,
+  "human_probability": <0-100 chance that a human agent needs to step in>,
+  "follow_up_priority": "critical|high|medium|low",
+  "explanation": "Detailed transparent explanation of the AI classification decision"
+}`;
+
 // ── Registry Implementation ───────────────────────────────────────────────
 
 const PROMPT_STORE: Map<string, PromptRecord> = new Map();
@@ -219,7 +290,8 @@ function seed(): void {
   ];
 
   for (const industry of industries) {
-    const record: PromptRecord = {
+    // Version v1
+    const recordV1: PromptRecord = {
       industry,
       promptKey:           'conversation_analysis',
       version:             'v1',
@@ -228,7 +300,19 @@ function seed(): void {
       isActive:            true,
       notes:               `Phase C v1: ${industry} conversation intelligence prompt`,
     };
-    PROMPT_STORE.set(key(industry, 'conversation_analysis', 'v1'), record);
+    PROMPT_STORE.set(key(industry, 'conversation_analysis', 'v1'), recordV1);
+
+    // Version v2
+    const recordV2: PromptRecord = {
+      industry,
+      promptKey:           'conversation_analysis',
+      version:             'v2',
+      systemPrompt:        CORE_SYSTEM_PROMPT_V2,
+      userPromptTemplate:  CONVERSATION_ANALYSIS_TEMPLATE_V2.replace('{{industry_context}}', INDUSTRY_CONTEXT[industry] ?? INDUSTRY_CONTEXT.general),
+      isActive:            true,
+      notes:               `Enterprise Lead Engine v2: ${industry} conversation intelligence prompt`,
+    };
+    PROMPT_STORE.set(key(industry, 'conversation_analysis', 'v2'), recordV2);
   }
 }
 
