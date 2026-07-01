@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Clock, ShieldCheck, Flame, ThermometerSun, Snowflake, Megaphone, Phone, UserCircle2, Star, UserX, Sparkles, Zap, CheckCircle2, Loader2, X } from 'lucide-react';
+import { Search, Clock, ShieldCheck, Flame, ThermometerSun, Snowflake, Megaphone, Phone, UserCircle2, Star, UserX, Sparkles } from 'lucide-react';
 import type { Lead } from '@/lib/types';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
@@ -39,16 +39,6 @@ export function LeadsClient() {
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
   const [campaignFilter, setCampaignFilter] = useState<string>('all');
-  // ── Re-score state ──────────────────────────────────────────────────────
-  const [rescoring, setRescoring] = useState(false);
-  const [rescoreResult, setRescoreResult] = useState<{
-    queued: number;
-    skipped_no_conv: number;
-    total_leads: number;
-    est_completion_min: number;
-    message: string;
-  } | null>(null);
-  const [showRescoreModal, setShowRescoreModal] = useState(false);
   const supabase = createBrowserSupabaseClient();
   const router = useRouter();
 
@@ -102,30 +92,6 @@ export function LeadsClient() {
     }
   };
 
-  // ── Re-score all leads handler ──────────────────────────────────────────
-  const handleRescoreAll = async () => {
-    if (rescoring) return;
-    setRescoring(true);
-    setRescoreResult(null);
-    setShowRescoreModal(true);
-    try {
-      const res = await fetch('/api/dashboard/leads/rescore-all', { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        toast.error(data.error || 'Re-score failed');
-        setShowRescoreModal(false);
-      } else {
-        setRescoreResult(data);
-        // Refresh leads after a short delay so UI reflects queuing
-        setTimeout(() => fetchLeads(), 2000);
-      }
-    } catch {
-      toast.error('Network error — re-score failed');
-      setShowRescoreModal(false);
-    } finally {
-      setRescoring(false);
-    }
-  };
 
   const assignLead = async (leadId: string, assignedTo: string | null) => {
     const member = assignedTo ? members.find(m => m.id === assignedTo) : null;
@@ -218,17 +184,6 @@ export function LeadsClient() {
                 {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
-            <button
-              onClick={handleRescoreAll}
-              disabled={rescoring}
-              title="Re-score all existing leads with AI"
-              className="flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white transition-all shadow-sm shrink-0"
-            >
-              {rescoring
-                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                : <Zap className="w-3.5 h-3.5" />}
-              <span className="hidden sm:inline">{rescoring ? 'Queuing…' : 'Re-score All'}</span>
-            </button>
           </div>
         </div>
         {/* Mobile search row */}
@@ -415,131 +370,7 @@ export function LeadsClient() {
         </div>
       </div>
 
-      {/* ── Re-score Progress Modal ────────────────────────────────────── */}
-      <AnimatePresence>
-        {showRescoreModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-            onClick={() => !rescoring && setShowRescoreModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.92, opacity: 0, y: 16 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.92, opacity: 0, y: 16 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-              className="relative w-full max-w-md bg-card border border-border/60 rounded-2xl shadow-2xl overflow-hidden"
-              onClick={e => e.stopPropagation()}
-            >
-              {/* Gradient top bar */}
-              <div className="h-1.5 w-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
 
-              <div className="p-6">
-                {/* Header */}
-                <div className="flex items-start justify-between mb-5">
-                  <div className="flex items-center gap-3">
-                    <div className={`p-2.5 rounded-xl ${rescoreResult ? 'bg-emerald-500/15' : 'bg-indigo-500/15'}`}>
-                      {rescoring
-                        ? <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
-                        : rescoreResult
-                          ? <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                          : <Zap className="w-5 h-5 text-indigo-400" />}
-                    </div>
-                    <div>
-                      <h2 className="text-base font-semibold text-foreground">
-                        {rescoring ? 'Queuing AI Re-score…' : rescoreResult ? 'Re-score Queued!' : 'AI Re-scoring'}
-                      </h2>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {rescoring ? 'Talking to the AI engine…' : 'Leads will update automatically'}
-                      </p>
-                    </div>
-                  </div>
-                  {!rescoring && (
-                    <button
-                      onClick={() => setShowRescoreModal(false)}
-                      className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-
-                {/* Loading state */}
-                {rescoring && (
-                  <div className="space-y-3">
-                    <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
-                      <motion.div
-                        className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full"
-                        initial={{ width: '5%' }}
-                        animate={{ width: '85%' }}
-                        transition={{ duration: 3, ease: 'easeOut' }}
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground text-center">Analyzing all leads and queuing AI jobs…</p>
-                  </div>
-                )}
-
-                {/* Result state */}
-                {rescoreResult && !rescoring && (
-                  <div className="space-y-4">
-                    {/* Stats grid */}
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3 text-center">
-                        <div className="text-2xl font-bold text-indigo-400">{rescoreResult.queued}</div>
-                        <div className="text-xs text-muted-foreground mt-1">Leads queued</div>
-                      </div>
-                      <div className="bg-secondary/60 border border-border/40 rounded-xl p-3 text-center">
-                        <div className="text-2xl font-bold text-foreground">{rescoreResult.total_leads}</div>
-                        <div className="text-xs text-muted-foreground mt-1">Total leads</div>
-                      </div>
-                      <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 text-center">
-                        <div className="text-2xl font-bold text-emerald-400">~{rescoreResult.est_completion_min}m</div>
-                        <div className="text-xs text-muted-foreground mt-1">Est. time</div>
-                      </div>
-                    </div>
-
-                    {/* Message */}
-                    <div className="bg-secondary/40 rounded-xl p-3.5 border border-border/40">
-                      <p className="text-sm text-foreground/90 leading-relaxed">
-                        {rescoreResult.message}
-                      </p>
-                      {rescoreResult.skipped_no_conv > 0 && (
-                        <p className="text-xs text-muted-foreground mt-2">
-                          {rescoreResult.skipped_no_conv} leads skipped — no conversation history yet.
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Info */}
-                    <div className="flex items-start gap-2.5 text-xs text-muted-foreground bg-blue-500/5 border border-blue-500/15 rounded-xl p-3">
-                      <Sparkles className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
-                      <span>The AI engine processes leads in the background. Your pipeline will automatically update as each lead is scored. Refresh the page to see results.</span>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex gap-2 pt-1">
-                      <button
-                        onClick={() => { setShowRescoreModal(false); fetchLeads(); }}
-                        className="flex-1 h-9 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
-                      >
-                        Refresh Pipeline
-                      </button>
-                      <button
-                        onClick={() => setShowRescoreModal(false)}
-                        className="h-9 px-4 rounded-lg bg-secondary hover:bg-secondary/80 text-sm text-muted-foreground transition-colors"
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
