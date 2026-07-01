@@ -715,7 +715,7 @@ function parseAIResponse(text: string): AIResponse {
     // Safely extract and validate dynamic buttons (strictly 1-3, titles <= 20 chars)
     let buttons: AIButton[] | undefined = undefined;
     if (Array.isArray(parsed.buttons) && parsed.buttons.length > 0) {
-      buttons = parsed.buttons
+      const mappedButtons = parsed.buttons
         .map((b: any, index: number) => {
           const type = (b?.type === 'url' || b?.type === 'call') ? b.type : 'quick_reply';
           const title = String(b?.title || '').trim().slice(0, 20);
@@ -732,8 +732,8 @@ function parseAIResponse(text: string): AIResponse {
         })
         .filter((b: any) => b.title.length > 0 && (b.type !== 'url' || b.url) && (b.type !== 'call' || b.phone))
         .slice(0, 3);
-      if (buttons.length === 0) {
-        buttons = undefined;
+      if (mappedButtons.length > 0) {
+        buttons = mappedButtons;
       }
     }
 
