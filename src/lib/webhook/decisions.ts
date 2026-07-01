@@ -110,6 +110,17 @@ export function pickScriptedReply<T extends ScriptedReplyRow>(
   return matched;
 }
 
+/** A flow "owns" the turn while conversations.context.pending_flow_node is
+ *  set — the customer is mid-flow, waiting to reply to a button/list/
+ *  question node. Scripted replies must not fire in that window: a button's
+ *  label text (e.g. "Book a table") can coincidentally match a tenant's
+ *  scripted-reply keyword and hijack an in-progress flow before the flow
+ *  engine (which owns resuming it) ever runs. Required priority is
+ *  Flow > Human > AI — scripted replies only apply when no flow is active. */
+export function hasActiveFlow(context: Record<string, unknown> | null | undefined): boolean {
+  return !!context?.pending_flow_node;
+}
+
 /** Monotonic message-status ordering for Meta status callbacks.
  *  pending → sent → delivered → read; never downgrade; a failed message may
  *  still be upgraded if Meta later reports delivery. */

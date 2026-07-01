@@ -12,16 +12,18 @@ import { isDuplicateMessage, getRedisClient, acquireOffHoursLock, acquireOnceNot
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
 import { appendLeadRow, appendBookingRow } from '@/lib/integrations/google-sheets';
-import { parseMetaWebhook, sendTextMessage, sendMediaMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator, sendStaffAlert } from '@/lib/meta/service';
+import { parseMetaWebhook, sendTextMessage, sendMediaMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
+import { sendBusinessEvent } from '@/lib/whatsapp/businessNotify';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 import { processMessageWithAI, isHumanHandoffRequest } from '@/lib/ai/engine';
-import { kwWordMatch, pickScriptedReply, allowStatusUpdate } from '@/lib/webhook/decisions';
+import { kwWordMatch, pickScriptedReply, allowStatusUpdate, hasActiveFlow } from '@/lib/webhook/decisions';
 import { checkSenderRateLimit } from '@/lib/abuse/prevention';
 import { checkAICostLimit, checkDailyAICostLimit, AI_FALLBACK_MESSAGE } from '@/lib/billing/costProtection';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
 import { decryptToken } from '@/lib/utils/crypto';
 import { runFlowsForMessage } from '@/lib/flows/engine';
 import { fireIntegrations, createBookingPaymentLink } from '@/lib/integrations/runner';
+import { MicrosoftExcelWorkerService } from '@/lib/integrations/microsoft-excel-worker';
 import { sendLeadAssignedEmail } from '@/lib/email/service';
 import { scheduleFollowUp, cancelLeadFollowUps } from '@/lib/followup/engine';
 import { randomUUID } from 'crypto';
@@ -205,6 +207,10 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       console.error('❌ Meta Webhook processing error:', err);
     }
+    // Drain Excel sync queue for any jobs enqueued by DB triggers above
+    MicrosoftExcelWorkerService.processQueue('webhook', 10).catch(err =>
+      console.error('⚠️ Excel sync drain error (non-fatal):', err)
+    );
   });
 
   return NextResponse.json({ ok: true });
@@ -1069,15 +1075,17 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // Must run BEFORE the off-hours guard so scripted replies (e.g. welcome image
   // on "hi") always fire even when the business is closed. Longest-keyword-match
   // wins so more specific keywords beat broad single words.
-  if (msg.text) {
+  //
+  // Skipped entirely while a flow is mid-execution — see hasActiveFlow().
+  if (msg.text && !hasActiveFlow(conversation?.context as Record<string, unknown> | undefined)) {
     const { data: earlyScriptedRows } = await supabaseAdmin
       .from('scripted_replies')
-      .select('keywords, reply, media_url')
+      .select('keywords, reply, media_url, secondary_reply')
       .eq('tenant_id', tenant.id)
       .eq('is_active', true);
 
     if (earlyScriptedRows && earlyScriptedRows.length > 0) {
-      type ESRow = { keywords: string[]; reply: string; media_url?: string | null };
+      type ESRow = { keywords: string[]; reply: string; media_url?: string | null; secondary_reply?: string | null };
       // Matching rules (short-keyword start anchor, longest-keyword-wins) live
       // in @/lib/webhook/decisions — unit-tested in tests/webhook-decisions.test.ts
       const matchedEarly = pickScriptedReply(earlyScriptedRows as ESRow[], msg.text);
@@ -1105,6 +1113,21 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           });
           if (scriptedMsgErr) {
             console.error('❌ Scripted reply message insert failed:', scriptedMsgErr.message);
+          }
+
+          // Secondary reply — sent immediately after the first (e.g. bar menu after food menu)
+          if (matchedEarly.secondary_reply) {
+            const sendResult2 = await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, matchedEarly.secondary_reply)
+              .catch((e: Error) => { console.error('❌ Scripted secondary reply send failed:', e.message); return null; });
+            await supabaseAdmin.from('messages').insert({
+              tenant_id: tenant.id, conversation_id: conversation.id,
+              direction: 'outbound',
+              content: matchedEarly.secondary_reply,
+              message_type: 'text',
+              channel: 'whatsapp', status: sendResult2 ? 'sent' : 'failed',
+              ai_generated: false, wa_message_id: sendResult2?.messageId ?? null,
+            }).then(({ error: e }) => { if (e) console.error('❌ Scripted secondary reply DB insert failed:', e.message); });
+            console.log(`⚡ Scripted secondary reply sent to ${cleanPhone}`);
           }
         }
         // Scripted reply exits before step 18, so schedule follow-ups here.
@@ -1472,6 +1495,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     sendTypingIndicator(decryptedAccessToken, tenant.wa_phone_number_id, msg.messageId).catch(() => {});
   }
 
+  const _aiStart = Date.now();
   let aiResponse;
   try {
     aiResponse = await processMessageWithAI(
@@ -1502,6 +1526,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     }).catch((e) => console.error('notifyAdmin failed:', (e as Error).message));
     return;
   }
+  const aiLatencyMs = Date.now() - _aiStart;
   perf('ai_done');
 
   if (!aiResponse?.reply) {
@@ -1570,8 +1595,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // 15. Send reply via Meta
   let metaMsgId: string | null = null;
   let sendFailureMsg: string | null = null;
-  // Set to true when the welcome image is saved to DB inside the block below,
-  // so the generic text insert at step 16 is skipped (avoids duplicate rows).
+  // welcomeImageSentToMeta: image+caption reached Meta (regardless of DB outcome).
+  //   Used to prevent a duplicate text send when the image DB insert fails.
+  // welcomeImageSavedToDB: image row is in DB — step 16 text insert must be skipped.
+  let welcomeImageSentToMeta = false;
   let welcomeImageSavedToDB = false;
   if (!decryptedAccessToken || !tenant.wa_phone_number_id) {
     sendFailureMsg = !decryptedAccessToken
@@ -1598,14 +1625,14 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         ).then((r) => { welcomeMediaResult = r; }).catch(mediaErr => {
           console.error(`⚠️ Meta: welcome ${welcomeMediaType} send failed, falling back to text only:`, (mediaErr as Error).message);
         });
-        // For images: caption is delivered with the media as one WhatsApp message.
-        // Save the image row to DB immediately with the REAL wamid so:
-        //   (a) it appears in the dashboard (with the image thumbnail), and
+        // For images: caption is delivered atomically with the media.
+        // Save the image row now with the REAL wamid so:
+        //   (a) it shows as an image in the dashboard, and
         //   (b) the unique index on wa_message_id is satisfied by a real per-message ID
-        //       (the old hardcoded 'welcome-image-with-caption' string collided on every
-        //       second first-contact and silently blocked the DB insert — messages were
-        //       sent via Meta but never appeared in the AriesAI inbox).
+        //       (the old hardcoded 'welcome-image-with-caption' string collided globally —
+        //       messages were sent via Meta but silently lost from the AriesAI inbox).
         if (welcomeMediaResult && welcomeMediaType === 'image') {
+          welcomeImageSentToMeta = true;
           const realWamid = (welcomeMediaResult as { messageId: string }).messageId || null;
           const { error: imgInsertErr } = await supabaseAdmin.from('messages').insert({
             tenant_id: tenant.id,
@@ -1617,21 +1644,25 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
             sender_id: null,
             status: 'sent',
             ai_generated: true,
+            ai_latency_ms: aiLatencyMs,
             wa_message_id: realWamid,
             media_url: tenantConfig.welcomeImageUrl,
             media_caption: aiResponse.reply,
           });
           if (imgInsertErr) {
             console.error('❌ Meta: failed to save welcome image message:', imgInsertErr.message);
+            // Image was delivered to customer — do NOT send text (would be a duplicate).
+            // Step 16 will save a fallback text row with wa_message_id: null.
           } else {
             welcomeImageSavedToDB = true;
-            metaMsgId = realWamid ?? 'sent';
+            metaMsgId = realWamid; // real wamid for downstream status tracking
           }
         }
         // For video/document: caption not supported, fall through to send text too.
       }
 
-      if (!metaMsgId) {
+      // Only send a text message if the image was NOT already delivered to the customer.
+      if (!metaMsgId && !welcomeImageSentToMeta) {
         const result = await sendTextMessage(
           decryptedAccessToken,
           tenant.wa_phone_number_id,
@@ -1782,6 +1813,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // Run BOTH DB writes in parallel — saves ~30-60ms
   // welcomeImageSavedToDB: image row already inserted inside step 15 with the real
   // wamid; skip this text insert to avoid a duplicate outbound row.
+  // welcomeImageSentToMeta && !welcomeImageSavedToDB: image reached customer but DB
+  // insert failed — save a fallback text row with wa_message_id: null (null is always
+  // safe for the unique index) and status 'sent' (message WAS delivered).
   const [{ error: aiMsgErr }] = await Promise.all([
     welcomeImageSavedToDB
       ? Promise.resolve({ error: null })
@@ -1793,9 +1827,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           message_type: 'text',
           channel: 'whatsapp',
           sender_id: null,
-          status: metaMsgId ? 'sent' : 'failed',
+          status: (metaMsgId || welcomeImageSentToMeta) ? 'sent' : 'failed',
           ai_generated: true,
-          wa_message_id: metaMsgId,
+          ai_latency_ms: aiLatencyMs,
+          wa_message_id: metaMsgId, // null when image sent but its DB insert failed
           error_message: sendFailureMsg,
         }),
     supabaseAdmin.rpc('update_conversation_after_ai', {
@@ -1847,24 +1882,19 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     const rawTemplate = tenant.escalation_alert_template?.trim() || DEFAULT_ESCALATION_TEMPLATE;
     const alertMsg = rawTemplate.replace(/\{\{(\w+)\}\}/g, (_: string, key: string) => templateVars[key] ?? '');
 
-    const alertResults = await sendStaffAlert(tenant, alertMsg);
-    const alertFailures = alertResults.filter(r => !r.ok);
-    if (alertFailures.length > 0) {
-      notifyAdmin({
-        dedupeKey: `staff-alert-fail:${tenant.id}`,
-        subject: `Staff alert delivery failed — ${tenant.business_name || tenant.id}`,
-        summary:
-          `Escalation alert could not be delivered to: ${alertFailures.map(f => f.phone).join(', ')}. ` +
-          `Customer ${leadName} (+${cleanPhone}) triggered escalation but staff may not have been notified.`,
-        context: {
-          tenantId: tenant.id,
-          businessName: tenant.business_name,
-          failedPhones: alertFailures.map(f => f.phone),
-          errors: alertFailures.map(f => f.error),
-        },
-      }).catch(() => {});
-    }
-    console.log(`🚨 [${tenant.business_name}] Escalation fired for ${leadName} — delivered: ${alertResults.filter(r => r.ok).length}/${alertResults.length}`);
+    // Guaranteed delivery: durable dashboard record written first, then
+    // WhatsApp session-or-template send with automatic retry — see
+    // src/lib/whatsapp/businessNotify.ts.
+    const eventResult = await sendBusinessEvent({
+      tenantId: tenant.id,
+      eventType: 'human_assistance',
+      title: `Escalation — ${leadName}`,
+      body: alertMsg,
+      variables: templateVars,
+      conversationId: conversation.id,
+      leadId: lead?.id ?? null,
+    });
+    console.log(`🚨 [${tenant.business_name}] Escalation fired for ${leadName} — waStatus=${eventResult.waStatus}`);
 
     // ── Cancellation-specific alert — richer than the generic escalation ping ──
     // Fires only when the AI classified the intent as 'cancel' AND there is a
@@ -1881,9 +1911,18 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         `⏰ ${eb.slot_time || 'N/A'}\n` +
         `👥 ${eb.party_size || '?'} guest${(eb.party_size || 1) > 1 ? 's' : ''}\n\n` +
         `Please confirm cancellation via Live Chat: https://ariesai.in/dashboard/chat`;
-      sendStaffAlert(tenant, cancelAlert).catch(e =>
-        console.error('❌ Cancellation alert failed:', (e as Error).message)
-      );
+      sendBusinessEvent({
+        tenantId: tenant.id,
+        eventType: 'reservation_update',
+        title: `Cancellation request — ${leadName}`,
+        body: cancelAlert,
+        variables: {
+          customer_name: leadName, customer_phone: cleanPhone,
+          reservation_id: eb.reservation_id || '', business_name: tenant.business_name || '',
+        },
+        conversationId: conversation.id,
+        leadId: lead?.id ?? null,
+      }).catch(e => console.error('❌ Cancellation alert failed:', (e as Error).message));
       console.log(`🚫 [${tenant.business_name}] Cancellation alert sent for reservation ${eb.reservation_id}`);
     }
 
@@ -2428,8 +2467,16 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
         const rawBookingTemplate = (tenant as any).booking_alert_template?.trim() || DEFAULT_BOOKING_ALERT_TEMPLATE;
         const staffAlert = rawBookingTemplate.replace(/\{\{(\w+)\}\}/g, (_: string, key: string) => bookingAlertVars[key] ?? '');
-        sendStaffAlert(tenant, staffAlert)
-          .then(r => console.log(`   📨 Staff booking alert sent (${r.filter(x => x.ok).length}/${r.length} delivered)`))
+        sendBusinessEvent({
+          tenantId: tenant.id,
+          eventType: 'booking_confirmation',
+          title: `New booking — ${customerName || 'Guest'}`,
+          body: staffAlert,
+          variables: bookingAlertVars,
+          conversationId: conversation.id,
+          leadId: lead?.id ?? null,
+        })
+          .then(r => console.log(`   📨 Staff booking alert — waStatus=${r.waStatus}`))
           .catch(e => console.error('   ❌ Staff booking alert failed:', (e as Error).message));
 
         // Email alert — reliable fallback (no Meta 24-hour window restriction)

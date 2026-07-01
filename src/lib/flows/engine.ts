@@ -34,6 +34,7 @@ import { createBookingEvent } from '@/lib/integrations/google-calendar';
 import { sendFlowEmail } from '@/lib/email/service';
 import type { Tenant } from '@/lib/types';
 import { getFlowVariables } from './variables';
+import { logTrace, logFlowExecution, type FlowExecutionLog } from '@/lib/observability/trace';
 
 // ── Types ────────────────────────────────────────────────────
 interface FlowNode {
@@ -56,6 +57,7 @@ interface FlowRecord {
   trigger_keywords: string[];
   nodes: FlowNode[];
   edges: FlowEdge[];
+  updated_at?: string;
 }
 
 // ── Simulation trace ────────────────────────────────────────
@@ -127,7 +129,9 @@ function interpolate(template: string, ctx: ExecContext): string {
  * matching one. Returns true if a flow ran and sent at least
  * one message (caller should skip Gemini AI reply).
  */
-export async function runFlowsForMessage(
+// Inner implementation — always call the exported runFlowsForMessage wrapper
+// below, which holds the per-conversation lock around this function.
+async function runFlowsForMessageInner(
   tenantId: string,
   messageText: string,
   phone: string,
@@ -148,7 +152,7 @@ export async function runFlowsForMessage(
   // Fetch active flows for this tenant
   const { data: flows, error } = await supabaseAdmin
     .from('automation_flows')
-    .select('id, name, trigger_type, trigger_keywords, nodes, edges')
+    .select('id, name, trigger_type, trigger_keywords, nodes, edges, updated_at')
     .eq('tenant_id', tenantId)
     .eq('is_active', true);
 
@@ -235,21 +239,14 @@ export async function runFlowsForMessage(
 
   if (pendingNode) {
     const savedCtx = { ...(conv?.context as Record<string, unknown>) };
-    const isButtonReply = messageType === 'interactive' || messageType === 'button';
 
-    // Always resume the flow on any reply (button click OR text).
-    // Text replies work when buttons don't render on WhatsApp —
-    // the customer's text is stored as button_value so conditions
-    // can still evaluate it.
-    delete savedCtx.pending_flow_node;
-    delete savedCtx._pending_pause_type;
-    await supabaseAdmin
-      .from('conversations')
-      .update({ context: { ...savedCtx, pending_flow_node: null, _pending_pause_type: null } })
-      .eq('id', conversationId);
-
-    // Find the flow that owns this node and resume, with restored variables
+    // Find the flow that owns this node BEFORE touching the DB. Clearing
+    // pending_flow_node first and only then checking whether the node still
+    // exists meant a miss (flow deactivated/edited/deleted mid-conversation)
+    // silently and permanently lost the conversation's place in the flow —
+    // the pointer was already gone and nothing was logged.
     const ownerFlow = (flows as FlowRecord[]).find(f => f.nodes.some(n => n.id === pendingNode));
+
     if (ownerFlow) {
       const resumeVars = { ...ctx.variables, ...savedCtx };
       // Save the customer's reply into the variable configured by ask_question/collect_input
@@ -269,9 +266,46 @@ export async function runFlowsForMessage(
         resumeVars.button_value = messageText;
       }
       resumeVars.last_message = messageText;
+
+      // Clear pending state now that we know how to proceed — executeFlowFromNode
+      // will set a fresh pending_flow_node below if the flow pauses again later.
+      delete savedCtx.pending_flow_node;
+      delete savedCtx._pending_pause_type;
+      await supabaseAdmin
+        .from('conversations')
+        .update({ context: { ...savedCtx, pending_flow_node: null, _pending_pause_type: null } })
+        .eq('id', conversationId);
+
       const resumeCtx: ExecContext = { ...ctx, variables: resumeVars, pendingFlowNode: pendingNode };
       const handled = await executeFlowFromNode(ownerFlow, resumeCtx, pendingNode);
       if (handled) return true;
+      console.warn(`⚠️ Flow engine: resumed at node "${pendingNode}" (flow "${ownerFlow.name}") but no edge/message resulted — falling through to trigger matching / AI for conversation ${conversationId}`);
+      void logTrace({
+        tenantId: ctx.tenantId,
+        conversationId,
+        flowId: ownerFlow.id,
+        nodeId: pendingNode,
+        action: 'flow_resume_no_edge',
+        payload: { buttonId, messageText, reason: 'resume produced no further edge or message' },
+      });
+    } else {
+      // The node this conversation was waiting on no longer exists in any
+      // active flow. Previously this failed completely silently; log it and
+      // clear the stale pointer so the conversation isn't stuck forever.
+      console.error(`⚠️ Flow engine: pending_flow_node "${pendingNode}" not found in any active flow for conversation ${conversationId} — abandoning stale flow state`);
+      void logTrace({
+        tenantId: ctx.tenantId,
+        conversationId,
+        nodeId: pendingNode,
+        action: 'flow_resume_node_missing',
+        payload: { reason: 'pending_flow_node not found in any active flow' },
+      });
+      delete savedCtx.pending_flow_node;
+      delete savedCtx._pending_pause_type;
+      await supabaseAdmin
+        .from('conversations')
+        .update({ context: { ...savedCtx, pending_flow_node: null, _pending_pause_type: null } })
+        .eq('id', conversationId);
     }
   }
 
@@ -322,6 +356,56 @@ export async function runFlowsForMessage(
   }
 
   return false;
+}
+
+// ── Public entry point ────────────────────────────────────────────
+// Wraps runFlowsForMessageInner with a per-conversation Redis lock so two
+// rapid inbound messages for the same conversation (WhatsApp redelivery, or
+// the customer double-tapping before the first reply lands) can't race:
+// both reading the same pending_flow_node before either writes it back would
+// let both try to resume/advance the flow independently. Mirrors the mutex
+// pattern already used for Instagram DM processing (conv:lock:* in
+// src/lib/instagram/processor.ts) rather than inventing a new locking design.
+export async function runFlowsForMessage(
+  tenantId: string,
+  messageText: string,
+  phone: string,
+  conversationId: string,
+  leadId: string | null,
+  isFirstMessage = false,
+  messageType = 'text',
+  buttonId?: string,
+  referral?: {
+    source_id?: string;
+    source_type?: string;
+    headline?: string;
+    body?: string;
+    ctwa_clid?: string;
+    source_url?: string;
+  }
+): Promise<boolean> {
+  const redis = getRedisClient();
+  const lockKey = `flow:lock:${conversationId}`;
+
+  if (redis) {
+    const acquired = await redis.set(lockKey, '1', 'EX', 20, 'NX');
+    if (!acquired) {
+      console.warn(`⏳ Flow engine: conversation ${conversationId} locked, skipping parallel processing`);
+      // Another in-flight request already owns this turn. Report "handled"
+      // (not "no flow matched") so the caller doesn't also let AI reply —
+      // whichever request holds the lock will produce the real response.
+      return true;
+    }
+  }
+
+  try {
+    return await runFlowsForMessageInner(
+      tenantId, messageText, phone, conversationId, leadId,
+      isFirstMessage, messageType, buttonId, referral
+    );
+  } finally {
+    if (redis) await redis.del(lockKey).catch(() => {});
+  }
 }
 
 // ── Trigger matching ─────────────────────────────────────────
@@ -404,12 +488,23 @@ function triggerMatches(
 }
 
 // ── Flow graph traversal ─────────────────────────────────────
-async function executeFlowGraph(nodes: FlowNode[], edges: FlowEdge[], ctx: ExecContext, startId: string): Promise<boolean> {
+// flowMeta is optional so lower-level callers (none today) can skip
+// observability without a dummy value; every real caller below passes it.
+async function executeFlowGraph(
+  nodes: FlowNode[],
+  edges: FlowEdge[],
+  ctx: ExecContext,
+  startId: string,
+  flowMeta?: { id: string; updatedAt?: string }
+): Promise<boolean> {
   let messageSent = false;
   let currentId: string | null = startId;
   const visited = new Set<string>();
+  const nodePath: string[] = [];
+  let lastNode: FlowNode | undefined;
   const MAX_STEPS = 100; // raised from 20 — enterprise flows can have 50+ nodes
   let steps = 0;
+  const startedAt = Date.now();
 
   while (currentId && steps < MAX_STEPS) {
     if (visited.has(currentId)) break;
@@ -422,6 +517,8 @@ async function executeFlowGraph(nodes: FlowNode[], edges: FlowEdge[], ctx: ExecC
 
     const node = nodes.find(n => n.id === currentId);
     if (!node) break;
+    lastNode = node;
+    nodePath.push(node.id);
 
     const result = await executeNode(node, ctx, edges, nodes);
     if (result.sent) messageSent = true;
@@ -429,11 +526,79 @@ async function executeFlowGraph(nodes: FlowNode[], edges: FlowEdge[], ctx: ExecC
     currentId = result.nextId ?? null;
   }
 
+  if (flowMeta && !ctx.dryRun && nodePath.length > 0) {
+    void logFlowRunOutcome(ctx, flowMeta, nodePath, lastNode, Date.now() - startedAt);
+  }
+
   return messageSent;
 }
 
+// ── Persist observability for a completed top-level flow run ──────
+// Fire-and-forget (logFlowExecution/logTrace never throw) and skipped
+// entirely in dry-run so simulator runs never pollute real logs. This is a
+// best-effort mirror for debugging/analytics — conversations.context.
+// pending_flow_node remains the engine's authoritative resume state.
+const PAUSE_NODE_TYPES = new Set([
+  'send_buttons', 'send_quick_replies', 'send_list', 'wait_for_reply',
+  'ask_question', 'collect_input', 'intake_form',
+]);
+
+async function logFlowRunOutcome(
+  ctx: ExecContext,
+  flowMeta: { id: string; updatedAt?: string },
+  nodePath: string[],
+  lastNode: FlowNode | undefined,
+  durationMs: number
+): Promise<void> {
+  const outcome: FlowExecutionLog['outcome'] =
+    lastNode?.type === 'end' ? 'completed' :
+    lastNode?.type === 'handoff' ? 'handoff' :
+    (lastNode && PAUSE_NODE_TYPES.has(lastNode.type)) ? 'wait' :
+    'completed';
+
+  await logFlowExecution({
+    tenantId: ctx.tenantId,
+    flowId: flowMeta.id,
+    conversationId: ctx.conversationId,
+    nodePath,
+    totalNodes: nodePath.length,
+    durationMs,
+    outcome,
+  });
+
+  try {
+    const status = outcome === 'wait' ? 'paused' : 'completed';
+    const { data: existing } = await supabaseAdmin
+      .from('flow_engine_executions')
+      .select('id')
+      .eq('conversation_id', ctx.conversationId)
+      .in('status', ['running', 'paused'])
+      .maybeSingle();
+
+    const row = {
+      tenant_id: ctx.tenantId,
+      conversation_id: ctx.conversationId,
+      flow_id: flowMeta.id,
+      flow_snapshot_at: flowMeta.updatedAt ?? null,
+      current_node_id: lastNode?.id ?? null,
+      status,
+      pending_reason: outcome === 'wait' ? (lastNode?.type ?? null) : null,
+      variables: ctx.variables,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (existing?.id) {
+      await supabaseAdmin.from('flow_engine_executions').update(row).eq('id', existing.id);
+    } else {
+      await supabaseAdmin.from('flow_engine_executions').insert({ ...row, started_at: new Date().toISOString() });
+    }
+  } catch (err) {
+    console.warn('⚠️ flow_engine_executions upsert failed (non-critical):', (err as Error).message);
+  }
+}
+
 async function executeFlowFromNode(flow: FlowRecord, ctx: ExecContext, startNodeId: string): Promise<boolean> {
-  return executeFlowGraph(flow.nodes as FlowNode[], flow.edges as FlowEdge[], ctx, startNodeId);
+  return executeFlowGraph(flow.nodes as FlowNode[], flow.edges as FlowEdge[], ctx, startNodeId, { id: flow.id, updatedAt: flow.updated_at });
 }
 
 async function executeFlow(flow: FlowRecord, ctx: ExecContext): Promise<boolean> {
@@ -463,7 +628,7 @@ async function executeFlow(flow: FlowRecord, ctx: ExecContext): Promise<boolean>
     ctx.variables.is_from_ad = true;
   }
 
-  return executeFlowGraph(nodes, edges, ctx, triggerNode.id);
+  return executeFlowGraph(nodes, edges, ctx, triggerNode.id, { id: flow.id, updatedAt: flow.updated_at });
 }
 
 interface StepResult {
@@ -593,15 +758,8 @@ async function executeNode(
 
   // ── Send Interactive Buttons ──────────────────────────────
   if (type === 'send_buttons' || type === 'send_quick_replies') {
-    const raw = (node.data?.message as string) || (node.data?.content as string) || '';
-    const content = interpolate(raw, ctx);
     const buttons: Array<{ id?: string; label?: string; value?: string; title?: string }> =
       Array.isArray(node.data?.buttons) ? (node.data.buttons as any[]) : [];
-    const headerText = node.data?.header ? interpolate(node.data.header as string, ctx) : undefined;
-    const footerText = node.data?.footer ? interpolate(node.data.footer as string, ctx) : undefined;
-
-    if (!content.trim()) return { nextId: getNextNode(node.id, null, edges) };
-
     const mappedButtons = buttons
       .filter(b => (b.label || b.title || '').trim())
       .slice(0, 3)
@@ -610,16 +768,38 @@ async function executeNode(
         title: (b.label || b.title || '').trim().slice(0, 20),
       }));
 
+    // Resume: pending_flow_node was this node's own id, meaning the customer
+    // already replied to the buttons sent below. Resolve which edge their
+    // reply follows instead of re-sending — the actual click is only known
+    // now, not when the buttons went out.
+    if (ctx.pendingFlowNode === node.id) {
+      const target = resolveReplyEdge(node.id, edges, mappedButtons, { buttonId: ctx.buttonId, text: ctx.messageText });
+      if (ctx.dryRun) {
+        ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'button_reply_resolved', payload: { buttonId: ctx.buttonId, text: ctx.messageText }, variables: { ...ctx.variables }, nextId: target ?? null });
+      }
+      return target ? { nextId: target } : { stop: true };
+    }
+
+    const raw = (node.data?.message as string) || (node.data?.content as string) || '';
+    const content = interpolate(raw, ctx);
+    const headerText = node.data?.header ? interpolate(node.data.header as string, ctx) : undefined;
+    const footerText = node.data?.footer ? interpolate(node.data.footer as string, ctx) : undefined;
+
+    if (!content.trim()) return { nextId: getNextNode(node.id, null, edges) };
+
     if (ctx.dryRun) {
       // Simulate auto-pause: show that the flow waits here for a button click.
       // Pick the first button as the simulated reply so downstream conditions work.
       const simButton = mappedButtons[0];
+      const simTarget = simButton
+        ? resolveReplyEdge(node.id, edges, mappedButtons, { buttonId: simButton.id, text: simButton.title })
+        : getNextNode(node.id, 'fallback', edges);
       if (simButton) {
         ctx.variables.selected_button = simButton.id;
         ctx.variables.button_value = simButton.id;
       }
-      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_interactive_buttons', payload: { body: content, buttons: mappedButtons, pause: true, simulatedReply: simButton?.id }, variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
-      return { nextId: getNextNode(node.id, null, edges), sent: true };
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_interactive_buttons', payload: { body: content, buttons: mappedButtons, pause: true, simulatedReply: simButton?.id }, variables: { ...ctx.variables }, nextId: simTarget ?? null });
+      return { nextId: simTarget, sent: true };
     }
 
     try {
@@ -647,17 +827,13 @@ async function executeNode(
         } : null,
       });
 
-      // Auto-pause after sending so the flow waits for the customer's
-      // reply before continuing. Without this, sequential questions all
-      // fire in one shot. Applies even when buttons are empty (degraded
-      // to text) because the node type semantically means "ask and wait."
-      const nextNodeId = getNextNode(node.id, null, edges);
-      if (nextNodeId) {
-        await supabaseAdmin
-          .from('conversations')
-          .update({ context: { ...ctx.variables, pending_flow_node: nextNodeId, _pending_pause_type: 'buttons' } })
-          .eq('id', ctx.conversationId);
-      }
+      // Auto-pause after sending so the flow waits for the customer's reply
+      // before continuing. Stores THIS node's own id (not a precomputed next
+      // node) so resume above can resolve the real edge once the reply exists.
+      await supabaseAdmin
+        .from('conversations')
+        .update({ context: { ...ctx.variables, pending_flow_node: node.id, _pending_pause_type: 'buttons' } })
+        .eq('id', ctx.conversationId);
       return { stop: true, sent: true };
     } catch (e) {
       console.error(`Flow engine: sendInteractiveButtons failed for node ${node.id}:`, (e as Error).message);
@@ -667,18 +843,10 @@ async function executeNode(
 
   // ── Send Interactive List ───────────────────────────────────
   if (type === 'send_list') {
-    const raw = (node.data?.message as string) || (node.data?.content as string) || '';
-    const content = interpolate(raw, ctx);
     const items: Array<{ id?: string; title?: string; label?: string; description?: string; value?: string }> =
       Array.isArray(node.data?.items) ? (node.data.items as any[]) :
       Array.isArray(node.data?.options) ? (node.data.options as any[]) :
       Array.isArray(node.data?.buttons) ? (node.data.buttons as any[]) : [];
-    const buttonLabel = (node.data?.buttonLabel as string) || (node.data?.button_label as string) || 'Select';
-    const headerText = node.data?.header ? interpolate(node.data.header as string, ctx) : undefined;
-    const footerText = node.data?.footer ? interpolate(node.data.footer as string, ctx) : undefined;
-
-    if (!content.trim()) return { nextId: getNextNode(node.id, null, edges) };
-
     const rows = items
       .filter(i => (i.title || i.label || '').trim())
       .slice(0, 10)
@@ -688,14 +856,35 @@ async function executeNode(
         ...(i.description ? { description: i.description.slice(0, 72) } : {}),
       }));
 
+    // Resume: same reasoning as send_buttons above — resolve the real edge
+    // from the actual reply instead of a target precomputed before it existed.
+    if (ctx.pendingFlowNode === node.id) {
+      const target = resolveReplyEdge(node.id, edges, rows, { buttonId: ctx.buttonId, text: ctx.messageText });
+      if (ctx.dryRun) {
+        ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'list_reply_resolved', payload: { buttonId: ctx.buttonId, text: ctx.messageText }, variables: { ...ctx.variables }, nextId: target ?? null });
+      }
+      return target ? { nextId: target } : { stop: true };
+    }
+
+    const raw = (node.data?.message as string) || (node.data?.content as string) || '';
+    const content = interpolate(raw, ctx);
+    const buttonLabel = (node.data?.buttonLabel as string) || (node.data?.button_label as string) || 'Select';
+    const headerText = node.data?.header ? interpolate(node.data.header as string, ctx) : undefined;
+    const footerText = node.data?.footer ? interpolate(node.data.footer as string, ctx) : undefined;
+
+    if (!content.trim()) return { nextId: getNextNode(node.id, null, edges) };
+
     if (ctx.dryRun) {
       const simRow = rows[0];
+      const simTarget = simRow
+        ? resolveReplyEdge(node.id, edges, rows, { buttonId: simRow.id, text: simRow.title })
+        : getNextNode(node.id, 'fallback', edges);
       if (simRow) {
         ctx.variables.selected_button = simRow.id;
         ctx.variables.button_value = simRow.id;
       }
-      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_interactive_list', payload: { body: content, rows, pause: true, simulatedReply: simRow?.id }, variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
-      return { nextId: getNextNode(node.id, null, edges), sent: true };
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'send_interactive_list', payload: { body: content, rows, pause: true, simulatedReply: simRow?.id }, variables: { ...ctx.variables }, nextId: simTarget ?? null });
+      return { nextId: simTarget, sent: true };
     }
 
     try {
@@ -722,13 +911,10 @@ async function executeNode(
         } : null,
       });
 
-      const nextNodeId = getNextNode(node.id, null, edges);
-      if (nextNodeId) {
-        await supabaseAdmin
-          .from('conversations')
-          .update({ context: { ...ctx.variables, pending_flow_node: nextNodeId, _pending_pause_type: 'list' } })
-          .eq('id', ctx.conversationId);
-      }
+      await supabaseAdmin
+        .from('conversations')
+        .update({ context: { ...ctx.variables, pending_flow_node: node.id, _pending_pause_type: 'list' } })
+        .eq('id', ctx.conversationId);
       return { stop: true, sent: true };
     } catch (e) {
       console.error(`Flow engine: sendInteractiveList failed for node ${node.id}:`, (e as Error).message);
@@ -1268,15 +1454,25 @@ async function executeNode(
 
   // ── Wait for Reply — pause flow, resume on next inbound ──
   if (type === 'wait_for_reply') {
-    const nextNodeId = getNextNode(node.id, null, edges);
+    // Resume: reaching runFlowsForMessage at all means an inbound message
+    // arrived, so this is always the 'next' (replied) branch — 'timeout' has
+    // no live firing path today (nothing resumes here for a timeout reason).
+    if (ctx.pendingFlowNode === node.id) {
+      const target = getNextNode(node.id, 'next', edges) ?? getNextNode(node.id, null, edges);
+      return target ? { nextId: target } : { stop: true };
+    }
+
+    const nextNodeId = getNextNode(node.id, 'next', edges) ?? getNextNode(node.id, null, edges);
     if (ctx.dryRun) {
-      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'wait_for_reply', payload: `will resume at ${nextNodeId}`, nextId: nextNodeId });
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'wait_for_reply', payload: `will resume at ${nextNodeId}`, nextId: nextNodeId ?? null });
       return { stop: true };
     }
     if (nextNodeId) {
+      // Stores THIS node's own id (not the precomputed target) so resume
+      // above can resolve the real edge once the reply exists.
       await supabaseAdmin
         .from('conversations')
-        .update({ context: { ...ctx.variables, pending_flow_node: nextNodeId, _pending_pause_type: 'wait_for_reply' } })
+        .update({ context: { ...ctx.variables, pending_flow_node: node.id, _pending_pause_type: 'wait_for_reply' } })
         .eq('id', ctx.conversationId);
     }
     return { stop: true }; // Stop execution until next inbound message resumes here
@@ -1509,7 +1705,7 @@ export async function runInactivityFlows(): Promise<number> {
     // Pull all active flows that contain an inactivity_trigger node
     const { data: flows } = await supabaseAdmin
       .from('automation_flows')
-      .select('id, tenant_id, name, nodes, edges')
+      .select('id, tenant_id, name, nodes, edges, updated_at')
       .eq('is_active', true);
 
     if (!flows || flows.length === 0) return 0;
@@ -1581,7 +1777,7 @@ export async function runInactivityFlows(): Promise<number> {
 
         try {
           const sent = await executeFlowGraph(
-            flow.nodes as FlowNode[], flow.edges as FlowEdge[], ctx, inactNode.id
+            flow.nodes as FlowNode[], flow.edges as FlowEdge[], ctx, inactNode.id, { id: flow.id, updatedAt: flow.updated_at }
           );
           if (sent) {
             // Mark this inactivity flow as fired so it doesn't repeat
@@ -1650,7 +1846,7 @@ export async function runScheduledFlows(): Promise<number> {
   try {
     const { data: flows } = await supabaseAdmin
       .from('automation_flows')
-      .select('id, tenant_id, name, nodes, edges')
+      .select('id, tenant_id, name, nodes, edges, updated_at')
       .eq('is_active', true);
 
     if (!flows || flows.length === 0) return 0;
@@ -1774,7 +1970,7 @@ export async function runScheduledFlows(): Promise<number> {
 
         try {
           await executeFlowGraph(
-            flow.nodes as FlowNode[], flow.edges as FlowEdge[], ctx, schedNode.id
+            flow.nodes as FlowNode[], flow.edges as FlowEdge[], ctx, schedNode.id, { id: flow.id, updatedAt: flow.updated_at }
           );
           fired++;
         } catch (e) {
@@ -1807,7 +2003,7 @@ export async function simulateFlow(
 ): Promise<SimulationResult> {
   const { data: flow, error } = await supabaseAdmin
     .from('automation_flows')
-    .select('id, name, trigger_type, trigger_keywords, nodes, edges')
+    .select('id, name, trigger_type, trigger_keywords, nodes, edges, updated_at')
     .eq('id', flowId)
     .eq('tenant_id', tenantId)
     .single();
@@ -1906,4 +2102,38 @@ function getNextNode(
     (handle === null || !e.sourceHandle || e.sourceHandle === handle)
   );
   return match?.target;
+}
+
+// ── Resolve which edge a button/list reply should follow ───────────
+// Multi-output choice nodes (send_buttons, send_list) render one source
+// handle per option plus a 'fallback' handle (see InteractiveButtonsNode in
+// the builder) so each option can route to a different node. This can only
+// be decided once the reply exists, so it must run at RESUME time — never
+// at send time (getNextNode(id, null, edges) would silently take whichever
+// edge happens to be first in array order, regardless of the actual click).
+// Matches the clicked button id first, then the reply text against a known
+// option's id/label, then falls back to the node's 'fallback' handle.
+export function resolveReplyEdge(
+  nodeId: string,
+  edges: FlowEdge[],
+  options: Array<{ id: string; title?: string }>,
+  reply: { buttonId?: string; text: string }
+): string | undefined {
+  const replyText = (reply.text || '').trim().toLowerCase();
+  let matchedHandle: string | undefined;
+
+  if (reply.buttonId && options.some(o => o.id === reply.buttonId)) {
+    matchedHandle = reply.buttonId;
+  } else if (replyText) {
+    const byText = options.find(o =>
+      o.id.toLowerCase() === replyText || (o.title || '').trim().toLowerCase() === replyText
+    );
+    matchedHandle = byText?.id;
+  }
+
+  if (matchedHandle) {
+    const target = getNextNode(nodeId, matchedHandle, edges);
+    if (target) return target;
+  }
+  return getNextNode(nodeId, 'fallback', edges);
 }

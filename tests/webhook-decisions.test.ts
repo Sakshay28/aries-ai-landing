@@ -5,6 +5,7 @@ import {
   pickScriptedReply,
   isScriptedReplyRelevant,
   allowStatusUpdate,
+  hasActiveFlow,
 } from '@/lib/webhook/decisions';
 import { isHumanHandoffRequest } from '@/lib/ai/engine';
 
@@ -233,5 +234,35 @@ describe('allowStatusUpdate', () => {
     expect(allowStatusUpdate('sent', 'delivered')).toBe(true);
     expect(allowStatusUpdate('sent', 'read')).toBe(true);
     expect(allowStatusUpdate('pending', 'sent')).toBe(true);
+  });
+});
+
+// ─── hasActiveFlow — Flow > Human > AI priority gate ─────────────────────────
+// Regression for the P0 bug: a button reply's label text (e.g. "Book a table")
+// could match a tenant's scripted-reply keyword and hijack an in-progress flow
+// before the flow engine ever got to resume it. Scripted replies must be
+// skipped for the entire duration a flow owns the conversation.
+
+describe('hasActiveFlow', () => {
+  it('is true while pending_flow_node is set', () => {
+    expect(hasActiveFlow({ pending_flow_node: 'date_selection' })).toBe(true);
+  });
+
+  it('is false once pending_flow_node has been cleared', () => {
+    expect(hasActiveFlow({ pending_flow_node: null })).toBe(false);
+    expect(hasActiveFlow({})).toBe(false);
+  });
+
+  it('is false for a conversation with no context at all', () => {
+    expect(hasActiveFlow(undefined)).toBe(false);
+    expect(hasActiveFlow(null)).toBe(false);
+  });
+
+  it('REGRESSION: a scripted-reply-worthy keyword inside an active flow must still be treated as flow-owned', () => {
+    // e.g. the "23 Jul - 29 Jul" button's label text happens to contain "jul" —
+    // if some tenant configured a scripted reply on that keyword, it must not
+    // fire while the date-selection flow node is waiting for this exact reply.
+    const context = { pending_flow_node: 'date_selection', last_message: '23 Jul - 29 Jul' };
+    expect(hasActiveFlow(context)).toBe(true);
   });
 });
