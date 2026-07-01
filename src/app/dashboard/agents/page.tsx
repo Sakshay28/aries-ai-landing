@@ -59,7 +59,7 @@ interface ChatMessage {
   mediaType?: 'image' | 'video' | 'document' | null;
   timestamp: Date;
   isError?: boolean;
-  buttons?: Array<{ id: string; title: string }>;
+  buttons?: Array<{ type?: 'quick_reply' | 'url' | 'call'; id?: string; title: string; url?: string; phone?: string }>;
 }
 
 function mediaTypeFromUrl(url: string): 'image' | 'video' | 'document' {
@@ -2065,19 +2065,51 @@ export default function AISettingsPage() {
                         </div>
                       )}
 
-                      {/* Render dynamic quick-reply buttons in simulator */}
+                      {/* Render dynamic quick-reply, URL, and call buttons in simulator */}
                       {m.role === 'assistant' && m.buttons && m.buttons.length > 0 && (
                         <div className="flex flex-col gap-1.5 mt-1 max-w-[280px]">
-                          {m.buttons.map(btn => (
-                            <button
-                              key={btn.id}
-                              disabled={sendingMsg}
-                              onClick={() => handleSendMessage(undefined, btn.title)}
-                              className="text-center py-2 px-3 text-xs font-semibold rounded-xl transition-colors border border-emerald-600/25 bg-emerald-50/30 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                            >
-                              {btn.title}
-                            </button>
-                          ))}
+                          {m.buttons.map((btn, idx) => {
+                            const isUrl = btn.type === 'url';
+                            const isCall = btn.type === 'call';
+                            const key = btn.id || `sim_btn_${idx}`;
+
+                            const className = "text-center py-2 px-3 text-xs font-semibold rounded-xl transition-colors border border-emerald-600/25 bg-emerald-50/30 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm block w-full";
+
+                            if (isUrl && btn.url) {
+                              return (
+                                <a
+                                  key={key}
+                                  href={btn.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className={className}
+                                >
+                                  🔗 {btn.title}
+                                </a>
+                              );
+                            } else if (isCall && btn.phone) {
+                              return (
+                                <a
+                                  key={key}
+                                  href={`tel:${btn.phone}`}
+                                  className={className}
+                                >
+                                  📞 {btn.title}
+                                </a>
+                              );
+                            } else {
+                              return (
+                                <button
+                                  key={key}
+                                  disabled={sendingMsg}
+                                  onClick={() => handleSendMessage(undefined, btn.title)}
+                                  className={className}
+                                >
+                                  {btn.title}
+                                </button>
+                              );
+                            }
+                          })}
                         </div>
                       )}
                     </div>

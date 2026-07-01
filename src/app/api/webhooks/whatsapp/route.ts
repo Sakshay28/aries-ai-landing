@@ -12,7 +12,7 @@ import { isDuplicateMessage, getRedisClient, acquireOffHoursLock, acquireOnceNot
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
 import { appendLeadRow, appendBookingRow } from '@/lib/integrations/google-sheets';
-import { parseMetaWebhook, sendTextMessage, sendMediaMessage, sendInteractiveButtonsMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
+import { parseMetaWebhook, sendTextMessage, sendMediaMessage, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
 import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus, resolveOrCreateConversation } from '@/lib/whatsapp/businessNotify';
 import { normalizePhoneNumber, isSamePhoneNumber } from '@/lib/whatsapp/phone';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
@@ -1762,20 +1762,73 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
       // Only send a text message if the image was NOT already delivered to the customer.
       if (!metaMsgId && !welcomeImageSentToMeta) {
-        if (aiResponse.buttons && aiResponse.buttons.length > 0) {
+        const quickReplies = (aiResponse.buttons || []).filter(b => b.type === 'quick_reply');
+        const urls = (aiResponse.buttons || []).filter(b => b.type === 'url');
+        const calls = (aiResponse.buttons || []).filter(b => b.type === 'call');
+
+        // Append multiple URL buttons and call buttons to the text response directly
+        // to work around WhatsApp structural limits (cannot mix url/call with quick replies in one payload)
+        let extraText = '';
+        if (urls.length > 0) {
+          const isSingleNativeUrl = urls.length === 1 && quickReplies.length === 0 && calls.length === 0;
+          if (!isSingleNativeUrl) {
+            extraText += '\n\n🔗 Links:';
+            urls.forEach(u => {
+              if (u.url) extraText += `\n👉 ${u.title}: ${u.url}`;
+            });
+          }
+        }
+        if (calls.length > 0) {
+          extraText += '\n\n📞 Contacts:';
+          calls.forEach(c => {
+            if (c.phone) extraText += `\n👉 ${c.title}: ${c.phone}`;
+          });
+        }
+        if (extraText) {
+          aiResponse.reply += extraText;
+        }
+
+        // Send dispatch logic
+        if (quickReplies.length > 0) {
           try {
+            const mappedReplies = quickReplies
+              .map((b, i) => ({ id: b.id || `ai_btn_${i}`, title: b.title }))
+              .slice(0, 3);
             const result = await sendInteractiveButtonsMessage(
               decryptedAccessToken,
               tenant.wa_phone_number_id,
               cleanPhone,
               aiResponse.reply,
-              aiResponse.buttons
+              mappedReplies
             );
             metaMsgId = result.messageId;
             buttonsSentSuccessfully = true;
+            aiResponse.buttons = quickReplies.slice(0, 3);
           } catch (btnErr) {
             console.error('⚠️ Meta: failed to send AI reply as interactive buttons, falling back to text:', (btnErr as Error).message);
-            // Fall back to text message
+            const result = await sendTextMessage(
+              decryptedAccessToken,
+              tenant.wa_phone_number_id,
+              cleanPhone,
+              aiResponse.reply
+            );
+            metaMsgId = result.messageId;
+          }
+        } else if (urls.length === 1 && calls.length === 0) {
+          try {
+            const targetUrl = urls[0];
+            const result = await sendInteractiveUrlButtonMessage(
+              decryptedAccessToken,
+              tenant.wa_phone_number_id,
+              cleanPhone,
+              aiResponse.reply,
+              targetUrl.title,
+              targetUrl.url!
+            );
+            metaMsgId = result.messageId;
+            buttonsSentSuccessfully = true;
+          } catch (urlErr) {
+            console.error('⚠️ Meta: failed to send AI reply as interactive URL button, falling back to text:', (urlErr as Error).message);
             const result = await sendTextMessage(
               decryptedAccessToken,
               tenant.wa_phone_number_id,

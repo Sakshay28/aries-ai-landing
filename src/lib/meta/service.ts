@@ -314,6 +314,59 @@ export async function sendInteractiveButtonsMessage(
   });
 }
 
+// SEND: Interactive URL Button Message (CTA URL Button)
+// ═══════════════════════════════════════
+// WhatsApp Cloud API interactive message with a single call-to-action URL button.
+export async function sendInteractiveUrlButtonMessage(
+  accessToken: string,
+  phoneNumberId: string,
+  destination: string,
+  bodyText: string,
+  buttonTitle: string,
+  url: string,
+  headerText?: string,
+  footerText?: string
+): Promise<MetaSendResult> {
+  if (!accessToken || !phoneNumberId || !destination || !bodyText || !buttonTitle || !url) {
+    throw new Error('Meta sendInteractiveUrlButtonMessage: missing required parameters');
+  }
+
+  const interactive: Record<string, unknown> = {
+    type: 'cta_url',
+    body: { text: bodyText },
+    action: {
+      name: 'cta_url',
+      parameters: {
+        display_text: buttonTitle.slice(0, 20),
+        url: url,
+      },
+    },
+  };
+
+  if (headerText) interactive.header = { type: 'text', text: headerText.slice(0, 60) };
+  if (footerText) interactive.footer = { text: footerText.slice(0, 60) };
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: cleanPhone(destination),
+    type: 'interactive',
+    interactive,
+  };
+
+  return withMetaRetry(async () => {
+    const res = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: headers(accessToken),
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) throw await metaErrorFromResponse(res, 'interactive_url_button');
+    const data = await res.json();
+    return { messageId: data.messages?.[0]?.id || '', status: 'sent' };
+  });
+}
+
 // ═══════════════════════════════════════
 // SEND: Interactive List Message
 // ═══════════════════════════════════════

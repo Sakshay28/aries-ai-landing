@@ -18,7 +18,14 @@ import { getAI } from '@/lib/ai/client';
 import { getRedisClient } from '@/lib/redis/client';
 const MODEL = 'gemini-2.5-flash';
 
-// ── Response Types ──
+export interface AIButton {
+  type: 'quick_reply' | 'url' | 'call';
+  id?: string;
+  title: string;
+  url?: string;
+  phone?: string;
+}
+
 export interface AIResponse {
   reply: string;
   extractedData: ExtractedData;
@@ -28,7 +35,7 @@ export interface AIResponse {
   escalationReason?: string;
   nextStep: string;
   confidence: number;
-  buttons?: Array<{ id: string; title: string }>;
+  buttons?: AIButton[];
 }
 
 export interface ExtractedData {
@@ -383,12 +390,22 @@ ESCALATION KEYWORDS: If the customer's message contains any of these words or ph
 ${tenantConfig.systemPrompt}
 ` : ''}
 
-QUICK-REPLY BUTTONS RULES (Optional):
-- You can optionally attach 1 to 3 quick-reply buttons to your reply in the "buttons" field.
-- Do NOT use buttons on every response. Use them only when offering clear pathways/choices (e.g., "Reserve a Table", "View Menu", "Talk to Staff", "Modify Booking", "Cancel Booking", "Speak to Team").
-- Each button must be an object with:
-  1. "id": A unique alphanumeric ID (e.g., "opt_reserve", "opt_menu", "opt_support").
-  2. "title": A short, clear label STRICTLY 20 characters or less (e.g., "Book a Table", "View Menu", "Talk to Human"). This 20-character limit is absolute.
+QUICK-REPLY, URL, AND CALL BUTTONS RULES (Optional):
+- You can optionally attach 1 to 3 interactive buttons in the "buttons" field.
+- Do NOT use buttons on every response. Use them only when offering clear pathways/choices (e.g., reserving, reviewing, showing social links, making calls).
+- Support three types of buttons:
+  1. Quick Reply: {"type": "quick_reply", "id": "btn_id", "title": "Button Title"}
+     - "id": A unique alphanumeric ID (e.g., "opt_reserve", "opt_menu", "opt_support").
+     - "title": A short label STRICTLY 20 characters or less.
+  2. URL/Link: {"type": "url", "title": "Instagram", "url": "https://instagram.com/mybrand"}
+     - Use this for opening Instagram links, Google reviews links, websites, menus, etc.
+     - "title": Label under 20 characters (e.g., "Google Review", "Instagram").
+     - "url": The target URL link.
+  3. Call Button: {"type": "call", "title": "Call Support", "phone": "+1234567890"}
+     - Use this to prompt phone calls.
+     - "title": Label under 20 characters (e.g., "Call Us", "Call Manager").
+     - "phone": The phone number (with country code, e.g. "+91...").
+- Keep button titles/labels brief (max 20 characters).
 - If no buttons are appropriate, set "buttons" to null or omit the field.
 
 You must respond with ONLY a JSON object (no markdown, no backticks) in this exact format:
@@ -415,8 +432,9 @@ You must respond with ONLY a JSON object (no markdown, no backticks) in this exa
   "nextStep": "what info to collect next: greeting, ask_intent, ask_guests, ask_date, ask_occasion, ask_name, ask_phone, ask_email, confirmation, completed, escalated",
   "confidence": 0.95,
   "buttons": [
-    { "id": "btn_1", "title": "Reserve Table" },
-    { "id": "btn_2", "title": "See Menu" }
+    { "type": "quick_reply", "id": "btn_1", "title": "Reserve Table" },
+    { "type": "url", "title": "Google Review", "url": "https://g.page/r/some_review_link/review" },
+    { "type": "call", "title": "Call Us", "phone": "+919876543210" }
   ]
 }${SYSTEM_PROMPT_SAFETY_APPENDIX}`;
 }
@@ -695,15 +713,24 @@ function parseAIResponse(text: string): AIResponse {
     const parsed = JSON.parse(cleaned);
 
     // Safely extract and validate dynamic buttons (strictly 1-3, titles <= 20 chars)
-    let buttons = undefined;
+    let buttons: AIButton[] | undefined = undefined;
     if (Array.isArray(parsed.buttons) && parsed.buttons.length > 0) {
       buttons = parsed.buttons
         .map((b: any, index: number) => {
+          const type = (b?.type === 'url' || b?.type === 'call') ? b.type : 'quick_reply';
           const title = String(b?.title || '').trim().slice(0, 20);
-          const id = String(b?.id || `ai_btn_${index}`).trim().replace(/[^a-zA-Z0-9_-]/g, '');
-          return { id, title };
+          if (type === 'url') {
+            const url = String(b?.url || '').trim();
+            return { type, title, url };
+          } else if (type === 'call') {
+            const phone = String(b?.phone || '').trim();
+            return { type, title, phone };
+          } else {
+            const id = String(b?.id || `ai_btn_${index}`).trim().replace(/[^a-zA-Z0-9_-]/g, '');
+            return { type, id, title };
+          }
         })
-        .filter((b: any) => b.title.length > 0)
+        .filter((b: any) => b.title.length > 0 && (b.type !== 'url' || b.url) && (b.type !== 'call' || b.phone))
         .slice(0, 3);
       if (buttons.length === 0) {
         buttons = undefined;
