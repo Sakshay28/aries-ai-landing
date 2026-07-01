@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { decryptToken } from '@/lib/utils/crypto';
+import { getExcelConfig } from '@/lib/integrations/microsoft-excel';
 
 // GET: Fetch list of worksheets (tabs) from Microsoft Graph API
 export async function GET() {
@@ -9,19 +9,9 @@ export async function GET() {
   if (!tenantId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
-    const { data: integration, error: intError } = await supabaseAdmin
-      .from('tenant_integrations')
-      .select('config')
-      .eq('tenant_id', tenantId)
-      .eq('integration_id', 'microsoft_excel')
-      .maybeSingle();
-
-    if (intError) throw intError;
-    if (!integration) return NextResponse.json({ error: 'Microsoft Excel not connected' }, { status: 404 });
-
-    const cfg = integration.config as any;
+    // getExcelConfig handles proactive token refresh before the token expires
+    const { token: accessToken, config: cfg } = await getExcelConfig(tenantId);
     const spreadsheetId = cfg.spreadsheet_id;
-    const accessToken = decryptToken(cfg.access_token);
 
     if (!spreadsheetId || !accessToken) {
       return NextResponse.json({ error: 'Microsoft Excel integration configuration missing parameters' }, { status: 400 });

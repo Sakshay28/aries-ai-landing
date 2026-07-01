@@ -8,8 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withTenantGuard } from '@/lib/auth/tenantGuard';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
-import { sendStaffAlert } from '@/lib/meta/service';
-import { decryptToken } from '@/lib/utils/crypto';
+import { sendBusinessEvent } from '@/lib/whatsapp/businessNotify';
 
 export async function GET(req: NextRequest) {
   const guard = await withTenantGuard(req);
@@ -176,17 +175,10 @@ export async function POST(req: NextRequest) {
     created_at: new Date().toISOString(),
   }).catch(() => {});
 
-  // Notify staff + manager on WhatsApp (both recipients, independent sends)
-  const staffPhone  = (tenant as any)?.staff_phone   as string | null;
-  const managerPhone = (tenant as any)?.manager_phone as string | null;
-  const waToken = (tenant as any)?.wa_access_token
-    ? (decryptToken((tenant as any).wa_access_token as string) as string)
-    : null;
-  const waPhoneId = (tenant as any)?.wa_phone_number_id as string | null;
-
-  console.log(`[bookings] Loaded settings — staff_phone=${staffPhone ?? 'null'}, manager_phone=${managerPhone ?? 'null'}`);
-
-  if (waToken && waPhoneId) {
+  // Notify staff + manager — guaranteed delivery: durable dashboard record
+  // written first, then WhatsApp session-or-template send with automatic
+  // retry (see src/lib/whatsapp/businessNotify.ts).
+  {
     const [hh, mm] = slot.slot_time.split(':').map(Number);
     const ampm = hh >= 12 ? 'PM' : 'AM';
     const hr12 = hh > 12 ? hh - 12 : hh === 0 ? 12 : hh;
@@ -199,16 +191,17 @@ export async function POST(req: NextRequest) {
       `📞 Phone: ${cleanPhone}` +
       (special_request?.trim() ? `\n📝 Note: ${special_request.trim()}` : '');
 
-    sendStaffAlert(
-      {
-        wa_phone_number_id: waPhoneId,
-        wa_access_token: (tenant as any)?.wa_access_token as string,
-        staff_phone:   staffPhone,
-        manager_phone: managerPhone,
+    sendBusinessEvent({
+      tenantId,
+      eventType: 'booking_confirmation',
+      title: `New booking (staff added) — ${customer_name.trim()}`,
+      body: alertMsg,
+      variables: {
+        customer_name: customer_name.trim(), customer_phone: cleanPhone,
+        reservation_id, guest_count: String(guestCount),
       },
-      alertMsg
-    ).then(results =>
-      console.log(`[bookings] Booking alert sent to ${results.filter(r => r.ok).length}/${results.length} recipients:`, results.map(r => `${r.phone}=${r.ok ? 'ok' : r.error}`))
+    }).then(r =>
+      console.log(`[bookings] Booking alert — waStatus=${r.waStatus}`)
     ).catch(e => console.error('❌ [BOOKINGS] Staff notification failed:', (e as Error).message));
   }
 

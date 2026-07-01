@@ -53,12 +53,26 @@ export async function PATCH(
     // Handle body separately (avoid conflict with request.json body variable)
     if (body.bodyText !== undefined) updateData.body = body.bodyText;
     if (body.status !== undefined) updateData.status = body.status;
+    // Guaranteed-delivery event binding (null clears the binding).
+    if (body.eventType !== undefined) updateData.event_type = body.eventType || null;
 
-    await supabaseAdmin
+    const { error: updateErr } = await supabaseAdmin
       .from('draft_templates')
       .update(updateData)
       .eq('id', id)
       .eq('tenant_id', tenantId);
+
+    if (updateErr) {
+      // Partial unique index (tenant_id, event_type) WHERE status='APPROVED' —
+      // another approved template already owns this event.
+      if (/duplicate key|unique constraint/i.test(updateErr.message)) {
+        return NextResponse.json(
+          { success: false, error: 'Another approved template is already bound to this event. Unbind it first.' },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ success: false, error: updateErr.message }, { status: 500 });
+    }
 
     // If resubmitting to Meta (status was REJECTED or user explicitly wants to resubmit)
     if (body.resubmit === true) {

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
 import { createBookingPaymentLink, fireIntegrations } from '@/lib/integrations/runner';
-import { sendTextMessage, sendStaffAlert } from '@/lib/meta/service';
+import { sendTextMessage } from '@/lib/meta/service';
+import { sendBusinessEvent } from '@/lib/whatsapp/businessNotify';
 import { decryptToken } from '@/lib/utils/crypto';
 
 function timeToMins(t: string): number {
@@ -307,9 +308,10 @@ export async function POST(req: NextRequest) {
       }).catch(() => {});
     }
 
-    // Always notify staff + manager immediately (both recipients, independent sends).
-    console.log(`[save-booking] Loaded settings — staff_phone=${(tenant as any).staff_phone ?? 'null'}, manager_phone=${(tenant as any).manager_phone ?? 'null'}`);
-    if (accessToken && phoneNumberId) {
+    // Always notify staff + manager — guaranteed delivery: durable dashboard
+    // record first, then WhatsApp session-or-template send with automatic
+    // retry (see src/lib/whatsapp/businessNotify.ts).
+    {
       const displayTime = formatSlotTime(chosenSlot!.slot_time);
       const paymentNote = isPrepaid ? `\n💳 Payment: ₹${feeRupees} pending` : '';
       const alertMsg =
@@ -320,16 +322,17 @@ export async function POST(req: NextRequest) {
         `📞 Phone: ${cleanPhoneStr}` +
         paymentNote +
         (special_request ? `\n📝 Note: ${special_request}` : '');
-      sendStaffAlert(
-        {
-          wa_phone_number_id: phoneNumberId,
-          wa_access_token: (tenant as any).wa_access_token as string,
-          staff_phone:   (tenant as any).staff_phone   as string | null,
-          manager_phone: (tenant as any).manager_phone as string | null,
+      sendBusinessEvent({
+        tenantId,
+        eventType: 'booking_confirmation',
+        title: `New booking — ${name}`,
+        body: alertMsg,
+        variables: {
+          customer_name: name, customer_phone: cleanPhoneStr,
+          reservation_id: reservationId, guest_count: String(guestCount),
         },
-        alertMsg
-      ).then(results =>
-        console.log(`[save-booking] Booking alert sent to ${results.filter(r => r.ok).length}/${results.length} recipients:`, results.map(r => `${r.phone}=${r.ok ? 'ok' : r.error}`))
+      }).then(r =>
+        console.log(`[save-booking] Booking alert — waStatus=${r.waStatus}`)
       ).catch(e => console.error('❌ [SAVE BOOKING] Staff notification failed:', (e as Error).message));
     }
 

@@ -53,7 +53,7 @@ export async function GET() {
     const aiHandledConversations = aiHandledResult.count ?? 0;
 
     const latencies = (latencyResult.data ?? []).map(r => r.ai_latency_ms as number).filter(v => v > 0);
-    const avgResponseTimeSec = latencies.length >= 2
+    const avgResponseTimeSec = latencies.length >= 1
       ? Math.round((latencies.reduce((a, b) => a + b, 0) / latencies.length) / 100) / 10
       : null;
 

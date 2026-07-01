@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { MicrosoftExcelWorkerService } from '@/lib/integrations/microsoft-excel-worker';
 
 export async function POST(req: NextRequest) {
   const tenantId = await getTenantId();
@@ -14,37 +15,44 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'jobId is required' }, { status: 400 });
     }
 
-    const { data: updatedJob, error: updateError } = await supabaseAdmin
-      .from('microsoft_excel_sync_queue')
-      .update({
-        status: 'pending',
-        attempts: 0,
-        run_at: new Date().toISOString(),
-        error_message: null,
-        updated_at: new Date().toISOString(),
-      })
+    // jobId is an audit_log id — look up phone + event_type from the audit log
+    const { data: auditLog, error: logError } = await supabaseAdmin
+      .from('microsoft_excel_audit_logs')
+      .select('id, phone, event_type, lead_id')
       .eq('id', jobId)
       .eq('tenant_id', tenantId)
-      .select('id, phone, event_type')
       .maybeSingle();
 
-    if (updateError) throw updateError;
-
-    if (!updatedJob) {
-      return NextResponse.json({ error: 'Job not found in queue or already processed' }, { status: 404 });
+    if (logError) throw logError;
+    if (!auditLog) {
+      return NextResponse.json({ error: 'Audit log entry not found' }, { status: 404 });
     }
 
-    console.log(`🔄 [EXCEL retry api] manually queued retry for job ${jobId} (phone: ${updatedJob.phone})`);
+    // Re-enqueue the phone into the sync queue (upsert merges if already pending)
+    const { error: upsertError } = await supabaseAdmin
+      .from('microsoft_excel_sync_queue')
+      .upsert(
+        {
+          tenant_id: tenantId,
+          lead_id: auditLog.lead_id ?? null,
+          phone: auditLog.phone,
+          event_type: auditLog.event_type,
+          status: 'pending',
+          attempts: 0,
+          error_message: null,
+          run_at: new Date().toISOString(),
+        },
+        { onConflict: 'tenant_id,phone' }
+      );
 
-    await supabaseAdmin.from('microsoft_excel_audit_logs').insert({
-      tenant_id: tenantId,
-      phone: updatedJob.phone,
-      event_type: updatedJob.event_type,
-      status: 'failed',
-      error_message: 'Manual retry initiated',
-      latency_ms: 0,
-      details: { jobId, retry_action: 'manual_initiated' },
-    });
+    if (upsertError) throw upsertError;
+
+    console.log(`🔄 [EXCEL retry] re-enqueued phone ${auditLog.phone} for tenant ${tenantId}`);
+
+    // Immediately drain the queue so the retry fires without waiting for cron
+    MicrosoftExcelWorkerService.processQueue('manual-retry', 5).catch(err =>
+      console.error('⚠️ [EXCEL retry] processQueue error (non-fatal):', err)
+    );
 
     return NextResponse.json({ success: true, message: 'Job rescheduled for immediate retry' });
   } catch (err: any) {

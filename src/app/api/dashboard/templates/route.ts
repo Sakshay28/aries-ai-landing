@@ -106,6 +106,7 @@ export async function GET() {
       footer: d.footer,
       buttons: d.buttons_json ?? [],
       variableMap: d.variables_json ?? {},
+      eventType: d.event_type ?? null,
       usageCount: d.usage_count ?? 0,
       updatedAt: d.updated_at,
       createdAt: d.created_at,

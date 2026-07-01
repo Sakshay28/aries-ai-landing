@@ -51,6 +51,14 @@
     {
       "path": "/api/cron/ai-scoring",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/excel-sync",
+      "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/cron/session-keepalive",
+      "schedule": "0 * * * *"
     }
   ]
 }

@@ -9,26 +9,42 @@
 //     Customer replies → window resets → staff can always message freely.
 //     Each tenant opts in via an Automation rule (trigger = 'session_window_expiring').
 //
-// [B] Staff phone keepalive — sends a brief daily ping to the owner's
-//     staff_phone and manager_phone. This keeps the business→staff WhatsApp
-//     window permanently open so booking alerts and cancellation alerts
-//     are NEVER blocked by Meta error 131047.
-//     Dedup: uses system_heartbeats table (key = staff_keepalive:{tenant_id}).
+// [B] Staff phone keepalive — production-grade, window_expires_at-driven.
+//     Pings staff_phone/manager_phone with an interactive button (a tap
+//     reopens the window; a passive FYI text does not) whenever their
+//     session has <=12h left. Two safety windows per 24h cycle means a
+//     single missed/delayed cron tick can't blow through the deadline. If
+//     the window's already closed, falls back to the tenant's bound
+//     'staff_keepalive' template. If BOTH fail, writes a durable, critical
+//     business_notifications row + emails the tenant directly — this keeps
+//     booking/cancellation/handoff alerts from ever going silently missing.
+//     Dedup: system_heartbeats table (key = staff_keepalive:{tenant_id}:{phone}).
 // ═══════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { sendTextMessage, sendTemplateMessage } from '@/lib/meta/service';
+import { sendTextMessage, sendTemplateMessage, sendInteractiveButtonsMessage } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { isWindowClosedError } from '@/lib/automations/logic';
 import { notifyAdmin } from '@/lib/alerts/admin';
+import { notifyTenant } from '@/lib/alerts/tenantAlert';
+import { getSessionState, shouldPingForKeepalive } from '@/lib/whatsapp/session';
+import { resolveEventTemplate, mapVariablesToPositional } from '@/lib/whatsapp/templateManager';
 
 const WINDOW_OPEN_HOURS  = 22;    // nudge customer at 22h — window still open
 const WINDOW_CLOSE_HOURS = 23.5;  // stop after 23.5h — too late, window closed
 const DEDUP_MINUTES      = 90;    // skip customer conv if outbound sent in last 90 min
-const STAFF_PING_HOURS   = 22;    // ping staff phones every 22h
+const STAFF_WINDOW_LOOKAHEAD_HOURS = 12; // ping when window_expires_at <= now + 12h
+const STAFF_DEDUP_HOURS            = 10; // don't re-ping the same phone within 10h
 
 export async function GET(req: NextRequest) {
+  return handler(req);
+}
+export async function POST(req: NextRequest) {
+  return handler(req);
+}
+
+async function handler(req: NextRequest) {
   const secret = req.headers.get('authorization')?.replace('Bearer ', '');
   if (secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -52,16 +68,17 @@ export async function GET(req: NextRequest) {
 }
 
 // ── [B] Staff phone keepalive ─────────────────────────────────────────────────
-async function runStaffKeepalive(): Promise<{ pinged: number; skipped: number }> {
-  const cutoff = new Date(Date.now() - STAFF_PING_HOURS * 3_600_000).toISOString();
+async function runStaffKeepalive(): Promise<{ pinged: number; skipped: number; failed: number }> {
+  const dedupCutoff = new Date(Date.now() - STAFF_DEDUP_HOURS * 3_600_000).toISOString();
 
   const { data: tenants } = await supabaseAdmin
     .from('tenants')
-    .select('id, wa_access_token, wa_phone_number_id, business_name, staff_phone, manager_phone')
+    .select('id, wa_access_token, wa_phone_number_id, business_name, staff_phone, manager_phone, staff_email')
     .or('staff_phone.not.is.null,manager_phone.not.is.null');
 
   let pinged = 0;
   let skipped = 0;
+  let failed = 0;
 
   for (const tenant of tenants ?? []) {
     if (!tenant.wa_access_token || !tenant.wa_phone_number_id) { skipped++; continue; }
@@ -78,59 +95,125 @@ async function runStaffKeepalive(): Promise<{ pinged: number; skipped: number }>
 
     if (!phones.length) { skipped++; continue; }
 
-    // Dedup via system_heartbeats — avoids inserting fake message rows.
-    // Key: staff_keepalive:{tenant_id}  last_run_at = when we last pinged.
-    const heartbeatKey = `staff_keepalive:${tenant.id}`;
-    const { data: hb } = await supabaseAdmin
-      .from('system_heartbeats')
-      .select('last_run_at')
-      .eq('key', heartbeatKey)
-      .maybeSingle();
-
-    if (hb?.last_run_at && hb.last_run_at > cutoff) {
-      // Already pinged this tenant's staff within the last 22h — skip
-      skipped++;
-      continue;
-    }
-
-    const pingText =
-      `📋 *Daily update — ${tenant.business_name || 'Your Restaurant'}*\n` +
-      `All good! You'll receive booking confirmations and cancellation alerts here instantly.\n` +
-      `_Dashboard: https://ariesai.in/dashboard_`;
-
-    let sentAny = false;
     for (const phone of phones) {
-      try {
-        await sendTextMessage(token, tenant.wa_phone_number_id, phone, pingText);
-        pinged++;
-        sentAny = true;
-        console.log(`[staff-keepalive] ✅ pinged +${phone} (${tenant.business_name})`);
-      } catch (err) {
-        if (isWindowClosedError(err)) {
-          // Window closed between business number and this staff phone.
-          // This happens on first setup or if staff never messaged back.
-          // Log clearly so the owner knows they need to send one message first.
-          console.warn(
-            `[staff-keepalive] ⚠️  window closed for staff phone +${phone} (${tenant.business_name}). ` +
-            `Staff must send one WhatsApp message to the business number to open the window.`
-          );
-        } else {
-          console.error(`[staff-keepalive] ❌ failed for +${phone} (${tenant.business_name}):`, (err as Error).message);
-        }
-      }
-    }
-
-    // Update heartbeat whether we sent or not — avoids hammering a phone that
-    // has no window (we'll log the warning once per 22h, not every 30 min).
-    if (sentAny) {
-      await supabaseAdmin
+      // Dedup via system_heartbeats, per PHONE (staff and manager numbers
+      // are independent — one being fresh shouldn't skip pinging the other).
+      const heartbeatKey = `staff_keepalive:${tenant.id}:${phone}`;
+      const { data: hb } = await supabaseAdmin
         .from('system_heartbeats')
-        .upsert({ key: heartbeatKey, last_run_at: new Date().toISOString() }, { onConflict: 'key' })
-        .then(null, (e) => console.error('[staff-keepalive] heartbeat upsert failed:', e.message));
+        .select('last_run_at')
+        .eq('key', heartbeatKey)
+        .maybeSingle();
+
+      if (hb?.last_run_at && hb.last_run_at > dedupCutoff) { skipped++; continue; }
+
+      // window_expires_at (migration 20260701_guaranteed_business_delivery)
+      // is the real signal now — no row / null means never opened, which
+      // needs a template, not a session ping.
+      const session = await getSessionState(tenant.id, phone);
+      const needsPing = shouldPingForKeepalive(session.windowExpiresAt, STAFF_WINDOW_LOOKAHEAD_HOURS * 3_600_000);
+
+      if (!needsPing) { skipped++; continue; }
+
+      const outcome = await pingStaffPhone(tenant, token, phone, session.windowOpen);
+
+      if (outcome === 'ok') {
+        pinged++;
+        await supabaseAdmin
+          .from('system_heartbeats')
+          .upsert({ key: heartbeatKey, last_run_at: new Date().toISOString() }, { onConflict: 'key' })
+          .then(null, (e) => console.error('[staff-keepalive] heartbeat upsert failed:', e.message));
+      } else {
+        failed++;
+        await handleKeepaliveFailure(tenant, phone);
+      }
     }
   }
 
-  return { pinged, skipped };
+  return { pinged, skipped, failed };
+}
+
+// Interactive-button ping when the window's open (a tap reopens it — a
+// passive FYI text does not); falls back to the tenant's bound
+// 'staff_keepalive' template when it's closed (or just closed on send).
+async function pingStaffPhone(
+  tenant: { id: string; wa_phone_number_id: string; business_name: string | null },
+  token: string,
+  phone: string,
+  windowOpen: boolean,
+): Promise<'ok' | 'failed'> {
+  if (windowOpen) {
+    try {
+      await sendInteractiveButtonsMessage(
+        token, tenant.wa_phone_number_id, phone,
+        `📋 Quick check-in from your Aries AI bot for *${tenant.business_name || 'your business'}*.\n` +
+        `Tap below so we know you're getting booking, cancellation, and handoff alerts here.`,
+        [{ id: 'staff_keepalive_ack', title: '✅ Got it' }],
+      );
+      console.log(`[staff-keepalive] ✅ pinged +${phone} (${tenant.business_name})`);
+      return 'ok';
+    } catch (err) {
+      if (!isWindowClosedError(err)) {
+        console.error(`[staff-keepalive] ❌ ping failed for +${phone} (${tenant.business_name}):`, (err as Error).message);
+        return 'failed';
+      }
+      // fall through to template fallback below
+    }
+  }
+
+  const template = await resolveEventTemplate(tenant.id, 'staff_keepalive');
+  if (!template) {
+    console.warn(`[staff-keepalive] ⚠️  window closed for +${phone} (${tenant.business_name}) and no staff_keepalive template bound.`);
+    return 'failed';
+  }
+
+  try {
+    const positional = mapVariablesToPositional(template.variableMap, { business_name: tenant.business_name || 'your business' });
+    await sendTemplateMessage(token, tenant.wa_phone_number_id, phone, template.name, positional, template.language);
+    console.log(`[staff-keepalive] ✅ template fallback sent +${phone} (${tenant.business_name})`);
+    return 'ok';
+  } catch (tplErr) {
+    console.error(`[staff-keepalive] ❌ template fallback failed for +${phone} (${tenant.business_name}):`, (tplErr as Error).message);
+    return 'failed';
+  }
+}
+
+// Ping AND template fallback both failed — surface it to the business
+// itself (durable dashboard record + email), not just the platform operator.
+async function handleKeepaliveFailure(
+  tenant: { id: string; business_name: string | null; staff_email: string | null },
+  phone: string,
+): Promise<void> {
+  const summary =
+    `We couldn't confirm your team is still reachable on WhatsApp (+${phone}). ` +
+    `Send any message to your bot's WhatsApp number to re-open the connection — ` +
+    `otherwise booking, cancellation, and handoff alerts may not reach you.`;
+
+  await supabaseAdmin.from('business_notifications').insert({
+    tenant_id: tenant.id,
+    event_type: 'staff_keepalive',
+    severity: 'critical',
+    title: 'Your WhatsApp alerts may be delayed',
+    body: summary,
+    payload: { phone },
+    wa_status: 'failed',
+  }).then(null, (e) => console.error('[staff-keepalive] business_notifications insert failed:', e.message));
+
+  if (tenant.staff_email) {
+    await notifyTenant({
+      staffEmail: tenant.staff_email,
+      businessName: tenant.business_name || 'Your Business',
+      subject: 'Your WhatsApp alerts may be delayed',
+      summary,
+    });
+  }
+
+  await notifyAdmin({
+    dedupeKey: `staff_keepalive_failed:${tenant.id}:${phone}`,
+    subject: `Staff keepalive failed — ${tenant.business_name || tenant.id}`,
+    summary: `Staff/manager phone +${phone} for ${tenant.business_name} could not be pinged (session closed, no fallback template, or send error). Alerts to this business may be silently lost.`,
+    context: { tenantId: tenant.id, phone },
+  }).catch(() => {});
 }
 
 // ── [A] Customer keepalive ────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { PLAN_DETAILS } from '@/lib/types';
 import { env } from '@/lib/env';
+import { logAuthEvent } from '@/lib/auth/events';
 
 export async function GET(req: NextRequest) {
   const { searchParams, origin } = req.nextUrl;
@@ -10,9 +11,13 @@ export async function GET(req: NextRequest) {
   const state = searchParams.get('state');
   const errorParam = searchParams.get('error');
   const storedState = req.cookies.get('google_oauth_state')?.value;
+  const ip = req.headers.get('x-vercel-forwarded-for')?.split(',')[0]?.trim()
+           || req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+           || 'unknown';
 
   if (errorParam) {
     console.error('Google OAuth error:', errorParam, searchParams.get('error_description'));
+    await logAuthEvent('google_oauth_failed', '', ip, { error: errorParam });
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
   }
 
@@ -82,6 +87,7 @@ export async function GET(req: NextRequest) {
 
   if (error || !data.user) {
     console.error('Supabase signInWithIdToken failed:', error);
+    await logAuthEvent('google_oauth_failed', '', ip, { error: error?.message, step: 'signInWithIdToken' });
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
   }
 
@@ -110,6 +116,7 @@ export async function GET(req: NextRequest) {
     .maybeSingle();
 
   if (existingUser) {
+    await logAuthEvent('google_oauth_success', user.email ?? '', ip, { userId: user.id, returning: true });
     return applySessionCookies(NextResponse.redirect(`${origin}/dashboard`));
   }
 
@@ -156,6 +163,7 @@ export async function GET(req: NextRequest) {
     if (userError) {
       await supabaseAdmin.from('tenants').delete().eq('id', tenant.id);
       console.error('OAuth user create failed:', userError);
+      await logAuthEvent('google_oauth_failed', user.email ?? '', ip, { error: userError.message, step: 'create_user' });
       return NextResponse.redirect(`${origin}/login?error=signup_failed`);
     }
 
@@ -165,9 +173,11 @@ export async function GET(req: NextRequest) {
       metadata: { email: user.email, source: 'google_oauth', plan: 'starter' },
     });
 
+    await logAuthEvent('google_oauth_success', user.email ?? '', ip, { userId: user.id, returning: false, tenantId: tenant.id });
     return applySessionCookies(NextResponse.redirect(`${origin}/onboard`));
   } catch (err) {
     console.error('OAuth callback error:', err);
+    await logAuthEvent('google_oauth_failed', user?.email ?? '', ip, { error: String(err), step: 'provision' }).catch(() => {});
     return NextResponse.redirect(`${origin}/login?error=signup_failed`);
   }
 }

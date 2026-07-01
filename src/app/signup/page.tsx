@@ -83,13 +83,16 @@ Please verify your production environment variables in your deployment dashboard
     }
     setLoading(true);
     setError("");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
-      // Send OTP via our Resend-backed route (bypasses Supabase SMTP).
       const res = await fetch("/api/auth/send-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, fullName, businessName }),
+        body: JSON.stringify({ email: email.toLowerCase().trim(), fullName, businessName }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.error || "Failed to send verification code.");
@@ -97,7 +100,12 @@ Please verify your production environment variables in your deployment dashboard
       setOtpSent(true);
       setCountdown(60);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send verification code.");
+      clearTimeout(timeout);
+      if ((err as Error).name === "AbortError") {
+        setError("Request timed out. Please check your connection and try again.");
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to send verification code.");
+      }
     } finally {
       setLoading(false);
     }
@@ -105,44 +113,59 @@ Please verify your production environment variables in your deployment dashboard
 
   async function verifySignupOtp(e: React.FormEvent) {
     e.preventDefault();
+    if (otpCode.length < 6) {
+      setError("Please enter the full verification code.");
+      return;
+    }
     setLoading(true);
     setError("");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
-      const res = await fetch("/api/auth/verify-otp", {
+      const verifyRes = await fetch("/api/auth/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email,
+          email: email.toLowerCase().trim(),
           token: otpCode,
           type: "email",
         }),
+        signal: controller.signal,
       });
-      const verifyData = await res.json();
-      if (!verifyData.success || !verifyData.data?.userId) {
+      clearTimeout(timeout);
+      const verifyData = await verifyRes.json();
+      if (!verifyData.success) {
         throw new Error(verifyData.error || "Verification failed");
       }
 
-      // Provision user and tenant in our public database
+      // Provision user and tenant — authId is now validated server-side from session
+      const controller2 = new AbortController();
+      const timeout2 = setTimeout(() => controller2.abort(), 15000);
       const provisionRes = await fetch("/api/auth/provision", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email,
+          email: email.toLowerCase().trim(),
           fullName,
           businessName,
-          authId: verifyData.data.userId,
         }),
+        signal: controller2.signal,
       });
+      clearTimeout(timeout2);
 
       const provisionData = await provisionRes.json();
       if (!provisionData.success) {
         throw new Error(provisionData.error || "Failed to provision workspace");
       }
 
-      // Session is confirmed — navigate to onboarding wizard
       window.location.href = "/onboard";
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Verification failed. Check code and try again.");
+      clearTimeout(timeout);
+      if ((err as Error).name === "AbortError") {
+        setError("Request timed out. Please check your connection and try again.");
+      } else {
+        setError(err instanceof Error ? err.message : "Verification failed. Check code and try again.");
+      }
     } finally {
       setLoading(false);
     }

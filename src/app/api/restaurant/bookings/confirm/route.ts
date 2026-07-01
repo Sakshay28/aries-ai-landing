@@ -14,7 +14,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { sendTextMessage, sendStaffAlert } from '@/lib/meta/service';
+import { sendTextMessage } from '@/lib/meta/service';
+import { sendBusinessEvent } from '@/lib/whatsapp/businessNotify';
 import { decryptToken } from '@/lib/utils/crypto';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
 import { fireIntegrations } from '@/lib/integrations/runner';
@@ -218,7 +219,9 @@ export async function POST(req: NextRequest) {
           console.error('❌ WA customer confirmation failed:', (err as Error).message);
         }
 
-        // ── 2. Staff + Manager notification (both recipients, independent sends) ─
+        // ── 2. Staff + Manager notification — guaranteed delivery: durable
+        //    dashboard record first, then WhatsApp session-or-template send
+        //    with automatic retry (see src/lib/whatsapp/businessNotify.ts) ─
         const staffAlertMsg =
           `🔔 New Booking!\n\n` +
           `👤 ${customer_name}, ${party_size} guests\n` +
@@ -226,16 +229,17 @@ export async function POST(req: NextRequest) {
           `📋 Reservation ID: ${reservation_id}\n` +
           `📞 Phone: ${customer_phone}`;
 
-        const alertResults = await sendStaffAlert(
-          {
-            wa_phone_number_id: waPhoneId,
-            wa_access_token: tenant.wa_access_token as string,
-            staff_phone:   (tenant as any).staff_phone   as string | null,
-            manager_phone: (tenant as any).manager_phone as string | null,
+        const eventResult = await sendBusinessEvent({
+          tenantId: restaurant_id,
+          eventType: 'booking_confirmation',
+          title: `New booking — ${customer_name}`,
+          body: staffAlertMsg,
+          variables: {
+            customer_name, customer_phone,
+            reservation_id, guest_count: String(party_size ?? ''),
           },
-          staffAlertMsg
-        );
-        console.log(`[confirm] Booking alert sent to ${alertResults.filter(r => r.ok).length}/${alertResults.length} recipients:`, alertResults.map(r => `${r.phone}=${r.ok ? 'ok' : r.error}`));
+        });
+        console.log(`[confirm] Booking alert — waStatus=${eventResult.waStatus}`);
       }
 
       // ── 3. Google Sheets sync ──────────────────────────────────────

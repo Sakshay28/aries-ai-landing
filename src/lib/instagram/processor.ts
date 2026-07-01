@@ -2,7 +2,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantByIgPageId, getTenantConfig, incrementMessageCount, checkUsageLimits } from '@/lib/tenant/manager';
 import { processMessageWithAI } from '@/lib/ai/engine';
 import { sendInstagramMessage, markInstagramAsRead } from '@/lib/instagram/service';
-import { sendStaffAlert } from '@/lib/meta/service';
+import { sendBusinessEvent } from '@/lib/whatsapp/businessNotify';
 import { scheduleConversationTimeout } from '@/lib/followup/engine';
 import { checkRedisRateLimit, getRedisClient } from '@/lib/redis/client';
 import { v4 as uuidv4 } from 'uuid';
@@ -205,7 +205,18 @@ async function handleEscalation(
   aiResponse: Awaited<ReturnType<typeof processMessageWithAI>>,
 ) {
   await supabaseAdmin.from('conversations').update({ escalated: true, escalated_at: new Date().toISOString(), escalation_reason: aiResponse.escalationReason }).eq('id', conversationId);
-  await sendStaffAlert(tenant, `🔔 IG ESCALATION\n\n👤 IG User (${senderId})\n⚠️ Reason: ${aiResponse.escalationReason}\n🏢 ${tenant.business_name}`);
+  // Guaranteed delivery: durable dashboard record first, then a WhatsApp
+  // session-or-template send to staff/manager (see
+  // src/lib/whatsapp/businessNotify.ts). Instagram itself has no WA template
+  // fallback, so the dashboard record is the guarantee for this channel.
+  await sendBusinessEvent({
+    tenantId: tenant.id,
+    eventType: 'human_assistance',
+    title: `Instagram escalation — IG user ${senderId}`,
+    body: `🔔 IG ESCALATION\n\n👤 IG User (${senderId})\n⚠️ Reason: ${aiResponse.escalationReason}\n🏢 ${tenant.business_name}`,
+    variables: { customer_name: senderId, reason: aiResponse.escalationReason || '', business_name: tenant.business_name || '' },
+    conversationId,
+  });
 }
 
 async function saveLead(tenant: Tenant, conversation: Record<string, unknown>, context: ConversationContext, senderId: string) {

@@ -3,8 +3,7 @@
 import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { isSupabaseConfigured, getEnvDiagnostics, env } from "@/lib/env";
+import { isSupabaseConfigured, getEnvDiagnostics } from "@/lib/env";
 
 // ═══════════════════════════════════════════════════════════════
 // 🔐 Login — premium split-pane with Google OAuth + email/password
@@ -72,22 +71,35 @@ Please verify your production environment variables in your deployment dashboard
       setError("Authentication setup incomplete. Please contact support or try again shortly.");
       return;
     }
+    if (!email || !email.includes("@")) {
+      setError("Please enter a valid email address.");
+      return;
+    }
     setLoading(true);
     setError("");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
-      const supabase = createBrowserSupabaseClient();
-      const { error: otpError } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          shouldCreateUser: false,
-          emailRedirectTo: `${window.location.origin}/api/auth/callback`,
-        }
+      const res = await fetch("/api/auth/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.toLowerCase().trim() }),
+        signal: controller.signal,
       });
-      if (otpError) throw otpError;
+      clearTimeout(timeout);
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to send verification code.");
+      }
       setOtpSent(true);
       setCountdown(60);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send verification code.");
+      clearTimeout(timeout);
+      if ((err as Error).name === "AbortError") {
+        setError("Request timed out. Please check your connection and try again.");
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to send verification code.");
+      }
     } finally {
       setLoading(false);
     }
@@ -95,25 +107,38 @@ Please verify your production environment variables in your deployment dashboard
 
   async function verifyOtp(e: React.FormEvent) {
     e.preventDefault();
+    if (otpCode.length < 6) {
+      setError("Please enter the full verification code.");
+      return;
+    }
     setLoading(true);
     setError("");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       const res = await fetch("/api/auth/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email,
+          email: email.toLowerCase().trim(),
           token: otpCode,
           type: "email",
         }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
       const data = await res.json();
       if (!data.success) {
         throw new Error(data.error || "Verification failed");
       }
       window.location.replace("/dashboard");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid code. Please check and try again.");
+      clearTimeout(timeout);
+      if ((err as Error).name === "AbortError") {
+        setError("Request timed out. Please check your connection and try again.");
+      } else {
+        setError(err instanceof Error ? err.message : "Invalid code. Please check and try again.");
+      }
     } finally {
       setLoading(false);
     }

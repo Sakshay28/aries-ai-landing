@@ -12,8 +12,7 @@ import { verifyWebhookSignature, handleRazorpayWebhook } from '@/lib/billing/raz
 import { fireIntegrations } from '@/lib/integrations/runner';
 import { triggerAutomations } from '@/lib/automations/engine';
 import { resolveBookingVariables } from '@/lib/automations/variables';
-import { sendStaffAlert } from '@/lib/meta/service';
-import { decryptToken } from '@/lib/utils/crypto';
+import { sendBusinessEvent } from '@/lib/whatsapp/businessNotify';
 
 export async function POST(req: NextRequest) {
   // Read raw body first — signature verification requires the unmodified bytes.
@@ -118,16 +117,10 @@ export async function POST(req: NextRequest) {
             ),
           }).catch(e => console.error('Automations (payment_received):', e.message));
 
-          const staffPhone  = (tenant as any)?.staff_phone   as string | null;
-          const mgrPhone    = (tenant as any)?.manager_phone as string | null;
-          const waToken = (tenant as any)?.wa_access_token
-            ? (decryptToken((tenant as any).wa_access_token as string) as string)
-            : null;
-          const waPhoneId = (tenant as any)?.wa_phone_number_id as string | null;
-
-          console.log(`[razorpay] Loaded settings — staff_phone=${staffPhone ?? 'null'}, manager_phone=${mgrPhone ?? 'null'}`);
-
-          if (waToken && waPhoneId) {
+          // Guaranteed delivery: durable dashboard record first, then WhatsApp
+          // session-or-template send with automatic retry (see
+          // src/lib/whatsapp/businessNotify.ts).
+          {
             const pSize = booking.party_size ?? '';
             const bDate = booking.booking_date ?? '';
             const alertMsg =
@@ -137,16 +130,19 @@ export async function POST(req: NextRequest) {
               `📋 Reservation: ${reservationId}\n` +
               `📞 Phone: ${booking.customer_phone}`;
 
-            sendStaffAlert(
-              {
-                wa_phone_number_id: waPhoneId,
-                wa_access_token: (tenant as any)?.wa_access_token as string,
-                staff_phone:   staffPhone,
-                manager_phone: mgrPhone,
+            sendBusinessEvent({
+              tenantId: tenantIdVal,
+              eventType: 'payment_confirmation',
+              title: `Payment confirmed — ${booking.customer_name}`,
+              body: alertMsg,
+              variables: {
+                customer_name: String(booking.customer_name ?? ''),
+                customer_phone: String(booking.customer_phone ?? ''),
+                reservation_id: reservationId,
+                guest_count: String(pSize),
               },
-              alertMsg
-            ).then(results =>
-              console.log(`[razorpay] Payment alert sent to ${results.filter(r => r.ok).length}/${results.length} recipients:`, results.map(r => `${r.phone}=${r.ok ? 'ok' : r.error}`))
+            }).then(r =>
+              console.log(`[razorpay] Payment alert — waStatus=${r.waStatus}`)
             ).catch(e => console.error('❌ [RAZORPAY] Staff notification failed:', (e as Error).message));
           }
 
