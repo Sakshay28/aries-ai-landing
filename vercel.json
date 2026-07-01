@@ -55,6 +55,6 @@
     {
       "path": "/api/cron/excel-sync",
       "schedule": "0 10 * * *"
-    },
+    }
   ]
 }
