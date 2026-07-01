@@ -271,6 +271,12 @@ async function runFlowsForMessageInner(
       // will set a fresh pending_flow_node below if the flow pauses again later.
       delete savedCtx.pending_flow_node;
       delete savedCtx._pending_pause_type;
+      delete savedCtx._pending_save_as;
+      
+      delete resumeVars.pending_flow_node;
+      delete resumeVars._pending_pause_type;
+      delete resumeVars._pending_save_as;
+
       await supabaseAdmin
         .from('conversations')
         .update({ context: { ...savedCtx, pending_flow_node: null, _pending_pause_type: null } })
