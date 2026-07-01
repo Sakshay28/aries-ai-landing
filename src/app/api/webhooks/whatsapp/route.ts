@@ -48,7 +48,7 @@ import { shouldRunAIAnalysis } from '@/lib/scoring/cost-optimizer';
 function mediaTypeFromUrl(url: string): 'image' | 'video' | 'document' {
   const lower = url.toLowerCase().split('?')[0];
   if (/\.(mp4|mov|webm|m4v|avi)$/.test(lower)) return 'video';
-  if (/\.(pdf|doc|docx|xls|xlsx|ppt|pptx)$/.test(lower)) return 'document';
+  if (/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|md|csv)$/.test(lower)) return 'document';
   return 'image';
 }
 
@@ -1464,6 +1464,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     smartRules: (smartRulesRows || []) as Array<{ name: string; trigger_source: string; ai_summary: string }>,
     knowledgeDocs: knowledgeRows,
     mediaFiles: ((kbMediaFiles || []) as Array<{ filename: string; file_type: string; file_url: string }>)
+      .filter(f => /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|png|jpg|jpeg|webp|gif|mp4|mov|webm|m4v|avi)$/i.test(f.filename))
       .map(f => ({ filename: f.filename, file_type: f.file_type })),
     // Inject existing booking so AI can handle cancel/modify requests
     existingBooking: existingBookingRow ? {
