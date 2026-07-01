@@ -1864,13 +1864,14 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     // Per-tenant template with variable interpolation.
     // Variables: {{customer_name}} {{customer_phone}} {{reason}} {{message}} {{business_name}}
     const DEFAULT_ESCALATION_TEMPLATE =
-      `🚨 Escalation Alert — {{business_name}}\n\n` +
-      `Customer: {{customer_name}}\n` +
-      `Phone: +{{customer_phone}}\n` +
-      `Reason: {{reason}}\n` +
-      `Message: {{message}}\n\n` +
-      `👉 Reply via Live Chat: https://ariesai.in/dashboard/chat\n` +
-      `(Bot is now paused for this customer — resume it from Live Chat when done)`;
+      `🚨 New Escalation Alert | {{business_name}}\n\n` +
+      `👤 Customer: {{customer_name}}\n` +
+      `📌 Escalation Reason:\n` +
+      `{{reason}}\n\n` +
+      `💬 Customer Message:\n` +
+      `{{message}}\n\n` +
+      `⚡ Action Required:\n` +
+      `Please respond to the customer as soon as possible. The AI conversation has been paused pending staff assistance.`;
 
     const templateVars: Record<string, string> = {
       customer_name:  leadName,
