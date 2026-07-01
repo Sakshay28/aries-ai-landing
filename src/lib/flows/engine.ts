@@ -345,9 +345,15 @@ async function runFlowsForMessageInner(
         // Mark all_messages flows as fired so they don't repeat in this session
         if (isEffectivelyAllMessages) {
           const firedKey = `all_msg_flow_fired_${flow.id}`;
+          const { data: latestConv } = await supabaseAdmin
+            .from('conversations')
+            .select('context')
+            .eq('id', conversationId)
+            .single();
+          const latestCtx = (latestConv?.context as Record<string, any>) || {};
           await supabaseAdmin
             .from('conversations')
-            .update({ context: { ...convCtx, [firedKey]: new Date().toISOString() } })
+            .update({ context: { ...latestCtx, [firedKey]: new Date().toISOString() } })
             .eq('id', conversationId);
         }
         return true;
@@ -1781,9 +1787,15 @@ export async function runInactivityFlows(): Promise<number> {
           );
           if (sent) {
             // Mark this inactivity flow as fired so it doesn't repeat
+            const { data: latestConv } = await supabaseAdmin
+              .from('conversations')
+              .select('context')
+              .eq('id', conv.id)
+              .single();
+            const latestCtx = (latestConv?.context as Record<string, any>) || {};
             await supabaseAdmin
               .from('conversations')
-              .update({ context: { ...ctxData, [lastFiredKey]: new Date().toISOString() } })
+              .update({ context: { ...latestCtx, [lastFiredKey]: new Date().toISOString() } })
               .eq('id', conv.id);
             fired++;
           }
