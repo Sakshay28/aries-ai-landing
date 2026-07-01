@@ -239,6 +239,30 @@ async function runFlowsForMessageInner(
   );
 
   if (pendingNode) {
+    const lowerText = messageText.toLowerCase().trim();
+    const isThinkReply = 
+      buttonId === 'cost_think' || 
+      buttonId === 'i_need_to_think' ||
+      lowerText === 'i need to think' ||
+      lowerText === 'need to think' ||
+      lowerText === 'let me think' ||
+      lowerText === 'will think';
+
+    if (isThinkReply) {
+      console.log(`[flow engine] Customer replied "need to think". Clearing flow state to drop to AI.`);
+      const savedCtx = { ...(conv?.context as Record<string, unknown>) };
+      delete savedCtx.pending_flow_node;
+      delete savedCtx._pending_pause_type;
+      delete savedCtx._pending_save_as;
+      
+      await supabaseAdmin
+        .from('conversations')
+        .update({ context: { ...savedCtx, pending_flow_node: null, _pending_pause_type: null } })
+        .eq('id', conversationId);
+
+      return false; // Yield and let the AI process it!
+    }
+
     const savedCtx = { ...(conv?.context as Record<string, unknown>) };
 
     // Find the flow that owns this node BEFORE touching the DB. Clearing
