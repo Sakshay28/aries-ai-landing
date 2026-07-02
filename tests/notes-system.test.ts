@@ -57,7 +57,7 @@ describe('Notes API System Units & Integrations', () => {
     expect(data.error).toBe('Unauthorized');
   });
 
-  it('GET requests return notes formatted correctly', async () => {
+  it('GET requests return notes formatted correctly, including idempotencyKey', async () => {
     (getCurrentUser as any).mockResolvedValue(MOCK_USER);
 
     const dbNotes = [
@@ -67,6 +67,7 @@ describe('Notes API System Units & Integrations', () => {
         created_at: '2026-07-01T12:00:00Z',
         created_by: 'u-123',
         created_by_name: 'Agent Cooper',
+        idempotency_key: 'idem-1',
       },
       {
         id: 'n-2',
@@ -74,12 +75,14 @@ describe('Notes API System Units & Integrations', () => {
         created_at: '2026-07-01T13:00:00Z',
         created_by: 'u-123',
         created_by_name: 'Agent Cooper',
+        idempotency_key: null,
       },
     ];
 
     const chain = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
       order: vi.fn().mockResolvedValue({ data: dbNotes, error: null }),
     };
     (supabaseAdmin.from as any).mockReturnValue(chain);
@@ -96,7 +99,45 @@ describe('Notes API System Units & Integrations', () => {
       text: 'First note',
       createdAt: '2026-07-01T12:00:00Z',
       createdBy: 'Agent Cooper',
+      idempotencyKey: 'idem-1',
     });
+    expect(data.notes[1].idempotencyKey).toBeNull();
+    // deleted_at IS NULL must be applied so soft-deleted notes never reappear
+    expect(chain.is).toHaveBeenCalledWith('deleted_at', null);
+  });
+
+  it('GET scopes by contact_id when contactId is provided, not just conversationId', async () => {
+    (getCurrentUser as any).mockResolvedValue(MOCK_USER);
+
+    const chain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [], error: null }),
+    };
+    (supabaseAdmin.from as any).mockReturnValue(chain);
+
+    const req = new NextRequest(`http://localhost/api/dashboard/notes?contactId=${MOCK_CONTACT_ID}`);
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    // A contact can span multiple conversation threads — notes must be found
+    // by contact_id so they survive a new thread being opened for the same
+    // customer, instead of only matching the single conversation_id that
+    // happened to be open when the note was written.
+    expect(chain.eq).toHaveBeenCalledWith('contact_id', MOCK_CONTACT_ID);
+    expect(chain.eq).not.toHaveBeenCalledWith('conversation_id', expect.anything());
+  });
+
+  it('GET rejects requests with neither contactId nor conversationId', async () => {
+    (getCurrentUser as any).mockResolvedValue(MOCK_USER);
+
+    const req = new NextRequest('http://localhost/api/dashboard/notes');
+    const res = await GET(req);
+
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.success).toBe(false);
   });
 
   it('POST creation rejects empty or whitespace-only notes', async () => {
@@ -270,6 +311,7 @@ describe('Notes API System Units & Integrations', () => {
     const notesChain = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
       maybeSingle: vi.fn().mockResolvedValue({ data: existingNote, error: null }),
       update: vi.fn().mockReturnThis(),
       single: vi.fn().mockResolvedValue({ data: updatedNote, error: null }),
@@ -287,27 +329,30 @@ describe('Notes API System Units & Integrations', () => {
     const data = await res.json();
     expect(data.success).toBe(true);
     expect(data.note.text).toBe('New text');
+    // Editing a soft-deleted note must be impossible
+    expect(notesChain.is).toHaveBeenCalledWith('deleted_at', null);
   });
 
-  it('DELETE requests validate ownership and remove note row', async () => {
+  it('DELETE soft-deletes: sets deleted_at instead of removing the row', async () => {
     (getCurrentUser as any).mockResolvedValue(MOCK_USER);
 
     const validUuid = 'a10a0628-97c7-43cf-bf2f-04a081bc13e3';
     const existingNote = { id: validUuid, text: 'Old text', tenant_id: MOCK_USER.tenant_id };
 
-    const notesChain = {
+    const notesChain: any = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
       maybeSingle: vi.fn().mockResolvedValue({ data: existingNote, error: null }),
-      delete: vi.fn().mockReturnThis(),
+      update: vi.fn(),
     };
 
-    // Mock resolution of delete chain promise (which is thenable or resolves directly)
-    const deleteChain = {
+    // update(...).eq(...).eq(...) resolves to { error: null } — no .delete() anywhere
+    const updateChain = {
       eq: vi.fn().mockReturnThis(),
-      then: vi.fn((cb) => cb({ error: null })),
+      then: (cb: any) => cb({ error: null }),
     };
-    (notesChain.delete as any).mockReturnValue(deleteChain);
+    notesChain.update.mockReturnValue(updateChain);
 
     (supabaseAdmin.from as any).mockReturnValue(notesChain);
 
@@ -319,5 +364,36 @@ describe('Notes API System Units & Integrations', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.success).toBe(true);
+
+    // The row must be preserved with deleted_at set — never hard-deleted —
+    // so it keeps an audit trail and can never be permanently, silently lost.
+    expect(notesChain.update).toHaveBeenCalledTimes(1);
+    const updateArg = notesChain.update.mock.calls[0][0];
+    expect(updateArg).toHaveProperty('deleted_at');
+    expect(typeof updateArg.deleted_at).toBe('string');
+    expect(notesChain.delete).toBeUndefined();
+  });
+
+  it('DELETE on an already-deleted note returns 404 (idempotent, not a crash)', async () => {
+    (getCurrentUser as any).mockResolvedValue(MOCK_USER);
+
+    const validUuid = 'a10a0628-97c7-43cf-bf2f-04a081bc13e3';
+    const notesChain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      // deleted_at IS NULL filter excludes the already-deleted row
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    (supabaseAdmin.from as any).mockReturnValue(notesChain);
+
+    const req = new NextRequest(`http://localhost/api/dashboard/notes?id=${validUuid}`, {
+      method: 'DELETE',
+    });
+
+    const res = await DELETE(req);
+    expect(res.status).toBe(404);
+    const data = await res.json();
+    expect(data.success).toBe(false);
   });
 });

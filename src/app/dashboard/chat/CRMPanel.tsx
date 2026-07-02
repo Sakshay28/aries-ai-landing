@@ -128,6 +128,9 @@ interface CRMPanelProps {
 
 export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const [notes, setNotes] = useState<Note[]>([]);
+  const [notesLoadStatus, setNotesLoadStatus] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
+  const [notesLoadError, setNotesLoadError] = useState<string | null>(null);
+  const [notesRetryTick, setNotesRetryTick] = useState(0);
   const [noteInput, setNoteInput] = useState("");
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -154,6 +157,10 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const noteInputRef = useRef<HTMLTextAreaElement>(null);
   const agentSelectRef = useRef<HTMLSelectElement>(null);
   const notesSectionRef = useRef<HTMLDivElement>(null);
+  // Guards against an in-flight (slow) fetch response landing after a newer
+  // one and clobbering fresher state — the classic "old websocket/HTTP data
+  // replacing new state" race.
+  const notesFetchSeqRef = useRef(0);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(true);
   // Outside-click for tags inline panel
@@ -319,11 +326,19 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
     }
   };
 
+  // Notes are scoped by contact whenever a contact is linked — a contact can
+  // span multiple conversation threads (new WhatsApp session, 24h-window
+  // reset), so scoping strictly to conversation_id makes historical notes
+  // vanish the moment a new thread opens for the same customer. Falls back
+  // to the conversation when no contact is linked yet.
+  const notesContactId = meta?.leads?.id || null;
+  const notesScopeKey = meta?.id ? (notesContactId ? `c:${notesContactId}` : `v:${meta.id}`) : null;
+
   // Helper to read offline queue from localStorage
-  const getOfflineQueue = (convId: string): any[] => {
+  const getOfflineQueue = (scopeKey: string): any[] => {
     if (typeof window === 'undefined') return [];
     try {
-      const raw = localStorage.getItem(`crm-notes-queue-${convId}`);
+      const raw = localStorage.getItem(`crm-notes-queue-${scopeKey}`);
       return raw ? JSON.parse(raw) : [];
     } catch {
       return [];
@@ -331,12 +346,12 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   };
 
   // Helper to save offline queue to localStorage
-  const saveOfflineQueue = (convId: string, queue: any[]) => {
+  const saveOfflineQueue = (scopeKey: string, queue: any[]) => {
     if (typeof window === 'undefined') return;
     try {
-      localStorage.setItem(`crm-notes-queue-${convId}`, JSON.stringify(queue));
+      localStorage.setItem(`crm-notes-queue-${scopeKey}`, JSON.stringify(queue));
     } catch (err) {
-      console.error('Failed to save offline queue:', err);
+      console.error('[Notes] Failed to persist offline queue:', err);
     }
   };
 
@@ -344,7 +359,7 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      syncOfflineQueue();
+      syncOfflineQueue(true);
     };
     const handleOffline = () => {
       setIsOnline(false);
@@ -355,80 +370,112 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [meta?.id]);
+  }, [notesScopeKey]);
 
-  // Sync offline queue to server
-  const syncOfflineQueue = () => {
-    if (!meta?.id) return;
-    const queue = getOfflineQueue(meta.id);
+  // Sync offline queue to server. Also called (silently) right after the
+  // initial notes fetch so a note left "saving" from a page reload/crash
+  // mid-request actually resumes instead of sitting stuck forever.
+  const syncOfflineQueue = (announce = false) => {
+    if (!notesScopeKey || !navigator.onLine) return;
+    const queue = getOfflineQueue(notesScopeKey).filter((q: any) => q.retryCount < 3);
     if (queue.length === 0) return;
 
-    toast.success("Connection restored! Syncing queued notes...");
+    if (announce) toast.success("Connection restored! Syncing queued notes...");
+    console.log('[Notes] Resuming pending queue items', { scopeKey: notesScopeKey, count: queue.length });
     queue.forEach((item: any) => {
-      const resetItem = { ...item, retryCount: 0 };
-      saveNoteToServer(resetItem);
+      saveNoteToServer(item);
     });
   };
 
   // Load notes from DB & listen to realtime updates via Supabase Channel
   useEffect(() => {
-    if (!meta?.id) { setNotes([]); return; }
+    if (!meta?.id) { setNotes([]); setNotesLoadStatus('idle'); setNotesLoadError(null); return; }
 
     let active = true;
+    const scopeKey = notesScopeKey as string;
 
     const fetchNotes = async () => {
+      const seq = ++notesFetchSeqRef.current;
+      setNotesLoadStatus('loading');
+      setNotesLoadError(null);
+      console.log('[Notes] Fetch started', { scopeKey, contactId: notesContactId, conversationId: meta.id });
+
       try {
-        const res = await fetch(`/api/dashboard/notes?conversationId=${meta.id}`);
+        const params = notesContactId
+          ? `contactId=${notesContactId}`
+          : `conversationId=${meta.id}`;
+        const res = await fetch(`/api/dashboard/notes?${params}`);
         const data = await res.json();
-        if (data.success && active) {
-          const apiNotes = data.notes.map((n: any) => ({ ...n, status: 'saved' }));
 
-          // Get any locally queued notes
-          const queue = getOfflineQueue(meta.id);
-          const queueNotes = queue.map((qn: any) => ({
-            id: qn.id,
-            text: qn.text,
-            createdAt: qn.createdAt,
-            createdBy: 'You',
-            status: qn.retryCount >= 3 ? 'failed' : 'saving',
-            error: qn.retryCount >= 3 ? 'Could not save note. Please try again.' : `Saving (Retry ${qn.retryCount}/3)...`,
-            idempotencyKey: qn.idempotencyKey
-          }));
+        // A newer fetch (contact/conversation switch, or a second call that
+        // raced ahead) has already landed — this response is stale, drop it
+        // rather than let it clobber fresher state.
+        if (!active || seq !== notesFetchSeqRef.current) return;
 
-          // Filter out queued notes that are already in the DB response
-          const filteredQueueNotes = queueNotes.filter(
-            (qn: any) => !apiNotes.some((an: any) => an.text === qn.text || (qn.idempotencyKey && an.idempotencyKey === qn.idempotencyKey))
-          );
-
-          setNotes([...apiNotes, ...filteredQueueNotes]);
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || `Request failed (${res.status})`);
         }
-      } catch (err) {
-        console.error('Failed to fetch notes:', err);
+
+        const apiNotes = data.notes.map((n: any) => ({ ...n, status: 'saved' as const }));
+
+        // Get any locally queued notes not yet confirmed by the server
+        const queue = getOfflineQueue(scopeKey);
+        const queueNotes = queue.map((qn: any) => ({
+          id: qn.id,
+          text: qn.text,
+          createdAt: qn.createdAt,
+          createdBy: 'You',
+          status: qn.retryCount >= 3 ? 'failed' as const : 'saving' as const,
+          error: qn.retryCount >= 3 ? "Couldn't save note. Please try again." : `Saving (Retry ${qn.retryCount}/3)...`,
+          idempotencyKey: qn.idempotencyKey
+        }));
+
+        const filteredQueueNotes = queueNotes.filter(
+          (qn: any) => !apiNotes.some((an: any) => (qn.idempotencyKey && an.idempotencyKey === qn.idempotencyKey) || an.text === qn.text)
+        );
+
+        setNotes([...apiNotes, ...filteredQueueNotes]);
+        setNotesLoadStatus('loaded');
+        console.log('[Notes] Fetch succeeded', { scopeKey, dbCount: apiNotes.length, pendingCount: filteredQueueNotes.length });
+
+        // Resume anything still marked "saving" from a prior session (e.g. the
+        // tab was closed/refreshed mid-request) — it would otherwise sit
+        // stuck forever since only a fresh addNote() or the online event used
+        // to trigger a retry.
+        syncOfflineQueue(false);
+      } catch (err: any) {
+        if (!active || seq !== notesFetchSeqRef.current) return;
+        console.error('[Notes] Fetch failed', { scopeKey, error: err.message });
+        setNotesLoadStatus('error');
+        setNotesLoadError(err.message || 'Failed to load notes');
       }
     };
 
     fetchNotes();
 
     const supabase = createBrowserSupabaseClient();
-    const channelName = `realtime-notes-${meta.id}-${Date.now()}`;
+    const channelName = `realtime-notes-${scopeKey}-${Date.now()}`;
+    const filter = notesContactId ? `contact_id=eq.${notesContactId}` : `conversation_id=eq.${meta.id}`;
     const channel = supabase
       .channel(channelName)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'notes',
-        filter: `conversation_id=eq.${meta.id}`
+        filter,
       }, (payload) => {
         if (!active) return;
 
         if (payload.eventType === 'INSERT') {
           const incoming = payload.new as any;
+          if (incoming.deleted_at) return;
+          console.log('[Notes] Realtime INSERT', { noteId: incoming.id });
           setNotes(prev => {
             const matchIndex = prev.findIndex(n => n.id === incoming.id || (incoming.idempotency_key && n.idempotencyKey === incoming.idempotency_key));
             if (matchIndex !== -1) {
               return prev.map((n, idx) =>
                 idx === matchIndex
-                  ? { ...n, id: incoming.id, status: 'saved', createdAt: incoming.created_at, createdBy: incoming.created_by_name }
+                  ? { ...n, id: incoming.id, status: 'saved', createdAt: incoming.created_at, createdBy: incoming.created_by_name, idempotencyKey: incoming.idempotency_key }
                   : n
               );
             }
@@ -437,34 +484,49 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
               text: incoming.text,
               createdAt: incoming.created_at,
               createdBy: incoming.created_by_name,
-              status: 'saved'
+              status: 'saved',
+              idempotencyKey: incoming.idempotency_key,
             }];
           });
         } else if (payload.eventType === 'UPDATE') {
           const incoming = payload.new as any;
-          setNotes(prev => prev.map(n =>
-            n.id === incoming.id
-              ? { ...n, text: incoming.text, createdAt: incoming.created_at, createdBy: incoming.created_by_name, status: 'saved' }
-              : n
-          ));
+          console.log('[Notes] Realtime UPDATE', { noteId: incoming.id, deleted: !!incoming.deleted_at });
+          if (incoming.deleted_at) {
+            // Soft-deleted elsewhere (another tab/user) — remove from view.
+            setNotes(prev => prev.filter(n => n.id !== incoming.id));
+          } else {
+            setNotes(prev => prev.map(n =>
+              n.id === incoming.id
+                ? { ...n, text: incoming.text, createdAt: incoming.created_at, createdBy: incoming.created_by_name, status: 'saved' }
+                : n
+            ));
+          }
         } else if (payload.eventType === 'DELETE') {
           const deletedId = payload.old.id;
+          console.log('[Notes] Realtime DELETE', { noteId: deletedId });
           setNotes(prev => prev.filter(n => n.id !== deletedId));
         }
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.error('[Notes] Realtime channel error/timeout', { scopeKey, status });
+        }
+      });
 
     return () => {
       active = false;
       supabase.removeChannel(channel);
     };
-  }, [meta?.id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notesScopeKey, notesRetryTick]);
 
   // POST note saving implementation
   const saveNoteToServer = async (item: any) => {
     if (!navigator.onLine) {
       return; // Offline: item remains in queue, UI already displays Saving/Retry
     }
+
+    console.log('[Notes] POST dispatched', { id: item.id, scopeKey: item.scopeKey, retryCount: item.retryCount });
 
     try {
       const res = await fetch('/api/dashboard/notes', {
@@ -481,21 +543,22 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
       const data = await res.json();
 
       if (res.ok && (data.id || data.text)) {
-        // Update UI
+        console.log('[Notes] POST confirmed, cache updated', { tempId: item.id, noteId: data.id });
+        // Update UI — server response is the source of truth
         setNotes(prev => prev.map(n =>
           (n.id === item.id || (item.idempotencyKey && n.idempotencyKey === item.idempotencyKey))
-            ? { ...n, id: data.id, status: 'saved', createdAt: data.createdAt, createdBy: data.createdBy }
+            ? { ...n, id: data.id, status: 'saved', createdAt: data.createdAt, createdBy: data.createdBy, idempotencyKey: data.idempotencyKey }
             : n
         ));
 
         // Remove from local storage queue
-        const currentQueue = getOfflineQueue(item.conversationId);
-        saveOfflineQueue(item.conversationId, currentQueue.filter((q: any) => q.id !== item.id));
+        const currentQueue = getOfflineQueue(item.scopeKey);
+        saveOfflineQueue(item.scopeKey, currentQueue.filter((q: any) => q.id !== item.id));
       } else {
         throw new Error(data.error || 'Failed to save');
       }
     } catch (err: any) {
-      console.warn('[NOTE_SAVE_FAILED_RETRYING]', item.id, err.message);
+      console.warn('[Notes] POST failed, scheduling retry', { id: item.id, error: err.message });
       handleSaveFailure(item);
     }
   };
@@ -509,11 +572,11 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
       const delay = delays[nextRetryCount - 1];
 
       // Update local storage queue
-      const currentQueue = getOfflineQueue(item.conversationId);
+      const currentQueue = getOfflineQueue(item.scopeKey);
       const updatedQueue = currentQueue.map((q: any) =>
         q.id === item.id ? { ...q, retryCount: nextRetryCount } : q
       );
-      saveOfflineQueue(item.conversationId, updatedQueue);
+      saveOfflineQueue(item.scopeKey, updatedQueue);
 
       // Update UI Status
       setNotes(prev => prev.map(n =>
@@ -524,41 +587,43 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
 
       // Retry query
       setTimeout(() => {
-        const freshQueue = getOfflineQueue(item.conversationId);
+        const freshQueue = getOfflineQueue(item.scopeKey);
         const freshItem = freshQueue.find((q: any) => q.id === item.id);
         if (freshItem) {
           saveNoteToServer(freshItem);
         }
       }, delay);
     } else {
-      // Retries exhausted: Mark failed, toast error, restore text to input if it's currently empty
+      // Retries exhausted: Mark failed, toast error, restore text to input if it's currently empty.
+      // The note text itself is NEVER discarded — it stays in the local queue
+      // (status 'failed') until the user retries or explicitly deletes it.
       setNotes(prev => prev.map(n =>
         n.id === item.id
           ? { ...n, status: 'failed', error: 'Couldn\'t save note. Please try again.' }
           : n
       ));
-      
+
       // If the note input is currently empty (meaning they just submitted it), restore it
       setNoteInput(prev => prev.trim() === '' ? item.text : prev);
-      
+
       toast.error("Couldn't save note. Please try again.");
     }
   };
 
   // Manual Retry Handler
   const handleManualRetry = (id: string) => {
-    if (!meta?.id) return;
-    const queue = getOfflineQueue(meta.id);
+    if (!notesScopeKey) return;
+    const queue = getOfflineQueue(notesScopeKey);
     const item = queue.find((q: any) => q.id === id);
     if (item) {
       // Reset retry count to 0
       const resetItem = { ...item, retryCount: 0 };
-      
+
       // Update queue
       const updatedQueue = queue.map((q: any) =>
         q.id === id ? resetItem : q
       );
-      saveOfflineQueue(meta.id, updatedQueue);
+      saveOfflineQueue(notesScopeKey, updatedQueue);
 
       // Update UI status to saving
       setNotes(prev => prev.map(n =>
@@ -572,11 +637,13 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   // Add Note Handler (triggered by enter / button click)
   const addNote = () => {
     const text = noteInput.trim();
+    console.log('[Notes] Save clicked');
     if (!text) return;
-    if (!meta?.id || !meta?.leads?.id) {
+    if (!meta?.id || !meta?.leads?.id || !notesScopeKey) {
       toast.error("No contact linked to this conversation");
       return;
     }
+    console.log('[Notes] Validation passed');
 
     const tempId = `opt_${Math.random().toString(36).substring(2, 9)}`;
     const idempotencyKey = `idem_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`;
@@ -594,18 +661,20 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
     setNotes(prev => [...prev, newNote]);
     setNoteInput(""); // Clear controlled textarea
 
-    // Add note to local storage queue
+    // Add note to local storage queue — the write-ahead log that lets the
+    // note survive a refresh/crash that happens before the POST resolves.
     const queueItem = {
       id: tempId,
       text,
       conversationId: meta.id,
       contactId: meta.leads.id,
+      scopeKey: notesScopeKey,
       idempotencyKey,
       createdAt: newNote.createdAt,
       retryCount: 0
     };
-    const currentQueue = getOfflineQueue(meta.id);
-    saveOfflineQueue(meta.id, [...currentQueue, queueItem]);
+    const currentQueue = getOfflineQueue(notesScopeKey);
+    saveOfflineQueue(notesScopeKey, [...currentQueue, queueItem]);
 
     // Send note to backend
     saveNoteToServer(queueItem);
@@ -656,9 +725,9 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
       // Remove from UI
       setNotes(prev => prev.filter(n => n.id !== id));
       // Remove from offline queue
-      if (meta?.id) {
-        const queue = getOfflineQueue(meta.id);
-        saveOfflineQueue(meta.id, queue.filter((q: any) => q.id !== id));
+      if (notesScopeKey) {
+        const queue = getOfflineQueue(notesScopeKey);
+        saveOfflineQueue(notesScopeKey, queue.filter((q: any) => q.id !== id));
       }
       toast.success("Queued note removed");
       return;
@@ -1079,7 +1148,25 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
             {/* Notes */}
             <div ref={notesSectionRef}>
               <Section title="Notes" icon={Tag} defaultOpen={notesOpen}>
-              {notes.length === 0 && (
+              {notesLoadStatus === 'loading' && notes.length === 0 && (
+                <p className="text-[12px] text-muted-foreground flex items-center gap-1.5">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Loading notes...
+                </p>
+              )}
+              {notesLoadStatus === 'error' && (
+                <div className="flex items-center justify-between gap-2 bg-destructive/10 border border-destructive/20 rounded-lg px-2.5 py-2">
+                  <p className="text-[11.5px] text-destructive font-medium">
+                    Couldn&apos;t load notes{notesLoadError ? `: ${notesLoadError}` : '.'}
+                  </p>
+                  <button
+                    onClick={() => setNotesRetryTick(t => t + 1)}
+                    className="text-[11px] font-semibold text-destructive underline hover:text-destructive-foreground transition-colors flex-shrink-0"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+              {notesLoadStatus === 'loaded' && notes.length === 0 && (
                 <p className="text-[12px] text-muted-foreground">No notes yet.</p>
               )}
               <div className="space-y-2">

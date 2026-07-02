@@ -18,49 +18,69 @@ const updateNoteSchema = z.object({
   text: z.string().trim().min(1, 'Note cannot be empty').max(2000, 'Note too long (max 2000 chars)'),
 });
 
-// ── GET: Fetch notes for a conversation ──
+const NOTE_SELECT = 'id, text, created_at, created_by, created_by_name, idempotency_key';
+
+function formatNote(n: any) {
+  return {
+    id: n.id,
+    text: n.text,
+    createdAt: n.created_at,
+    createdBy: n.created_by_name,
+    idempotencyKey: n.idempotency_key ?? null,
+  };
+}
+
+// ── GET: Fetch notes for a contact (falls back to conversation) ──
 export async function GET(req: NextRequest) {
   try {
     const me = await getCurrentUser();
     if (!me) {
+      console.warn('[Notes] GET rejected: unauthenticated');
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
     const { searchParams } = new URL(req.url);
+    const contactId = searchParams.get('contactId');
     const conversationId = searchParams.get('conversationId');
 
-    if (!conversationId) {
-      return NextResponse.json({ success: false, error: 'Missing conversationId' }, { status: 400 });
+    if (!contactId && !conversationId) {
+      return NextResponse.json({ success: false, error: 'Missing contactId or conversationId' }, { status: 400 });
     }
 
-    const { data: notes, error } = await supabaseAdmin
+    // Scope by contact_id whenever available: a contact can span multiple
+    // conversation threads (new WhatsApp session, 24h-window reset, etc.),
+    // so scoping strictly by conversation_id makes historical notes vanish
+    // the moment a new thread opens for the same customer.
+    let query = supabaseAdmin
       .from('notes')
-      .select('id, text, created_at, created_by, created_by_name')
-      .eq('conversation_id', conversationId)
+      .select(NOTE_SELECT)
       .eq('tenant_id', me.tenant_id)
-      .order('created_at', { ascending: true });
+      .is('deleted_at', null);
+
+    query = contactId ? query.eq('contact_id', contactId) : query.eq('conversation_id', conversationId as string);
+    query = query.order('created_at', { ascending: true });
+
+    console.log('[Notes] GET started', { tenantId: me.tenant_id, contactId, conversationId });
+
+    const { data: notes, error } = await query;
 
     if (error) {
-      console.error('[NOTES_GET_FAILED]', {
+      console.error('[Notes] GET failed', {
         tenantId: me.tenant_id,
+        contactId,
         conversationId,
         error: error.message,
+        code: error.code,
       });
-      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      return NextResponse.json({ success: false, code: 'NOTES_FETCH_FAILED', error: error.message }, { status: 500 });
     }
 
-    // Map to camelCase requested output format
-    const formattedNotes = (notes || []).map(n => ({
-      id: n.id,
-      text: n.text,
-      createdAt: n.created_at,
-      createdBy: n.created_by_name,
-    }));
+    console.log('[Notes] GET succeeded', { tenantId: me.tenant_id, contactId, conversationId, count: notes?.length ?? 0 });
 
-    return NextResponse.json({ success: true, notes: formattedNotes });
+    return NextResponse.json({ success: true, notes: (notes || []).map(formatNote) });
   } catch (err: any) {
-    console.error('[NOTES_GET_UNEXPECTED_ERROR]', { error: err.message, stack: err.stack });
-    return NextResponse.json({ success: false, error: 'Internal Server Error' }, { status: 500 });
+    console.error('[Notes] GET unexpected error', { error: err.message, stack: err.stack });
+    return NextResponse.json({ success: false, code: 'NOTES_FETCH_FAILED', error: 'Internal Server Error' }, { status: 500 });
   }
 }
 
@@ -68,6 +88,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const me = await getCurrentUser();
   if (!me) {
+    console.warn('[Notes] POST rejected: unauthenticated');
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -85,7 +106,7 @@ export async function POST(req: NextRequest) {
   const validation = createNoteSchema.safeParse(body);
   if (!validation.success) {
     const errorDetails = validation.error.format();
-    console.warn('[NOTE_CREATION_VALIDATION_FAILED]', {
+    console.warn('[Notes] POST validation failed', {
       tenantId,
       userId,
       payload: body,
@@ -93,6 +114,7 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ success: false, error: 'Validation failed', details: errorDetails }, { status: 400 });
   }
+  console.log('[Notes] POST validation passed', { tenantId, userId });
 
   const { conversationId, contactId, text, idempotencyKey } = validation.data;
   const sanitizedText = sanitizeInput(text, 2000);
@@ -111,9 +133,10 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (convErr || !conversation) {
-      console.warn('[NOTE_CREATION_UNAUTHORIZED_CONVERSATION]', { tenantId, conversationId, error: convErr?.message });
+      console.warn('[Notes] POST rejected: conversation not found or access denied', { tenantId, conversationId, error: convErr?.message });
       return NextResponse.json({ success: false, error: 'Conversation not found or access denied' }, { status: 404 });
     }
+    console.log('[Notes] POST conversation resolved', { tenantId, conversationId });
 
     // 2. Verify contact ownership
     const { data: contact, error: contactErr } = await supabaseAdmin
@@ -124,13 +147,16 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (contactErr || !contact) {
-      console.warn('[NOTE_CREATION_UNAUTHORIZED_CONTACT]', { tenantId, contactId, error: contactErr?.message });
+      console.warn('[Notes] POST rejected: contact not found or access denied', { tenantId, contactId, error: contactErr?.message });
       return NextResponse.json({ success: false, error: 'Contact not found or access denied' }, { status: 404 });
     }
+    console.log('[Notes] POST contact resolved', { tenantId, contactId });
 
     const agentName = me.full_name || me.email || 'Agent';
 
-    // 3. Attempt DB insert
+    // 3. Attempt DB insert. PostgREST performs this as a single statement and
+    // the .select().single() below is a RETURNING clause on the same insert —
+    // there is no window where the row can exist without also being returned.
     const insertPayload = {
       tenant_id: tenantId,
       conversation_id: conversationId,
@@ -141,50 +167,53 @@ export async function POST(req: NextRequest) {
       idempotency_key: idempotencyKey || null,
     };
 
+    console.log('[Notes] POST insert started', { tenantId, conversationId, contactId, idempotencyKey });
+
     const { data: note, error: insertErr } = await supabaseAdmin
       .from('notes')
       .insert(insertPayload)
-      .select('id, text, created_at, created_by, created_by_name')
+      .select(NOTE_SELECT)
       .single();
 
     // 4. Handle unique violation for idempotency key
     if (insertErr && insertErr.code === '23505' && idempotencyKey) {
-      const { data: existing, error: fetchErr } = await supabaseAdmin
+      const { data: existing } = await supabaseAdmin
         .from('notes')
-        .select('id, text, created_at, created_by, created_by_name')
+        .select(NOTE_SELECT)
         .eq('idempotency_key', idempotencyKey)
         .eq('tenant_id', tenantId)
         .single();
 
       if (existing) {
-        console.log('[NOTE_CREATION_IDEMPOTENCY_MATCH]', {
+        console.log('[Notes] POST idempotency match — returning existing note', {
           tenantId,
           idempotencyKey,
           noteId: existing.id,
         });
 
-        return NextResponse.json({
-          id: existing.id,
-          text: existing.text,
-          createdAt: existing.created_at,
-          createdBy: existing.created_by_name,
-        }, { status: 200 }); // Return existing note successfully
+        return NextResponse.json(formatNote(existing), { status: 200 });
       }
     }
 
-    if (insertErr) {
-      console.error('[NOTE_CREATION_DB_FAILED]', {
+    if (insertErr || !note) {
+      console.error('[Notes] POST insert failed', {
         tenantId,
         conversationId,
         contactId,
         userId,
-        error: insertErr.message,
-        code: insertErr.code,
+        error: insertErr?.message,
+        code: insertErr?.code,
       });
-      return NextResponse.json({ success: false, error: insertErr.message }, { status: 500 });
+      return NextResponse.json({
+        success: false,
+        code: 'NOTE_SAVE_FAILED',
+        error: insertErr?.message || 'Database insert failed',
+      }, { status: 500 });
     }
 
-    // Success Audit Trail
+    console.log('[Notes] POST insert committed', { tenantId, conversationId, contactId, noteId: note.id });
+
+    // Success Audit Trail (fire-and-forget, never blocks the response)
     logAudit({
       tenant_id: tenantId,
       actor_id: userId,
@@ -195,26 +224,19 @@ export async function POST(req: NextRequest) {
       new_value: { text: note.text },
     });
 
-    console.log('[NOTE_CREATION_SUCCESS]', {
+    console.log('[Notes] POST success', {
       tenantId,
       conversationId,
       contactId,
       userId,
-      timestamp: new Date().toISOString(),
-      payload: { text, idempotencyKey },
-      dbResult: note,
+      noteId: note.id,
       apiResponseStatus: 201,
     });
 
-    return NextResponse.json({
-      id: note.id,
-      text: note.text,
-      createdAt: note.created_at,
-      createdBy: note.created_by_name,
-    }, { status: 201 });
+    return NextResponse.json(formatNote(note), { status: 201 });
 
   } catch (err: any) {
-    console.error('[NOTE_CREATION_UNEXPECTED_ERROR]', {
+    console.error('[Notes] POST unexpected error', {
       tenantId,
       conversationId,
       contactId,
@@ -222,7 +244,7 @@ export async function POST(req: NextRequest) {
       error: err.message,
       stack: err.stack,
     });
-    return NextResponse.json({ success: false, error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ success: false, code: 'NOTE_SAVE_FAILED', error: 'Internal Server Error' }, { status: 500 });
   }
 }
 
@@ -253,29 +275,31 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
-    // Check ownership
+    // Check ownership — deleted notes cannot be edited
     const { data: existing, error: findErr } = await supabaseAdmin
       .from('notes')
       .select('id, text, tenant_id')
       .eq('id', id)
       .eq('tenant_id', me.tenant_id)
+      .is('deleted_at', null)
       .maybeSingle();
 
     if (findErr || !existing) {
+      console.warn('[Notes] PATCH rejected: not found or access denied', { tenantId: me.tenant_id, noteId: id });
       return NextResponse.json({ success: false, error: 'Note not found or access denied' }, { status: 404 });
     }
 
     const { data: updated, error: updateErr } = await supabaseAdmin
       .from('notes')
-      .update({ text: sanitizedText, updated_at: new Date().toISOString() })
+      .update({ text: sanitizedText })
       .eq('id', id)
       .eq('tenant_id', me.tenant_id)
-      .select('id, text, created_at, created_by, created_by_name')
+      .select(NOTE_SELECT)
       .single();
 
-    if (updateErr) {
-      console.error('[NOTE_UPDATE_FAILED]', { tenantId: me.tenant_id, noteId: id, error: updateErr.message });
-      return NextResponse.json({ success: false, error: updateErr.message }, { status: 500 });
+    if (updateErr || !updated) {
+      console.error('[Notes] PATCH update failed', { tenantId: me.tenant_id, noteId: id, error: updateErr?.message });
+      return NextResponse.json({ success: false, code: 'NOTE_UPDATE_FAILED', error: updateErr?.message || 'Update failed' }, { status: 500 });
     }
 
     logAudit({
@@ -289,23 +313,17 @@ export async function PATCH(req: NextRequest) {
       new_value: { text: updated.text },
     });
 
-    return NextResponse.json({
-      success: true,
-      note: {
-        id: updated.id,
-        text: updated.text,
-        createdAt: updated.created_at,
-        createdBy: updated.created_by_name,
-      }
-    });
+    console.log('[Notes] PATCH success', { tenantId: me.tenant_id, noteId: id });
+
+    return NextResponse.json({ success: true, note: formatNote(updated) });
 
   } catch (err: any) {
-    console.error('[NOTE_UPDATE_UNEXPECTED_ERROR]', { error: err.message, stack: err.stack });
-    return NextResponse.json({ success: false, error: 'Internal Server Error' }, { status: 500 });
+    console.error('[Notes] PATCH unexpected error', { error: err.message, stack: err.stack });
+    return NextResponse.json({ success: false, code: 'NOTE_UPDATE_FAILED', error: 'Internal Server Error' }, { status: 500 });
   }
 }
 
-// ── DELETE: Delete a note ──
+// ── DELETE: Soft-delete a note (deleted_at set, row + audit trail preserved) ──
 export async function DELETE(req: NextRequest) {
   const me = await getCurrentUser();
   if (!me) {
@@ -320,27 +338,29 @@ export async function DELETE(req: NextRequest) {
   }
 
   try {
-    // Check ownership
+    // Check ownership — already-deleted notes 404 (idempotent delete)
     const { data: existing, error: findErr } = await supabaseAdmin
       .from('notes')
       .select('id, text, tenant_id')
       .eq('id', id)
       .eq('tenant_id', me.tenant_id)
+      .is('deleted_at', null)
       .maybeSingle();
 
     if (findErr || !existing) {
+      console.warn('[Notes] DELETE rejected: not found or access denied', { tenantId: me.tenant_id, noteId: id });
       return NextResponse.json({ success: false, error: 'Note not found or access denied' }, { status: 404 });
     }
 
     const { error: deleteErr } = await supabaseAdmin
       .from('notes')
-      .delete()
+      .update({ deleted_at: new Date().toISOString() })
       .eq('id', id)
       .eq('tenant_id', me.tenant_id);
 
     if (deleteErr) {
-      console.error('[NOTE_DELETE_FAILED]', { tenantId: me.tenant_id, noteId: id, error: deleteErr.message });
-      return NextResponse.json({ success: false, error: deleteErr.message }, { status: 500 });
+      console.error('[Notes] DELETE failed', { tenantId: me.tenant_id, noteId: id, error: deleteErr.message });
+      return NextResponse.json({ success: false, code: 'NOTE_DELETE_FAILED', error: deleteErr.message }, { status: 500 });
     }
 
     logAudit({
@@ -353,10 +373,12 @@ export async function DELETE(req: NextRequest) {
       old_value: { text: existing.text },
     });
 
+    console.log('[Notes] DELETE success', { tenantId: me.tenant_id, noteId: id });
+
     return NextResponse.json({ success: true });
 
   } catch (err: any) {
-    console.error('[NOTE_DELETE_UNEXPECTED_ERROR]', { error: err.message, stack: err.stack });
-    return NextResponse.json({ success: false, error: 'Internal Server Error' }, { status: 500 });
+    console.error('[Notes] DELETE unexpected error', { error: err.message, stack: err.stack });
+    return NextResponse.json({ success: false, code: 'NOTE_DELETE_FAILED', error: 'Internal Server Error' }, { status: 500 });
   }
 }
