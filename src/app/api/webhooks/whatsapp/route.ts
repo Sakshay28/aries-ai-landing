@@ -11,7 +11,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { isDuplicateMessage, getRedisClient, acquireOffHoursLock, acquireOnceNotice } from '@/lib/redis/client';
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs } from '@/lib/ai/rag';
-import { appendLeadRow, appendBookingRow } from '@/lib/integrations/google-sheets';
+import { appendBookingRow } from '@/lib/integrations/google-sheets';
 import { parseMetaWebhook, sendTextMessage, sendMediaMessage, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
 import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus, resolveOrCreateConversation } from '@/lib/whatsapp/businessNotify';
 import { normalizePhoneNumber, isSamePhoneNumber } from '@/lib/whatsapp/phone';
@@ -25,6 +25,7 @@ import { decryptToken } from '@/lib/utils/crypto';
 import { runFlowsForMessage } from '@/lib/flows/engine';
 import { fireIntegrations, createBookingPaymentLink } from '@/lib/integrations/runner';
 import { MicrosoftExcelWorkerService } from '@/lib/integrations/microsoft-excel-worker';
+import { GoogleSheetsWorkerService } from '@/lib/integrations/google-sheets-worker';
 import { sendLeadAssignedEmail } from '@/lib/email/service';
 import { scheduleFollowUp, cancelLeadFollowUps } from '@/lib/followup/engine';
 import { randomUUID } from 'crypto';
@@ -211,6 +212,10 @@ export async function POST(req: NextRequest) {
     // Drain Excel sync queue for any jobs enqueued by DB triggers above
     MicrosoftExcelWorkerService.processQueue('webhook', 10).catch(err =>
       console.error('⚠️ Excel sync drain error (non-fatal):', err)
+    );
+    // Drain Google Sheets sync queue for any jobs enqueued by DB triggers above
+    GoogleSheetsWorkerService.processQueue('webhook', 10).catch(err =>
+      console.error('⚠️ Google Sheets sync drain error (non-fatal):', err)
     );
   });
 
@@ -653,16 +658,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         variables: { customer_name: newLead.name || 'there', business_name: tenant.business_name || '' },
       }).catch(e => console.error('Automations (new_lead):', e.message));
 
-      appendLeadRow(tenant.id, {
-        name: newLead.name || undefined,
-        phone: cleanPhone,
-        email: newLead.email || undefined,
-        lead_status: 'new',
-        source: leadSource,
-        campaign: campaignName,
-        lead_score: 0,
-        created_at: new Date().toISOString(),
-      }).catch(e => console.error('⚠️ Sheets append failed (non-fatal):', (e as Error).message));
+      // Google Sheets sync for this new lead is handled by the DB trigger →
+      // google_sheets_sync_queue → GoogleSheetsWorkerService pipeline (see
+      // the drain call above), not a direct write here — that keeps a single
+      // mapping-aware writer instead of two code paths racing on the same row.
 
       if (isFromAd) {
         triggerCapiEvent('Lead', { tenantId: tenant.id, leadId: newLead.id })

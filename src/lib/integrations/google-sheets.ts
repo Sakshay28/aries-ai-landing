@@ -5,8 +5,11 @@
 // Separate from Google Calendar — tenant can connect one or both.
 // Tokens stored encrypted in tenant_integrations (integration_id: 'google_sheets').
 //
-// Auto-sync: each time a new lead is created, appendLeadRow() is
-// called non-blocking so the lead shows up in the tenant's sheet.
+// Auto-sync: Postgres triggers on leads/conversations/bookings/shopify_events
+// enqueue rows into google_sheets_sync_queue; GoogleSheetsWorkerService drains
+// that queue (webhook after() hook + daily cron backstop) and calls
+// syncCustomerToSheet()/syncAllLeads() below, which are mapping-aware and
+// write into whatever columns the tenant configured (see column_mappings).
 // ═══════════════════════════════════════════════════════════
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
@@ -352,126 +355,122 @@ async function ensureSheetExists(tenantId: string, spreadsheetId: string, sheetN
   }
 }
 
-// ── Ensure header row exists (idempotent) ──────────────────
-const HEADERS = ['Date', 'Name', 'Phone', 'Email', 'Source', 'Campaign', 'Status', 'Score', 'Assigned To'];
-
+// ── Source labelling ────────────────────────────────────────
+// lead.channel is almost always "whatsapp" (the messaging channel itself,
+// not where the customer came from) — the meaningful acquisition source
+// lives in lead.source_detail (e.g. "meta_ctwa"). Fall back to channel only
+// if source_detail is unset.
 const SOURCE_LABELS: Record<string, string> = {
   meta_ctwa: 'Meta Ad', whatsapp: 'WhatsApp', instagram: 'Instagram', manual: 'Manual',
 };
-const fmtDate = (iso?: string) => (iso ? iso.slice(0, 10) : new Date().toISOString().slice(0, 10));
 
-async function ensureHeaders(tenantId: string, spreadsheetId: string, sheetName: string): Promise<void> {
-  await ensureSheetExists(tenantId, spreadsheetId, sheetName);
-
-  const range = `${sheetName}!A1:I1`;
-  const res = await fetchWithRetry(
-    tenantId,
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`
-  );
-  if (!res.ok) return; // silently ignore — sheet might not have rows yet
-
-  const data = await res.json() as { values?: string[][] };
-  // Already up to date (handles upgrading an old 3-column header to the new layout).
-  if (data.values && (data.values[0]?.length ?? 0) >= HEADERS.length) return;
-
-  await fetchWithRetry(
-    tenantId,
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
-    {
-      method:  'PUT',
-      body:    JSON.stringify({ values: [HEADERS] }),
-    }
+function resolveSourceLabel(lead: Record<string, any>): string {
+  return (
+    SOURCE_LABELS[lead.source_detail ?? ''] ??
+    SOURCE_LABELS[lead.channel ?? ''] ??
+    lead.source_detail ??
+    lead.channel ??
+    ''
   );
 }
 
-// ── Append a single lead row ───────────────────────────────
-export interface LeadRow {
-  name?:        string;
-  phone?:       string;
-  email?:       string;
-  lead_status?: string;
-  source?:      string;
-  campaign?:    string;
-  assigned_to?: string;
-  lead_score?:  number;
-  created_at?:  string;
-}
+// Fields derivable purely from a `leads` row (+ its assigned_user join), with
+// no conversation/booking/shopify joins. Used by the bulk resync below;
+// syncCustomerToSheet() layers richer conversation-derived enrichment on top
+// of this same lead data for its live per-customer sync.
+function resolveBulkLeadFields(lead: Record<string, any>): Record<string, any> {
+  const fields: Record<string, any> = {};
 
-export async function appendLeadRow(tenantId: string, lead: LeadRow): Promise<void> {
-  const { config } = await getSheetsConfig(tenantId);
-  await ensureHeaders(tenantId, config.spreadsheet_id, config.sheet_name);
+  fields['name'] = lead.name || '';
+  fields['whatsapp_name'] = lead.name || '';
+  fields['phone'] = lead.phone || '';
+  fields['email'] = lead.email || '';
+  fields['source'] = resolveSourceLabel(lead);
+  fields['status'] = lead.lead_status || 'new';
+  fields['notes'] = lead.notes || '';
+  fields['tags'] = lead.tags ? lead.tags.join(', ') : '';
 
-  const range   = `${config.sheet_name}!A:I`;
-  const values  = [[
-    fmtDate(lead.created_at),
-    lead.name  ?? '',
-    lead.phone ?? '',
-    lead.email ?? '',
-    SOURCE_LABELS[lead.source ?? ''] ?? lead.source ?? '',
-    lead.campaign ?? '',
-    lead.lead_status ?? '',
-    lead.lead_score ?? '',
-    lead.assigned_to ?? '',
-  ]];
+  fields['assigned_to_name'] = lead.assigned_user?.full_name || lead.assigned_user?.email || lead.staff_assigned || '';
+  fields['owner'] = fields['assigned_to_name'];
+  fields['assigned_at'] = lead.assigned_at ? new Date(lead.assigned_at).toISOString().slice(0, 19).replace('T', ' ') : '';
 
-  const res = await fetchWithRetry(
-    tenantId,
-    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheet_id}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
-    {
-      method:  'POST',
-      body:    JSON.stringify({ values }),
-    }
-  );
+  fields['created_at'] = lead.created_at ? lead.created_at.slice(0, 10) : '';
+  fields['first_contact_time'] = lead.first_message_at ? new Date(lead.first_message_at).toISOString().slice(0, 19).replace('T', ' ') : '';
+  fields['last_contact_time'] = lead.last_message_at ? new Date(lead.last_message_at).toISOString().slice(0, 19).replace('T', ' ') : '';
 
-  if (!res.ok) throw new Error(`Sheets append failed: ${await res.text()}`);
+  const leadUpdate = lead.updated_at ? new Date(lead.updated_at).getTime() : 0;
+  const leadMsg = lead.last_message_at ? new Date(lead.last_message_at).getTime() : 0;
+  const leadActivityAt = lead.last_activity_at ? new Date(lead.last_activity_at).getTime() : 0;
+  const maxTime = Math.max(leadUpdate, leadMsg, leadActivityAt);
+  fields['last_activity'] = maxTime > 0 ? new Date(maxTime).toISOString().slice(0, 19).replace('T', ' ') : '';
+
+  return fields;
 }
 
 // ── Bulk sync: write ALL tenant leads to the sheet ─────────
+// Respects the tenant's configured column mapping (and strict_schema) so a
+// manual "Sync Now" never clobbers a hand-built sheet layout with the wrong
+// schema — it writes into whichever headers already exist on the sheet.
 export async function syncAllLeads(tenantId: string): Promise<{ synced: number }> {
   const { config } = await getSheetsConfig(tenantId);
+  const sheetName = config.sheet_name || 'Leads';
+  const customMappings = (config as any).column_mappings || {};
+  const mappings = (config as any).strict_schema
+    ? customMappings
+    : { ...DEFAULT_COLUMN_MAPPINGS, ...customMappings };
 
   const { data: leads, error } = await supabaseAdmin
     .from('leads')
-    .select('name, phone, email, source, lead_status, lead_score, created_at, campaign:campaign_id(name), assigned_user:assigned_to(full_name, email)')
+    .select('*, assigned_user:assigned_to(full_name, email)')
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: true });
 
   if (error) throw new Error(`Leads query failed: ${error.message}`);
   if (!leads || leads.length === 0) return { synced: 0 };
 
-  // Clear existing data and rewrite (clean sync)
-  const clearRange = `${config.sheet_name}!A:I`;
+  await ensureSheetExists(tenantId, config.spreadsheet_id, sheetName);
+
+  // Prefer the sheet's own existing header row (respects a hand-built
+  // layout); only fall back to the configured mapping if the sheet is empty.
+  const headerRange = `${sheetName}!A1:ZZ1`;
+  const headerRes = await fetchWithRetry(
+    tenantId,
+    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheet_id}/values/${encodeURIComponent(headerRange)}`
+  );
+  let sheetHeaders: string[] = [];
+  if (headerRes.ok) {
+    const hData = await headerRes.json() as { values?: string[][] };
+    sheetHeaders = hData.values?.[0] || [];
+  }
+  if (sheetHeaders.length === 0) {
+    sheetHeaders = Object.keys(mappings);
+  }
+
+  const rows = leads.map(l => {
+    const resolved = resolveBulkLeadFields(l as Record<string, any>);
+    return sheetHeaders.map(header => {
+      const key = mappings[header];
+      return key && resolved[key] !== undefined ? resolved[key] : '';
+    });
+  });
+
+  const lastCol = getColumnLetter(sheetHeaders.length - 1);
+
+  // Clear existing data rows only — the header row (row 1) is left intact.
+  const clearRange = `${sheetName}!A2:${lastCol}`;
   await fetchWithRetry(
     tenantId,
     `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheet_id}/values/${encodeURIComponent(clearRange)}:clear`,
     { method: 'POST' }
   );
 
-  const rows = [
-    HEADERS,
-    ...leads.map(l => {
-      const a = l as Record<string, any>;
-      return [
-        fmtDate(a.created_at),
-        a.name  ?? '',
-        a.phone ?? '',
-        a.email ?? '',
-        SOURCE_LABELS[a.source ?? ''] ?? a.source ?? '',
-        a.campaign?.name ?? '',
-        a.lead_status ?? '',
-        a.lead_score ?? '',
-        a.assigned_user?.full_name ?? a.assigned_user?.email ?? '',
-      ];
-    }),
-  ];
-
-  const range = `${config.sheet_name}!A1`;
+  const writeRange = `${sheetName}!A1`;
   const res = await fetchWithRetry(
     tenantId,
-    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheet_id}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheet_id}/values/${encodeURIComponent(writeRange)}?valueInputOption=USER_ENTERED`,
     {
       method:  'PUT',
-      body:    JSON.stringify({ values: rows }),
+      body:    JSON.stringify({ values: [sheetHeaders, ...rows] }),
     }
   );
 
@@ -723,8 +722,12 @@ export async function syncCustomerToSheet(tenantId: string, phone: string): Prom
   const sheetName = config.sheet_name || 'Leads';
   const customMappings = (config as any).column_mappings || {};
 
-  // Combine custom mappings with defaults (custom mappings take priority)
-  const mappings = { ...DEFAULT_COLUMN_MAPPINGS, ...customMappings };
+  // Tenants with a hand-built sheet layout (strict_schema) use ONLY their
+  // explicit mappings — otherwise every DEFAULT_COLUMN_MAPPINGS header not
+  // already on the sheet gets auto-appended as a stray extra column.
+  const mappings = (config as any).strict_schema
+    ? customMappings
+    : { ...DEFAULT_COLUMN_MAPPINGS, ...customMappings };
 
   // 3. Resolve all CRM fields
   const resolvedFields: Record<string, any> = {};
@@ -752,6 +755,7 @@ export async function syncCustomerToSheet(tenantId: string, phone: string): Prom
   // Dynamic Last Activity Calculation (maximum of lead, messages, bookings, shopify events)
   const leadUpdate = lead.updated_at ? new Date(lead.updated_at).getTime() : 0;
   const leadMsg = lead.last_message_at ? new Date(lead.last_message_at).getTime() : 0;
+  const leadActivityAt = lead.last_activity_at ? new Date(lead.last_activity_at).getTime() : 0;
   let maxBookingTime = 0;
   if (bookings && bookings.length > 0) {
     maxBookingTime = Math.max(...bookings.map((b: any) => b.updated_at ? new Date(b.updated_at).getTime() : 0));
@@ -760,7 +764,7 @@ export async function syncCustomerToSheet(tenantId: string, phone: string): Prom
   if (shopifyEvents && shopifyEvents.length > 0) {
     maxShopifyTime = Math.max(...shopifyEvents.map((e: any) => e.created_at ? new Date(e.created_at).getTime() : 0));
   }
-  const maxTime = Math.max(leadUpdate, leadMsg, maxBookingTime, maxShopifyTime);
+  const maxTime = Math.max(leadUpdate, leadMsg, leadActivityAt, maxBookingTime, maxShopifyTime);
   resolvedFields['last_activity'] = maxTime > 0 ? new Date(maxTime).toISOString().slice(0, 19).replace('T', ' ') : '';
 
   resolvedFields['status'] = lead.lead_status || 'new';
@@ -769,7 +773,7 @@ export async function syncCustomerToSheet(tenantId: string, phone: string): Prom
   resolvedFields['tags'] = lead.tags ? lead.tags.join(', ') : '';
 
   // Lead Source
-  resolvedFields['source'] = lead.channel || '';
+  resolvedFields['source'] = resolveSourceLabel(lead);
   resolvedFields['campaign_name'] = lead.fb_campaign_name || broadcastDelivery?.campaign?.name || '';
   resolvedFields['campaign_id'] = lead.campaign_id || lead.meta_campaign_id || broadcastDelivery?.campaign_id || '';
   resolvedFields['ad_set'] = lead.fb_adset_name || '';
