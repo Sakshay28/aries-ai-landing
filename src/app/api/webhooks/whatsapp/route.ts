@@ -504,6 +504,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     lead = existingLead;
     const updateData: Record<string, any> = { last_message_at: new Date().toISOString() };
     if (isFromAd && !existingLead.source_detail) updateData.source_detail = leadSource;
+    // Backfill the WhatsApp display name the first time we see it — never
+    // overwrite a name that's already set (staff sometimes repurpose this
+    // field for call-back notes, e.g. "call him at 5pm").
+    if (!existingLead.name && msg.contactName) updateData.name = msg.contactName;
     // Awaited — fire-and-forget dies on serverless freeze, leaving CRM timestamps stale
     await supabaseAdmin.from('leads').update(updateData).eq('id', existingLead.id);
     // Cancel any pending follow-ups — they will be re-scheduled below (either in
@@ -608,6 +612,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           source_detail: leadSource,
           first_message_at: new Date().toISOString(),
           last_message_at: new Date().toISOString(),
+          ...(msg.contactName && { name: msg.contactName }),
           ...(assignedTo && { assigned_to: assignedTo }),
           ...(campaignId && { campaign_id: campaignId }),
           ...(isFromAd && msg.referral && {
@@ -710,9 +715,11 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   if (activeExistingConv) {
     conversation = activeExistingConv;
+    const convUpdate: Record<string, any> = { last_message_at: new Date().toISOString(), is_active: true };
+    if (!activeExistingConv.sender_name && msg.contactName) convUpdate.sender_name = msg.contactName;
     await supabaseAdmin
       .from('conversations')
-      .update({ last_message_at: new Date().toISOString(), is_active: true })
+      .update(convUpdate)
       .eq('id', activeExistingConv.id);
   } else {
     // No existing conversation found for this contact — create one.
@@ -725,7 +732,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         lead_id: lead?.id || null,
         channel: 'whatsapp',
         sender_id: cleanPhone,
-        sender_name: null,
+        sender_name: msg.contactName || null,
         current_step: 'greeting',
         is_active: true,
         bot_paused: false,
@@ -1574,6 +1581,8 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     // Repeat-visitor recognition
     visitCount:    (lead?.visit_count as number) ?? 0,
     lastVisitDate: (lead?.last_visit_date as string) ?? null,
+    // So the AI only asks for the customer's name once, ever
+    knownCustomerName: (lead?.name as string) || msg.contactName || null,
     ...(matchedAgent ? {
       botName: matchedAgent.bot_name || baseConfig.botName,
       botPersonality: matchedAgent.bot_personality || baseConfig.botPersonality,
@@ -1935,6 +1944,14 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   const prevContext = context as Record<string, any>;
   const extracted = (aiResponse.extractedData as Record<string, any>) ?? {};
+
+  // The AI may have asked for and captured the customer's name this turn
+  // (see CUSTOMER NAME instruction in the system prompt) — persist it to the
+  // lead once, same as the WhatsApp-profile-name backfill earlier in this file.
+  if (extracted.name && extracted.name !== 'null' && lead && !lead.name) {
+    supabaseAdmin.from('leads').update({ name: extracted.name }).eq('id', lead.id)
+      .then(() => {}, () => {});
+  }
 
   // Build top-level context delta: only newly extracted non-null values.
   // Existing fields not in the delta are preserved by PostgreSQL's || operator.

@@ -655,6 +655,10 @@ export interface ParsedMetaMessage {
   errorReason?: string;
   contextMessageId?: string;
   rawWebhook?: Record<string, unknown>;
+  // The customer's WhatsApp display name, from the sibling `contacts[]` array
+  // Meta sends alongside `messages[]` on every inbound message. Only present
+  // when the sender actually messages us — WhatsApp has no lookup-by-number API.
+  contactName?: string;
   referral?: {        // Ad click tracking
     source_type?: string;
     source_id?: string;
@@ -698,6 +702,10 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
       const messageId = msg.id || '';
       const timestamp = parseInt(msg.timestamp) * 1000 || Date.now();
       const msgType = msg.type || 'text';
+      const contactName: string | undefined =
+        value.contacts?.find((c: any) => c.wa_id === fromPhone)?.profile?.name ||
+        value.contacts?.[0]?.profile?.name ||
+        undefined;
 
       let text = '';
       let mediaId: string | undefined;
@@ -809,6 +817,7 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
         buttonId,
         contextMessageId: msg.context?.id || undefined,
         rawWebhook: msg as Record<string, unknown>,
+        contactName,
       };
     }
   } catch (err) {

@@ -292,6 +292,9 @@ CUSTOM FAQ (use these to answer common questions):
 ${tenantConfig.customFaqs.map((faq: { question: string; answer: string }) => `Q: ${faq.question}\nA: ${faq.answer}`).join('\n\n')}` : ''}
 
 CONVERSATION STATE: ${conversationState}
+${tenantConfig.knownCustomerName
+  ? `CUSTOMER NAME: You already know this customer's name — it's "${tenantConfig.knownCustomerName}". Use it naturally when addressing them (not in every message). Do NOT ask for their name again.`
+  : `CUSTOMER NAME: You do not know this customer's name yet. Once you understand what they need (don't lead with this), ask for their name naturally as part of the conversation — e.g. "By the way, might I know your name?" Ask only once; if they don't answer, move on and don't repeat the question.`}
 ${tenantConfig.businessHours ? `
 BUSINESS STATUS: Currently ${tenantConfig.businessIsOpen ? '🟢 OPEN' : '🔴 CLOSED'} | Time: ${tenantConfig.businessCurrentTime} (IST) | Hours: ${tenantConfig.businessHours}${!tenantConfig.businessIsOpen ? '\nIMPORTANT: The business is CLOSED right now. You may answer questions and collect booking details, but do NOT confirm any reservation — tell customers their request is noted and will be confirmed when the business opens.' : ''}
 ` : ''}
@@ -478,6 +481,9 @@ export interface TenantAIConfig {
   // Repeat-visitor recognition
   visitCount?: number;
   lastVisitDate?: string | null;
+  // The customer's name if already known (from WhatsApp profile or a prior
+  // extraction) — lets the AI skip asking for it again.
+  knownCustomerName?: string | null;
   // Click-to-WhatsApp campaign context — injected when lead came from a Meta ad
   ctwaContext?: string;
   // Business hours status — injected from working_hours so AI knows not to confirm bookings when closed
