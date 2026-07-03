@@ -120,12 +120,16 @@ async function runStaffKeepalive(): Promise<{ pinged: number; skipped: number; f
 
       const outcome = await pingStaffPhone(tenant, token, phone, session.windowOpen);
 
+      // Write heartbeat regardless of outcome so that both successful pings
+      // AND failures share the same 10h cooldown window. Without this, a
+      // failed ping has no cooldown and triggers an admin email every cron run.
+      await supabaseAdmin
+        .from('system_heartbeats')
+        .upsert({ key: heartbeatKey, last_run_at: new Date().toISOString() }, { onConflict: 'key' })
+        .then(null, (e) => console.error('[staff-keepalive] heartbeat upsert failed:', e.message));
+
       if (outcome === 'ok') {
         pinged++;
-        await supabaseAdmin
-          .from('system_heartbeats')
-          .upsert({ key: heartbeatKey, last_run_at: new Date().toISOString() }, { onConflict: 'key' })
-          .then(null, (e) => console.error('[staff-keepalive] heartbeat upsert failed:', e.message));
       } else {
         failed++;
         await handleKeepaliveFailure(tenant, phone);

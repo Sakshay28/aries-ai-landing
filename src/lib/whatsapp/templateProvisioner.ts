@@ -188,18 +188,21 @@ export async function ensureRequiredTemplates(tenantId: string): Promise<void> {
         console.log(`[template-provisioner] Successfully registered template "${config.name}" on Meta (status=${result.status})`);
       } catch (createErr) {
         console.error(`[template-provisioner] Failed to register template "${config.name}" on Meta:`, (createErr as Error).message);
-        
-        // Remove the local placeholder so subsequent retries can run
+
+        // Mark as FAILED (do NOT delete — a deleted placeholder causes an infinite retry loop
+        // because the next cron run finds no row and tries again immediately). Leaving it as
+        // FAILED means the next run's insert hits the unique constraint (23505) and silently
+        // skips, which is the right behaviour until a human resets it.
         await supabaseAdmin
           .from('draft_templates')
-          .delete()
+          .update({ status: 'FAILED', updated_at: new Date().toISOString() })
           .eq('id', placeholderId);
 
-        // Alert administrators immediately
+        // Alert administrators — only once (the FAILED row above prevents future retries).
         notifyAdmin({
           dedupeKey: `template_provisioning_failed:${tenantId}:${config.name}`,
           subject: `WABA Template Provisioning Failed — ${config.name}`,
-          summary: `Failed to register template "${config.name}" on Meta for tenant "${tenant.business_name}": ${(createErr as Error).message}. Will retry on next keepalive cron execution.`,
+          summary: `Failed to register template "${config.name}" on Meta for tenant "${tenant.business_name}": ${(createErr as Error).message}. Retries are suppressed until the FAILED row in draft_templates is deleted.`,
           context: { tenantId, templateName: config.name, error: (createErr as Error).message },
         }).catch(() => {});
       }
