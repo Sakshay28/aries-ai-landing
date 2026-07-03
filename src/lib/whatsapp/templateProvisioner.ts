@@ -71,16 +71,19 @@ export async function ensureRequiredTemplates(tenantId: string): Promise<void> {
     if (!token) return;
 
     for (const config of REQUIRED_TEMPLATES) {
-      // 1. Check if we already have an approved, bound template locally
-      const { data: existingBound } = await supabaseAdmin
+      // 1. Skip if we already have a terminal row for this event type — either
+      //    APPROVED (done) or FAILED (WABA is restricted; retrying every cron
+      //    run would cause infinite email spam). A human must delete the FAILED
+      //    row (e.g. after Meta business verification) to re-enable provisioning.
+      const { data: existingRow } = await supabaseAdmin
         .from('draft_templates')
         .select('id, status')
         .eq('tenant_id', tenantId)
         .eq('event_type', config.eventType)
-        .eq('status', 'APPROVED')
+        .in('status', ['APPROVED', 'FAILED'])
         .maybeSingle();
 
-      if (existingBound) continue;
+      if (existingRow) continue;
 
       // 2. Atomically insert a placeholder row to act as a lock key.
       const placeholderId = crypto.randomUUID();
