@@ -30,7 +30,6 @@ import { notifyAdmin } from '@/lib/alerts/admin';
 import { notifyTenant } from '@/lib/alerts/tenantAlert';
 import { getSessionState, shouldPingForKeepalive } from '@/lib/whatsapp/session';
 import { resolveEventTemplate, mapVariablesToPositional } from '@/lib/whatsapp/templateManager';
-import { ensureRequiredTemplates } from '@/lib/whatsapp/templateProvisioner';
 import { normalizePhoneNumber } from '@/lib/whatsapp/phone';
 
 const WINDOW_OPEN_HOURS  = 22;    // nudge customer at 22h — window still open
@@ -86,9 +85,6 @@ async function runStaffKeepalive(): Promise<{ pinged: number; skipped: number; f
     if (!tenant.wa_access_token || !tenant.wa_phone_number_id) { skipped++; continue; }
     const token = decryptToken(tenant.wa_access_token);
     if (!token) { skipped++; continue; }
-
-    // Idempotent check-and-create required alert templates
-    await ensureRequiredTemplates(tenant.id);
 
     const phones = [...new Set(
       [tenant.staff_phone, tenant.manager_phone]

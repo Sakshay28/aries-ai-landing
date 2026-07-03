@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { UserPlus, Building2, Search, Save, CheckCircle2, AlertCircle, LogIn } from 'lucide-react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { UserPlus, Building2, Search, Save, CheckCircle2, AlertCircle, LogIn, RefreshCw, Clock, XCircle, ShieldAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 type TenantRow = {
@@ -17,9 +17,16 @@ type TenantRow = {
 
 type TenantForm = Record<string, string | boolean | null>;
 
+type TemplateStatus = {
+  status: string;
+  meta_template_id: string | null;
+  updated_at: string;
+};
+
+type TemplateMap = Record<string, TemplateStatus>;
+
 const MASK = '••••••••';
 
-// Field groups rendered in the form. `secret` masks the value + shows a hint.
 const SECTIONS: { title: string; fields: { key: string; label: string; secret?: boolean; textarea?: boolean; toggle?: boolean; placeholder?: string }[] }[] = [
   {
     title: 'WhatsApp credentials',
@@ -64,6 +71,47 @@ const SECTIONS: { title: string; fields: { key: string; label: string; secret?: 
 const SECRET_KEYS = ['wa_access_token', 'wa_app_secret'];
 const ALL_KEYS = SECTIONS.flatMap(s => s.fields.map(f => f.key));
 
+const TEMPLATE_LABELS: Record<string, string> = {
+  staff_keepalive: 'Staff keepalive',
+  human_assistance: 'Human handoff alert',
+};
+
+function TemplateStatusBadge({ status }: { status: string }) {
+  if (status === 'APPROVED') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400 px-2 py-0.5 rounded-full">
+        <CheckCircle2 className="w-3 h-3" /> Approved
+      </span>
+    );
+  }
+  if (status === 'PENDING' || status === 'IN_APPEAL') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400 px-2 py-0.5 rounded-full">
+        <Clock className="w-3 h-3" /> {status === 'IN_APPEAL' ? 'In appeal' : 'Pending Meta'}
+      </span>
+    );
+  }
+  if (status === 'FAILED') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 dark:bg-red-950/40 dark:text-red-400 px-2 py-0.5 rounded-full">
+        <ShieldAlert className="w-3 h-3" /> WABA restricted
+      </span>
+    );
+  }
+  if (status === 'REJECTED') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 dark:bg-red-950/40 dark:text-red-400 px-2 py-0.5 rounded-full">
+        <XCircle className="w-3 h-3" /> Rejected
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+      <AlertCircle className="w-3 h-3" /> Not registered
+    </span>
+  );
+}
+
 export function OnboardClient() {
   const [tenants, setTenants] = useState<TenantRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,6 +123,8 @@ export function OnboardClient() {
   const [saving, setSaving] = useState(false);
   const [impersonating, setImpersonating] = useState(false);
   const [parentTenantId, setParentTenantId] = useState<string>('');
+  const [templates, setTemplates] = useState<TemplateMap>({});
+  const [provisioningTemplates, setProvisioningTemplates] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -91,8 +141,6 @@ export function OnboardClient() {
     })();
   }, []);
 
-  // Apply the in-progress parent selection so the sidebar updates immediately
-  // as soon as the user picks a parent — before they hit Save.
   const effectiveTenants = useMemo(() => {
     if (!selectedId) return tenants;
     return tenants.map(t =>
@@ -111,9 +159,6 @@ export function OnboardClient() {
     );
   }, [effectiveTenants, query]);
 
-  // Build ordered list: parents first, children immediately after their parent.
-  // Tenants with a parent_tenant_id are ONLY shown as sub-entries below their
-  // parent — they never appear as standalone entries in the main list.
   const orderedTenants = useMemo(() => {
     const parents = filtered.filter(t => !t.parent_tenant_id);
     const childrenByParent: Record<string, TenantRow[]> = {};
@@ -130,7 +175,6 @@ export function OnboardClient() {
         result.push({ tenant: c, isChild: true });
       }
     }
-    // Orphaned children (parent was filtered out by search) shown at end
     for (const t of filtered) {
       if (t.parent_tenant_id && !filtered.find(p => p.id === t.parent_tenant_id)) {
         result.push({ tenant: t, isChild: true });
@@ -139,10 +183,21 @@ export function OnboardClient() {
     return result;
   }, [filtered]);
 
+  const fetchTemplateStatuses = useCallback(async (tenantId: string) => {
+    try {
+      const res = await fetch(`/api/admin/provision-templates?tenant_id=${encodeURIComponent(tenantId)}`);
+      const data = await res.json();
+      if (data.success) setTemplates(data.templates ?? {});
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
   const selectTenant = async (id: string) => {
     setSelectedId(id);
     setLoadingTenant(true);
     setForm({});
+    setTemplates({});
     try {
       const res = await fetch(`/api/admin/provision?tenant_id=${encodeURIComponent(id)}`);
       const data = await res.json();
@@ -160,13 +215,41 @@ export function OnboardClient() {
     } finally {
       setLoadingTenant(false);
     }
+    // Fetch template statuses in parallel
+    fetchTemplateStatuses(id);
+  };
+
+  const provisionTemplates = async (forceRetry = false) => {
+    if (!selectedId) return;
+    setProvisioningTemplates(true);
+    try {
+      const res = await fetch('/api/admin/provision-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: selectedId, force_retry: forceRetry }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTemplates(data.templates ?? {});
+        const allApproved = Object.values(data.templates ?? {}).every((t: unknown) => (t as TemplateStatus).status === 'APPROVED');
+        const anyFailed = Object.values(data.templates ?? {}).some((t: unknown) => (t as TemplateStatus).status === 'FAILED');
+        if (allApproved) toast.success('All templates approved — keepalive is fully active');
+        else if (anyFailed) toast.error('WABA restricted — client must verify Meta Business Account');
+        else toast.success('Templates submitted to Meta — approval usually takes a few minutes');
+      } else {
+        toast.error(data.error || 'Template provisioning failed');
+      }
+    } catch {
+      toast.error('Template provisioning failed');
+    } finally {
+      setProvisioningTemplates(false);
+    }
   };
 
   const save = async () => {
     if (!selectedId) return;
     setSaving(true);
     try {
-      // Don't send secrets that are still masked (unchanged).
       const payload: Record<string, unknown> = { tenant_id: selectedId };
       for (const k of ALL_KEYS) {
         if (SECRET_KEYS.includes(k) && form[k] === MASK) continue;
@@ -188,6 +271,8 @@ export function OnboardClient() {
               : t
           )
         );
+        // Auto-provision templates immediately after saving credentials
+        await provisionTemplates();
       } else {
         toast.error(data.error || 'Save failed');
       }
@@ -223,6 +308,10 @@ export function OnboardClient() {
       setImpersonating(false);
     }
   };
+
+  const allTemplatesApproved = Object.keys(TEMPLATE_LABELS).length > 0 &&
+    Object.keys(TEMPLATE_LABELS).every(k => templates[k]?.status === 'APPROVED');
+  const anyTemplateRestricted = Object.values(templates).some(t => t.status === 'FAILED');
 
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-hidden">
@@ -315,6 +404,62 @@ export function OnboardClient() {
                   </button>
                 </div>
               )}
+
+              {/* ── WhatsApp Alert Templates ── */}
+              <section className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
+                <div className="px-5 py-3 border-b border-border bg-secondary/30 flex items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-sm font-semibold">WhatsApp Alert Templates</h2>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Required for staff to receive booking, handoff, and payment alerts when their 24h window is closed.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => provisionTemplates(anyTemplateRestricted)}
+                    disabled={provisioningTemplates || allTemplatesApproved}
+                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${provisioningTemplates ? 'animate-spin' : ''}`} />
+                    {provisioningTemplates ? 'Provisioning…' : anyTemplateRestricted ? 'Retry (after Meta verification)' : allTemplatesApproved ? 'All active' : 'Provision templates'}
+                  </button>
+                </div>
+                <div className="p-5 space-y-3">
+                  {Object.entries(TEMPLATE_LABELS).map(([eventType, label]) => {
+                    const t = templates[eventType];
+                    return (
+                      <div key={eventType} className="flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-sm font-medium">{label}</div>
+                          <div className="text-[11px] text-muted-foreground font-mono">{eventType}</div>
+                        </div>
+                        <TemplateStatusBadge status={t?.status ?? 'NOT_REGISTERED'} />
+                      </div>
+                    );
+                  })}
+
+                  {anyTemplateRestricted && (
+                    <div className="mt-3 p-3 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-400">
+                      <strong>WABA restricted from creating templates.</strong> The client&apos;s Meta Business Account needs to be verified.
+                      Guide them to <span className="font-mono">business.facebook.com → Settings → Business Info → Start Verification</span>.
+                      Once verified, click &ldquo;Retry&rdquo; above — templates register instantly on a verified WABA.
+                    </div>
+                  )}
+
+                  {!anyTemplateRestricted && !allTemplatesApproved && Object.keys(templates).length > 0 && (
+                    <div className="mt-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-400">
+                      Templates submitted to Meta. Approval for UTILITY templates typically takes a few minutes.
+                      Refresh to check status.
+                    </div>
+                  )}
+
+                  {allTemplatesApproved && (
+                    <div className="mt-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-700 dark:text-emerald-400">
+                      All templates approved. Staff will automatically receive WhatsApp alerts — no manual action needed from their side.
+                    </div>
+                  )}
+                </div>
+              </section>
+
               {SECTIONS.map(section => (
                 <section key={section.title} className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
                   <div className="px-5 py-3 border-b border-border bg-secondary/30">
@@ -381,10 +526,11 @@ export function OnboardClient() {
               <div className="flex justify-end pb-4">
                 <button
                   onClick={save}
-                  disabled={saving}
+                  disabled={saving || provisioningTemplates}
                   className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
                 >
-                  <Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save & provision'}
+                  <Save className="w-4 h-4" />
+                  {saving ? 'Saving…' : provisioningTemplates ? 'Provisioning templates…' : 'Save & provision'}
                 </button>
               </div>
             </div>
