@@ -29,6 +29,7 @@ import { isWindowClosedError } from '@/lib/automations/logic';
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { notifyTenant } from '@/lib/alerts/tenantAlert';
 import { getSessionState, shouldPingForKeepalive } from '@/lib/whatsapp/session';
+import { sendPlatformKeepalive, isPlatformConfigured } from '@/lib/whatsapp/platformSend';
 import { resolveEventTemplate, mapVariablesToPositional } from '@/lib/whatsapp/templateManager';
 import { normalizePhoneNumber } from '@/lib/whatsapp/phone';
 
@@ -126,6 +127,18 @@ async function runStaffKeepalive(): Promise<{ pinged: number; skipped: number; f
 
       if (outcome === 'ok') {
         pinged++;
+      } else if (isPlatformConfigured()) {
+        // Client WABA can't reach this phone (window closed, no approved template).
+        // Fall back to Aries AI's platform number — templates registered once on
+        // the platform WABA, works for every client with no per-client Meta setup.
+        const platformOutcome = await sendPlatformKeepalive(phone, tenant.business_name || 'your business', session.windowOpen);
+        if (platformOutcome === 'ok') {
+          console.log(`[staff-keepalive] ✅ platform fallback pinged +${phone} (${tenant.business_name})`);
+          pinged++;
+        } else {
+          failed++;
+          await handleKeepaliveFailure(tenant, phone);
+        }
       } else {
         failed++;
         await handleKeepaliveFailure(tenant, phone);

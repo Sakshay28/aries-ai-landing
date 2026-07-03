@@ -17,6 +17,7 @@ import { resolveEventTemplate, mapVariablesToPositional, type SystemEventType } 
 import { ensureRequiredTemplates } from '@/lib/whatsapp/templateProvisioner';
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { notifyTenant } from '@/lib/alerts/tenantAlert';
+import { sendPlatformAlert, isPlatformConfigured } from '@/lib/whatsapp/platformSend';
 import { normalizePhoneNumber } from '@/lib/whatsapp/phone';
 import type { Tenant } from '@/lib/types';
 import crypto from 'crypto';
@@ -394,7 +395,24 @@ async function attemptDelivery(
     }
 
     if (!template) {
-      results.push({ phone: recipient.phone, role: recipient.role, status: 'failed', error: 'Window closed, no template bound', no_fallback_template: true });
+      // No client template available — try sending from the Aries AI platform number.
+      // Platform templates are registered once on our own verified WABA and work for
+      // every client regardless of their WABA's Meta verification status.
+      if (isPlatformConfigured()) {
+        try {
+          const platformResult = await sendPlatformAlert(
+            recipient.phone,
+            tenant?.business_name || 'your business',
+            body,
+          );
+          results.push({ phone: recipient.phone, role: recipient.role, status: 'sent_template', wa_message_id: platformResult.messageId });
+          console.log(`[TRACE:${traceId}] ✅ Platform fallback delivered to ${recipient.role} +${recipient.phone}`);
+        } catch (platformErr) {
+          results.push({ phone: recipient.phone, role: recipient.role, status: 'failed', error: `platform: ${(platformErr as Error).message}`, no_fallback_template: true });
+        }
+      } else {
+        results.push({ phone: recipient.phone, role: recipient.role, status: 'failed', error: 'Window closed, no template bound', no_fallback_template: true });
+      }
       continue;
     }
 
@@ -404,7 +422,18 @@ async function attemptDelivery(
       results.push({ phone: recipient.phone, role: recipient.role, status: 'sent_template', wa_message_id: sendResult.messageId });
       if (conversationId) await logOutboundMessage(tenantId, conversationId, `[Template: ${template.name}]`, 'template', sendResult.messageId, template.name);
     } catch (tplErr) {
-      results.push({ phone: recipient.phone, role: recipient.role, status: 'failed', error: (tplErr as Error).message });
+      // Client template send failed — try platform as last resort
+      if (isPlatformConfigured()) {
+        try {
+          const platformResult = await sendPlatformAlert(recipient.phone, tenant?.business_name || 'your business', body);
+          results.push({ phone: recipient.phone, role: recipient.role, status: 'sent_template', wa_message_id: platformResult.messageId });
+          console.log(`[TRACE:${traceId}] ✅ Platform fallback (after template err) delivered to ${recipient.role} +${recipient.phone}`);
+        } catch {
+          results.push({ phone: recipient.phone, role: recipient.role, status: 'failed', error: (tplErr as Error).message });
+        }
+      } else {
+        results.push({ phone: recipient.phone, role: recipient.role, status: 'failed', error: (tplErr as Error).message });
+      }
     }
   }
 
