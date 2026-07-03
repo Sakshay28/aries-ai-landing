@@ -156,15 +156,17 @@ export async function sendBusinessEvent(params: BusinessEventParams): Promise<Bu
     await finalizeAttempt(notificationId, result, 1);
   }
 
-  // 4. Alert/Escalation triggers on direct failures
-  if (result.waStatus === 'failed' || result.waStatus === 'no_template') {
-    // If WhatsApp failed, trigger immediate Resend fallback email
-    await triggerEmailFallback(tenant, eventType, title, body, traceId);
+  // 4. Always send email — email is co-primary, not a fallback.
+  // New/restricted WABAs can't use templates; staff windows close after 24h.
+  // Email guarantees delivery for every client regardless of WABA state.
+  // WhatsApp is the preferred UX channel when it works; email is the guarantee.
+  await notifyStaffByEmail(tenant, eventType, title, body, traceId);
 
+  if (result.waStatus === 'failed' || result.waStatus === 'no_template') {
     notifyAdmin({
       dedupeKey: `business_event_delivery_failed:${tenantId}:${eventType}`,
-      subject: `Business alert delivery failed — ${eventType}`,
-      summary: `A ${eventType} alert for tenant ${tenantId} failed WhatsApp delivery (${result.waStatus}). Fallback channels triggered.`,
+      subject: `Business alert WhatsApp failed — ${eventType}`,
+      summary: `A ${eventType} alert for tenant ${tenantId} failed WhatsApp delivery (${result.waStatus}). Staff notified via email.`,
       context: { tenantId, eventType, notificationId, traceId },
     }).catch(() => {});
   }
@@ -237,12 +239,7 @@ export async function processNotificationRetries(): Promise<{ claimed: number; r
       const newAttemptCount = row.attempt_count + 1;
       await finalizeAttempt(row.id, result, newAttemptCount);
 
-      // Email fallback if WhatsApp fails repeatedly
-      if (result.waStatus === 'failed' || result.waStatus === 'no_template') {
-        if (newAttemptCount >= 3) {
-          await triggerEmailFallback(tenant, row.event_type, `Retry alert — ${row.event_type}`, row.body ?? '', row.trace_id);
-        }
-      }
+      // Email was already sent on the first attempt (co-primary). No retry needed.
 
       // Final failure notification
       if ((result.waStatus === 'failed' || result.waStatus === 'no_template') && newAttemptCount >= MAX_RETRY_ATTEMPTS) {
@@ -413,7 +410,7 @@ async function attemptDelivery(
   return { waStatus: summarizeStatus(results), recipients: results };
 }
 
-async function triggerEmailFallback(
+async function notifyStaffByEmail(
   tenant: Tenant | null,
   eventType: string,
   title: string,
