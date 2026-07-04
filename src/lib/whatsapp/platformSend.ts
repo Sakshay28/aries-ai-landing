@@ -19,12 +19,12 @@
 // 1. aries_booking_alert
 //    Header (TEXT): New Booking 🎉
 //    Body:
-//      Restaurant: *{{1}}*
+//      *{{1}}*
 //
-//      👤 Guest: {{2}}
+//      👤 Customer: {{2}}
 //      📅 Date: {{3}}
 //      ⏰ Time: {{4}}
-//      👥 Guests: {{5}}
+//      👥 Count: {{5}}
 //      📝 Notes: {{6}}
 //
 //      Open your dashboard to confirm or manage this booking.
@@ -32,7 +32,7 @@
 // 2. aries_assistance_alert
 //    Header (TEXT): ⚡ Assistance Needed
 //    Body:
-//      Restaurant: *{{1}}*
+//      *{{1}}*
 //
 //      👤 Customer: {{2}}
 //      📌 Reason: {{3}}
@@ -43,7 +43,7 @@
 // 3. aries_payment_alert
 //    Header (TEXT): Payment Received 💰
 //    Body:
-//      Restaurant: *{{1}}*
+//      *{{1}}*
 //
 //      👤 Customer: {{2}}
 //      💰 Amount: ₹{{3}}
@@ -54,12 +54,12 @@
 // 4. aries_cancellation_alert
 //    Header (TEXT): Booking Cancelled
 //    Body:
-//      Restaurant: *{{1}}*
+//      *{{1}}*
 //
-//      👤 Guest: {{2}}
+//      👤 Customer: {{2}}
 //      📅 Date: {{3}}
 //      ⏰ Time: {{4}}
-//      👥 Guests: {{5}}
+//      👥 Count: {{5}}
 //
 //      This booking has been cancelled.
 //
@@ -67,7 +67,7 @@
 //    Body:
 //      📋 Aries AI check-in for *{{1}}*.
 //
-//      Tap below to confirm you're receiving booking and handoff alerts.
+//      Tap below to confirm you're receiving alerts.
 //    Button: QUICK_REPLY → "✅ Got it"
 // ═══════════════════════════════════════════════════════════
 
