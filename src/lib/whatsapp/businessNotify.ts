@@ -14,7 +14,6 @@ import { sendTextMessage, sendTemplateMessage } from '@/lib/meta/service';
 import { isWindowClosedError } from '@/lib/automations/logic';
 import { getSessionState } from '@/lib/whatsapp/session';
 import { resolveEventTemplate, mapVariablesToPositional, type SystemEventType } from '@/lib/whatsapp/templateManager';
-import { ensureRequiredTemplates } from '@/lib/whatsapp/templateProvisioner';
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { notifyTenant } from '@/lib/alerts/tenantAlert';
 import { sendPlatformEventAlert, isPlatformConfigured } from '@/lib/whatsapp/platformSend';

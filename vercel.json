@@ -59,6 +59,14 @@
     {
       "path": "/api/cron/google-sheets-sync",
       "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/cron/session-keepalive",
+      "schedule": "0 */4 * * *"
+    },
+    {
+      "path": "/api/cron/notification-retry",
+      "schedule": "0 */2 * * *"
     }
   ]
 }
