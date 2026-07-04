@@ -185,8 +185,11 @@ export default function ChatSidebar() {
   }, [tenantId, load]);
 
   // ─── Polling fallback — guarantees sidebar updates even without Realtime ───
+  // 20s: this query fetches up to 2000 conversations + 5000 messages per call, so its
+  // poll frequency is the single biggest lever on Supabase egress/Disk-IO (was 5s — see
+  // 2026-07-02 usage investigation). Realtime (above) already covers the common case.
   useEffect(() => {
-    const interval = setInterval(() => { load(); }, 5_000);
+    const interval = setInterval(() => { load(); }, 20_000);
     return () => clearInterval(interval);
   }, [load]);
 

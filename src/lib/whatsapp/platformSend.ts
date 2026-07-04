@@ -16,23 +16,27 @@
 // WhatsApp → Message Templates → Create Template
 // All are UTILITY category, English, no header unless noted.
 //
+// NOTE: Meta does not allow a variable at the very start or end of a body.
+// All bodies below begin with static text before the first {{variable}}.
+//
 // 1. aries_booking_alert
 //    Header (TEXT): New Booking 🎉
 //    Body:
-//      *{{1}}*
+//      New booking for *{{1}}*
 //
 //      👤 Customer: {{2}}
-//      📅 Date: {{3}}
-//      ⏰ Time: {{4}}
-//      👥 Count: {{5}}
-//      📝 Notes: {{6}}
+//      📞 Phone: {{3}}
+//      📅 Date: {{4}}
+//      ⏰ Time: {{5}}
+//      👥 Count: {{6}}
+//      📝 Notes: {{7}}
 //
-//      Open your dashboard to confirm or manage this booking.
+//      Call them directly for any changes.
 //
 // 2. aries_assistance_alert
 //    Header (TEXT): ⚡ Assistance Needed
 //    Body:
-//      *{{1}}*
+//      Alert from *{{1}}*
 //
 //      👤 Customer: {{2}}
 //      📌 Reason: {{3}}
@@ -43,7 +47,7 @@
 // 3. aries_payment_alert
 //    Header (TEXT): Payment Received 💰
 //    Body:
-//      *{{1}}*
+//      Payment received for *{{1}}*
 //
 //      👤 Customer: {{2}}
 //      💰 Amount: ₹{{3}}
@@ -54,7 +58,7 @@
 // 4. aries_cancellation_alert
 //    Header (TEXT): Booking Cancelled
 //    Body:
-//      *{{1}}*
+//      Cancellation for *{{1}}*
 //
 //      👤 Customer: {{2}}
 //      📅 Date: {{3}}
@@ -76,7 +80,7 @@ import { decryptToken } from '@/lib/utils/crypto';
 import { sendTemplateMessage, sendInteractiveButtonsMessage } from '@/lib/meta/service';
 import type { SystemEventType } from '@/lib/whatsapp/templateManager';
 
-const PLATFORM_KEEPALIVE_TEMPLATE = 'aries_staff_keepalive';
+const PLATFORM_KEEPALIVE_TEMPLATE = 'staff_keepalive';
 
 // Maps each system event to its platform template name + variable builder
 const EVENT_TEMPLATES: Record<string, {
@@ -88,10 +92,11 @@ const EVENT_TEMPLATES: Record<string, {
     buildVars: (biz, v) => [
       biz,
       v.customer_name || v.guest_name || 'Guest',
-      v.booking_date  || v.date        || '—',
-      v.booking_time  || v.time        || '—',
-      v.guests_count  || v.guests      || '—',
-      v.notes         || v.message     || '—',
+      v.customer_phone || v.phone     || '—',
+      v.booking_date  || v.date       || '—',
+      v.booking_time  || v.time       || '—',
+      v.guests_count  || v.guests     || '—',
+      v.notes         || v.message    || '—',
     ],
   },
   reservation_update: {
@@ -99,10 +104,11 @@ const EVENT_TEMPLATES: Record<string, {
     buildVars: (biz, v) => [
       biz,
       v.customer_name || v.guest_name || 'Guest',
-      v.booking_date  || v.date        || '—',
-      v.booking_time  || v.time        || '—',
-      v.guests_count  || v.guests      || '—',
-      v.notes         || v.message     || '—',
+      v.customer_phone || v.phone     || '—',
+      v.booking_date  || v.date       || '—',
+      v.booking_time  || v.time       || '—',
+      v.guests_count  || v.guests     || '—',
+      v.notes         || v.message    || '—',
     ],
   },
   human_assistance: {
@@ -157,10 +163,11 @@ const GENERIC_TEMPLATE = {
   name: 'aries_booking_alert',
   buildVars: (biz: string, v: Record<string, string>) => [
     biz,
-    v.customer_name || 'Customer',
-    v.booking_date  || '—',
-    v.booking_time  || '—',
-    v.guests_count  || '—',
+    v.customer_name  || 'Customer',
+    v.customer_phone || v.phone || '—',
+    v.booking_date   || '—',
+    v.booking_time   || '—',
+    v.guests_count   || '—',
     v.notes || v.message || '—',
   ],
 };

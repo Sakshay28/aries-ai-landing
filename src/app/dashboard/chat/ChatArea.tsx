@@ -549,7 +549,10 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
-  // Status polling: every 3s, always run — picks up delivered/read from Meta webhook DB updates
+  // Status polling: every 10s, always run — picks up delivered/read from Meta webhook DB updates.
+  // Realtime UPDATE events (Effect 2 above) already cover this in the common case; this is
+  // just a safety net, so it doesn't need sub-10s cadence (was 3s — a major Supabase
+  // egress/Disk-IO contributor at scale, see 2026-07-02 usage investigation).
   useEffect(() => {
     if (!conversationId) return;
     const poll = async () => {
@@ -566,9 +569,9 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         }));
       } catch { /* ignore */ }
     };
-    // Poll immediately on mount, then every 3s
+    // Poll immediately on mount, then every 10s
     poll();
-    const interval = setInterval(poll, 3_000);
+    const interval = setInterval(poll, 10_000);
     return () => clearInterval(interval);
   }, [conversationId]);
 
@@ -582,8 +585,8 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     }
   }, [messages]);
 
-  // ── Effect 3: Fast polling — guaranteed real-time message delivery ─────────
-  // Polls every 2s for messages newer than the last known one.
+  // ── Effect 3: Fallback polling — guaranteed message delivery ─────────
+  // Polls every 6s for messages newer than the last known one (was 2s — see note above).
   // Works even if Supabase Realtime is not configured/enabled.
   // Pauses when tab is hidden (saves bandwidth). Deduplicates in-flight requests.
   useEffect(() => {
@@ -638,7 +641,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
     const onVisible = () => { if (!document.hidden) poll(); };
     document.addEventListener('visibilitychange', onVisible);
 
-    const interval = setInterval(poll, 2_000);
+    const interval = setInterval(poll, 6_000);
     return () => {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisible);
