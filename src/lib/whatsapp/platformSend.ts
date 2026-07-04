@@ -172,33 +172,41 @@ const GENERIC_TEMPLATE = {
   ],
 };
 
+// Always returns true — the platform sender discovers its creds from the DB
+// (Aries AI tenant row). No env var required for the gate check.
 export function isPlatformConfigured(): boolean {
-  return Boolean(process.env.PLATFORM_WA_PHONE_NUMBER_ID);
+  return true;
 }
 
 // Cached per cold-start — avoids a DB hit on every send
 let _cachedCreds: { token: string; phoneId: string } | null = null;
 
 async function getPlatformCreds(): Promise<{ token: string; phoneId: string } | null> {
-  const phoneNumberId = process.env.PLATFORM_WA_PHONE_NUMBER_ID;
-  if (!phoneNumberId) return null;
   if (_cachedCreds) return _cachedCreds;
 
-  const { data, error } = await supabaseAdmin
-    .from('tenants')
-    .select('wa_access_token')
-    .eq('wa_phone_number_id', phoneNumberId)
-    .maybeSingle();
+  // Primary: look up by the env var phone number ID (fastest, explicit)
+  // Fallback: look up by business_name so this works even without the env var
+  const phoneNumberId = process.env.PLATFORM_WA_PHONE_NUMBER_ID;
 
-  if (error || !data?.wa_access_token) {
-    console.error('[platform-send] Could not load platform credentials:', error?.message ?? 'no row found');
+  const query = supabaseAdmin
+    .from('tenants')
+    .select('wa_access_token, wa_phone_number_id');
+
+  const { data, error } = await (
+    phoneNumberId
+      ? query.eq('wa_phone_number_id', phoneNumberId).maybeSingle()
+      : query.eq('business_name', 'Aries AI').maybeSingle()
+  );
+
+  if (error || !data?.wa_access_token || !data?.wa_phone_number_id) {
+    console.error('[platform-send] Could not load platform credentials:', error?.message ?? 'no Aries AI tenant found');
     return null;
   }
 
   const token = decryptToken(data.wa_access_token);
   if (!token) { console.error('[platform-send] Token decryption failed'); return null; }
 
-  _cachedCreds = { token, phoneId: phoneNumberId };
+  _cachedCreds = { token, phoneId: data.wa_phone_number_id };
   return _cachedCreds;
 }
 
