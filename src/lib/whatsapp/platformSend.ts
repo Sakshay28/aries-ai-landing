@@ -210,10 +210,30 @@ async function getPlatformCreds(): Promise<{ token: string; phoneId: string } | 
   return _cachedCreds;
 }
 
+// Universal approved fallback. aries_assistance_alert is a 4-var
+// (business, customer, reason, last_message) UTILITY template that suits any
+// event, so if a more specific template is unavailable/unapproved we still
+// deliver rather than dropping the alert.
+const UNIVERSAL_FALLBACK = {
+  name: 'aries_assistance_alert',
+  buildVars: (biz: string, eventType: string, v: Record<string, string>) => [
+    biz,
+    v.customer_name || v.guest_name || 'Customer',
+    v.reason || eventType.replace(/_/g, ' '),
+    v.last_message || v.message || v.notes || [
+      v.amount ? `Amount: ₹${v.amount}` : null,
+      v.booking_date ? `Date: ${v.booking_date}` : null,
+      v.booking_time ? `Time: ${v.booking_time}` : null,
+    ].filter(Boolean).join(', ') || '—',
+  ],
+};
+
 /**
  * Sends the right structured template for each event type from the Aries AI
  * platform number. Picks booking / assistance / payment / cancellation template
- * automatically. Falls back to the generic alert template if no specific match.
+ * automatically. If that specific template send fails (e.g. it is still pending
+ * Meta approval), it retries once with the universally-approved assistance
+ * template so the alert is never silently dropped.
  */
 export async function sendPlatformEventAlert(
   toPhone: string,
@@ -227,7 +247,16 @@ export async function sendPlatformEventAlert(
   const tpl = EVENT_TEMPLATES[eventType] ?? GENERIC_TEMPLATE;
   const positional = tpl.buildVars(businessName, variables);
 
-  return sendTemplateMessage(creds.token, creds.phoneId, toPhone, tpl.name, positional, 'en');
+  try {
+    return await sendTemplateMessage(creds.token, creds.phoneId, toPhone, tpl.name, positional, 'en');
+  } catch (primaryErr) {
+    // Don't double-send if the primary WAS already the fallback template.
+    if (tpl.name === UNIVERSAL_FALLBACK.name) throw primaryErr;
+
+    console.warn(`[platform-send] "${tpl.name}" failed (${(primaryErr as Error).message}) — retrying with ${UNIVERSAL_FALLBACK.name}`);
+    const fallbackVars = UNIVERSAL_FALLBACK.buildVars(businessName, String(eventType), variables);
+    return sendTemplateMessage(creds.token, creds.phoneId, toPhone, UNIVERSAL_FALLBACK.name, fallbackVars, 'en');
+  }
 }
 
 /**
