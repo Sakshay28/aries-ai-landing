@@ -62,11 +62,11 @@
     },
     {
       "path": "/api/cron/session-keepalive",
-      "schedule": "0 */4 * * *"
+      "schedule": "0 12 * * *"
     },
     {
       "path": "/api/cron/notification-retry",
-      "schedule": "0 */2 * * *"
+      "schedule": "0 13 * * *"
     }
   ]
 }
