@@ -237,6 +237,31 @@ async function processWebhookAsync(parsed: NonNullable<ReturnType<typeof parseMe
   await handleIncomingMessage(parsed);
 }
 
+// The Aries AI platform number sends staff alerts for EVERY client and receives
+// their replies. Identify it so cross-tenant staff replies aren't treated as
+// customer conversations.
+function isPlatformTenant(tenant: { wa_phone_number_id?: string | null; business_name?: string | null }): boolean {
+  const platformId = process.env.PLATFORM_WA_PHONE_NUMBER_ID;
+  return (!!platformId && tenant.wa_phone_number_id === platformId)
+    || tenant.business_name === 'Aries AI';
+}
+
+// True if `phone` is the staff_phone/manager_phone of ANY tenant. Cached 60s so
+// the platform webhook doesn't re-query on every inbound message.
+let _knownStaffCache: { set: Set<string>; at: number } | null = null;
+async function isKnownStaffNumber(phone: string): Promise<boolean> {
+  if (!_knownStaffCache || Date.now() - _knownStaffCache.at > 60_000) {
+    const { data } = await supabaseAdmin.from('tenants').select('staff_phone, manager_phone');
+    const set = new Set<string>();
+    for (const t of data ?? []) {
+      if (t.staff_phone) set.add(normalizePhoneNumber(t.staff_phone));
+      if (t.manager_phone) set.add(normalizePhoneNumber(t.manager_phone));
+    }
+    _knownStaffCache = { set, at: Date.now() };
+  }
+  return _knownStaffCache.set.has(phone);
+}
+
 // ── Inbound Message Processing ──
 async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMetaWebhook>>) {
   if (!msg.messageId || !msg.fromPhone || !msg.appPhoneId) {
@@ -352,7 +377,16 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const cleanPhone = normalizePhoneNumber(msg.fromPhone);
   const staffPhone = normalizePhoneNumber(tenant.staff_phone);
   const managerPhone = normalizePhoneNumber(tenant.manager_phone);
-  const isStaffMessage = cleanPhone && (cleanPhone === staffPhone || cleanPhone === managerPhone);
+  let isStaffMessage = !!cleanPhone && (cleanPhone === staffPhone || cleanPhone === managerPhone);
+
+  // Platform number: the Aries AI number blasts alerts to EVERY client's staff and
+  // receives their replies. Those senders are staff of OTHER tenants, so they don't
+  // match THIS tenant's own staff/manager numbers — without this, the customer AI
+  // engages them ("how can I help you plan your event?"). Treat any known
+  // staff/manager (across all tenants) reaching the platform number as staff.
+  if (!isStaffMessage && cleanPhone && isPlatformTenant(tenant)) {
+    isStaffMessage = await isKnownStaffNumber(cleanPhone);
+  }
 
   // Early Intercept for Staff Alert Acknowledgements & Keepalives
   if (isStaffMessage) {

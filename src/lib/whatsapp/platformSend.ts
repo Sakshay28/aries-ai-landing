@@ -219,17 +219,20 @@ async function logPlatformSend(
   staffPhone: string,
   waMessageId: string | undefined,
   label: string,
+  displayText: string,
 ): Promise<void> {
   try {
-    // One conversation per staff phone under the platform tenant.
-    const { data: existing } = await supabaseAdmin
+    // One conversation per staff phone under the platform tenant. Use limit(1)
+    // (not maybeSingle) — legacy duplicate rows for a phone must not error out.
+    const { data: existingRows } = await supabaseAdmin
       .from('conversations')
       .select('id')
       .eq('tenant_id', tenantId)
       .eq('sender_id', staffPhone)
-      .maybeSingle();
+      .order('created_at', { ascending: true })
+      .limit(1);
 
-    let conversationId = existing?.id ?? null;
+    let conversationId = existingRows?.[0]?.id ?? null;
     if (!conversationId) {
       const { data: created } = await supabaseAdmin
         .from('conversations')
@@ -239,12 +242,20 @@ async function logPlatformSend(
           sender_name: 'Staff Alert',
           channel: 'whatsapp',
           is_active: true,
+          // Never let the platform-tenant AI engage staff who reply to an alert.
+          bot_paused: true,
           created_at: new Date().toISOString(),
           last_message_at: new Date().toISOString(),
         })
         .select('id')
         .single();
       conversationId = created?.id ?? null;
+    } else {
+      // Ensure the bot stays paused on this conversation even if it pre-existed.
+      await supabaseAdmin
+        .from('conversations')
+        .update({ bot_paused: true, last_message_at: new Date().toISOString() })
+        .eq('id', conversationId);
     }
     if (!conversationId) return;
 
@@ -252,7 +263,7 @@ async function logPlatformSend(
       tenant_id: tenantId,
       conversation_id: conversationId,
       direction: 'outbound',
-      content: `[Platform alert: ${label}]`,
+      content: displayText,
       message_type: 'template',
       channel: 'whatsapp',
       status: waMessageId ? 'sent' : 'failed',
@@ -261,6 +272,26 @@ async function logPlatformSend(
     });
   } catch (err) {
     console.error('[platform-send] logPlatformSend failed:', (err as Error).message);
+  }
+}
+
+// Renders the actual WhatsApp body text for a template + its positional vars,
+// so the dashboard shows what staff really received instead of a placeholder
+// like "[Platform alert: aries_booking_alert]".
+function renderTemplateText(templateName: string, vars: string[]): string {
+  switch (templateName) {
+    case 'aries_booking_alert':
+      return `New booking for *${vars[0]}*\n\n👤 Customer: ${vars[1]}\n📞 Phone: ${vars[2]}\n📅 Date: ${vars[3]}\n⏰ Time: ${vars[4]}\n👥 Count: ${vars[5]}\n📝 Notes: ${vars[6]}\n\nCall them directly for any changes.`;
+    case 'aries_assistance_alert':
+      return `Alert from *${vars[0]}*\n\n👤 Customer: ${vars[1]}\n📌 Reason: ${vars[2]}\n💬 Last message: ${vars[3]}\n\nThe AI has paused. Please take over in your dashboard.`;
+    case 'aries_payment_alert':
+      return `Payment received for *${vars[0]}*\n\n👤 Customer: ${vars[1]}\n💰 Amount: ₹${vars[2]}\n📋 Reference: ${vars[3]}\n\nPayment recorded successfully.`;
+    case 'aries_cancellation_alert':
+      return `Cancellation for *${vars[0]}*\n\n👤 Customer: ${vars[1]}\n📅 Date: ${vars[2]}\n⏰ Time: ${vars[3]}\n👥 Count: ${vars[4]}\n\nThis booking has been cancelled.`;
+    case 'staff_keepalive':
+      return `📋 Aries AI check-in for *${vars[0]}*.\n\nTap below to confirm you're receiving alerts.`;
+    default:
+      return `[Template: ${templateName}] ${vars.join(', ')}`;
   }
 }
 
@@ -303,7 +334,7 @@ export async function sendPlatformEventAlert(
 
   try {
     const res = await sendTemplateMessage(creds.token, creds.phoneId, toPhone, tpl.name, positional, 'en');
-    await logPlatformSend(creds.tenantId, toPhone, res.messageId, tpl.name);
+    await logPlatformSend(creds.tenantId, toPhone, res.messageId, tpl.name, renderTemplateText(tpl.name, positional));
     return res;
   } catch (primaryErr) {
     // Don't double-send if the primary WAS already the fallback template.
@@ -312,7 +343,7 @@ export async function sendPlatformEventAlert(
     console.warn(`[platform-send] "${tpl.name}" failed (${(primaryErr as Error).message}) — retrying with ${UNIVERSAL_FALLBACK.name}`);
     const fallbackVars = UNIVERSAL_FALLBACK.buildVars(businessName, String(eventType), variables);
     const res = await sendTemplateMessage(creds.token, creds.phoneId, toPhone, UNIVERSAL_FALLBACK.name, fallbackVars, 'en');
-    await logPlatformSend(creds.tenantId, toPhone, res.messageId, UNIVERSAL_FALLBACK.name);
+    await logPlatformSend(creds.tenantId, toPhone, res.messageId, UNIVERSAL_FALLBACK.name, renderTemplateText(UNIVERSAL_FALLBACK.name, fallbackVars));
     return res;
   }
 }
@@ -331,10 +362,12 @@ export async function sendPlatformKeepalive(
 
   try {
     let messageId: string | undefined;
+    let displayText: string;
     if (platformWindowOpen) {
+      displayText = `📋 Aries AI check-in for *${businessName}*.\n\nTap below to confirm you're receiving booking and handoff alerts on this number.`;
       const res = await sendInteractiveButtonsMessage(
         creds.token, creds.phoneId, toPhone,
-        `📋 Aries AI check-in for *${businessName}*.\n\nTap below to confirm you're receiving booking and handoff alerts on this number.`,
+        displayText,
         [{ id: 'platform_keepalive_ack', title: '✅ Got it' }],
       );
       messageId = res?.messageId;
@@ -346,8 +379,9 @@ export async function sendPlatformKeepalive(
         'en',
       );
       messageId = res?.messageId;
+      displayText = renderTemplateText(PLATFORM_KEEPALIVE_TEMPLATE, [businessName]);
     }
-    await logPlatformSend(creds.tenantId, toPhone, messageId, PLATFORM_KEEPALIVE_TEMPLATE);
+    await logPlatformSend(creds.tenantId, toPhone, messageId, PLATFORM_KEEPALIVE_TEMPLATE, displayText);
     return 'ok';
   } catch (err) {
     console.error(`[platform-send] keepalive failed for +${toPhone} (${businessName}):`, (err as Error).message);
