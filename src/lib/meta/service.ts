@@ -683,6 +683,10 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
     // Case 1: Status updates
     if (value.statuses && value.statuses.length > 0) {
       const statusObj = value.statuses[0];
+      // Meta attaches an `errors` array on a failed status with the real reason
+      // (e.g. 131047 re-engagement / 131026 undeliverable). Capture it so a
+      // failed staff-alert delivery shows WHY, not a blank "failed".
+      const statusErr = Array.isArray(statusObj.errors) ? statusObj.errors[0] : undefined;
       return {
         messageId: statusObj.id || '',
         fromPhone: statusObj.recipient_id || '',
@@ -692,6 +696,8 @@ export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage |
         timestamp: parseInt(statusObj.timestamp) * 1000 || Date.now(),
         isStatusUpdate: true,
         status: statusObj.status || '',
+        errorCode: typeof statusErr?.code === 'number' ? statusErr.code : undefined,
+        errorReason: statusErr?.title || statusErr?.error_data?.details || statusErr?.message || undefined,
       };
     }
 

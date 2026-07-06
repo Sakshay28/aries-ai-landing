@@ -2837,12 +2837,16 @@ async function handleStatusUpdate(msg: NonNullable<ReturnType<typeof parseMetaWe
     if (tenantIdForStatus) updateQuery = updateQuery.eq('tenant_id', tenantIdForStatus);
     const { data: updated, error } = await updateQuery.select('id');
 
+    const failReason = mappedStatus === 'failed'
+      ? ` reason="${msg.errorCode ?? ''} ${msg.errorReason ?? ''}".trim()`
+      : '';
+
     if (error) {
       console.error(`❌ Meta status update DB error: ${error.message}`);
     } else if (!updated || updated.length === 0) {
-      console.warn(`⚠️ Meta status update: No message matched wa_message_id="${msg.messageId}" in DB.`);
+      console.warn(`⚠️ Meta status update: No message matched wa_message_id="${msg.messageId}" (status=${mappedStatus}${failReason})`);
     } else {
-      console.log(`📬 Meta status update success: ${msg.messageId} → ${mappedStatus} (updated message ${updated[0].id})`);
+      console.log(`📬 Meta status update success: ${msg.messageId} → ${mappedStatus}${failReason} (updated message ${updated[0].id})`);
     }
   }
 

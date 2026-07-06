@@ -179,9 +179,9 @@ export function isPlatformConfigured(): boolean {
 }
 
 // Cached per cold-start — avoids a DB hit on every send
-let _cachedCreds: { token: string; phoneId: string } | null = null;
+let _cachedCreds: { token: string; phoneId: string; tenantId: string } | null = null;
 
-async function getPlatformCreds(): Promise<{ token: string; phoneId: string } | null> {
+async function getPlatformCreds(): Promise<{ token: string; phoneId: string; tenantId: string } | null> {
   if (_cachedCreds) return _cachedCreds;
 
   // Primary: look up by the env var phone number ID (fastest, explicit)
@@ -190,7 +190,7 @@ async function getPlatformCreds(): Promise<{ token: string; phoneId: string } | 
 
   const query = supabaseAdmin
     .from('tenants')
-    .select('wa_access_token, wa_phone_number_id');
+    .select('id, wa_access_token, wa_phone_number_id');
 
   const { data, error } = await (
     phoneNumberId
@@ -206,8 +206,62 @@ async function getPlatformCreds(): Promise<{ token: string; phoneId: string } | 
   const token = decryptToken(data.wa_access_token);
   if (!token) { console.error('[platform-send] Token decryption failed'); return null; }
 
-  _cachedCreds = { token, phoneId: data.wa_phone_number_id };
+  _cachedCreds = { token, phoneId: data.wa_phone_number_id, tenantId: data.id };
   return _cachedCreds;
+}
+
+// Logs a platform send to the messages table under the Aries AI tenant so the
+// existing webhook status pipeline marks it sent→delivered→read→failed and it
+// shows in the dashboard. This is what makes staff-alert delivery *visible and
+// verifiable* per phone instead of a blind "accepted by Meta".
+async function logPlatformSend(
+  tenantId: string,
+  staffPhone: string,
+  waMessageId: string | undefined,
+  label: string,
+): Promise<void> {
+  try {
+    // One conversation per staff phone under the platform tenant.
+    const { data: existing } = await supabaseAdmin
+      .from('conversations')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('sender_id', staffPhone)
+      .maybeSingle();
+
+    let conversationId = existing?.id ?? null;
+    if (!conversationId) {
+      const { data: created } = await supabaseAdmin
+        .from('conversations')
+        .insert({
+          tenant_id: tenantId,
+          sender_id: staffPhone,
+          sender_name: 'Staff Alert',
+          channel: 'whatsapp',
+          is_active: true,
+          created_at: new Date().toISOString(),
+          last_message_at: new Date().toISOString(),
+        })
+        .select('id')
+        .single();
+      conversationId = created?.id ?? null;
+    }
+    if (!conversationId) return;
+
+    await supabaseAdmin.from('messages').insert({
+      tenant_id: tenantId,
+      conversation_id: conversationId,
+      direction: 'outbound',
+      content: `[Platform alert: ${label}]`,
+      message_type: 'template',
+      channel: 'whatsapp',
+      status: waMessageId ? 'sent' : 'failed',
+      wa_message_id: waMessageId ?? null,
+      metadata: { interactive_type: 'template', template_name: label, platform_alert: true },
+    });
+  } catch (err) {
+    console.error('[platform-send] logPlatformSend failed:', (err as Error).message);
+  }
 }
 
 // Universal approved fallback. aries_assistance_alert is a 4-var
@@ -248,14 +302,18 @@ export async function sendPlatformEventAlert(
   const positional = tpl.buildVars(businessName, variables);
 
   try {
-    return await sendTemplateMessage(creds.token, creds.phoneId, toPhone, tpl.name, positional, 'en');
+    const res = await sendTemplateMessage(creds.token, creds.phoneId, toPhone, tpl.name, positional, 'en');
+    await logPlatformSend(creds.tenantId, toPhone, res.messageId, tpl.name);
+    return res;
   } catch (primaryErr) {
     // Don't double-send if the primary WAS already the fallback template.
     if (tpl.name === UNIVERSAL_FALLBACK.name) throw primaryErr;
 
     console.warn(`[platform-send] "${tpl.name}" failed (${(primaryErr as Error).message}) — retrying with ${UNIVERSAL_FALLBACK.name}`);
     const fallbackVars = UNIVERSAL_FALLBACK.buildVars(businessName, String(eventType), variables);
-    return sendTemplateMessage(creds.token, creds.phoneId, toPhone, UNIVERSAL_FALLBACK.name, fallbackVars, 'en');
+    const res = await sendTemplateMessage(creds.token, creds.phoneId, toPhone, UNIVERSAL_FALLBACK.name, fallbackVars, 'en');
+    await logPlatformSend(creds.tenantId, toPhone, res.messageId, UNIVERSAL_FALLBACK.name);
+    return res;
   }
 }
 
@@ -272,20 +330,24 @@ export async function sendPlatformKeepalive(
   if (!creds) return 'failed';
 
   try {
+    let messageId: string | undefined;
     if (platformWindowOpen) {
-      await sendInteractiveButtonsMessage(
+      const res = await sendInteractiveButtonsMessage(
         creds.token, creds.phoneId, toPhone,
         `📋 Aries AI check-in for *${businessName}*.\n\nTap below to confirm you're receiving booking and handoff alerts on this number.`,
         [{ id: 'platform_keepalive_ack', title: '✅ Got it' }],
       );
+      messageId = res?.messageId;
     } else {
-      await sendTemplateMessage(
+      const res = await sendTemplateMessage(
         creds.token, creds.phoneId, toPhone,
         PLATFORM_KEEPALIVE_TEMPLATE,
         [businessName],
         'en',
       );
+      messageId = res?.messageId;
     }
+    await logPlatformSend(creds.tenantId, toPhone, messageId, PLATFORM_KEEPALIVE_TEMPLATE);
     return 'ok';
   } catch (err) {
     console.error(`[platform-send] keepalive failed for +${toPhone} (${businessName}):`, (err as Error).message);
