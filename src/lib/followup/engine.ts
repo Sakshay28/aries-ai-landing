@@ -16,6 +16,7 @@ const isMetaConfigured = (t: Tenant) => !!t.wa_access_token && !!t.wa_phone_numb
 import { generateFollowUpMessage } from '@/lib/ai/engine';
 import type { Tenant } from '@/lib/types';
 import { decryptToken } from '@/lib/utils/crypto';
+import { firstName } from '@/lib/utils/name';
 import * as Sentry from '@/lib/sentry-stub';
 
 // ── Fallback scheduler — NOTE: setInterval is DEAD on Vercel serverless.
@@ -160,7 +161,7 @@ async function processFollowUpJob(data: FollowUpJobData): Promise<void> {
   if (!message) {
     const tenantConfig = getTenantConfig(tenant);
     message = await generateFollowUpMessage(
-      { name: leadName },
+      { name: firstName(leadName) ?? undefined },
       followUpType,
       tenantConfig
     );
@@ -330,7 +331,7 @@ export async function processPendingFollowUps(): Promise<number> {
       if (!message) {
         const tenantConfig = getTenantConfig(tenant);
         message = await generateFollowUpMessage(
-          { name: lead.name },
+          { name: firstName(lead.name) ?? undefined },
           followUp.follow_up_type,
           tenantConfig
         );
@@ -550,6 +551,7 @@ async function sendFollowUpWithTemplate(
   name: string,
   fallbackBody?: string | null,
 ): Promise<{ messageId: string | null; body: string }> {
+  const safeName = firstName(name) || 'there';
   let messageId: string | null = null;
   try {
     const result = await sendTemplateMessage(
@@ -557,7 +559,7 @@ async function sendFollowUpWithTemplate(
       tenant.wa_phone_number_id as string,
       phone,
       'follow_up_reminder',
-      [name || 'there'],
+      [safeName],
       'en'
     );
     messageId = result?.messageId || null;
@@ -566,6 +568,6 @@ async function sendFollowUpWithTemplate(
   }
   const body = fallbackBody && fallbackBody.trim()
     ? fallbackBody.trim()
-    : `Hi ${name || 'there'}, just following up from ${tenant.business_name || 'us'} — let us know if you'd like to continue. 🙏`;
+    : `Hi ${safeName}, just following up from ${tenant.business_name || 'us'} — let us know if you'd like to continue. 🙏`;
   return { messageId, body };
 }

@@ -3,6 +3,7 @@ import { sendTextMessage, sendMediaMessage, sendTemplateMessage } from '@/lib/me
 import { getTenantById } from '@/lib/tenant/manager';
 import { decryptToken } from '@/lib/utils/crypto';
 import { toSignedMediaUrl } from '@/lib/utils/storage';
+import { sanitizeName, firstName as toFirstName } from '@/lib/utils/name';
 import { KNOWN_VARIABLE_NAMES } from '@/lib/automations/variables';
 import { evaluateConditions, pickVariant, isWindowClosedError, type ConditionGroup } from '@/lib/automations/logic';
 import { getRedisClient } from '@/lib/redis/client';
@@ -515,7 +516,7 @@ async function sendAutomationMessage(
   const phoneNumberId = tenant.wa_phone_number_id as string;
 
   const allVars: Record<string, string> = {
-    customer_name: lead.name || 'there',
+    customer_name: sanitizeName(lead.name) || 'there',
     business_name: tenant.business_name || '',
     ...variables,
   };
@@ -648,7 +649,7 @@ async function tryWindowFallback(
     return { sent: false, messageId: null };
   }
   try {
-    const firstName = allVars.first_name || (lead.name || '').split(' ')[0] || allVars.customer_name || 'there';
+    const firstName = allVars.first_name || toFirstName(lead.name) || allVars.customer_name || 'there';
     const result = await sendTemplateMessage(token, phoneNumberId, lead.phone, automation.fallback_template_name, [firstName], 'en');
     console.log(`[AUTOMATION_WINDOW_FALLBACK_OK] lead=${lead.phone} template=${automation.fallback_template_name} msgId=${result.messageId}`);
     return { sent: true, messageId: result.messageId ?? null };

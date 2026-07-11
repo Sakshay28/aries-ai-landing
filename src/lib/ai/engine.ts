@@ -12,6 +12,7 @@
 import type { ConversationContext } from '@/lib/types';
 import * as Sentry from '@/lib/sentry-stub';
 import { withTimeout } from '@/lib/utils/safety';
+import { firstName } from '@/lib/utils/name';
 import { recordAITokenUsage, recordDailyTokenUsage } from '@/lib/billing/costProtection';
 import { guardInput, guardOutput, shouldRedirectToHuman, HALLUCINATION_REDIRECT, SYSTEM_PROMPT_SAFETY_APPENDIX } from '@/lib/ai/guardrails';
 import { getAI } from '@/lib/ai/client';
@@ -305,8 +306,8 @@ ${isHospitality ? `YOUR JOB:
 
 BOOKING FLOW RULES:
 - When customer says "same number" or "this number" for phone — use their WhatsApp number, confirm it directly
-- Once you have guests + date + time + name + phone, IMMEDIATELY confirm the booking — UNLESS any exception applies: (a) booking is for a party, private event, birthday, anniversary, corporate gathering, or group celebration; (b) guest count is 8 or more; (c) custom guidelines indicate manager confirmation is required. For exceptions: collect all details, say "Thank you [Name]! 🙏 Since this is a [party/large group], our manager will confirm your booking shortly. I've noted [date] at [time] for [N] guests 📝" and set shouldEscalate=true.
-- Confirmation message format for STANDARD bookings (1-7 guests, casual dining, no special event): "✅ Confirmed! [Name], your table for [N] is booked for [date] at [time]. We can't wait to see you! 🎉"
+- Once you have guests + date + time + name + phone, IMMEDIATELY confirm the booking — UNLESS any exception applies: (a) booking is for a party, private event, birthday, anniversary, corporate gathering, or group celebration; (b) guest count is 8 or more; (c) custom guidelines indicate manager confirmation is required. For exceptions: collect all details, say "Thank you! 🙏 Since this is a [party/large group], our manager will confirm your booking shortly. I've noted [date] at [time] for [N] guests 📝" and set shouldEscalate=true. (You MAY start with their first name — e.g. "Thank you Rahul!" — ONLY if they told you their name in this chat; otherwise omit the name entirely.)
+- Confirmation message format for STANDARD bookings (1-7 guests, casual dining, no special event): "✅ Confirmed! Your table for [N] is booked for [date] at [time]. We can't wait to see you! 🎉" (You MAY prefix it with their first name — "✅ Confirmed! Rahul, your table…" — ONLY if they gave you their name in this chat; never guess a name.)
 - Do NOT say "our team will contact you" for standard bookings — the booking is instantly confirmed.
 - For party/event/8+ exceptions: always set shouldEscalate=true so the manager is notified.
 - Do NOT ask the customer to wait after a standard booking is confirmed
@@ -351,6 +352,7 @@ MEDIA SENDING RULES:
 
 RULES:
 - NEVER make up information you don't have
+- CUSTOMER NAME (important): Only address the customer by a name that THEY have explicitly told you in THIS conversation. NEVER guess, assume, or invent a name, and NEVER use a name from their WhatsApp profile. If they have not given you their name, do NOT use any name — just be warm and speak to them directly. A wrong name is worse than no name.
 - NEVER start with a greeting if this is not the first message in the conversation — no "Hello", "Hi", "Hey", "Welcome" or any greeting opener. Jump straight to helping.
 ${isHospitality ? `- NEVER say "our team will contact you" or "someone will reach out" for standard bookings (1-7 guests, no party/event) — the booking is confirmed instantly. For party/private event/8+ guest bookings, always escalate (shouldEscalate=true) so the manager is notified.
 ` : ''}- HUMAN HANDOFF: Only set shouldEscalate=true when: (a) the customer is angry/frustrated, OR (b) they EXPLICITLY ask to talk to a human/agent/real person/the team, OR (c) they ask to book/schedule a demo or call with the team, OR (d) it is a party/private event/8+ guest booking (hospitality only). In those cases, say you're connecting them and set shouldEscalate=true${tenantConfig.escalationReply ? ` using this exact message: "${tenantConfig.escalationReply}"` : ''}. Do NOT escalate just because you can't answer a question — say you'll check with the team instead, and keep shouldEscalate=false.
@@ -1105,7 +1107,8 @@ export async function generateFollowUpMessage(
   tenantConfig: TenantAIConfig
 ): Promise<string> {
   try {
-    const prompt = `Write a short, friendly WhatsApp follow-up message (under 200 chars) for a customer named "${context.name || 'there'}" who was interested in ${context.enquiry_type || 'visiting'} at ${tenantConfig.businessName}.
+    const cleanName = firstName(context.name);
+    const prompt = `Write a short, friendly WhatsApp follow-up message (under 200 chars) ${cleanName ? `for a customer named "${cleanName}"` : `for a customer (do NOT use or invent a name — greet them without one)`} who was interested in ${context.enquiry_type || 'visiting'} at ${tenantConfig.businessName}.
 
 Follow-up type: ${followUpType}
 - If "30min": Reassure them their booking is being confirmed
@@ -1132,7 +1135,8 @@ function getDefaultFollowUp(
   type: string,
   config: TenantAIConfig
 ): string {
-  const name = (context.name || 'there').split(' ')[0];
+  // Only address by a real, self-provided name; otherwise a neutral "there".
+  const name = firstName(context.name) || 'there';
 
   switch (type) {
     case '30min':

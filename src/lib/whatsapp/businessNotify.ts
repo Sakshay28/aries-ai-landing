@@ -10,6 +10,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantById } from '@/lib/tenant/manager';
 import { decryptToken } from '@/lib/utils/crypto';
+import { sanitizeName } from '@/lib/utils/name';
 import { sendTextMessage, sendTemplateMessage } from '@/lib/meta/service';
 import { isWindowClosedError } from '@/lib/automations/logic';
 import { getSessionState } from '@/lib/whatsapp/session';
@@ -381,7 +382,7 @@ async function attemptDelivery(
       if (template) {
         resolvedVars = {
           business_name: variables.business_name || tenant?.business_name || 'Your Business',
-          customer_name: variables.customer_name || variables.guest_name || 'Guest',
+          customer_name: sanitizeName(variables.customer_name || variables.guest_name) || 'Guest',
           reason: eventType.replace(/_/g, ' ').toUpperCase(),
           message: variables.message || [
             variables.booking_date ? `Date: ${variables.booking_date}` : null,
@@ -551,7 +552,7 @@ export async function triggerEscalationAlert(params: EscalationAlertParams): Pro
   const formattedPhone = cleanPhone.length === 10 ? '91' + cleanPhone : cleanPhone;
 
   const templateVars: Record<string, string> = {
-    customer_name:  customerName || `+${formattedPhone}`,
+    customer_name:  sanitizeName(customerName) || `+${formattedPhone}`,
     customer_phone: formattedPhone,
     reason,
     message:        lastMessage || '[No message]',

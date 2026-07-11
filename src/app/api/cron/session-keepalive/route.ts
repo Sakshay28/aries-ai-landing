@@ -25,6 +25,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { sendTextMessage, sendTemplateMessage, sendInteractiveButtonsMessage } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
+import { sanitizeName, firstName as toFirstName } from '@/lib/utils/name';
 import { isWindowClosedError } from '@/lib/automations/logic';
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { notifyTenant } from '@/lib/alerts/tenantAlert';
@@ -357,9 +358,9 @@ async function processConversations(rows: Array<{
       const phone = conv.phone;
       if (!phone) { skipped++; continue; }
 
-      const firstName = (conv.lead_name || '').split(' ')[0] || 'there';
+      const firstName = toFirstName(conv.lead_name) || 'there';
       const vars: Record<string, string> = {
-        customer_name: conv.lead_name || firstName,
+        customer_name: sanitizeName(conv.lead_name) || firstName,
         first_name:    firstName,
         business_name: tenant.business_name || '',
       };

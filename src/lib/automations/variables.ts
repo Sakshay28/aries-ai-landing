@@ -4,6 +4,7 @@
 // so no caller ever constructs variables by hand.
 
 import type { Tenant } from '@/lib/types';
+import { sanitizeName, firstName } from '@/lib/utils/name';
 
 // ═══════════════════════════════════════
 // VARIABLE REGISTRY
@@ -168,8 +169,8 @@ export function resolveBookingVariables(
 
   return {
     // Customer
-    customer_name:    booking.customerName || 'there',
-    first_name:       (booking.customerName || '').split(' ')[0] || 'there',
+    customer_name:    sanitizeName(booking.customerName) || 'there',
+    first_name:       firstName(booking.customerName) || 'there',
     customer_phone:   booking.customerPhone || '',
     customer_email:   booking.customerEmail || '',
 

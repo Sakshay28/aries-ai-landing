@@ -15,6 +15,7 @@ import { appendBookingRow } from '@/lib/integrations/google-sheets';
 import { parseMetaWebhook, sendTextMessage, sendMediaMessage, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
 import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus, resolveOrCreateConversation } from '@/lib/whatsapp/businessNotify';
 import { normalizePhoneNumber, isSamePhoneNumber } from '@/lib/whatsapp/phone';
+import { sanitizeName } from '@/lib/utils/name';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 import { processMessageWithAI, isHumanHandoffRequest } from '@/lib/ai/engine';
 import { kwWordMatch, pickScriptedReply, allowStatusUpdate, hasActiveFlow } from '@/lib/webhook/decisions';
@@ -538,10 +539,11 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     lead = existingLead;
     const updateData: Record<string, any> = { last_message_at: new Date().toISOString() };
     if (isFromAd && !existingLead.source_detail) updateData.source_detail = leadSource;
-    // Backfill the WhatsApp display name the first time we see it — never
-    // overwrite a name that's already set (staff sometimes repurpose this
-    // field for call-back notes, e.g. "call him at 5pm").
-    if (!existingLead.name && msg.contactName) updateData.name = msg.contactName;
+    // NOTE: We deliberately do NOT backfill leads.name from the WhatsApp profile
+    // name (msg.contactName). Profile names are unreliable — emojis, nicknames,
+    // or plain wrong — and were causing the bot to address customers by the wrong
+    // name. leads.name is now reserved for a name the customer explicitly gives
+    // us in chat (captured after the AI extracts it, further below).
     // Awaited — fire-and-forget dies on serverless freeze, leaving CRM timestamps stale
     await supabaseAdmin.from('leads').update(updateData).eq('id', existingLead.id);
     // Cancel any pending follow-ups — they will be re-scheduled below (either in
@@ -646,7 +648,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           source_detail: leadSource,
           first_message_at: new Date().toISOString(),
           last_message_at: new Date().toISOString(),
-          ...(msg.contactName && { name: msg.contactName }),
+          // Intentionally NOT seeding `name` from the WhatsApp profile name —
+          // see the note in the existing-lead branch above. Name is captured
+          // only when the customer states it in chat.
           ...(assignedTo && { assigned_to: assignedTo }),
           ...(campaignId && { campaign_id: campaignId }),
           ...(isFromAd && msg.referral && {
@@ -683,7 +687,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         type: 'new_lead',
         tenantId: tenant.id,
         lead: {
-          name: newLead.name || '',
+          name: sanitizeName(newLead.name) || '',
           phone: cleanPhone,
           email: newLead.email || '',
           lead_status: 'new',
@@ -694,7 +698,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       triggerAutomations({
         tenantId: tenant.id, event: 'new_lead', leadId: newLead.id,
         phone: cleanPhone,
-        variables: { customer_name: newLead.name || 'there', business_name: tenant.business_name || '' },
+        variables: { customer_name: sanitizeName(newLead.name) || 'there', business_name: tenant.business_name || '' },
       }).catch(e => console.error('Automations (new_lead):', e.message));
 
       // Google Sheets sync for this new lead is handled by the DB trigger →
@@ -711,7 +715,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         const customTemplate = (tenant as any).lead_assigned_email_template;
         sendLeadAssignedEmail(
           assignedMember.email,
-          newLead.name || cleanPhone,
+          sanitizeName(newLead.name) || cleanPhone,
           (tenant.business_name as string) || 'your business',
           'Meta Ad',
           customTemplate
@@ -728,7 +732,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     processCtwaLead(
       tenant.id,
       cleanPhone,
-      (lead as Record<string, any> | null)?.name ?? null,
+      sanitizeName((lead as Record<string, any> | null)?.name),
       {
         source_type: msg.referral.source_type,
         source_id: msg.referral.source_id,
@@ -750,7 +754,10 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   if (activeExistingConv) {
     conversation = activeExistingConv;
     const convUpdate: Record<string, any> = { last_message_at: new Date().toISOString(), is_active: true };
-    if (!activeExistingConv.sender_name && msg.contactName) convUpdate.sender_name = msg.contactName;
+    // sender_name is no longer seeded from the WhatsApp profile name — it's
+    // populated only once the customer tells us their name in chat (see the
+    // self-provided-name capture below). This keeps the staff UI from showing
+    // emoji/nickname profile names.
     await supabaseAdmin
       .from('conversations')
       .update(convUpdate)
@@ -766,7 +773,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         lead_id: lead?.id || null,
         channel: 'whatsapp',
         sender_id: cleanPhone,
-        sender_name: msg.contactName || null,
+        // sender_name intentionally left null — populated only when the customer
+        // provides their name in chat (not from the WhatsApp profile name).
+        sender_name: null,
         current_step: 'greeting',
         is_active: true,
         bot_paused: false,
@@ -1086,7 +1095,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       triggerAutomations({
         tenantId: tenant.id, event: 'escalation_resolved', leadId: lead?.id,
         conversationId: conversation.id, phone: cleanPhone,
-        variables: { customer_name: lead?.name || 'there', business_name: tenant.business_name || '' },
+        variables: { customer_name: sanitizeName(lead?.name) || 'there', business_name: tenant.business_name || '' },
       }).catch(e => console.error('Automations (escalation_resolved):', e.message));
     } else if (conversation.escalated_at) {
       // Real-time timeout check — don't wait for the daily cron
@@ -1103,7 +1112,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         triggerAutomations({
           tenantId: tenant.id, event: 'escalation_resolved', leadId: lead?.id,
           conversationId: conversation.id, phone: cleanPhone,
-          variables: { customer_name: lead?.name || 'there', business_name: tenant.business_name || '' },
+          variables: { customer_name: sanitizeName(lead?.name) || 'there', business_name: tenant.business_name || '' },
         }).catch(e => console.error('Automations (escalation_resolved):', e.message));
       } else {
         // Still within timeout window — bot paused, human should handle.
@@ -1615,8 +1624,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     // Repeat-visitor recognition
     visitCount:    (lead?.visit_count as number) ?? 0,
     lastVisitDate: (lead?.last_visit_date as string) ?? null,
-    // So the AI only asks for the customer's name once, ever
-    knownCustomerName: (lead?.name as string) || msg.contactName || null,
+    // So the AI only asks for the customer's name once, ever. Only a
+    // self-provided, sanitized name is passed — never the WhatsApp profile name.
+    knownCustomerName: sanitizeName(lead?.name as string),
     ...(matchedAgent ? {
       botName: matchedAgent.bot_name || baseConfig.botName,
       botPersonality: matchedAgent.bot_personality || baseConfig.botPersonality,
@@ -1979,12 +1989,21 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const prevContext = context as Record<string, any>;
   const extracted = (aiResponse.extractedData as Record<string, any>) ?? {};
 
-  // The AI may have asked for and captured the customer's name this turn
-  // (see CUSTOMER NAME instruction in the system prompt) — persist it to the
-  // lead once, same as the WhatsApp-profile-name backfill earlier in this file.
+  // The customer may have told us their name this turn (the AI extracts it into
+  // extractedData.name). This is the ONLY way a name gets saved now — we no
+  // longer seed it from the unreliable WhatsApp profile name. Sanitize before
+  // storing (strip emojis/symbols; reject phone-like/garbage), save once, and
+  // mirror it onto the conversation so the staff inbox shows the real name.
   if (extracted.name && extracted.name !== 'null' && lead && !lead.name) {
-    supabaseAdmin.from('leads').update({ name: extracted.name }).eq('id', lead.id)
-      .then(() => {}, () => {});
+    const cleanName = sanitizeName(extracted.name);
+    if (cleanName) {
+      supabaseAdmin.from('leads').update({ name: cleanName }).eq('id', lead.id)
+        .then(() => {}, () => {});
+      if (conversation?.id) {
+        supabaseAdmin.from('conversations').update({ sender_name: cleanName }).eq('id', conversation.id)
+          .then(() => {}, () => {});
+      }
+    }
   }
 
   // Build top-level context delta: only newly extracted non-null values.
@@ -2088,7 +2107,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // Fully multi-tenant: each client's staff only receives their own alerts,
   // sent from their own WhatsApp number using their own token. Safe for 1500+ tenants.
   if (aiResponse.shouldEscalate && tenant.escalation_enabled !== false) {
-    const leadName = lead?.name || cleanPhone;
+    const leadName = sanitizeName(lead?.name) || cleanPhone;
     const reason   = aiResponse.escalationReason || 'Customer requested human assistance';
     const preview  = msg.text ? msg.text.slice(0, 200) : '[media message]';
 
@@ -2187,7 +2206,9 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           followUpType:    fu.follow_up_type,
           message:         null,
           leadPhone:       cleanPhone,
-          leadName:        lead?.name || 'Customer',
+          // Empty when we have no self-provided name — downstream falls back to
+          // a neutral "there" rather than echoing a wrong/emoji profile name.
+          leadName:        sanitizeName(lead?.name) || '',
           delayMs:         config.delayMs,
         }).catch(() => {});
       }
@@ -2337,7 +2358,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       const reservationId = `${shortCode}-${dateStr}-${seq}`;
       
       const guestCount = parseInt(String(bookingGuestsRaw)) || 2;
-      const customerName = contextObj.name || lead?.name || 'Customer';
+      const customerName = sanitizeName(contextObj.name) || sanitizeName(lead?.name) || 'Customer';
       
       // Use AI extractedData fields directly — the AI already handled language,
       // Hindi dates, ambiguous formats, "kal", "tonight", etc. far better than
