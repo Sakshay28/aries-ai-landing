@@ -37,6 +37,7 @@ function avatarGradient(seed: string) {
 }
 
 import { formatPhoneDisplay, normalizePhone } from "@/lib/utils/phone";
+import { contactDisplayName } from "@/lib/utils/contact-name";
 
 // Fix: format time always in IST (Asia/Kolkata) to avoid UTC/local confusion
 function formatTime(dateStr: string): string {
@@ -897,7 +898,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const lead = conversationMeta?.leads;
   const rawPhone = lead?.phone || conversationMeta?.sender_id || conversationMeta?.sender_name || '';
   const cachedContact = getContactByPhone(rawPhone);
-  const displayName = cachedContact?.name || lead?.name || formatPhoneDisplay(rawPhone) || conversationId?.slice(0, 8) || 'Unknown';
+  const displayName = contactDisplayName(cachedContact?.name ?? lead?.name, rawPhone);
   // Consistent avatar seed with sidebar (phone → fallback to conversationId)
   const avatarSeed = rawPhone || conversationId || 'x';
   // Consistent initial: prefer first letter of name, else last digit of phone number (same as sidebar getInitial)

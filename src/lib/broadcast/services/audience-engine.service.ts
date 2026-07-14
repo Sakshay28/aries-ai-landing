@@ -2,6 +2,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { AudienceState, EstimateResult } from '@/app/dashboard/broadcast/types';
 import { cleanPhone } from '@/lib/meta/service';
 import { fetchLeadsByFilter, fetchLeadsByIds } from '@/lib/broadcast/fetch-leads';
+import { cleanContactName } from '@/lib/broadcast/recipient-name';
 
 interface ResolvedAudience {
   total: number;
@@ -10,7 +11,7 @@ interface ResolvedAudience {
   invalidRemoved: number;
   noConsentRemoved: number;
   spamRisk: 'LOW' | 'MEDIUM' | 'HIGH';
-  contacts: Array<{ id: string; name: string; phone: string }>;
+  contacts: Array<{ id: string; name: string | null; phone: string }>;
 }
 
 export class AudienceEngineService {
@@ -102,7 +103,7 @@ export class AudienceEngineService {
         // Custom spreadsheet imported contacts
         rawContacts = audience.csvFile.contacts.map((c: any, idx: number) => ({
           id: c.id || `csv-${idx}`,
-          name: c.name || c.contact_name || 'there',
+          name: cleanContactName(c.name || c.contact_name),
           phone: c.phone || c.phone_number,
           tags: c.tags || [],
           email: c.email || ''
@@ -113,7 +114,7 @@ export class AudienceEngineService {
         const csvContacts = (audience as any).filters.csvFile.contacts;
         rawContacts = csvContacts.map((c: any, idx: number) => ({
           id: c.id || `csv-${idx}`,
-          name: c.name || c.contact_name || 'there',
+          name: cleanContactName(c.name || c.contact_name),
           phone: c.phone || c.phone_number,
           tags: c.tags || [],
           email: c.email || ''
@@ -153,7 +154,7 @@ export class AudienceEngineService {
       const seenPhones = new Set<string>();
       const seenContactIds = new Set<string>();
 
-      const filteredContacts: Array<{ id: string; name: string; phone: string }> = [];
+      const filteredContacts: Array<{ id: string; name: string | null; phone: string }> = [];
       let duplicatesRemoved = 0;
       let optedOutRemoved = 0;
       let invalidRemoved = 0;
@@ -217,7 +218,9 @@ export class AudienceEngineService {
 
         filteredContacts.push({
           id: lead.id,
-          name: lead.name || 'there',
+          // Clean human name or null; the send path applies the neutral "there"
+          // greeting fallback at render time (broadcast-engine / variable-engine).
+          name: cleanContactName(lead.name),
           phone: phoneCleaned,
         });
       }

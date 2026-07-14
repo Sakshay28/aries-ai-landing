@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { triggerAutomations } from '@/lib/automations/engine';
+import { greetingName } from '@/lib/utils/contact-name';
 
 export async function GET(req: NextRequest) {
   try {
@@ -134,7 +135,7 @@ export async function PATCH(req: NextRequest) {
           tenantId, event: 'escalation_resolved', leadId: conv.lead_id,
           conversationId: id,
           variables: {
-            customer_name: leadData?.name || 'there',
+            customer_name: greetingName(leadData?.name),
             business_name: tenantRow?.business_name || '',
           },
         }).catch(e => console.error('Automations (escalation_resolved):', e.message));

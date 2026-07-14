@@ -5,10 +5,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, Check, Filter, User, Tag, Star, Users } from 'lucide-react';
 import { List, type RowComponentProps } from 'react-window';
 import { useDebounceCallback } from '../hooks/useDebounce';
+import { recipientDisplayName, contactInitials } from '@/lib/broadcast/recipient-name';
 
 interface Contact {
   id: string;
-  name: string;
+  name: string | null;
   phone: string;
   email?: string;
   tags?: string[];
@@ -153,13 +154,13 @@ export function ContactPickerDrawer({
 
         {/* Avatar */}
         <div className="w-8.5 h-8.5 rounded-full bg-secondary flex items-center justify-center text-[12px] font-bold text-muted-foreground uppercase shrink-0">
-          {contact.name.slice(0, 2)}
+          {contactInitials(contact.name) || <User className="w-4 h-4 opacity-60" />}
         </div>
 
         {/* Info */}
         <div className="flex-1 min-w-0 text-left">
           <p className="text-[12.5px] font-semibold text-foreground leading-snug truncate">
-            {contact.name}
+            {recipientDisplayName(contact.name, contact.phone)}
           </p>
           <p className="text-[10.5px] text-muted-foreground/75 mt-0.5 tabular-nums">
             {contact.phone}

@@ -7,6 +7,7 @@ import {
   CheckCircle, XCircle, Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { contactDisplayName, contactInitials } from "@/lib/utils/contact-name";
 import type { CampaignLead, LeadSource } from "@/lib/meta-ads/types";
 
 const STATUS_COLOR: Record<string, string> = {
@@ -167,11 +168,11 @@ export function MetaAdsLeadsClient() {
                 >
                   {/* Avatar */}
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-500/10 text-sm font-bold text-blue-600 dark:text-blue-400">
-                    {(lead.name || lead.phone)?.[0]?.toUpperCase() || "?"}
+                    {contactInitials(lead.name) || lead.phone?.replace(/\D/g, "").slice(-2) || "?"}
                   </div>
                   {/* Name + phone */}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate">{lead.name || "Unknown"}</p>
+                    <p className="text-sm font-semibold text-foreground truncate">{contactDisplayName(lead.name, lead.phone)}</p>
                     <p className="text-xs text-muted-foreground">{lead.phone}</p>
                   </div>
                   {/* Campaign */}

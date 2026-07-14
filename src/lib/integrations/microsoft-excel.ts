@@ -7,6 +7,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { encryptToken, decryptToken } from '@/lib/utils/crypto';
+import { contactDisplayName } from '@/lib/utils/contact-name';
 
 const SCOPES = ['offline_access', 'Files.ReadWrite', 'User.Read'].join(' ');
 
@@ -370,7 +371,7 @@ export async function syncCustomerToExcel(tenantId: string, phone: string): Prom
 
   // 3. Resolve metrics
   const resolvedFields: Record<string, any> = {
-    name: lead.name || 'Unknown',
+    name: contactDisplayName(lead.name, lead.phone),
     phone: lead.phone,
     source: lead.channel === 'whatsapp' ? 'WhatsApp' : lead.channel === 'meta_ctwa' ? 'Meta Ad' : lead.channel || 'Manual',
     status: lead.lead_status || 'new',
@@ -524,7 +525,7 @@ export async function syncAllLeadsToExcel(tenantId: string): Promise<{ synced: n
   for (const lead of leads) {
     const l = lead as any;
     const row = [
-      l.name || 'Unknown',
+      contactDisplayName(l.name, l.phone),
       l.phone || '',
       l.channel === 'whatsapp' ? 'WhatsApp' : l.channel === 'meta_ctwa' ? 'Meta Ad' : l.channel || 'Manual',
       l.lead_status || 'new',

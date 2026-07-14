@@ -47,12 +47,13 @@ function avatarGradient(seed: string) {
   return AVATAR_GRADIENTS[h % AVATAR_GRADIENTS.length];
 }
 
-import { formatPhoneDisplay, normalizePhone } from "@/lib/utils/phone";
+import { normalizePhone } from "@/lib/utils/phone";
+import { contactDisplayName } from "@/lib/utils/contact-name";
 
 function getDisplayName(conv: ChatConversation, getContactByPhone: (phone: string) => Contact | undefined): string {
   const phone = conv.leads?.phone || '';
   const contact = getContactByPhone(phone);
-  return contact?.name || conv.leads?.name || formatPhoneDisplay(phone) || "Unknown";
+  return contactDisplayName(contact?.name ?? conv.leads?.name, phone);
 }
 
 function getInitial(conv: ChatConversation, getContactByPhone: (phone: string) => Contact | undefined): string {

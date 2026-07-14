@@ -23,6 +23,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { cleanContactName } from '@/lib/utils/contact-name';
 import { getTenantByPhoneNumberId } from '@/lib/tenant/manager';
 import type { Tenant } from '@/lib/types';
 
@@ -402,7 +403,9 @@ export async function handleContactSync(value: Record<string, any>): Promise<voi
     if (action === 'remove') continue; // never delete a lead from a contact removal
 
     const contact = entry?.contact || {};
-    const name: string = (contact.full_name || contact.first_name || '').trim();
+    // Sanitize the WhatsApp profile name; skip syncing when it is emoji-only /
+    // a placeholder so we never store a junk name.
+    const name = cleanContactName(contact.full_name || contact.first_name);
     const phone = digits(contact.phone_number);
     if (!phone || !name) continue;
     const plus = '+' + phone;

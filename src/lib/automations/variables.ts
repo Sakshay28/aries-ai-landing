@@ -4,7 +4,7 @@
 // so no caller ever constructs variables by hand.
 
 import type { Tenant } from '@/lib/types';
-import { sanitizeName, firstName } from '@/lib/utils/name';
+import { greetingName, greetingFirstName, NEUTRAL_GREETING } from '@/lib/utils/contact-name';
 
 // ═══════════════════════════════════════
 // VARIABLE REGISTRY
@@ -21,8 +21,8 @@ export interface VariableEntry {
 
 export const VARIABLE_REGISTRY: VariableEntry[] = [
   // ── Customer ──
-  { name: 'customer_name',  label: 'Customer Name',  description: 'Full name of the customer',             required: true,  defaultFallback: 'there',        category: 'customer' },
-  { name: 'first_name',     label: 'First Name',     description: 'First name only',                       required: false, defaultFallback: 'there',        category: 'customer' },
+  { name: 'customer_name',  label: 'Customer Name',  description: 'Full name of the customer',             required: true,  defaultFallback: NEUTRAL_GREETING, category: 'customer' },
+  { name: 'first_name',     label: 'First Name',     description: 'First name only',                       required: false, defaultFallback: NEUTRAL_GREETING, category: 'customer' },
   { name: 'customer_phone', label: 'Customer Phone',  description: 'Phone number with country code',       required: false, defaultFallback: null,           category: 'customer' },
   { name: 'customer_email', label: 'Customer Email',  description: 'Email address if collected',            required: false, defaultFallback: null,           category: 'customer' },
 
@@ -169,8 +169,8 @@ export function resolveBookingVariables(
 
   return {
     // Customer
-    customer_name:    sanitizeName(booking.customerName) || 'there',
-    first_name:       firstName(booking.customerName) || 'there',
+    customer_name:    greetingName(booking.customerName),
+    first_name:       greetingFirstName(booking.customerName),
     customer_phone:   booking.customerPhone || '',
     customer_email:   booking.customerEmail || '',
 

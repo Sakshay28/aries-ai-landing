@@ -8,6 +8,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { sanitizeInput, isValidEmail } from '@/lib/utils/safety';
 import { normalizePhone, isValidPhone } from '@/lib/utils/phone';
+import { cleanContactName } from '@/lib/utils/contact-name';
 
 // Schema for POST body
 // Schema for POST body
@@ -178,10 +179,12 @@ export async function POST(req: NextRequest) {
     if (existing) {
       const updatePayload: Record<string, any> = {};
 
-      // Overwrite name if existing has no name or if the existing name is just the phone number
-      const existingHasRealName = existing.name && existing.name !== existing.phone;
-      if (body.name && !existingHasRealName) {
-        updatePayload.name = sanitizeInput(body.name, 120);
+      // Overwrite name if existing has no real name. cleanContactName treats a
+      // phone-as-name / placeholder as "no real name" too.
+      const existingHasRealName = cleanContactName(existing.name) !== null;
+      const incomingName = cleanContactName(body.name ? sanitizeInput(body.name, 120) : null);
+      if (incomingName && !existingHasRealName) {
+        updatePayload.name = incomingName;
       }
 
       // Fill in email if missing
@@ -236,7 +239,7 @@ export async function POST(req: NextRequest) {
     // Create fresh contact
     const insertPayload = {
       tenant_id: tenantId,
-      name: body.name ? sanitizeInput(body.name, 120) : phone, // Default to phone if no name provided
+      name: cleanContactName(body.name ? sanitizeInput(body.name, 120) : null), // real name or NULL — never phone-as-name
       phone,
       email: body.email ?? null,
       channel: body.channel,

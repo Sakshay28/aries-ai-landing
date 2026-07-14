@@ -2,6 +2,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { AudienceState } from '@/app/dashboard/broadcast/types';
 import { cleanPhone } from '@/lib/meta/service';
 import { fetchLeadsByFilter, fetchLeadsByIds } from '@/lib/broadcast/fetch-leads';
+import { cleanContactName, logInvalidContactName, type ContactNameSource } from '@/lib/broadcast/recipient-name';
 
 export interface RecipientRecord {
   campaign_id: string;
@@ -106,7 +107,7 @@ export class BroadcastRecipientService {
       } else if (audience.type === 'csv' && audience.csvFile && Array.isArray(audience.csvFile.contacts)) {
         rawContacts = audience.csvFile.contacts.map((c: any, idx: number) => ({
           id: c.id || `csv-${idx}`,
-          name: c.name || c.contact_name || 'there',
+          name: cleanContactName(c.name || c.contact_name),
           phone: c.phone || c.phone_number,
           tags: c.tags || [],
           email: c.email || '',
@@ -155,7 +156,22 @@ export class BroadcastRecipientService {
       for (const lead of mergedContacts) {
         const leadId = lead.id;
         const leadPhone = lead.phone;
-        const leadName = lead.name || 'there';
+        // Store the clean human name or null — NEVER a placeholder like "there".
+        // The UI falls back to the phone number when this is null.
+        const leadName = cleanContactName(lead.name);
+
+        // Runtime validation + monitoring: if the source row CLAIMED a name but
+        // it was a placeholder (now coerced to null), surface it so a bad import
+        // is caught immediately — with tenant / contact / source / campaign.
+        if (lead.name != null && String(lead.name).trim() !== '' && leadName === null) {
+          logInvalidContactName({
+            tenantId,
+            campaignId,
+            contactId: String(leadId).startsWith('csv-') ? null : leadId,
+            source: (audience.type === 'csv' ? 'csv' : 'crm') as ContactNameSource,
+            rawName: lead.name,
+          });
+        }
         const leadEmail = lead.email || null;
         const lastMsgAt = lead.last_message_at || null;
         const isManualAddition = (lead as any).isManualAddition || false;

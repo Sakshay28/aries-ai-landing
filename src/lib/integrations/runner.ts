@@ -6,6 +6,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { decryptToken } from '@/lib/utils/crypto';
+import { contactDisplayName } from '@/lib/utils/contact-name';
 
 export type IntegrationEvent =
   | { type: 'new_lead'; tenantId: string; lead: { name: string; phone: string; email?: string; lead_status?: string; source?: string } }
@@ -66,7 +67,7 @@ async function runZohoCRM(cfg: IntegrationConfig, event: IntegrationEvent) {
       },
       body: JSON.stringify({
         data: [{
-          Last_Name: event.lead.name || 'Unknown',
+          Last_Name: contactDisplayName(event.lead.name, event.lead.phone),
           Mobile: event.lead.phone,
           Email: event.lead.email || '',
           Lead_Source: 'WhatsApp',

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
+import { contactDisplayName } from '@/lib/utils/contact-name';
 import {
   Plus, Play, Pause, Edit2, X, Save, Trash2, Loader2,
   Zap, Clock, Upload, AlertTriangle, Activity, RefreshCw, CheckCircle2, XCircle,
@@ -824,7 +825,7 @@ export function AutomationsClient() {
                             onClick={() => setExpandedExec(isExpanded ? null : e.id)}
                           >
                             <td className="px-4 py-3">
-                              <div className="font-medium truncate max-w-[140px]">{e.contact_name || 'Unknown'}</div>
+                              <div className="font-medium truncate max-w-[140px]">{contactDisplayName(e.contact_name, e.contact_phone)}</div>
                               <div className="text-[11px] text-muted-foreground">{e.contact_phone || '—'}</div>
                             </td>
                             <td className="px-4 py-3">

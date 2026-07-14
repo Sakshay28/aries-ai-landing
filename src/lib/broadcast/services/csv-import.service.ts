@@ -1,7 +1,8 @@
 import { cleanPhone } from '@/lib/meta/service';
+import { cleanContactName } from '@/lib/utils/contact-name';
 
 interface CSVRowPreview {
-  name: string;
+  name: string | null;
   phone: string;
   isValid: boolean;
   reason?: string;
@@ -52,7 +53,9 @@ export class CSVImportService {
         continue;
       }
 
-      const nameVal = cols[nameIdx] || 'there';
+      // Clean human name or null — never a placeholder. Display layers fall back
+      // to the phone number via contactDisplayName.
+      const nameVal = cleanContactName(cols[nameIdx]);
       const rawPhone = cols[phoneIdx] || '';
 
       if (!rawPhone) {

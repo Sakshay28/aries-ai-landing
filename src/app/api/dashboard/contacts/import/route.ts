@@ -7,6 +7,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { sanitizeInput, isValidEmail } from '@/lib/utils/safety';
 import { normalizePhone, isValidPhone } from '@/lib/utils/phone';
+import { cleanContactName } from '@/lib/broadcast/recipient-name';
 
 const MAX_ROWS = 5_000;
 
@@ -181,7 +182,7 @@ export async function POST(req: NextRequest) {
       }
       
       candidateMap.set(phone, {
-        name: idx.name !== -1 ? sanitizeInput(cells[idx.name] ?? '', 120) || null : null,
+        name: idx.name !== -1 ? cleanContactName(sanitizeInput(cells[idx.name] ?? '', 120)) : null,
         email: email || null,
         notes: idx.notes !== -1 ? sanitizeInput(cells[idx.notes] ?? '', 2000) || null : null,
         source: idx.source !== -1 ? sanitizeInput(cells[idx.source] ?? '', 200) || null : 'csv_import',
@@ -263,7 +264,9 @@ export async function POST(req: NextRequest) {
       } else {
         toInsert.push({
           tenant_id: tenantId,
-          name: c.name ?? phone,
+          // Store the real name or NULL — never the phone-as-name (that pollutes
+          // the known/unknown split and looks like a placeholder in the UI).
+          name: c.name ?? null,
           phone,
           email: c.email,
           channel: 'manual',

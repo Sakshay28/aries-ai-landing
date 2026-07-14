@@ -5,6 +5,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';
+import { greetingFirstName } from '@/lib/utils/contact-name';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { sendTextMessage } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
@@ -72,7 +73,7 @@ async function handler(req: NextRequest) {
     const offer = (tenant.welcome_offer as string) || '';
 
     for (const l of leads) {
-      const firstName = (l.name || 'there').split(' ')[0];
+      const firstName = greetingFirstName(l.name);
       const offerLine = offer ? `\n\nHere's a little something from us: ${offer} 🎁` : '';
       const msg = `🎂 Happy Birthday, ${firstName}! Wishing you a wonderful day from all of us at ${bizName}.${offerLine}`;
 

@@ -13,6 +13,7 @@ import type { ConversationContext } from '@/lib/types';
 import * as Sentry from '@/lib/sentry-stub';
 import { withTimeout } from '@/lib/utils/safety';
 import { firstName } from '@/lib/utils/name';
+import { greetingFirstName } from '@/lib/utils/contact-name';
 import { recordAITokenUsage, recordDailyTokenUsage } from '@/lib/billing/costProtection';
 import { guardInput, guardOutput, shouldRedirectToHuman, HALLUCINATION_REDIRECT, SYSTEM_PROMPT_SAFETY_APPENDIX } from '@/lib/ai/guardrails';
 import { getAI } from '@/lib/ai/client';
@@ -1136,7 +1137,7 @@ function getDefaultFollowUp(
   config: TenantAIConfig
 ): string {
   // Only address by a real, self-provided name; otherwise a neutral "there".
-  const name = firstName(context.name) || 'there';
+  const name = greetingFirstName(context.name);
 
   switch (type) {
     case '30min':
