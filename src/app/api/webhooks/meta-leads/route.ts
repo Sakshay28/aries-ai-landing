@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { cleanContactName } from '@/lib/utils/contact-name';
 import { triggerCapiEvent } from '@/lib/integrations/capi-trigger';
 import { verifySignature } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
@@ -156,8 +157,10 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        // Standardize Name if blank
-        if (!name) name = 'Meta Ad Lead';
+        // Store the real name or NULL — never a generic placeholder. The CRM/UI
+        // falls back to the phone number, and the `source` field marks it as a
+        // Meta ad lead.
+        const cleanName = cleanContactName(name);
 
         // 4. Check if lead already exists to avoid double entries
         const { data: existingLead } = await supabaseAdmin
@@ -186,7 +189,7 @@ export async function POST(req: NextRequest) {
           .from('leads')
           .insert({
             tenant_id: tenantId,
-            name,
+            name: cleanName,
             phone,
             email,
             channel: 'manual',

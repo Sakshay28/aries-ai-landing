@@ -4,6 +4,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ShieldCheck, AlertTriangle, Send, X, Clock, HelpCircle, Users } from 'lucide-react';
 import { RecipientRecord } from '@/lib/broadcast/services/broadcast-recipient.service';
+import { recipientDisplayName } from '@/lib/broadcast/recipient-name';
 
 interface LaunchSafetyModalProps {
   isOpen: boolean;
@@ -32,7 +33,7 @@ export function LaunchSafetyModal({
   const eligibleNames = recipients
     .filter(r => r.status === 'eligible')
     .slice(0, 3)
-    .map(r => r.name || r.phone_number);
+    .map(r => recipientDisplayName(r.name, r.phone_number));
 
   const displayRecipientsCount = recipients.filter(r => r.status === 'eligible').length;
   const noConsentCount = recipients.filter(r => r.status === 'no_consent').length;

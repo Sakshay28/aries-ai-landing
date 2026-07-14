@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useUserContext } from "../_layout/DashboardLayoutClient";
+import { NEUTRAL_GREETING } from "@/lib/utils/contact-name";
 
 export function GreetingSection() {
   const [dateStr, setDateStr] = useState("");
@@ -17,8 +18,8 @@ export function GreetingSection() {
     setDateStr(new Date().toLocaleDateString("en-US", dateOptions));
   }, []);
 
-  // Display name: use server-provided userName, fall back to "there"
-  const displayName = userName || "there";
+  // Display name: use server-provided userName, fall back to the neutral greeting
+  const displayName = userName || NEUTRAL_GREETING;
 
   return (
     <div className="pt-2 pb-4">

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { contactDisplayName } from '@/lib/utils/contact-name';
 import { 
   FileSpreadsheet, CheckCircle2, AlertCircle, RefreshCw, ArrowLeft, 
   Settings, Activity, Layers, Database, ChevronRight, Play, Check, 
@@ -409,7 +410,7 @@ export function GoogleSheetsDashboard() {
                                   </td>
                                   <td className="py-3.5 px-5 font-medium whitespace-nowrap">
                                     <div className="flex flex-col">
-                                      <span>{log.lead?.name || 'Unknown'}</span>
+                                      <span>{contactDisplayName(log.lead?.name, log.phone)}</span>
                                       <span className="text-[10px] text-muted-foreground">{log.phone}</span>
                                     </div>
                                   </td>

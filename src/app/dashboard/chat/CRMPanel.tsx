@@ -32,6 +32,7 @@ function crmAvatarGradient(seed: string) {
 }
 
 import { formatPhoneDisplay } from "@/lib/utils/phone";
+import { contactDisplayName, hasRealName } from "@/lib/utils/contact-name";
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "—";
@@ -754,8 +755,8 @@ export default function CRMPanel({ meta, messages }: CRMPanelProps) {
   const lead = meta?.leads;
   const rawPhone = lead?.phone || meta?.sender_id || meta?.sender_name || "";
   const cachedContact = getContactByPhone(rawPhone);
-  const displayName = cachedContact?.name || lead?.name || formatPhoneDisplay(rawPhone) || "Unknown";
-  const hasSavedName = cachedContact?.name && cachedContact.name !== cachedContact.phone;
+  const displayName = contactDisplayName(cachedContact?.name ?? lead?.name, rawPhone);
+  const hasSavedName = hasRealName(cachedContact?.name);
 
   const inboundCount = messages.filter(m => m.direction === "inbound").length;
   const outboundCount = messages.filter(m => m.direction === "outbound").length;

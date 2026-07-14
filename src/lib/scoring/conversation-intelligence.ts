@@ -13,6 +13,7 @@
 
 import { randomUUID }               from 'crypto';
 import { supabaseAdmin }             from '@/lib/supabase/admin';
+import { contactDisplayName }        from '@/lib/utils/contact-name';
 import type { LeadStatus }           from '@/lib/types';
 import type { SupabaseClient }       from '@supabase/supabase-js';
 
@@ -195,7 +196,7 @@ export async function runConversationIntelligence(
   const pastHistoryOrders = shopifyRes.data?.map(s => `- Event: ${s.event_type}, Value: ${s.order_value}, Date: ${s.created_at}`).join('\n') || 'None';
   const pastHistory = `Bookings:\n${pastHistoryBookings}\n\nOrders/Shopify Events:\n${pastHistoryOrders}`;
   const campaignSource = `Channel: ${lead.channel || 'unknown'}, Detail: ${lead.source_detail || 'none'}`;
-  const customerMetadata = `Name: ${lead.name || 'Unknown'}, Phone: ${lead.phone || 'Unknown'}, Email: ${lead.email || 'Unknown'}, Tags: ${JSON.stringify(lead.tags || [])}`;
+  const customerMetadata = `Name: ${contactDisplayName(lead.name, lead.phone)}, Phone: ${lead.phone || 'Unknown'}, Email: ${lead.email || 'Unknown'}, Tags: ${JSON.stringify(lead.tags || [])}`;
 
   // Calculate average response delay
   let avgDelayMins = null;

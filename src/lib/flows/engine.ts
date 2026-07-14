@@ -27,6 +27,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getRedisClient } from '@/lib/redis/client';
 import { sendTextMessage, sendMediaMessage, sendInteractiveButtonsMessage, sendInteractiveListMessage, MetaMediaType } from '@/lib/meta/service';
+import { greetingName } from '@/lib/utils/contact-name';
 import { decryptToken } from '@/lib/utils/crypto';
 import { processMessageWithAI, TenantAIConfig } from '@/lib/ai/engine';
 import { getTenantConfig } from '@/lib/tenant/manager';
@@ -112,7 +113,7 @@ function keywordMatches(text: string, keyword: string): boolean {
 // ── Interpolate {{variables}} in message text ─────────────────
 function interpolate(template: string, ctx: ExecContext): string {
   return template
-    .replace(/\{\{name\}\}/gi, ctx.leadName || 'there')
+    .replace(/\{\{name\}\}/gi, greetingName(ctx.leadName))
     .replace(/\{\{phone\}\}/gi, ctx.phone)
     .replace(/\{\{message\}\}/gi, ctx.messageText)
     // {{field}} or {{a.b.c}} — resolved from ctx.variables
@@ -198,7 +199,7 @@ async function runFlowsForMessageInner(
     isFromAd,
     referral,
     variables: {
-      wa_name: (lead as { name?: string } | null)?.name || 'there',
+      wa_name: greetingName((lead as { name?: string } | null)?.name),
       wa_phone: phone,
       tenant_name: tenant?.business_name || 'Business',
       current_date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
@@ -1814,7 +1815,7 @@ export async function runInactivityFlows(): Promise<number> {
           isFirstMessage: false,
           messageType: 'inactivity',
           variables: {
-            wa_name: leadName || 'there',
+            wa_name: greetingName(leadName),
             wa_phone: conv.sender_id,
             tenant_name: (tenant.business_name as string) || 'Business',
             current_date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
@@ -2014,7 +2015,7 @@ export async function runScheduledFlows(): Promise<number> {
           isFirstMessage: false,
           messageType:    'scheduled',
           variables: {
-            wa_name:      lead.name || 'there',
+            wa_name:      greetingName(lead.name),
             wa_phone:     lead.phone,
             tenant_name:  (tenant.business_name as string) || 'Business',
             current_date: now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),

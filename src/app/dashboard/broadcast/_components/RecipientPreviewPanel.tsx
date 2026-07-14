@@ -3,6 +3,7 @@
 import React, { useMemo } from 'react';
 import { Users, Eye, ShieldCheck, User, Save, Zap } from 'lucide-react';
 import { RecipientRecord } from '@/lib/broadcast/services/broadcast-recipient.service';
+import { hasRealName } from '@/lib/broadcast/recipient-name';
 
 interface RecipientPreviewPanelProps {
   recipients: RecipientRecord[];
@@ -29,8 +30,8 @@ export function RecipientPreviewPanel({
   // Real data calculations
   const baseContacts = useMemo(() => recipients.filter(r => r.status === 'eligible' || r.status === 'excluded'), [recipients]);
   
-  const knownCount = useMemo(() => 
-    baseContacts.filter(r => r.name && r.name.trim() !== '' && r.name.toLowerCase() !== 'anonymous' && r.name.toLowerCase() !== 'there').length,
+  const knownCount = useMemo(() =>
+    baseContacts.filter(r => hasRealName(r.name)).length,
     [baseContacts]
   );
   

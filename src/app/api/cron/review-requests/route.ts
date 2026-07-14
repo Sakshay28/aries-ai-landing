@@ -5,6 +5,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';
+import { greetingFirstName } from '@/lib/utils/contact-name';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { sendTextMessage } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
@@ -69,7 +70,7 @@ async function handler(req: NextRequest) {
     const bizName = (tenant.business_name as string) || 'us';
 
     for (const b of tenantBookings) {
-      const firstName = (b.customer_name || 'there').split(' ')[0];
+      const firstName = greetingFirstName(b.customer_name);
       const reviewLink = tenant.google_review_url
         ? `\n\nLoved your experience? A quick review means the world to us: ${tenant.google_review_url}`
         : '';

@@ -16,6 +16,7 @@ import { parseMetaWebhook, sendTextMessage, sendMediaMessage, sendInteractiveBut
 import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus, resolveOrCreateConversation } from '@/lib/whatsapp/businessNotify';
 import { normalizePhoneNumber, isSamePhoneNumber } from '@/lib/whatsapp/phone';
 import { sanitizeName } from '@/lib/utils/name';
+import { greetingName } from '@/lib/utils/contact-name';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 import { processMessageWithAI, isHumanHandoffRequest } from '@/lib/ai/engine';
 import { kwWordMatch, pickScriptedReply, allowStatusUpdate, hasActiveFlow } from '@/lib/webhook/decisions';
@@ -698,7 +699,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       triggerAutomations({
         tenantId: tenant.id, event: 'new_lead', leadId: newLead.id,
         phone: cleanPhone,
-        variables: { customer_name: sanitizeName(newLead.name) || 'there', business_name: tenant.business_name || '' },
+        variables: { customer_name: greetingName(newLead.name), business_name: tenant.business_name || '' },
       }).catch(e => console.error('Automations (new_lead):', e.message));
 
       // Google Sheets sync for this new lead is handled by the DB trigger →
@@ -1095,7 +1096,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       triggerAutomations({
         tenantId: tenant.id, event: 'escalation_resolved', leadId: lead?.id,
         conversationId: conversation.id, phone: cleanPhone,
-        variables: { customer_name: sanitizeName(lead?.name) || 'there', business_name: tenant.business_name || '' },
+        variables: { customer_name: greetingName(lead?.name), business_name: tenant.business_name || '' },
       }).catch(e => console.error('Automations (escalation_resolved):', e.message));
     } else if (conversation.escalated_at) {
       // Real-time timeout check — don't wait for the daily cron
@@ -1112,7 +1113,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
         triggerAutomations({
           tenantId: tenant.id, event: 'escalation_resolved', leadId: lead?.id,
           conversationId: conversation.id, phone: cleanPhone,
-          variables: { customer_name: sanitizeName(lead?.name) || 'there', business_name: tenant.business_name || '' },
+          variables: { customer_name: greetingName(lead?.name), business_name: tenant.business_name || '' },
         }).catch(e => console.error('Automations (escalation_resolved):', e.message));
       } else {
         // Still within timeout window — bot paused, human should handle.

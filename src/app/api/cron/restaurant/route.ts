@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { greetingName } from '@/lib/utils/contact-name';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { sendTextMessage } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
@@ -182,7 +183,7 @@ async function processReviewRequests(): Promise<number> {
     }
 
     const bizName = tenant.business_name || 'our restaurant';
-    const guestName = table.last_guest_name || 'there';
+    const guestName = greetingName(table.last_guest_name);
 
     const message =
       `Hi ${guestName}! 😊\n\n` +

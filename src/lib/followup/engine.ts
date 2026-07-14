@@ -17,6 +17,7 @@ import { generateFollowUpMessage } from '@/lib/ai/engine';
 import type { Tenant } from '@/lib/types';
 import { decryptToken } from '@/lib/utils/crypto';
 import { firstName } from '@/lib/utils/name';
+import { greetingName, greetingFirstName } from '@/lib/utils/contact-name';
 import * as Sentry from '@/lib/sentry-stub';
 
 // ── Fallback scheduler — NOTE: setInterval is DEAD on Vercel serverless.
@@ -318,7 +319,7 @@ export async function processPendingFollowUps(): Promise<number> {
         // Interpolate {{name}} and {{business_name}} variables
         if (customTpl.message) {
           message = customTpl.message
-            .replace(/\{\{name\}\}/g, lead.name || 'there')
+            .replace(/\{\{name\}\}/g, greetingName(lead.name))
             .replace(/\{\{business_name\}\}/g, (tenant.business_name as string) || '');
         }
         if (customTpl.media_url) {
@@ -551,7 +552,7 @@ async function sendFollowUpWithTemplate(
   name: string,
   fallbackBody?: string | null,
 ): Promise<{ messageId: string | null; body: string }> {
-  const safeName = firstName(name) || 'there';
+  const safeName = greetingFirstName(name);
   let messageId: string | null = null;
   try {
     const result = await sendTemplateMessage(

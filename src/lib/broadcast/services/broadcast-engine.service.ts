@@ -499,7 +499,9 @@ export class BroadcastEngineService {
 
         const leadRecord = {
           id: item.contact_id || '',
-          name: item.payload?.name || 'there',
+          // Pass the raw stored name through; the variable engine sanitizes it
+          // and applies the neutral greeting fallback when it is missing.
+          name: item.payload?.name ?? null,
           phone: item.phone
         };
 

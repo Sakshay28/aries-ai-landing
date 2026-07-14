@@ -1,4 +1,5 @@
 import { VariableConfig } from '@/app/dashboard/broadcast/types';
+import { greetingName, greetingFirstName } from '@/lib/utils/contact-name';
 
 interface LeadRecord {
   id: string;
@@ -24,8 +25,14 @@ export class VariableEngineService {
     if (cfg.sourceType === 'crm_field' && cfg.crmField) {
       const field = cfg.crmField.toLowerCase();
       // Match common fields
-      if (field === 'name' || field === 'first name' || field === 'firstname') {
-        return lead.name || 'there';
+      // Sanitize the stored name so emoji/symbol profile names never reach the
+      // outbound message; the shared helper falls back to the neutral "there"
+      // greeting when there is no usable name.
+      if (field === 'first name' || field === 'firstname') {
+        return greetingFirstName(lead.name);
+      }
+      if (field === 'name') {
+        return greetingName(lead.name);
       }
       if (field === 'phone' || field === 'mobile') {
         return lead.phone || '';

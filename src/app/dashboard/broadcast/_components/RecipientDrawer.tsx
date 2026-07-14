@@ -2,9 +2,10 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Search, Check, FileText, RotateCcw, AlertTriangle, Users } from 'lucide-react';
+import { X, Search, Check, FileText, RotateCcw, AlertTriangle, Users, User } from 'lucide-react';
 import { List, type RowComponentProps } from 'react-window';
 import { RecipientRecord } from '@/lib/broadcast/services/broadcast-recipient.service';
+import { cleanContactName, recipientDisplayName, contactInitials } from '@/lib/broadcast/recipient-name';
 import toast from 'react-hot-toast';
 
 interface RecipientDrawerProps {
@@ -128,11 +129,12 @@ export function RecipientDrawer({
 
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
-        const nameMatch = (r.name || '').toLowerCase().includes(query);
-        const phoneMatch = (r.phone_number || '').includes(query);
+        const nameMatch = (cleanContactName(r.name) || '').toLowerCase().includes(query);
+        const phoneMatch = (r.phone_number || '').replace(/\D/g, '').includes(query.replace(/\D/g, '')) && query.replace(/\D/g, '') !== '';
+        const rawPhoneMatch = (r.phone_number || '').toLowerCase().includes(query);
         const emailMatch = (r.email || '').toLowerCase().includes(query);
         const labelMatch = (r.source_label || '').toLowerCase().includes(query);
-        return nameMatch || phoneMatch || emailMatch || labelMatch;
+        return nameMatch || phoneMatch || rawPhoneMatch || emailMatch || labelMatch;
       }
       return true;
     });
@@ -146,7 +148,8 @@ export function RecipientDrawer({
       const isSelected = isManual ? tempManualContactIds.has(id) : !tempExcludedContactIds.has(id);
       return {
         id,
-        name: r.name || 'there',
+        name: cleanContactName(r.name),                        // real name or null
+        displayName: recipientDisplayName(r.name, r.phone_number), // never a placeholder
         phone: r.phone_number,
         email: r.email,
         source_type: r.source_type,
@@ -154,7 +157,7 @@ export function RecipientDrawer({
         status: r.status,
         isManual,
         isSelected,
-        tags: []
+        tags: [] as string[]
       };
     });
 
@@ -165,7 +168,8 @@ export function RecipientDrawer({
         const isSelected = tempManualContactIds.has(id);
         items.push({
           id,
-          name: c.name || 'there',
+          name: cleanContactName(c.name),
+          displayName: recipientDisplayName(c.name, c.phone),
           phone: c.phone,
           email: c.email || '',
           source_type: 'manual',
@@ -240,7 +244,7 @@ export function RecipientDrawer({
     }
     const headers = ['Name', 'Phone', 'Email', 'Source Type', 'Source Label', 'Status'];
     const rows = allListItems.map(r => [
-      r.name,
+      r.displayName,
       r.phone || '',
       r.email || '',
       r.source_type,
@@ -304,12 +308,7 @@ export function RecipientDrawer({
       badges.push('Manual override');
     }
 
-    const initials = (item.name || 'T')
-      .split(' ')
-      .map(n => n[0])
-      .join('')
-      .slice(0, 2)
-      .toUpperCase();
+    const initials = contactInitials(item.name);
 
     let complianceLabel = '';
     let complianceClass = '';
@@ -360,14 +359,14 @@ export function RecipientDrawer({
               ? 'bg-indigo-500/10 border border-indigo-500/15 text-indigo-600'
               : 'bg-zinc-100 dark:bg-zinc-900 border border-border/40 text-muted-foreground'
           }`}>
-            {initials}
+            {initials || <User className="w-4 h-4 opacity-60" />}
           </div>
 
           {/* Info */}
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[13px] font-bold text-foreground truncate">
-                {item.name}
+                {item.displayName}
               </span>
               {complianceLabel && (
                 <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold border leading-none shrink-0 ${complianceClass}`}>
