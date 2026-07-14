@@ -78,7 +78,11 @@ export default function ChatSidebar() {
   const activeId = activeIdRef.current;
 
   const [convos, setConvos] = useState<ChatConversation[]>([]);
+  const convosRef = useRef<ChatConversation[]>([]);
+  convosRef.current = convos;
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [slowLoad, setSlowLoad] = useState(false);
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<'active' | 'requesting' | 'intervened'>('active');
   const [tenantId, setTenantId] = useState<string | null>(null);
@@ -97,14 +101,22 @@ export default function ChatSidebar() {
   // Using a ref-based pattern so the Realtime callback always calls the latest
   // version without needing to re-subscribe the channel.
   const load = useCallback(async () => {
+    // Only flag a slow load for the very first fetch (empty list) — background
+    // refreshes shouldn't flash a "taking a while" banner over a working inbox.
+    const isInitial = convosRef.current.length === 0;
+    const slowTimer = isInitial ? setTimeout(() => setSlowLoad(true), 4_000) : null;
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), 15_000);
     try {
-      const res = await fetch(`/api/dashboard/chat/conversations?_t=${Date.now()}`);
+      const res = await fetch(`/api/dashboard/chat/conversations?_t=${Date.now()}`, { signal: controller.signal });
       const data = await res.json();
       if (!data.success) {
         setLoading(false);
+        setLoadError(true);
         return;
       }
       setConvos(data.conversations);
+      setLoadError(false);
       if (data.tenantId) {
         setTenantId(data.tenantId);
       }
@@ -119,7 +131,15 @@ export default function ChatSidebar() {
         routerRef.current.push(`/dashboard/chat?conversationId=${data.conversations[0].id}`);
       }
     } catch {
+      // Keep any already-loaded list on screen (loadError still surfaces a
+      // non-blocking "couldn't refresh" banner); only a truly empty list turns
+      // this into a full blocking error state below.
       setLoading(false);
+      setLoadError(true);
+    } finally {
+      if (slowTimer) clearTimeout(slowTimer);
+      clearTimeout(abortTimer);
+      setSlowLoad(false);
     }
   }, []); // ← intentionally empty: uses refs for activeId and router
 
@@ -316,6 +336,21 @@ export default function ChatSidebar() {
         {loading ? (
           <div className="p-3 space-y-1">
             {[...Array(6)].map((_, i) => <SkeletonRow key={i} />)}
+            {slowLoad && (
+              <p className="text-center text-[11px] text-muted-foreground/60 pt-2">
+                Taking longer than usual…
+              </p>
+            )}
+          </div>
+        ) : loadError && convos.length === 0 ? (
+          <div className="py-16 px-6 text-center flex flex-col items-center gap-3">
+            <p className="text-[13px] text-muted-foreground">Couldn&rsquo;t load conversations.</p>
+            <button
+              onClick={() => { setLoading(true); load(); }}
+              className="text-[12px] font-medium px-3 py-1.5 rounded-lg bg-secondary hover:bg-[#E8ECF0] dark:hover:bg-white/8 text-foreground transition-colors"
+            >
+              Retry
+            </button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-16 px-6 text-center">
@@ -324,7 +359,14 @@ export default function ChatSidebar() {
             </p>
           </div>
         ) : (
-          filtered.map((conv) => {
+          <>
+            {loadError && (
+              <div className="mx-3 mt-3 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300">
+                <p className="text-[11.5px]">Couldn&rsquo;t refresh — showing last known conversations.</p>
+                <button onClick={() => load()} className="text-[11.5px] font-semibold underline flex-shrink-0">Retry</button>
+              </div>
+            )}
+          {filtered.map((conv) => {
             const isActive = conv.id === activeId;
             const phone = conv.leads?.phone ?? '';
             const name = getDisplayName(conv, getContactByPhone);
@@ -397,7 +439,8 @@ export default function ChatSidebar() {
                 </div>
               </button>
             );
-          })
+          })}
+          </>
         )}
       </div>
     </div>

@@ -195,6 +195,9 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [slowLoad, setSlowLoad] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   const [conversationMeta, setConversationMeta] = useState<SharedConversationMeta | null>(null);
   const [togglingMode, setTogglingMode] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -474,26 +477,42 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   useEffect(() => {
     if (!conversationId) { setConversationMeta(null); setMessages([]); onDataLoaded?.(null, []); return; }
     setLoadingMessages(true);
+    setLoadError(false);
+    setSlowLoad(false);
     setMessages([]);
     setSearchOpen(false);
     setSearchQuery('');
 
-    fetch(`/api/dashboard/chat/conversation?id=${conversationId}&_t=${Date.now()}`)
+    const controller = new AbortController();
+    const slowTimer = setTimeout(() => setSlowLoad(true), 4_000);
+    const abortTimer = setTimeout(() => controller.abort(), 15_000);
+
+    fetch(`/api/dashboard/chat/conversation?id=${conversationId}&_t=${Date.now()}`, { signal: controller.signal })
       .then(r => r.json())
       .then(data => {
+        if (controller.signal.aborted) return; // superseded by a newer conversation switch
         if (data.success) {
           const meta = data.conversation as SharedConversationMeta;
           const msgs = data.messages as Message[];
           setConversationMeta(meta);
           setMessages(msgs);
           onDataLoaded?.(meta, msgs);
+          setTimeout(() => scrollToBottom(false), 80);
+        } else {
+          setLoadError(true);
         }
         setLoadingMessages(false);
-        setTimeout(() => scrollToBottom(false), 80);
       })
-      .catch(() => setLoadingMessages(false));
+      .catch(() => {
+        if (controller.signal.aborted) return; // superseded, not a real failure
+        setLoadingMessages(false);
+        setLoadError(true);
+      })
+      .finally(() => { clearTimeout(slowTimer); clearTimeout(abortTimer); setSlowLoad(false); });
+
+    return () => { controller.abort(); clearTimeout(slowTimer); clearTimeout(abortTimer); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId, queryTrigger]);
+  }, [conversationId, queryTrigger, reloadTick]);
 
   // ── Effect 2: Supabase Realtime — live INSERT + UPDATE ────────────────────
   // Server-side filter on conversation_id (REPLICA IDENTITY FULL is enabled).
@@ -1264,6 +1283,21 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                 <Skeleton className={cn('h-11 rounded-2xl', w)} />
               </div>
             ))}
+            {slowLoad && (
+              <p className="text-center text-[11px] text-muted-foreground/60 pt-2">
+                Taking longer than usual…
+              </p>
+            )}
+          </div>
+        ) : loadError ? (
+          <div className="flex flex-col items-center justify-center h-full gap-3 py-20">
+            <p className="text-[13px] text-muted-foreground">Couldn&rsquo;t load this conversation.</p>
+            <button
+              onClick={() => setReloadTick((t) => t + 1)}
+              className="text-[12px] font-medium px-3 py-1.5 rounded-lg bg-secondary hover:bg-[#E8ECF0] dark:hover:bg-white/8 text-foreground transition-colors"
+            >
+              Retry
+            </button>
           </div>
         ) : filteredFeed.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 py-20">
