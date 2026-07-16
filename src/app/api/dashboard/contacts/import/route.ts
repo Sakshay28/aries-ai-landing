@@ -8,6 +8,7 @@ import { getTenantId } from '@/lib/auth/getTenantId';
 import { sanitizeInput, isValidEmail } from '@/lib/utils/safety';
 import { normalizePhone, isValidPhone } from '@/lib/utils/phone';
 import { cleanContactName } from '@/lib/broadcast/recipient-name';
+import { computeColdStartBaseline } from '@/lib/scoring/cold-start';
 
 const MAX_ROWS = 5_000;
 
@@ -262,6 +263,18 @@ export async function POST(req: NextRequest) {
           skipped++;
         }
       } else {
+        // Deterministic cold-start baseline from the metadata we already have —
+        // so imported leads enter the pipeline with a real score/status/signals
+        // instead of being frozen at 'new'/0 until they happen to message us.
+        const baseline = computeColdStartBaseline({
+          name: c.name,
+          email: c.email,
+          phone,
+          notes: c.notes,
+          source: c.source ?? 'csv_import',
+          channel: 'manual',
+        });
+
         toInsert.push({
           tenant_id: tenantId,
           // Store the real name or NULL — never the phone-as-name (that pollutes
@@ -273,8 +286,9 @@ export async function POST(req: NextRequest) {
           source_detail: 'csv_import',
           notes: c.notes,
           ...(c.birthday && { birthday: c.birthday }),
-          lead_status: 'new',
-          lead_score: 0,
+          lead_status: baseline.status,
+          lead_score: baseline.score,
+          buying_signals: baseline.signals,
         });
       }
     }
