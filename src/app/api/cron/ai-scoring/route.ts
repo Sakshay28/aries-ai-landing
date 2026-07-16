@@ -35,6 +35,13 @@ const BATCH_SIZE      = 3;   // Hobby plan: 10s function limit, ~2-3s per Gemini
 const MAX_RETRIES     = 3;
 const RETRY_DELAYS_MS = [30_000, 120_000, 300_000] as const;
 
+// A job claimed as 'processing' whose function timed out (Hobby 10s cap) or crashed
+// is never re-fetched and — because of the one-active-job-per-conversation unique
+// index — permanently blocks all future scoring for that conversation. Reclaim any
+// 'processing' job older than this so it retries (or dies once retries are exhausted).
+const STUCK_PROCESSING_MS = 3 * 60 * 1000; // 3 min — comfortably above the 10s budget
+const RECLAIM_LIMIT       = 25;            // bound the work to stay inside the budget
+
 // ── Route ─────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest)  { return handler(req); }
@@ -49,6 +56,9 @@ async function handler(req: NextRequest): Promise<NextResponse> {
   const start   = Date.now();
 
   console.log(`[ai-scoring cron:${batchId}] starting batch of ${BATCH_SIZE}`);
+
+  // ── 0. Reclaim stuck 'processing' jobs (timed-out / crashed claims) ───────
+  await reclaimStuckJobs(batchId);
 
   // ── 1. Fetch claimable jobs ─────────────────────────────────────────────
   const now = new Date().toISOString();
@@ -198,6 +208,40 @@ async function handler(req: NextRequest): Promise<NextResponse> {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+
+// Reclaim jobs stuck in 'processing' past the timeout budget. Requeue them as
+// 'pending' (so the next batch retries) unless retries are exhausted, in which
+// case they go to dead_letter — either way they stop blocking their conversation.
+async function reclaimStuckJobs(batchId: string): Promise<void> {
+  const cutoff = new Date(Date.now() - STUCK_PROCESSING_MS).toISOString();
+  const { data: stuck, error } = await supabaseAdmin
+    .from('ai_jobs')
+    .select('id, tenant_id, retry_count')
+    .eq('status', 'processing')
+    .lt('started_at', cutoff)
+    .limit(RECLAIM_LIMIT);
+
+  if (error) { console.error(`[ai-scoring cron:${batchId}] reclaim query error:`, error.message); return; }
+  if (!stuck || stuck.length === 0) return;
+
+  let requeued = 0, killed = 0;
+  for (const job of stuck) {
+    const attempts = (job.retry_count ?? 0) + 1;
+    if (attempts > MAX_RETRIES) {
+      await markJobDead(job.id, job.tenant_id, 5, `Stuck in processing > ${STUCK_PROCESSING_MS}ms; retries exhausted`, 0);
+      killed++;
+    } else {
+      await supabaseAdmin.from('ai_jobs').update({
+        status:        'pending',
+        retry_count:   attempts,
+        next_retry_at: null,
+        last_error:    'reclaimed: stuck in processing (function timeout/crash)',
+      }).eq('id', job.id);
+      requeued++;
+    }
+  }
+  console.warn(`[ai-scoring cron:${batchId}] reclaimed ${stuck.length} stuck jobs (requeued=${requeued}, dead=${killed})`);
+}
 
 async function markJobDead(
   jobId: string, tenantId: string, fallbackLevel: number,
