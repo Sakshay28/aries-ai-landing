@@ -30,6 +30,9 @@ export type AuditAction =
   | 'note_deleted'
   | 'note_edited'
   | 'settings_updated'
+  | 'data_export_requested'
+  | 'account_deletion_requested'
+  | 'account_deletion_cancelled'
   // Platform-admin actions — a human at Aries AI (not this tenant's own team)
   // touching this tenant's data via the internal admin tools. Surfaced in
   // the client's own Audit Log page so access is provable, not just promised.

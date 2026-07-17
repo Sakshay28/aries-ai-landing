@@ -12,6 +12,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { PLAN_DETAILS } from '@/lib/types';
 import { env } from '@/lib/env';
 import { logAuthEvent } from '@/lib/auth/events';
+import { recordConsent } from '@/lib/legal/consent';
 
 export async function POST(req: NextRequest) {
   const ip = req.headers.get('x-vercel-forwarded-for')?.split(',')[0]?.trim()
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest) {
            || 'unknown';
 
   try {
-    const { email, fullName, businessName } = await req.json();
+    const { email, fullName, businessName, consentAccepted } = await req.json();
 
     if (!email || !fullName) {
       return NextResponse.json({ success: false, error: 'Email and Name are required' }, { status: 400 });
@@ -63,6 +64,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, message: 'Already provisioned', tenantId: existingUser.tenant_id });
     }
 
+    // Only actually creating a new tenant requires consent — checked here,
+    // after auth and the idempotency check, so a re-call for an already-
+    // provisioned account never re-demands it.
+    if (consentAccepted !== true) {
+      return NextResponse.json(
+        { success: false, error: 'You must accept the Terms of Service and Privacy Policy to continue.' },
+        { status: 400 }
+      );
+    }
+
     // Create the tenant
     const planDetail = PLAN_DETAILS.starter;
     const finalBusinessName = String(businessName ?? '').trim() || `${fullName.split(' ')[0]}'s Business`;
@@ -102,6 +113,24 @@ export async function POST(req: NextRequest) {
       await supabaseAdmin.from('tenants').delete().eq('id', tenant.id);
       await logAuthEvent('signup_provision_failed', verifiedEmail, ip, { step: 'user', error: userError.message });
       return NextResponse.json({ success: false, error: 'Failed to create user profile.' }, { status: 500 });
+    }
+
+    // A tenant created without a provable consent record is a compliance
+    // gap — roll the whole signup back rather than let it silently succeed.
+    try {
+      await recordConsent({
+        tenantId: tenant.id,
+        email: verifiedEmail,
+        ip,
+        userAgent: req.headers.get('user-agent'),
+        source: 'otp_signup',
+      });
+    } catch (consentErr) {
+      console.error('❌ Provisioning: consent recording failed, rolling back', consentErr);
+      await supabaseAdmin.from('users').delete().eq('tenant_id', tenant.id);
+      await supabaseAdmin.from('tenants').delete().eq('id', tenant.id);
+      await logAuthEvent('signup_provision_failed', verifiedEmail, ip, { step: 'consent', error: String(consentErr) });
+      return NextResponse.json({ success: false, error: 'Failed to record consent. Please try again.' }, { status: 500 });
     }
 
     await supabaseAdmin.from('analytics_events').insert({

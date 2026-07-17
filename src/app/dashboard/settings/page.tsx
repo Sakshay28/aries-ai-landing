@@ -7,6 +7,7 @@ import {
   Users, Zap, Save, CheckCircle2, AlertCircle, Plus, X,
   MessageSquare, BrainCircuit, Bell, Copy, Eye, EyeOff, Key, HelpCircle, ExternalLink, RefreshCw, Star,
   ChevronDown, ChevronUp, Image as ImageIcon, UserCheck, Info, Target,
+  ShieldCheck, Download, ClipboardList, Loader2, Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PhoneInput } from '@/components/ui/phone-input';
@@ -102,6 +103,7 @@ const TABS = [
   { id: 'leads', label: 'Lead Routing', icon: Target },
   { id: 'followup', label: 'Follow-ups', icon: Bell },
   { id: 'offhours', label: 'Off-Hours', icon: Clock },
+  { id: 'privacy', label: 'Privacy & Data', icon: ShieldCheck },
 ];
 
 function SectionCard({ title, icon: Icon, children }: {
@@ -121,6 +123,218 @@ function SectionCard({ title, icon: Icon, children }: {
       </div>
       <div className="p-6 space-y-5">{children}</div>
     </div>
+  );
+}
+
+function PrivacyDataTab({ businessName }: { businessName: string }) {
+  const [exporting, setExporting] = useState(false);
+  const [deletionStatus, setDeletionStatus] = useState<{ status: string | null; scheduledFor: string | null }>({ status: null, scheduledFor: null });
+  const [loadingStatus, setLoadingStatus] = useState(true);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/dashboard/data-deletion')
+      .then(res => res.json())
+      .then(data => setDeletionStatus({ status: data.status, scheduledFor: data.scheduledFor }))
+      .catch(() => {})
+      .finally(() => setLoadingStatus(false));
+  }, []);
+
+  async function requestDeletion() {
+    if (confirmText.trim() !== businessName) {
+      toast.error('Business name does not match. Type it exactly to confirm.');
+      return;
+    }
+    setDeleting(true);
+    try {
+      const res = await fetch('/api/dashboard/data-deletion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmBusinessName: confirmText.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to schedule account deletion.');
+        return;
+      }
+      toast.success(data.message);
+      setDeletionStatus({ status: 'pending', scheduledFor: data.scheduledFor });
+      setConfirmOpen(false);
+      setConfirmText('');
+    } catch {
+      toast.error('Failed to schedule account deletion. Please try again.');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function cancelDeletion() {
+    setCancelling(true);
+    try {
+      const res = await fetch('/api/dashboard/data-deletion', { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to cancel deletion.');
+        return;
+      }
+      toast.success(data.message);
+      setDeletionStatus({ status: null, scheduledFor: null });
+    } catch {
+      toast.error('Failed to cancel deletion. Please try again.');
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function downloadExport() {
+    setExporting(true);
+    try {
+      const res = await fetch('/api/dashboard/settings/export');
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body.error || 'Failed to export your data.');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const date = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `ariesai-data-export-${date}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Your data export has downloaded.');
+    } catch {
+      toast.error('Failed to export your data. Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <motion.div key="privacy" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+      <SectionCard title="Download Your Data" icon={Download}>
+        <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
+          Download everything stored about your account in one file — business profile, team, leads,
+          conversations, messages, bookings, knowledge base, notes, and your consent history. Limited to
+          3 downloads per day. Owners and admins only.
+        </p>
+        <button
+          onClick={downloadExport}
+          disabled={exporting}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-opacity"
+          style={{
+            background: '#10B981',
+            color: 'white',
+            opacity: exporting ? 0.7 : 1,
+            cursor: exporting ? 'wait' : 'pointer',
+          }}
+        >
+          {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+          {exporting ? 'Preparing export…' : 'Download my data'}
+        </button>
+      </SectionCard>
+
+      <SectionCard title="Account Access History" icon={ClipboardList}>
+        <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
+          Every change your team makes, and any time Aries AI support accesses your account, is logged
+          and visible to you — not just promised.
+        </p>
+        <a
+          href="/dashboard/settings/audit-log"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"
+          style={{ background: 'var(--secondary)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+        >
+          <ClipboardList className="w-4 h-4" /> View Audit Log
+        </a>
+      </SectionCard>
+
+      {!loadingStatus && (
+        <div className="rounded-2xl border overflow-hidden" style={{ borderColor: '#EF4444' }}>
+          <div className="flex items-center gap-3 px-6 py-4 border-b" style={{ borderColor: '#EF4444', background: 'rgba(239,68,68,0.06)' }}>
+            <Trash2 className="w-4 h-4" style={{ color: '#EF4444' }} />
+            <span className="text-sm font-semibold" style={{ color: '#EF4444' }}>Danger Zone</span>
+          </div>
+          <div className="p-6 space-y-4">
+            {deletionStatus.status === 'pending' ? (
+              <>
+                <p className="text-sm" style={{ color: 'var(--foreground)' }}>
+                  Your account is scheduled for permanent deletion on{' '}
+                  <strong>{deletionStatus.scheduledFor ? new Date(deletionStatus.scheduledFor).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</strong>.
+                  Your AI assistant is paused and billing has been cancelled.
+                </p>
+                <button
+                  onClick={cancelDeletion}
+                  disabled={cancelling}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold"
+                  style={{ background: '#10B981', color: 'white', opacity: cancelling ? 0.7 : 1, cursor: cancelling ? 'wait' : 'pointer' }}
+                >
+                  {cancelling ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  {cancelling ? 'Cancelling…' : 'Cancel Deletion — Keep My Account'}
+                </button>
+              </>
+            ) : !confirmOpen ? (
+              <>
+                <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
+                  Permanently delete your account and all data. Your AI assistant is paused and billing is
+                  cancelled immediately; all data is permanently erased after a 30-day grace period, during
+                  which you can cancel. Owner only.
+                </p>
+                <button
+                  onClick={() => setConfirmOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold"
+                  style={{ background: '#EF4444', color: 'white', cursor: 'pointer' }}
+                >
+                  <Trash2 className="w-4 h-4" /> Delete My Account
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm" style={{ color: 'var(--foreground)' }}>
+                  Type <strong>{businessName}</strong> to confirm. This starts a 30-day countdown — your AI
+                  and billing stop immediately, and everything is permanently erased at the end unless cancelled.
+                </p>
+                <input
+                  type="text"
+                  value={confirmText}
+                  onChange={e => setConfirmText(e.target.value)}
+                  placeholder={businessName}
+                  className="w-full h-10 px-3 rounded-xl text-sm outline-none"
+                  style={{ background: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+                />
+                <div className="flex gap-3">
+                  <button
+                    onClick={requestDeletion}
+                    disabled={deleting || confirmText.trim() !== businessName}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold"
+                    style={{
+                      background: '#EF4444', color: 'white',
+                      opacity: deleting || confirmText.trim() !== businessName ? 0.5 : 1,
+                      cursor: deleting || confirmText.trim() !== businessName ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                    {deleting ? 'Deleting…' : 'Confirm Permanent Deletion'}
+                  </button>
+                  <button
+                    onClick={() => { setConfirmOpen(false); setConfirmText(''); }}
+                    className="px-4 py-2.5 rounded-xl text-sm font-semibold"
+                    style={{ background: 'var(--secondary)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </motion.div>
   );
 }
 
@@ -1694,6 +1908,9 @@ export default function SettingsPage() {
           </SectionCard>
         </motion.div>
       )}
+
+      {/* Tab: Privacy & Data */}
+      {activeTab === 'privacy' && <PrivacyDataTab businessName={settings.business_name} />}
 
       {/* Dirty state save reminder */}
       {dirty && (

@@ -28,6 +28,7 @@ const ACTION_COLORS: Record<string, string> = {
   bot_resumed:          "#22C55E",
   broadcast_sent:       "#A855F7",
   settings_updated:     "#9CA3AF",
+  data_export_requested: "#0EA5E9",
   // Platform-admin (Aries AI support staff) actions — deliberately distinct
   // from the team's own colors above so they stand out at a glance.
   platform_admin_viewed_credentials: "#FB923C",
