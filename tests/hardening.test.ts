@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 
 // ── Imports under test ──
-import { guardInput, guardOutput, shouldRedirectToHuman, HALLUCINATION_REDIRECT } from '@/lib/ai/guardrails';
+import { guardInput, guardOutput, shouldRedirectToHuman, isPolicyPermissionQuestion, HALLUCINATION_REDIRECT } from '@/lib/ai/guardrails';
 import { checkBroadcastCap, truncateInput, buildIdempotencyKey } from '@/lib/abuse/prevention';
 import { auditTenantConfig, applyTenantDefaults, DEFAULT_GREETING } from '@/lib/tenant/defaults';
 import { detectCircularFlow, findBrokenVariableRefs, findMissingFallbacks, validateFlow } from '@/app/dashboard/flows/utils';
@@ -97,6 +97,64 @@ describe('AI Guardrails — Hallucination Redirect', () => {
 
   it('HALLUCINATION_REDIRECT message contains "not fully sure"', () => {
     expect(HALLUCINATION_REDIRECT).toContain('not fully sure');
+  });
+});
+
+describe('AI Guardrails — Policy/Permission Question Detection', () => {
+  it('detects the exact reported incident: "are bodyguards allowed"', () => {
+    expect(isPolicyPermissionQuestion('are bodyguards allowed here?')).toBe(true);
+  });
+
+  it('detects "can I bring my pet"', () => {
+    expect(isPolicyPermissionQuestion('can I bring my pet dog with me?')).toBe(true);
+  });
+
+  it('detects "is it allowed to bring outside food"', () => {
+    expect(isPolicyPermissionQuestion('is it allowed to bring outside food?')).toBe(true);
+  });
+
+  it('detects "do you allow smoking"', () => {
+    expect(isPolicyPermissionQuestion('do you allow smoking on the premises?')).toBe(true);
+  });
+
+  it('detects "what is your policy on cancellations"', () => {
+    expect(isPolicyPermissionQuestion('what is your policy on cancellations?')).toBe(true);
+  });
+
+  it('detects Hinglish "allowed hai kya"', () => {
+    expect(isPolicyPermissionQuestion('outside food allowed hai kya')).toBe(true);
+  });
+
+  it('does NOT flag an ordinary booking question', () => {
+    expect(isPolicyPermissionQuestion('I want to book a table for 4 people tonight')).toBe(false);
+  });
+
+  it('does NOT flag a pricing question', () => {
+    expect(isPolicyPermissionQuestion('how much does it cost for 2 people?')).toBe(false);
+  });
+});
+
+describe('AI Guardrails — Hallucination Redirect for Permission Questions', () => {
+  const BODYGUARDS = 'are bodyguards allowed?';
+
+  it('redirects a permission question with no knowledge base, even at very high self-reported confidence', () => {
+    expect(shouldRedirectToHuman(0.95, false, 'general_enquiry', BODYGUARDS)).toBe(true);
+  });
+
+  it('redirects a permission question with a KB present but confidence below 0.85', () => {
+    expect(shouldRedirectToHuman(0.7, true, 'general_enquiry', BODYGUARDS)).toBe(true);
+  });
+
+  it('does NOT redirect a permission question when a KB is present and confidence is very high', () => {
+    expect(shouldRedirectToHuman(0.9, true, 'general_enquiry', BODYGUARDS)).toBe(false);
+  });
+
+  it('leaves ordinary (non-permission) questions on the existing confidence/KB logic', () => {
+    expect(shouldRedirectToHuman(0.9, false, 'general_enquiry', 'what time do you open?')).toBe(false);
+  });
+
+  it('defaults to the old behavior when no customer message is passed (backward compatible)', () => {
+    expect(shouldRedirectToHuman(0.9, false, 'general_enquiry')).toBe(false);
   });
 });
 

@@ -100,6 +100,31 @@ export function guardOutput(reply: string, fallback: string): string {
   return reply;
 }
 
+// ─── POLICY / PERMISSION QUESTION DETECTOR ────────────────────
+// Catches "is X allowed", "can I bring Y", "do you allow Z" style questions —
+// the highest-risk category for hallucination. A wrong "yes" here can create a
+// real safety or liability problem (e.g. "are bodyguards allowed" answered yes
+// with zero information behind it), and the model tends to answer these
+// decisively with high self-reported confidence even when it has no grounding
+// at all — so shouldRedirectToHuman below does NOT trust confidence for this
+// category the way it does for everything else.
+const POLICY_PERMISSION_PATTERNS: RegExp[] = [
+  /\b(is|are)\s+(\w+\s+){0,4}allowed\b/i,
+  /\ballowed\s+to\b/i,
+  /\bcan\s+(i|we)\s+(bring|carry|have|get|take)\b/i,
+  /\bdo\s+you\s+(allow|permit)\b/i,
+  /\bis\s+it\s+(ok|okay|fine|possible|permitted|permissible)\s+to\b/i,
+  /\bpermitted\s+to\b/i,
+  /\byour\s+policy\s+(on|about|regarding)\b/i,
+  /\bwhat('s| is)\s+your\s+policy\b/i,
+  /\bam\s+i\s+allowed\b/i,
+  /\b(allowed|permission)\s+(hai|milega|milegi|milta)\b/i, // Hinglish: "allowed hai kya", "permission milega"
+];
+
+export function isPolicyPermissionQuestion(message: string): boolean {
+  return POLICY_PERMISSION_PATTERNS.some(p => p.test(message));
+}
+
 // ─── HALLUCINATION GUARD ──────────────────────────────────────
 // Only redirect when AI is genuinely uncertain AND there's no KB to back it up.
 // Previous threshold of 0.55 was too aggressive — conversational replies like
@@ -108,11 +133,21 @@ export function shouldRedirectToHuman(
   confidence: number,
   hasKnowledgeBase: boolean,
   intent: string,
+  customerMessage = '',
   threshold = 0.25
 ): boolean {
   // Never redirect pure conversational intents — AI can handle these without a KB.
   const conversationalIntents = ['greeting', 'thank_you', 'confirm', 'cancel', 'unknown'];
   if (conversationalIntents.includes(intent)) return false;
+
+  // Policy/permission questions: redirect with no KB at all, and redirect even
+  // with a KB unless the model is very highly confident — a KB existing doesn't
+  // guarantee this specific policy is the fact it actually contains.
+  if (isPolicyPermissionQuestion(customerMessage)) {
+    if (!hasKnowledgeBase) return true;
+    if (confidence < 0.85) return true;
+  }
+
   if (confidence < threshold && !hasKnowledgeBase) return true;
   if (intent === 'menu' && !hasKnowledgeBase && confidence < 0.6) return true;
   return false;
@@ -132,4 +167,5 @@ CRITICAL SAFETY RULES (highest priority — override everything else):
 - NEVER provide information about: weapons, illegal activities, self-harm, or unrelated investment/political topics
 - If a customer question falls outside the business scope, say you can only assist with business-related queries
 - If you are genuinely uncertain about a product/service detail, say "I'm not fully sure — let me get our team to confirm" instead of guessing
-- NEVER invent menu items, prices, policies, or facts not provided to you`;
+- NEVER invent menu items, prices, policies, or facts not provided to you
+- PERMISSION QUESTIONS (highest priority of all): if a customer asks whether something is allowed, permitted, or possible — for example "are bodyguards allowed", "can I bring my pet", "is smoking allowed", "can I bring outside food" — you may answer yes or no ONLY if that exact policy is explicitly stated in the information given to you. If it is not explicitly stated, you do not know the answer. Do not guess based on what seems typical or reasonable for a business like this. Say you are not certain and will check with the team. A wrong "yes" on a permission question can create a real safety or liability problem for the business — this matters more than sounding helpful in the moment`;
