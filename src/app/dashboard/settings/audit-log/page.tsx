@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { ClipboardList, RefreshCw, Loader2, User, Calendar } from "lucide-react";
+import { ClipboardList, RefreshCw, Loader2, User, Calendar, ShieldAlert } from "lucide-react";
 
 interface AuditEntry {
   id: string;
@@ -28,7 +28,25 @@ const ACTION_COLORS: Record<string, string> = {
   bot_resumed:          "#22C55E",
   broadcast_sent:       "#A855F7",
   settings_updated:     "#9CA3AF",
+  // Platform-admin (Aries AI support staff) actions — deliberately distinct
+  // from the team's own colors above so they stand out at a glance.
+  platform_admin_viewed_credentials: "#FB923C",
+  platform_admin_edited_tenant:      "#FB923C",
+  platform_admin_impersonated:       "#F43F5E",
+  platform_admin_approved_signup:    "#FB923C",
 };
+
+// Human-readable labels for platform-admin entries — raw snake_case reads
+// like an internal log; these are written for the client reading their own
+// account's access history.
+const PLATFORM_ADMIN_LABELS: Record<string, string> = {
+  platform_admin_viewed_credentials: "Aries AI support viewed your account settings",
+  platform_admin_edited_tenant:      "Aries AI support updated your account settings",
+  platform_admin_impersonated:       "Aries AI support logged in to your account (support session)",
+  platform_admin_approved_signup:    "Aries AI support approved your account",
+};
+
+const isPlatformAdminAction = (action: string) => action.startsWith("platform_admin_");
 
 export default function AuditLogPage() {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
@@ -57,7 +75,9 @@ export default function AuditLogPage() {
           </div>
           <div>
             <h1 className="text-[18px] font-bold">Audit Log</h1>
-            <p className="text-[12px]" style={{ color: "rgba(255,255,255,0.4)" }}>All configuration changes, sorted by latest</p>
+            <p className="text-[12px]" style={{ color: "rgba(255,255,255,0.4)" }}>
+              All configuration changes, sorted by latest — including any time Aries AI support staff accessed this account
+            </p>
           </div>
         </div>
         <button onClick={load} disabled={loading} className="flex items-center gap-2 px-4 py-2 rounded-xl text-[12px]" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.6)" }}>
@@ -76,19 +96,26 @@ export default function AuditLogPage() {
         {entries.map((entry, i) => {
           const color = ACTION_COLORS[entry.action] ?? "#9CA3AF";
           const isExp = expanded === entry.id;
+          const isSupportAccess = isPlatformAdminAction(entry.action);
+          const label = PLATFORM_ADMIN_LABELS[entry.action] ?? entry.action.replace(/_/g, " ");
           return (
-            <div key={entry.id} className={i > 0 ? "border-t" : ""} style={{ borderColor: "rgba(255,255,255,0.04)" }}>
+            <div key={entry.id} className={i > 0 ? "border-t" : ""} style={{ borderColor: "rgba(255,255,255,0.04)", background: isSupportAccess ? "rgba(251,146,60,0.04)" : undefined }}>
               <button onClick={() => setExpanded(isExp ? null : entry.id)} className="w-full flex items-start gap-4 px-5 py-3.5 text-left hover:bg-white/[0.02] transition-colors">
                 <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: color }} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[13px] font-medium" style={{ color }}>{entry.action.replace(/_/g, " ")}</span>
+                    <span className="text-[13px] font-medium" style={{ color }}>{label}</span>
                     <span className="text-[11px] px-1.5 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.4)" }}>{entry.entity}</span>
+                    {isSupportAccess && (
+                      <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ background: "rgba(251,146,60,0.12)", color: "#FB923C" }}>
+                        <ShieldAlert className="w-2.5 h-2.5" />Support access
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 mt-1">
                     {entry.actor_email && (
                       <span className="flex items-center gap-1 text-[10px]" style={{ color: "rgba(255,255,255,0.3)" }}>
-                        <User className="w-2.5 h-2.5" />{entry.actor_email}
+                        <User className="w-2.5 h-2.5" />{isSupportAccess ? "Aries AI Support" : entry.actor_email}
                       </span>
                     )}
                     <span className="flex items-center gap-1 text-[10px]" style={{ color: "rgba(255,255,255,0.25)" }}>

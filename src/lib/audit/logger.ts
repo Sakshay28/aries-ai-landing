@@ -29,7 +29,14 @@ export type AuditAction =
   | 'note_created'
   | 'note_deleted'
   | 'note_edited'
-  | 'settings_updated';
+  | 'settings_updated'
+  // Platform-admin actions — a human at Aries AI (not this tenant's own team)
+  // touching this tenant's data via the internal admin tools. Surfaced in
+  // the client's own Audit Log page so access is provable, not just promised.
+  | 'platform_admin_viewed_credentials'
+  | 'platform_admin_edited_tenant'
+  | 'platform_admin_impersonated'
+  | 'platform_admin_approved_signup';
 
 export interface AuditEntry {
   tenant_id: string;

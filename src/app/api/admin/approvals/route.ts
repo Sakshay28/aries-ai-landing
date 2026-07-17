@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getCurrentUser } from '@/lib/auth/getCurrentUser';
+import { logAudit } from '@/lib/audit/logger';
 
 export async function GET() {
   const me = await getCurrentUser();
@@ -58,5 +59,15 @@ export async function POST(req: Request) {
     .eq('id', tenant_id);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  logAudit({
+    tenant_id,
+    actor_id: me.id,
+    actor_email: me.email,
+    action: 'platform_admin_approved_signup',
+    entity: 'tenant',
+    entity_id: tenant_id,
+  });
+
   return NextResponse.json({ success: true });
 }
