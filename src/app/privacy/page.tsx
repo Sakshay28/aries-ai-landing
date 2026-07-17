@@ -23,7 +23,7 @@ export default function PrivacyPolicyPage() {
       {/* Content */}
       <div style={{ maxWidth: 720, margin: "0 auto", padding: "60px 24px 120px" }}>
         <h1 style={{ fontSize: 36, fontWeight: 800, marginBottom: 8, letterSpacing: "-1px" }}>Privacy Policy</h1>
-        <p style={{ color: "#999", fontSize: 14, marginBottom: 48 }}>Last updated: May 7, 2026</p>
+        <p style={{ color: "#999", fontSize: 14, marginBottom: 48 }}>Last updated: July 17, 2026</p>
 
         <Section title="1. Introduction">
           Aries AI (&quot;we&quot;, &quot;our&quot;, or &quot;us&quot;) operates the ariesai.in website and the Aries AI platform (the &quot;Service&quot;). This Privacy Policy informs you of our policies regarding the collection, use, and disclosure of personal data when you use our Service and the choices you have associated with that data.
@@ -69,20 +69,21 @@ export default function PrivacyPolicyPage() {
             <li>Row-Level Security (RLS) for complete tenant data isolation.</li>
             <li>HTTPS encryption for all data in transit.</li>
             <li>HMAC signature verification for all incoming webhooks.</li>
+            <li>Any time our support team accesses your account through internal admin tools, it is logged and visible to you in your dashboard&apos;s Audit Log — not just promised.</li>
           </ul>
         </Section>
 
         <Section title="6. Data Retention">
-          We retain your data for as long as your account is active. Upon account deletion, we delete your personal data within 30 days, except where retention is required by law. WhatsApp message logs are retained for up to 90 days for service quality and dispute resolution.
+          We retain your data for as long as your account is active. WhatsApp message content is automatically deleted after 90 days by an automated daily process. Upon a confirmed account deletion request, your AI assistant is paused and billing is cancelled immediately, and all remaining personal data is permanently deleted within 30 days, except where retention is required by law.
         </Section>
 
         <Section title="7. Your Rights">
           You have the right to:
           <ul style={{ paddingLeft: 20, lineHeight: 2, marginTop: 12 }}>
-            <li>Access, update, or delete your personal information via your dashboard.</li>
-            <li>Export your data in a machine-readable format.</li>
+            <li>Access, update, or delete your personal information directly from your dashboard&apos;s Settings → Privacy &amp; Data page.</li>
+            <li>Export your data in a machine-readable format from that same page — covering your profile, team, leads, conversations, messages, bookings, knowledge base, and notes.</li>
             <li>Withdraw consent for data processing at any time.</li>
-            <li>Request complete account and data deletion by contacting us.</li>
+            <li>Request complete account and data deletion — self-service from your dashboard (account owners), or by contacting us.</li>
           </ul>
         </Section>
 
