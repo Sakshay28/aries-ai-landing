@@ -17,7 +17,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export const maxDuration = 60; // clamped to 10s on Hobby — the time guard below respects that
 
-export const RETENTION_DAYS = 90;
+const RETENTION_DAYS = 90;
 const BATCH_SIZE = 1000;
 const TIME_BUDGET_MS = 8_000;
 
