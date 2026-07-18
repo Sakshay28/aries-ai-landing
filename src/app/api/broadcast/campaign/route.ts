@@ -148,13 +148,18 @@ export async function POST(req: NextRequest) {
       template_language: templateLanguage || 'en',
       delivery_mode:     deliveryMode || 'now',
       scheduled_for:     scheduledAt || null,
-      status:            'draft',
       updated_at:        new Date().toISOString(),
     };
 
     let activeId = campaignId;
 
     if (activeId) {
+      // Deliberately omit `status` here — this save path runs on every edit,
+      // including the auto-save handleLaunch() fires immediately before
+      // calling /api/broadcast/launch. Forcing status back to 'draft'
+      // unconditionally would clobber a campaign that's already
+      // launching/sending/completed (data corruption, and it can race the
+      // CAS-claim in BroadcastEngineService.launchCampaign).
       const { error } = await supabaseAdmin
         .from('broadcast_campaigns')
         .update(campaignPayload)
@@ -166,6 +171,7 @@ export async function POST(req: NextRequest) {
         .from('broadcast_campaigns')
         .insert({
           ...campaignPayload,
+          status:     'draft',
           created_at: new Date().toISOString()
         })
         .select('id')

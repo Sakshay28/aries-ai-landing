@@ -4,6 +4,7 @@ import { decryptToken } from '@/lib/utils/crypto';
 import { AudienceEngineService } from './audience-engine.service';
 import { MetaPayloadBuilderService } from './meta-payload-builder.service';
 import { TemplateParserService } from './template-parser.service';
+import { MetaTemplateSyncService } from './meta-template-sync.service';
 import { ExecutionEventService } from './execution-event.service';
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { pushToDLQ } from '@/lib/queue/deadLetter';
@@ -77,12 +78,27 @@ export class BroadcastEngineService {
       // never-synced template straight through to every recipient, only failing
       // (correctly, but wastefully and later) once each send hits Meta.
       if (campaign.template_name) {
-        const { data: cachedTemplate } = await supabaseAdmin
+        let { data: cachedTemplate } = await supabaseAdmin
           .from('broadcast_templates_cache')
           .select('status')
           .eq('name', campaign.template_name)
           .eq('tenant_id', tenantId)
           .maybeSingle();
+
+        // Nothing in the codebase syncs this cache proactively (no cron, no
+        // UI action) — a tenant's very first launch of a template would always
+        // find it empty here. Sync on demand once rather than hard-failing on
+        // a cache that was never given a chance to be populated.
+        if (!cachedTemplate) {
+          await MetaTemplateSyncService.syncTemplates(tenantId);
+          ({ data: cachedTemplate } = await supabaseAdmin
+            .from('broadcast_templates_cache')
+            .select('status')
+            .eq('name', campaign.template_name)
+            .eq('tenant_id', tenantId)
+            .maybeSingle());
+        }
+
         const templateStatus = cachedTemplate?.status || 'UNKNOWN';
         if (templateStatus === 'REJECTED') {
           return { success: false, error: `Template "${campaign.template_name}" was REJECTED by Meta and cannot be sent. Choose a different template.` };
