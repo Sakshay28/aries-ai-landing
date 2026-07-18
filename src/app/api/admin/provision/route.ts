@@ -18,6 +18,7 @@ import { getCurrentUser } from '@/lib/auth/getCurrentUser';
 import { encryptToken } from '@/lib/utils/crypto';
 import { invalidateTenantAllCaches } from '@/lib/tenant/manager';
 import { trimCredentialFields } from '@/lib/utils/credentials';
+import { logAudit } from '@/lib/audit/logger';
 
 const forbidden = () => NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
@@ -66,6 +67,16 @@ export async function GET(req: NextRequest) {
     // Never send secrets to the browser — mask them.
     if (data.wa_access_token) data.wa_access_token = MASK;
     if (data.wa_app_secret) data.wa_app_secret = MASK;
+
+    // Surfaced on the client's own Audit Log page — proves access, doesn't just promise it.
+    logAudit({
+      tenant_id: tenantId,
+      actor_id: me.id,
+      actor_email: me.email,
+      action: 'platform_admin_viewed_credentials',
+      entity: 'tenant_settings',
+      entity_id: tenantId,
+    });
 
     // Attach the owner email for context.
     const { data: users } = await supabaseAdmin
@@ -168,6 +179,18 @@ export async function PATCH(req: NextRequest) {
   // Flush caches so the bot picks up the new credentials on the very next message.
   await invalidateTenantAllCaches(tenantId);
   console.log(`🟢 [admin/provision] tenant ${tenantId} updated by ${me.email}`);
+
+  // Log which fields changed, never the values — secret fields are only ever
+  // stored encrypted, and this log should never become a second place they leak.
+  logAudit({
+    tenant_id: tenantId,
+    actor_id: me.id,
+    actor_email: me.email,
+    action: 'platform_admin_edited_tenant',
+    entity: 'tenant_settings',
+    entity_id: tenantId,
+    new_value: Object.keys(updates),
+  });
 
   return NextResponse.json({ success: true });
 }

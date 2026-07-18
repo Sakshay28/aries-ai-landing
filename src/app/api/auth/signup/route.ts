@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { PLAN_DETAILS } from '@/lib/types';
 import { checkRedisRateLimit } from '@/lib/redis/client';
+import { recordConsent } from '@/lib/legal/consent';
 import { z } from 'zod';
 
 const signupSchema = z.object({
@@ -21,7 +22,10 @@ const signupSchema = z.object({
   businessName: z.string().min(2, 'Business name must be at least 2 characters').max(100),
   businessType: z.string().optional(),
   plan: z.enum(['starter', 'growth', 'pro', 'enterprise']).optional(),
-  brand: z.enum(['aries', 'libra']).optional()
+  brand: z.enum(['aries', 'libra']).optional(),
+  consentAccepted: z.literal(true, {
+    message: 'You must accept the Terms of Service and Privacy Policy to continue.',
+  }),
 });
 
 // ═══════════════════════════════════════
@@ -125,6 +129,31 @@ export async function POST(req: NextRequest) {
         });
       }
       throw userError;
+    }
+
+    // A tenant created without a provable consent record is a compliance
+    // gap — roll the whole signup back rather than let it silently succeed.
+    try {
+      await recordConsent({
+        tenantId: tenant.id,
+        email,
+        ip,
+        userAgent: req.headers.get('user-agent'),
+        source: 'password_signup',
+      });
+    } catch (consentErr) {
+      console.error('❌ Signup: consent recording failed, rolling back', consentErr);
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(authUser.id);
+        await supabaseAdmin.from('users').delete().eq('tenant_id', tenant.id);
+        await supabaseAdmin.from('tenants').delete().eq('id', tenant.id);
+      } catch (cleanupErr) {
+        console.error('❌ Signup rollback (consent failure) failed — orphan tenant/user may exist:', cleanupErr);
+      }
+      return NextResponse.json(
+        { success: false, error: 'Failed to record consent. Please try again.' },
+        { status: 500 }
+      );
     }
 
     // 4. Send email verification link via Resend

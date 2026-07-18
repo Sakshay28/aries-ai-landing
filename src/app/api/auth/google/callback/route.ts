@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { PLAN_DETAILS } from '@/lib/types';
 import { env } from '@/lib/env';
 import { logAuthEvent } from '@/lib/auth/events';
+import { recordConsent } from '@/lib/legal/consent';
 
 export async function GET(req: NextRequest) {
   const { searchParams, origin } = req.nextUrl;
@@ -120,7 +121,15 @@ export async function GET(req: NextRequest) {
     return applySessionCookies(NextResponse.redirect(`${origin}/dashboard`));
   }
 
-  // New user — auto-provision tenant + user row
+  // New user — auto-provision tenant + user row, but never without a
+  // recorded consent: the signup page only sets this cookie once its
+  // checkbox is checked, before redirecting into the Google OAuth flow.
+  const consentGiven = req.cookies.get('google_oauth_consent')?.value === '1';
+  if (!consentGiven) {
+    await logAuthEvent('google_oauth_failed', user.email ?? '', ip, { error: 'consent_not_given', step: 'provision' });
+    return applySessionCookies(NextResponse.redirect(`${origin}/signup?error=consent_required`));
+  }
+
   const fullName: string =
     (user.user_metadata?.full_name as string) ||
     (user.user_metadata?.name as string) ||
@@ -165,6 +174,24 @@ export async function GET(req: NextRequest) {
       console.error('OAuth user create failed:', userError);
       await logAuthEvent('google_oauth_failed', user.email ?? '', ip, { error: userError.message, step: 'create_user' });
       return NextResponse.redirect(`${origin}/login?error=signup_failed`);
+    }
+
+    // A tenant created without a provable consent record is a compliance
+    // gap — roll the whole signup back rather than let it silently succeed.
+    try {
+      await recordConsent({
+        tenantId: tenant.id,
+        email: user.email ?? '',
+        ip,
+        userAgent: req.headers.get('user-agent'),
+        source: 'google_oauth',
+      });
+    } catch (consentErr) {
+      console.error('OAuth consent recording failed, rolling back:', consentErr);
+      await supabaseAdmin.from('users').delete().eq('tenant_id', tenant.id);
+      await supabaseAdmin.from('tenants').delete().eq('id', tenant.id);
+      await logAuthEvent('google_oauth_failed', user.email ?? '', ip, { error: String(consentErr), step: 'consent' });
+      return NextResponse.redirect(`${origin}/signup?error=signup_failed`);
     }
 
     await supabaseAdmin.from('analytics_events').insert({

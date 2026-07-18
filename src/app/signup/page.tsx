@@ -25,6 +25,7 @@ function SignupInner() {
   const initialError =
     urlError === "auth_failed" ? "Google sign-up failed. Please try again."
     : urlError === "signup_failed" ? "We couldn't create your account. Please try again."
+    : urlError === "consent_required" ? "Please accept the Terms of Service and Privacy Policy, then try Google sign-up again."
     : "";
 
   const [fullName, setFullName] = useState("");
@@ -33,6 +34,7 @@ function SignupInner() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState(initialError);
+  const [consentChecked, setConsentChecked] = useState(false);
 
   // OTP Signup States
   const [otpCode, setOtpCode] = useState("");
@@ -62,9 +64,13 @@ Please verify your production environment variables in your deployment dashboard
   }, []);
 
   const handleGoogleClick = () => {
+    if (!consentChecked) {
+      setError("Please accept the Terms of Service and Privacy Policy to continue.");
+      return;
+    }
     setGoogleLoading(true);
     setError("");
-    window.location.href = "/api/auth/google";
+    window.location.href = "/api/auth/google?consent=1";
   };
 
   async function sendSignupOtp(e: React.FormEvent) {
@@ -79,6 +85,10 @@ Please verify your production environment variables in your deployment dashboard
     }
     if (businessName.trim().length < 2) {
       setError("Business name must be at least 2 characters.");
+      return;
+    }
+    if (!consentChecked) {
+      setError("Please accept the Terms of Service and Privacy Policy to continue.");
       return;
     }
     setLoading(true);
@@ -148,6 +158,7 @@ Please verify your production environment variables in your deployment dashboard
           email: email.toLowerCase().trim(),
           fullName,
           businessName,
+          consentAccepted: consentChecked,
         }),
         signal: controller2.signal,
       });
@@ -254,6 +265,21 @@ Please verify your production environment variables in your deployment dashboard
           <p style={styles.formSub}>
             Fill in the details below to launch your free 14-day trial.
           </p>
+
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: "4px 0 16px", fontSize: 13, color: "#475569", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={consentChecked}
+              onChange={(e) => setConsentChecked(e.target.checked)}
+              style={{ marginTop: 2, width: 16, height: 16, flexShrink: 0, cursor: "pointer" }}
+            />
+            <span>
+              I agree to the{" "}
+              <Link href="/terms" target="_blank" style={{ color: G, fontWeight: 600, textDecoration: "none" }}>Terms of Service</Link>
+              {" "}and{" "}
+              <Link href="/privacy" target="_blank" style={{ color: G, fontWeight: 600, textDecoration: "none" }}>Privacy Policy</Link>.
+            </span>
+          </label>
 
           {/* Google OAuth */}
           <button
@@ -433,12 +459,6 @@ Please verify your production environment variables in your deployment dashboard
               </div>
             </form>
           )}
-
-          <p style={styles.legal}>
-            By signing up you agree to our{" "}
-            <Link href="/terms" style={styles.legalLink}>Terms</Link> &{" "}
-            <Link href="/privacy" style={styles.legalLink}>Privacy Policy</Link>.
-          </p>
         </div>
       </main>
     </div>
@@ -694,12 +714,4 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 0.2,
     marginTop: 4,
   },
-  legal: {
-    fontSize: 12,
-    color: "#94a3b8",
-    textAlign: "center",
-    marginTop: 20,
-    marginBottom: 0,
-  },
-  legalLink: { color: "#64748b", textDecoration: "underline" },
 };

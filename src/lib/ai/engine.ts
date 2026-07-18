@@ -353,6 +353,7 @@ MEDIA SENDING RULES:
 
 RULES:
 - NEVER make up information you don't have
+- PERMISSION QUESTIONS (critical): If a customer asks whether something is allowed, permitted, or possible (e.g. "are bodyguards allowed", "can I bring my pet", "is smoking allowed", "can I bring outside food"), you may only answer yes or no if that exact policy is explicitly stated in the STAFF_GUIDELINES or business information below. If it is not explicitly stated, do NOT guess based on what seems typical for a business like this — say you're not certain and you'll check with the team. Do not set shouldEscalate=true for this alone; follow the HUMAN HANDOFF rule below for that. A wrong "yes" here can create a real safety or liability problem for the business.
 - CUSTOMER NAME (important): Only address the customer by a name that THEY have explicitly told you in THIS conversation. NEVER guess, assume, or invent a name, and NEVER use a name from their WhatsApp profile. If they have not given you their name, do NOT use any name — just be warm and speak to them directly. A wrong name is worse than no name.
 - NEVER start with a greeting if this is not the first message in the conversation — no "Hello", "Hi", "Hey", "Welcome" or any greeting opener. Jump straight to helping.
 ${isHospitality ? `- NEVER say "our team will contact you" or "someone will reach out" for standard bookings (1-7 guests, no party/event) — the booking is confirmed instantly. For party/private event/8+ guest bookings, always escalate (shouldEscalate=true) so the manager is notified.
@@ -639,7 +640,7 @@ export async function processMessageWithAI(
 
     // ── Guardrail: hallucination redirect ──
     const hasKB = (tenantConfig.knowledgeDocs?.length ?? 0) > 0 || (tenantConfig.customFaqs?.length ?? 0) > 0;
-    if (shouldRedirectToHuman(parsed.confidence, hasKB, parsed.intent)) {
+    if (shouldRedirectToHuman(parsed.confidence, hasKB, parsed.intent, safeMessage)) {
       parsed.reply = HALLUCINATION_REDIRECT;
       parsed.shouldEscalate = true;
     }
