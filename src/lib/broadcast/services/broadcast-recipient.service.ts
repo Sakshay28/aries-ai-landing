@@ -38,7 +38,14 @@ export class BroadcastRecipientService {
     campaignId: string,
     audience: AudienceState
   ): Promise<RecipientCacheResult> {
-    try {
+    // No top-level swallow here either — same reasoning as
+    // AudienceEngineService.resolveAudience. This is the "live estimate" path
+    // (Recipients drawer / preview), not the launch-time queue path, but
+    // silently returning a fake all-zero result on a DB error still misleads
+    // the user while they're building the campaign. Both callers
+    // (src/app/api/broadcast/recipients/route.ts) already have their own
+    // try/catch that turns a thrown error into a real success:false response.
+    {
       let rawContacts: any[] = [];
       let sourceLabel = 'All Contacts';
 
@@ -381,18 +388,6 @@ export class BroadcastRecipientService {
         normalizationCount,
         recipients: finalRecords,
       };
-
-    } catch (err: any) {
-      console.error('❌ Failed to resolve broadcast audience:', err);
-      return {
-        totalRecipients: 0,
-        excluded: 0,
-        duplicatesRemoved: 0,
-        invalidNumbers: 0,
-        noConsentRemoved: 0,
-        normalizationCount: 0,
-        recipients: [],
-      };
     }
   }
 
@@ -404,7 +399,10 @@ export class BroadcastRecipientService {
     tenantId: string,
     campaignId: string
   ): Promise<RecipientCacheResult> {
-    try {
+    // Same reasoning as resolveBroadcastAudience above — this outer catch used
+    // to re-swallow whatever resolveBroadcastAudience threw (including after
+    // that method's own fix) back into a fake all-zero result.
+    {
       const { data, error } = await supabaseAdmin
         .from('broadcast_campaign_recipient_cache')
         .select('*')
@@ -455,10 +453,6 @@ export class BroadcastRecipientService {
         normalizationCount,
         recipients,
       };
-
-    } catch (err) {
-      console.error('Failed to get campaign recipients:', err);
-      return { totalRecipients: 0, excluded: 0, duplicatesRemoved: 0, invalidNumbers: 0, noConsentRemoved: 0, normalizationCount: 0, recipients: [] };
     }
   }
 }

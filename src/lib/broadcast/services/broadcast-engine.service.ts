@@ -10,6 +10,13 @@ import { pushToDLQ } from '@/lib/queue/deadLetter';
 import { TokenBucket, metaTierCap, remainingTierBudget } from './rate-limiter';
 
 const RETRY_BACKOFF_MINUTES = [1, 5, 15, 30, 60];
+// Cap for Meta rate/tier-limit re-queues, which historically never incremented
+// attempt_count ("don't burn a real attempt on a throttle") and so could retry
+// forever for a recipient that keeps hitting a persistent limit. This is a much
+// longer leash than RETRY_BACKOFF_MINUTES (throttles are expected to be
+// transient) but it is still finite — see the catch block in
+// processItemsForTenant for how it terminates into the normal DLQ path.
+const MAX_THROTTLE_ATTEMPTS = 20;
 
 interface ProcessOpts {
   forceNow?: boolean;
@@ -37,10 +44,52 @@ export class BroadcastEngineService {
         return { success: false, error: 'Campaign not found' };
       }
 
-      // Guard against re-launch: only draft/scheduled/launching campaigns can be queued.
-      // 'launching' is set by the scheduler's CAS claim to prevent double-dispatch.
-      if (!['draft', 'scheduled', 'launching'].includes(campaign.status)) {
+      // Guard against re-launch AND concurrent double-launch. There are two live
+      // UI entry points that both reach this function on a 'draft' campaign
+      // (/api/broadcast/launch and /api/broadcasts/send) — a plain read-then-branch
+      // status check lets two near-simultaneous calls both pass, both resolve the
+      // audience, and both write (the queue insert is idempotent, but the
+      // broadcast_analytics upsert below was not, and the resolution work itself
+      // is wastefully duplicated). CAS-claim 'draft' -> 'launching' atomically so
+      // only one caller proceeds. 'scheduled' and 'launching' starts are already
+      // exclusively owned by SchedulerService's own CAS claim before it calls this
+      // function, so they pass straight through without re-claiming here.
+      if (campaign.status === 'draft') {
+        const { data: claimed, error: claimErr } = await supabaseAdmin
+          .from('broadcast_campaigns')
+          .update({ status: 'launching', updated_at: new Date().toISOString() })
+          .eq('id', campaignId)
+          .eq('tenant_id', tenantId)
+          .eq('status', 'draft')
+          .select('id')
+          .maybeSingle();
+        if (claimErr || !claimed) {
+          return { success: false, error: 'Campaign launch already in progress — duplicate request ignored.' };
+        }
+      } else if (!['scheduled', 'launching'].includes(campaign.status)) {
         return { success: false, error: `Campaign is already "${campaign.status}". Cannot re-launch — duplicate sends prevented.` };
+      }
+
+      // 1b. Server-side template-approval gate. The UI's pre-flight check
+      // (CampaignReview/BroadcastBuilder) only compares against the client's
+      // possibly-stale cached template object and is not enforced server-side —
+      // a direct API call (or a stale page) could otherwise launch a REJECTED or
+      // never-synced template straight through to every recipient, only failing
+      // (correctly, but wastefully and later) once each send hits Meta.
+      if (campaign.template_name) {
+        const { data: cachedTemplate } = await supabaseAdmin
+          .from('broadcast_templates_cache')
+          .select('status')
+          .eq('name', campaign.template_name)
+          .eq('tenant_id', tenantId)
+          .maybeSingle();
+        const templateStatus = cachedTemplate?.status || 'UNKNOWN';
+        if (templateStatus === 'REJECTED') {
+          return { success: false, error: `Template "${campaign.template_name}" was REJECTED by Meta and cannot be sent. Choose a different template.` };
+        }
+        if (templateStatus === 'UNKNOWN') {
+          return { success: false, error: `Template "${campaign.template_name}" approval status is unknown. Sync templates from Meta before launching.` };
+        }
       }
 
       // 2. Fetch audience targeting parameters
@@ -119,7 +168,9 @@ export class BroadcastEngineService {
         })
         .eq('id', campaignId);
 
-      // Create default analytics record
+      // Create default analytics record. ignoreDuplicates so a re-entrant call
+      // (e.g. scheduler retry after a partial prior failure) can never reset an
+      // existing row's real counts back to zero.
       await supabaseAdmin
         .from('broadcast_analytics')
         .upsert({
@@ -129,7 +180,7 @@ export class BroadcastEngineService {
           delivered_count: 0,
           read_count: 0,
           failed_count: 0
-        });
+        }, { onConflict: 'campaign_id', ignoreDuplicates: true });
 
       return { success: true, queuedCount: resolved.total };
 
@@ -238,11 +289,21 @@ export class BroadcastEngineService {
   /** Unlock items stuck in 'processing' for >10 min (crashed/killed runs). */
   static async resetStaleProcessing(): Promise<void> {
     const staleThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    await supabaseAdmin
+    // The Supabase client resolves with {error} rather than throwing on a
+    // query-level failure — this used to be discarded entirely (result never
+    // even captured), so a permission/schema issue here would silently mean
+    // stale 'processing' rows are NEVER recovered, with no log and no alert.
+    // Since a campaign only reaches 'completed' when its queue has zero
+    // pending/retrying/processing rows, that's a direct path to a campaign
+    // stuck on 'sending' forever after any crash mid-batch.
+    const { error } = await supabaseAdmin
       .from('broadcast_queue')
       .update({ status: 'pending', locked_at: null })
       .eq('status', 'processing')
       .lt('locked_at', staleThreshold);
+    if (error) {
+      console.error('❌ resetStaleProcessing failed — stale processing rows were NOT recovered:', error.message);
+    }
   }
 
   /** Atomically claim a global batch (RPC, with a two-step fallback if missing). */
@@ -405,6 +466,14 @@ export class BroadcastEngineService {
             summary: `Campaign ${cid} for tenant ${tenantId} was paused after 5 consecutive send failures. Likely cause: expired Meta token or template rejected.`,
             context: { tenantId, campaignId: cid },
           }).catch(() => {});
+          // Previously only the platform admin was told (via notifyAdmin, email).
+          // The campaign OWNER's own timeline (BroadcastExecutionTimeline.tsx)
+          // showed nothing — their campaign just silently stopped progressing.
+          ExecutionEventService.logEvent(
+            tenantId, cid, 'campaign_auto_paused', 'Campaign auto-paused',
+            '5 consecutive sends failed in a row — pausing to avoid burning through the rest of the audience. Common causes: WhatsApp token expired/revoked, or the template was rejected by Meta. Use Retry Now after fixing the cause.',
+            'error'
+          ).catch(() => {});
           processed++;
           continue;
         }
@@ -449,6 +518,11 @@ export class BroadcastEngineService {
                 summary: `Campaign ${item.campaign_id} (tenant ${tenantId}) was auto-resumed. If it pauses again, it will stay paused permanently — manual Retry Now required.`,
                 context: { tenantId, campaignId: item.campaign_id },
               }).catch(() => {});
+              ExecutionEventService.logEvent(
+                tenantId, item.campaign_id, 'campaign_auto_resumed', 'Campaign auto-resumed',
+                'Resumed automatically 30 minutes after an auto-pause. If it pauses again, it will stay paused — the underlying cause needs fixing, then use Retry Now.',
+                'warning'
+              ).catch(() => {});
             } else {
               campaignLiveStatusCache.set(item.campaign_id, st);
             }
@@ -566,22 +640,47 @@ export class BroadcastEngineService {
         console.error(`❌ Meta dispatch failure to ${item.phone}:`, errorMsg);
         consecutiveFailures.set(item.campaign_id, (consecutiveFailures.get(item.campaign_id) ?? 0) + 1);
 
-        // A Meta tier/rate limit means "slow down", not "this recipient is bad".
-        // Re-queue WITHOUT consuming an attempt so the message isn't wrongly burned.
-        if (err instanceof MetaApiError && (err.isRateLimited || err.isTierLimited)) {
-          const deferMins = err.isTierLimited ? 60 : 5;
-          const nextTime = new Date(Date.now() + deferMins * 60 * 1000);
-          await supabaseAdmin
-            .from('broadcast_queue')
-            .update({ status: 'retrying', next_attempt_at: nextTime.toISOString(), failure_reason: `Meta throttled: ${errorMsg}`, locked_at: null })
-            .eq('id', item.id);
-          processed++;
-          continue;
+        // A Meta tier/rate limit means "slow down", not "this recipient is bad" —
+        // defer without burning a normal retry attempt. This must still be
+        // BOUNDED: a recipient that keeps hitting a persistent Meta pair-rate/tier
+        // limit used to retry here forever (attempt_count was never touched on
+        // this path, so RETRY_BACKOFF_MINUTES's cap never applied) — the queue
+        // item, and therefore the whole campaign (which only completes when its
+        // queue is empty), could never reach a terminal state. Give throttles
+        // their own, much longer, but still finite budget, then fall through to
+        // the shared permanent-failure/DLQ path below.
+        // Guard every failure-path write with `.eq('status', 'processing')`. If
+        // the campaign was cancelled while this send was in flight (network
+        // latency during the Meta call above), the cancel route already flipped
+        // this row to 'cancelled'. Without this guard, the update below would
+        // blindly overwrite that back to 'retrying'/'failed' — an "impossible"
+        // transition (cancelled -> retrying) that would let a supposedly-
+        // cancelled item get re-claimed by a future batch. (It would ultimately
+        // be re-cancelled there by the per-item live-status check rather than
+        // actually re-sent, but the row would incorrectly show as retrying/failed
+        // in the meantime, and it'd cost an extra claim cycle.) A 0-row match
+        // means the row is no longer ours to update — skip the DLQ/analytics
+        // side effects too, since a cancelled message isn't a real failure.
+        const isThrottled = err instanceof MetaApiError && (err.isRateLimited || err.isTierLimited);
+        if (isThrottled) {
+          const throttleAttempt = (item.attempt_count || 0) + 1;
+          if (throttleAttempt <= MAX_THROTTLE_ATTEMPTS) {
+            const deferMins = (err as MetaApiError).isTierLimited ? 60 : 5;
+            const nextTime = new Date(Date.now() + deferMins * 60 * 1000);
+            await supabaseAdmin
+              .from('broadcast_queue')
+              .update({ status: 'retrying', attempt_count: throttleAttempt, next_attempt_at: nextTime.toISOString(), failure_reason: `Meta throttled (${throttleAttempt}/${MAX_THROTTLE_ATTEMPTS}): ${errorMsg}`, locked_at: null })
+              .eq('id', item.id)
+              .eq('status', 'processing');
+            processed++;
+            continue;
+          }
+          // Throttle budget exhausted — fall through to permanent failure below.
         }
 
         const nextAttempt = (item.attempt_count || 0) + 1;
 
-        if (nextAttempt <= RETRY_BACKOFF_MINUTES.length) {
+        if (!isThrottled && nextAttempt <= RETRY_BACKOFF_MINUTES.length) {
           const delayMins = RETRY_BACKOFF_MINUTES[nextAttempt - 1];
           const nextTime = new Date();
           nextTime.setMinutes(nextTime.getMinutes() + delayMins);
@@ -595,10 +694,11 @@ export class BroadcastEngineService {
               failure_reason: errorMsg,
               locked_at: null
             })
-            .eq('id', item.id);
+            .eq('id', item.id)
+            .eq('status', 'processing');
         } else {
           // Permanent failure — mark failed AND record in the DLQ for recovery/audit.
-          await supabaseAdmin
+          const { data: stillOurs } = await supabaseAdmin
             .from('broadcast_queue')
             .update({
               status: 'failed',
@@ -607,7 +707,18 @@ export class BroadcastEngineService {
               processed_at: new Date().toISOString(),
               locked_at: null
             })
-            .eq('id', item.id);
+            .eq('id', item.id)
+            .eq('status', 'processing')
+            .select('id')
+            .maybeSingle();
+
+          if (!stillOurs) {
+            // Row was cancelled (or otherwise reassigned) out from under us —
+            // don't record a DLQ entry / failure analytics for a message that
+            // isn't actually a failure.
+            processed++;
+            continue;
+          }
 
           await pushToDLQ({
             tenant_id: tenantId,

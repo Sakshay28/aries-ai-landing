@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
-import { 
-  Users, CheckCircle2, AlertTriangle, Eye, Send, 
-  Hourglass, Activity, RefreshCw, BarChart2
+import {
+  Users, CheckCircle2, AlertTriangle, Eye, Send,
+  Hourglass, Activity, RefreshCw, BarChart2, HelpCircle
 } from 'lucide-react';
 
 interface Stats {
@@ -37,6 +37,13 @@ export function QueueStatusCard({ campaignId }: QueueStatusCardProps) {
     etaSecondsRemaining: 0
   });
   const [loading, setLoading] = useState(true);
+  // Tracks whether the LAST fetch failed. Distinct from `stats` being all-zero,
+  // which is also what a genuinely completed campaign looks like — without this,
+  // a transient API/DB failure rendered identically to "Completed" (green check,
+  // "Delivery Cycle Closed") while the campaign could still have thousands of
+  // messages in flight. See the fix to QueueObservabilityService.getQueueStats
+  // for the other half of this bug (it used to swallow errors into fake zeros).
+  const [statsUnavailable, setStatsUnavailable] = useState(false);
 
   const fetchStats = async () => {
     try {
@@ -44,9 +51,13 @@ export function QueueStatusCard({ campaignId }: QueueStatusCardProps) {
       const data = await res.json();
       if (data.success && data.stats) {
         setStats(data.stats);
+        setStatsUnavailable(false);
+      } else {
+        setStatsUnavailable(true);
       }
     } catch (err) {
       console.error('Failed to load queue status observability statistics:', err);
+      setStatsUnavailable(true);
     } finally {
       setLoading(false);
     }
@@ -110,6 +121,11 @@ export function QueueStatusCard({ campaignId }: QueueStatusCardProps) {
   };
 
   const isTransmitting = stats.queuedCount > 0 || stats.processingCount > 0 || stats.retryingCount > 0;
+  // Whenever the last fetch failed, always show "unavailable" — never fall
+  // through to the Completed/Transmitting badges, which would either lie
+  // (Completed, off default/stale zeros) or show a stale in-flight state as
+  // if it were live.
+  const showUnavailable = statsUnavailable;
 
   if (loading) {
     return (
@@ -120,9 +136,24 @@ export function QueueStatusCard({ campaignId }: QueueStatusCardProps) {
     );
   }
 
+  if (showUnavailable) {
+    return (
+      <div className="border border-amber-500/25 rounded-xl p-4 bg-amber-500/5 space-y-1 text-left">
+        <div className="flex items-center gap-2">
+          <HelpCircle className="w-4 h-4 text-amber-600 shrink-0" />
+          <span className="text-[11.5px] font-bold text-amber-700">Live status unavailable</span>
+        </div>
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          Couldn't load queue counts — this does NOT mean the campaign is done.
+          Retrying every 5s; check the Timeline tab for the last confirmed state.
+        </p>
+      </div>
+    );
+  }
+
   // Calculate percentages
-  const pctSent = stats.totalRecipientCount > 0 
-    ? Math.round(((stats.sentCount + stats.failedCount) / stats.totalRecipientCount) * 100) 
+  const pctSent = stats.totalRecipientCount > 0
+    ? Math.round(((stats.sentCount + stats.failedCount) / stats.totalRecipientCount) * 100)
     : 0;
 
   return (

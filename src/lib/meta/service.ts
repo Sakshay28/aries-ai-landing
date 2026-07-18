@@ -19,18 +19,23 @@ export class MetaApiError extends Error {
   status: number;
   code?: number;
   retryAfterMs?: number;
+  // Meta's own support-correlation ID (error.fbtrace_id). Was being parsed out
+  // of the response and then discarded — without it, escalating a delivery
+  // failure to Meta support meant they had nothing to look up server-side.
+  fbtraceId?: string;
   // True for transient throttling that WILL succeed if retried later.
   isRateLimited: boolean;
   // True for Meta messaging-tier / pair-rate limits — the engine should pace down,
   // not just blindly retry (sending harder makes the quality rating worse).
   isTierLimited: boolean;
 
-  constructor(message: string, status: number, opts: { code?: number; retryAfterMs?: number } = {}) {
+  constructor(message: string, status: number, opts: { code?: number; retryAfterMs?: number; fbtraceId?: string } = {}) {
     super(message);
     this.name = 'MetaApiError';
     this.status = status;
     this.code = opts.code;
     this.retryAfterMs = opts.retryAfterMs;
+    this.fbtraceId = opts.fbtraceId;
     // Meta throttle/rate-limit error codes (transient):
     //   4      = application request limit reached
     //   80007  = rate limit issues
@@ -50,9 +55,11 @@ export class MetaApiError extends Error {
 async function metaErrorFromResponse(res: Response, kind: string): Promise<MetaApiError> {
   const bodyText = await res.text().catch(() => res.statusText);
   let code: number | undefined;
+  let fbtraceId: string | undefined;
   try {
     const parsed = JSON.parse(bodyText);
     code = parsed?.error?.code ?? parsed?.error?.error_subcode;
+    fbtraceId = parsed?.error?.fbtrace_id;
   } catch { /* non-JSON body */ }
 
   let retryAfterMs: number | undefined;
@@ -63,9 +70,9 @@ async function metaErrorFromResponse(res: Response, kind: string): Promise<MetaA
   }
 
   return new MetaApiError(
-    `Meta Cloud API ${kind} error ${res.status}: ${bodyText.slice(0, 300)}`,
+    `Meta Cloud API ${kind} error ${res.status}: ${bodyText.slice(0, 300)}${fbtraceId ? ` [fbtrace_id=${fbtraceId}]` : ''}`,
     res.status,
-    { code, retryAfterMs }
+    { code, retryAfterMs, fbtraceId }
   );
 }
 

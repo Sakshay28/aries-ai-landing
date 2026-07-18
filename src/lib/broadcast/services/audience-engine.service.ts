@@ -20,7 +20,16 @@ export class AudienceEngineService {
    * opt-out checks, E.164 validations, and strict deduplication.
    */
   static async resolveAudience(tenantId: string, audience: AudienceState): Promise<ResolvedAudience> {
-    try {
+    // No top-level try/catch swallow: this used to catch any exception (a
+    // transient DB error, a thrown fetchLeadsByFilter, a thrown
+    // broadcast_deliveries query) and return `{total: 0, ...}` — indistinguishable
+    // from "the filter genuinely matched zero contacts". launchCampaign() treats
+    // total===0 as "nothing to send" and marks the campaign COMPLETED. A
+    // transient failure therefore permanently terminated the campaign (not
+    // re-launchable — 'completed' isn't in the re-launch allowlist) while
+    // reporting success to the user. Let errors propagate so launchCampaign's
+    // own catch returns a real, retryable failure instead.
+    {
       let rawContacts: any[] = [];
 
       // 1. Fetch contacts based on targeting type
@@ -236,18 +245,6 @@ export class AudienceEngineService {
         noConsentRemoved,
         spamRisk,
         contacts: filteredContacts,
-      };
-
-    } catch (e) {
-      console.error('❌ AudienceEngine resolution failed:', e);
-      return {
-        total: 0,
-        duplicatesRemoved: 0,
-        optedOutRemoved: 0,
-        invalidRemoved: 0,
-        noConsentRemoved: 0,
-        spamRisk: 'LOW',
-        contacts: [],
       };
     }
   }
