@@ -25,9 +25,13 @@ export async function POST(req: NextRequest) {
   const tenantId = await getTenantId();
   if (!tenantId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const rl = await checkRedisRateLimit(`kb_upload:${tenantId}`, 20, 86400);
+  // Separate, higher cap from the text-doc knowledge upload limit — bulk
+  // media onboarding (dozens of photos/videos in one batch) shouldn't be
+  // throttled by the same 20/day guard meant for Gemini PDF-extraction abuse.
+  // Per-file cost here is small and already concurrency-capped by media-queue.ts.
+  const rl = await checkRedisRateLimit(`kb_media_upload:${tenantId}`, 200, 86400);
   if (!rl.allowed) {
-    return NextResponse.json({ error: 'Daily upload limit reached. Try again tomorrow.' }, { status: 429 });
+    return NextResponse.json({ error: 'Daily media upload limit reached. Try again tomorrow.' }, { status: 429 });
   }
 
   const body = await req.json().catch(() => null);

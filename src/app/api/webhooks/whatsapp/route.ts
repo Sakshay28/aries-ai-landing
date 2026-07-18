@@ -10,15 +10,16 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { isDuplicateMessage, getRedisClient, acquireOffHoursLock, acquireOnceNotice } from '@/lib/redis/client';
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
-import { retrieveRelevantDocs } from '@/lib/ai/rag';
+import { retrieveRelevantDocs, retrieveRelevantMedia } from '@/lib/ai/rag';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
-import { parseMetaWebhook, sendTextMessage, sendMediaMessage, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
+import { parseMetaWebhook, sendTextMessage, sendMediaMessage, sendMediaMessageById, uploadMediaToMeta, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
 import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus, resolveOrCreateConversation } from '@/lib/whatsapp/businessNotify';
 import { normalizePhoneNumber, isSamePhoneNumber } from '@/lib/whatsapp/phone';
 import { sanitizeName } from '@/lib/utils/name';
 import { greetingName } from '@/lib/utils/contact-name';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 import { processMessageWithAI, isHumanHandoffRequest } from '@/lib/ai/engine';
+import { ToolRegistry } from '@/lib/ai/tools/registry';
 import { kwWordMatch, pickScriptedReply, allowStatusUpdate, hasActiveFlow } from '@/lib/webhook/decisions';
 import { checkSenderRateLimit } from '@/lib/abuse/prevention';
 import { checkAICostLimit, checkDailyAICostLimit, AI_FALLBACK_MESSAGE } from '@/lib/billing/costProtection';
@@ -1466,10 +1467,16 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     // Fetch sendable media files (videos, images, PDFs with file_url)
     supabaseAdmin
       .from('knowledge_docs')
-      .select('filename, file_type, file_url')
+      .select('id, filename, file_type, file_url, meta_media_id')
       .eq('tenant_id', tenant.id)
       .not('file_url', 'is', null)
-      .limit(20),
+      .limit(50),
+    // Fetch active saved locations for prompt references
+    supabaseAdmin
+      .from('saved_locations')
+      .select('name, category')
+      .eq('tenant_id', tenant.id)
+      .eq('is_active', true),
   ]);
 
   // 12. Flow Engine Execution (runs concurrently with _aiBatchPromise above)
@@ -1497,7 +1504,16 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const storedMsgCount = conversation.message_count ?? 0;
 
   // 13. Await the speculative batch (started before flows — likely already resolved)
-  const [{ data: recentMsgs }, { data: smartRulesRows }, { data: agentRows }, { data: existingBookingRow }, { data: kbDocs }, { data: kbEmbedCheck }, { data: kbMediaFiles }] = await _aiBatchPromise;
+  const [
+    { data: recentMsgs },
+    { data: smartRulesRows },
+    { data: agentRows },
+    { data: existingBookingRow },
+    { data: kbDocs },
+    { data: kbEmbedCheck },
+    { data: kbMediaFiles },
+    { data: savedLocationsRows }
+  ] = await _aiBatchPromise;
 
   const history = (recentMsgs || [])
     .reverse()
@@ -1577,10 +1593,17 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // for large knowledge bases (5+ docs) where it picks the best matches.
   const KB_FETCH_LIMIT = 5;
   let knowledgeRows: Array<{ filename: string; content_text: string }> = (kbDocs || []) as Array<{ filename: string; content_text: string }>;
-  if (kbEmbedCheck && kbEmbedCheck.length > 0 && (kbDocs?.length ?? 0) >= KB_FETCH_LIMIT) {
-    const ragDocs = await retrieveRelevantDocs(tenant.id, msg.text, 3).catch(() => []);
-    if (ragDocs.length > 0) knowledgeRows = ragDocs;
-  }
+  const needsTextRag = !!(kbEmbedCheck && kbEmbedCheck.length > 0 && (kbDocs?.length ?? 0) >= KB_FETCH_LIMIT);
+  // Media candidates are always retrieved semantically (never dumped in full —
+  // a tenant can have dozens of unlabeled photos) whenever any sendable media
+  // exists. Run alongside the text RAG call rather than after it so the two
+  // Gemini embedding round-trips overlap instead of stacking latency.
+  const hasMedia = (kbMediaFiles?.length ?? 0) > 0;
+  const [ragDocs, mediaCandidates] = await Promise.all([
+    needsTextRag ? retrieveRelevantDocs(tenant.id, msg.text, 3).catch(() => []) : Promise.resolve([]),
+    hasMedia ? retrieveRelevantMedia(tenant.id, msg.text, 8, 0.35).catch(() => []) : Promise.resolve([]),
+  ]);
+  if (ragDocs.length > 0) knowledgeRows = ragDocs;
 
   const lowerMsgText = msg.text.toLowerCase();
   type AgentRow = { agent_name: string; routing_keywords: string[]; bot_name?: string; bot_personality?: string; system_prompt?: string };
@@ -1610,9 +1633,16 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     } : {}),
     smartRules: (smartRulesRows || []) as Array<{ name: string; trigger_source: string; ai_summary: string }>,
     knowledgeDocs: knowledgeRows,
-    mediaFiles: ((kbMediaFiles || []) as Array<{ filename: string; file_type: string; file_url: string }>)
-      .filter(f => /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|png|jpg|jpeg|webp|gif|mp4|mov|webm|m4v|avi)$/i.test(f.filename))
-      .map(f => ({ filename: f.filename, file_type: f.file_type })),
+    mediaCandidates: mediaCandidates.map(m => ({
+      filename:    m.filename,
+      file_type:   m.file_type,
+      title:       m.title,
+      description: m.description,
+      tags:        m.tags,
+      category:    m.category,
+      similarity:  m.similarity,
+    })),
+    savedLocations: (savedLocationsRows || []) as Array<{ name: string; category: string }>,
     // Inject existing booking so AI can handle cancel/modify requests
     existingBooking: existingBookingRow ? {
       reservationId:  (existingBookingRow as any).reservation_id,
@@ -1906,44 +1936,140 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       Sentry.captureException(sendErr);
     }
 
-    // 15b. Send media attachment if AI requested one
-    const mediaFilename = aiResponse.extractedData?.mediaToSend;
-    if (mediaFilename && decryptedAccessToken && tenant.wa_phone_number_id) {
-      const matchedMedia = ((kbMediaFiles || []) as Array<{ filename: string; file_type: string; file_url: string }>)
-        .find(f => f.filename === mediaFilename);
-      if (matchedMedia?.file_url) {
+    // 15b. Send media attachment(s) if AI requested any (semantic retrieval —
+    // see mediaCandidates above — capped server-side as defense in depth even
+    // though the prompt already instructs the same caps).
+    const mediaFilenames = aiResponse.extractedData?.mediaToSend;
+    if (Array.isArray(mediaFilenames) && mediaFilenames.length > 0 && decryptedAccessToken && tenant.wa_phone_number_id) {
+      type KbMedia = { id: string; filename: string; file_type: string; file_url: string; meta_media_id: string | null };
+      const allMedia = (kbMediaFiles || []) as KbMedia[];
+      const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
+      const VIDEO_EXTS = new Set(['mp4', 'mov', 'webm']);
+      const MAX_IMAGES = 3, MAX_VIDEOS = 1, MAX_PDFS = 1;
+      let imageCount = 0, videoCount = 0, pdfCount = 0;
+
+      for (const filename of mediaFilenames) {
+        const matchedMedia = allMedia.find(f => f.filename === filename);
+        if (!matchedMedia?.file_url) continue;
+
+        if (IMAGE_EXTS.has(matchedMedia.file_type)) {
+          if (imageCount >= MAX_IMAGES) continue;
+          imageCount++;
+        } else if (VIDEO_EXTS.has(matchedMedia.file_type)) {
+          if (videoCount >= MAX_VIDEOS) continue;
+          videoCount++;
+        } else if (matchedMedia.file_type === 'pdf') {
+          if (pdfCount >= MAX_PDFS) continue;
+          pdfCount++;
+        }
+
+        const accessToken = decryptedAccessToken;
+        const phoneNumberId = tenant.wa_phone_number_id;
+
         try {
-          const mediaUrl = await toSignedMediaUrl(matchedMedia.file_url);
-          if (mediaUrl) {
-            const mType = mediaTypeFromUrl(matchedMedia.filename);
-            const mediaResult = await sendMediaMessage(
-              decryptedAccessToken,
-              tenant.wa_phone_number_id,
+          const mType = mediaTypeFromUrl(matchedMedia.filename);
+          const mimeType = mType === 'video' ? 'video/mp4' : mType === 'document' ? 'application/pdf' : 'image/jpeg';
+          let mediaResult: { messageId: string; status: string } | null = null;
+          let deliveredUrl: string | null = null;
+
+          // Try the cached Meta media ID first — avoids re-uploading the same
+          // knowledge-base asset to Meta on every send.
+          if (matchedMedia.meta_media_id) {
+            try {
+              mediaResult = await sendMediaMessageById(
+                accessToken,
+                phoneNumberId,
+                cleanPhone,
+                mType,
+                matchedMedia.meta_media_id,
+                mType === 'document' ? matchedMedia.filename : undefined
+              );
+            } catch (idErr) {
+              console.warn(`⚠️ Cached Meta media ID stale for "${matchedMedia.filename}", falling back to link send:`, (idErr as Error).message);
+              await supabaseAdmin.from('knowledge_docs').update({ meta_media_id: null }).eq('id', matchedMedia.id);
+            }
+          }
+
+          if (!mediaResult) {
+            const signedUrl = await toSignedMediaUrl(matchedMedia.file_url);
+            if (!signedUrl) continue;
+            deliveredUrl = signedUrl;
+
+            mediaResult = await sendMediaMessage(
+              accessToken,
+              phoneNumberId,
               cleanPhone,
               mType,
-              mediaUrl,
+              signedUrl,
               mType === 'document' ? matchedMedia.filename : undefined
             );
-            // Store the media message in DB so it appears in the dashboard chat
-            const { error: mediaInsertErr } = await supabaseAdmin.from('messages').insert({
-              tenant_id: tenant.id,
-              conversation_id: conversation.id,
-              direction: 'outbound',
-              content: matchedMedia.filename,
-              message_type: mType,
-              channel: 'whatsapp',
-              status: 'sent',
-              ai_generated: true,
-              media_url: mediaUrl,
-              file_name: matchedMedia.filename,
-              mime_type: mType === 'video' ? 'video/mp4' : mType === 'document' ? 'application/pdf' : 'image/jpeg',
-              wa_message_id: mediaResult.messageId,
-            });
-            if (mediaInsertErr) console.error('Failed to store media message:', mediaInsertErr);
-            console.log(`✅ Sent media attachment "${matchedMedia.filename}" to ${cleanPhone}`);
+
+            // Opportunistically cache a Meta media ID for next time — never
+            // blocks delivery (fire-and-forget), the link-based send above
+            // already succeeded regardless of whether this succeeds.
+            if (!matchedMedia.meta_media_id) {
+              (async () => {
+                try {
+                  const { data: fileData } = await supabaseAdmin.storage.from('knowledge-docs').download(matchedMedia.file_url);
+                  if (!fileData) return;
+                  const buffer = Buffer.from(await fileData.arrayBuffer());
+                  const newId = await uploadMediaToMeta(accessToken, phoneNumberId, buffer, mimeType, matchedMedia.filename);
+                  await supabaseAdmin.from('knowledge_docs')
+                    .update({ meta_media_id: newId, meta_media_id_uploaded_at: new Date().toISOString() })
+                    .eq('id', matchedMedia.id);
+                } catch (uploadErr) {
+                  console.error(`media-id cache: background upload failed for "${matchedMedia.filename}":`, (uploadErr as Error).message);
+                }
+              })();
+            }
           }
+
+          // Store the media message in DB so it appears in the dashboard chat
+          const { error: mediaInsertErr } = await supabaseAdmin.from('messages').insert({
+            tenant_id: tenant.id,
+            conversation_id: conversation.id,
+            direction: 'outbound',
+            content: matchedMedia.filename,
+            message_type: mType,
+            channel: 'whatsapp',
+            status: 'sent',
+            ai_generated: true,
+            media_url: deliveredUrl,
+            file_name: matchedMedia.filename,
+            mime_type: mimeType,
+            wa_message_id: mediaResult.messageId,
+          });
+          if (mediaInsertErr) console.error('Failed to store media message:', mediaInsertErr);
+
+          // Usage analytics — append-only log + atomic counter bump
+          void supabaseAdmin.from('knowledge_media_usage').insert({
+            tenant_id: tenant.id,
+            doc_id: matchedMedia.id,
+            conversation_id: conversation.id,
+            matched_query: msg.text?.slice(0, 500) || null,
+          });
+          void supabaseAdmin.rpc('increment_media_usage', { p_doc_id: matchedMedia.id });
+
+          console.log(`✅ Sent media attachment "${matchedMedia.filename}" to ${cleanPhone}`);
         } catch (mediaErr) {
-          console.error(`⚠️ Failed to send media "${mediaFilename}":`, (mediaErr as Error).message);
+          console.error(`⚠️ Failed to send media "${filename}":`, (mediaErr as Error).message);
+        }
+      }
+    }
+
+    // 15c. Execute any tool calls requested by the AI
+    if (aiResponse.toolCalls && Array.isArray(aiResponse.toolCalls) && aiResponse.toolCalls.length > 0) {
+      for (const call of aiResponse.toolCalls) {
+        try {
+          await ToolRegistry.execute(call.tool, {
+            tenantId: tenant.id,
+            phone: cleanPhone,
+            conversationId: conversation.id,
+            accessToken: decryptedAccessToken || '',
+            phoneNumberId: tenant.wa_phone_number_id || '',
+          }, call.arguments);
+        } catch (toolErr) {
+          console.error(`⚠️ Failed to execute tool "${call.tool}":`, (toolErr as Error).message);
         }
       }
     }

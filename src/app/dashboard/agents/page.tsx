@@ -38,7 +38,21 @@ interface KnowledgeDoc {
   created_at: string;
   file_url?: string | null;
   embedding?: string | null;
+  title?: string | null;
+  description?: string | null;
+  ai_description?: string | null;
+  tags?: string[] | null;
+  category?: string | null;
+  processing_status?: 'pending' | 'processing' | 'ready' | 'failed' | null;
+  processing_error?: string | null;
+  usage_count?: number | null;
+  manually_edited?: boolean | null;
 }
+
+const MEDIA_CATEGORIES = [
+  'Food', 'Drinks', 'Decor', 'Rooms', 'Banquet', 'Wedding', 'Birthday',
+  'Corporate', 'Offers', 'Menus', 'Policies', 'Events', 'Gallery', 'Products', 'Services',
+];
 
 interface DraftConfig {
   bot_name: string;
@@ -217,6 +231,17 @@ export default function AISettingsPage() {
   const [uploading, setUploading] = useState(false);
   const [newFaqQuestion, setNewFaqQuestion] = useState('');
   const [newFaqAnswer, setNewFaqAnswer] = useState('');
+
+  // Knowledge Media Library UI state
+  const [mediaCategoryFilter, setMediaCategoryFilter] = useState<string | null>(null);
+  const [mediaSearch, setMediaSearch] = useState('');
+  const [editingDocId, setEditingDocId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editTags, setEditTags] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [dragOverKnowledge, setDragOverKnowledge] = useState(false);
 
   // Welcome image upload state
   const [uploadingWelcomeImage, setUploadingWelcomeImage] = useState(false);
@@ -600,16 +625,21 @@ export default function AISettingsPage() {
         if (json.success && (json.data || json.docs)) {
           const docsList = json.data || json.docs || [];
           const doc = docsList.find((d: any) => d.id === docId);
-          if (doc && doc.embedding) {
-            // Document has been indexed!
+          if (!doc) return;
+          const done = doc.processing_status === 'ready' || doc.processing_status === 'failed' || (!doc.processing_status && doc.embedding);
+          if (done) {
             setDocs(prev => prev.map(d => d.id === docId ? doc : d));
-            toast.success(
-              <div className="flex flex-col gap-0.5">
-                <span className="font-semibold text-emerald-500">✅ AI Finished Learning</span>
-                <span className="text-xs text-muted-foreground">AI finished learning from "{doc.filename}"</span>
-              </div>,
-              { duration: 4000 }
-            );
+            if (doc.processing_status === 'failed') {
+              toast.error(`AI couldn't analyze "${doc.filename}"${doc.processing_error ? `: ${doc.processing_error}` : ''}`, { duration: 5000 });
+            } else {
+              toast.success(
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-semibold text-emerald-500">✅ AI Finished Learning</span>
+                  <span className="text-xs text-muted-foreground">AI finished learning from "{doc.filename}"</span>
+                </div>,
+                { duration: 4000 }
+              );
+            }
             clearInterval(interval);
           }
         }
@@ -617,6 +647,15 @@ export default function AISettingsPage() {
         console.error('Polling status error:', err);
       }
     }, 2000);
+  };
+
+  const handleMultipleFileUpload = async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    const CONCURRENCY = 3;
+    for (let i = 0; i < list.length; i += CONCURRENCY) {
+      await Promise.all(list.slice(i, i + CONCURRENCY).map(f => handleFileUpload(f)));
+    }
   };
 
   const handleFileUpload = async (file: File) => {
@@ -684,6 +723,11 @@ export default function AISettingsPage() {
         });
         const regJson = await regRes.json();
         if (!regRes.ok) throw new Error(regJson.error || 'Failed to register file');
+        if (regJson.duplicate) {
+          toast.warning(`"${file.name}" looks identical to already-uploaded "${regJson.existingDoc?.filename}" — skipped`, { id: uploadToastId, duration: 5000 });
+          setDocs(prev => prev.filter(d => d.id !== tempId));
+          return;
+        }
         resultData = regJson.data;
       } else {
         // Direct upload for small text files
@@ -692,12 +736,17 @@ export default function AISettingsPage() {
         const res = await fetch('/api/dashboard/knowledge', { method: 'POST', body: formData });
         const json = await res.json();
         if (!json.success) throw new Error(json.error || 'Upload failed');
+        if (json.duplicate) {
+          toast.warning(`"${file.name}" looks identical to already-uploaded "${json.existingDoc?.filename}" — skipped`, { id: uploadToastId, duration: 5000 });
+          setDocs(prev => prev.filter(d => d.id !== tempId));
+          return;
+        }
         resultData = json.data;
       }
 
-      toast.success(`${isMedia ? 'Media' : ext === 'pdf' ? 'Document' : 'Knowledge'} uploaded successfully`, { id: uploadToastId });
+      toast.success(`${isMedia ? 'Media' : ext === 'pdf' ? 'Document' : 'Knowledge'} uploaded — AI is analyzing it now`, { id: uploadToastId });
       setDocs(prev => prev.map(d => d.id === tempId ? resultData : d));
-      if (!isMedia) pollDocStatus(resultData.id);
+      pollDocStatus(resultData.id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Upload failed. Please try again.', { id: uploadToastId });
       setDocs(prev => prev.filter(d => d.id !== tempId));
@@ -705,6 +754,31 @@ export default function AISettingsPage() {
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDocEditSave = async (docId: string) => {
+    setSavingEdit(true);
+    try {
+      const res = await fetch(`/api/dashboard/knowledge?id=${docId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: editTitle.trim(),
+          description: editDescription.trim(),
+          category: editCategory.trim(),
+          tags: editTags.split(',').map(t => t.trim()).filter(Boolean),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to save');
+      setDocs(prev => prev.map(d => d.id === docId ? { ...d, ...json.data } : d));
+      toast.success('Details updated — the AI will use this going forward');
+      setEditingDocId(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save changes');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -1688,29 +1762,45 @@ export default function AISettingsPage() {
                   </div>
 
                   {/* Knowledge Base Health Card */}
-                  <div className="space-y-4 pt-4 border-t border-border">
+                  <div
+                    className={cn(
+                      "space-y-4 pt-4 border-t border-border rounded-b-2xl transition-colors",
+                      dragOverKnowledge && "bg-emerald-500/5 ring-2 ring-emerald-500/40 ring-inset"
+                    )}
+                    onDragOver={e => { e.preventDefault(); setDragOverKnowledge(true); }}
+                    onDragLeave={() => setDragOverKnowledge(false)}
+                    onDrop={e => {
+                      e.preventDefault();
+                      setDragOverKnowledge(false);
+                      if (e.dataTransfer.files?.length) handleMultipleFileUpload(e.dataTransfer.files);
+                    }}
+                  >
                     <div className="flex justify-between items-center">
                       <label className="text-[11px] font-bold tracking-wider uppercase text-muted-foreground">
-                        Knowledge Health & RAG Files
+                        Knowledge Media Library
                       </label>
-                      
-                      {/* File Upload action trigger */}
+
+                      {/* File Upload action trigger — bulk, drag & drop supported */}
                       <button
                         onClick={() => fileInputRef.current?.click()}
                         disabled={uploading}
                         className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold bg-foreground text-background hover:opacity-90 disabled:opacity-50 transition-all cursor-pointer"
                       >
                         {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
-                        {uploading ? 'Uploading...' : 'Upload File'}
+                        {uploading ? 'Uploading...' : 'Upload Files'}
                       </button>
                       <input
                         ref={fileInputRef}
                         type="file"
+                        multiple
                         className="hidden"
-                        onChange={e => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
+                        onChange={e => { if (e.target.files?.length) handleMultipleFileUpload(e.target.files); }}
                         accept=".txt,.md,.csv,.json,.pdf,.mp4,.mov,.webm,.jpg,.jpeg,.png,.webp"
                       />
                     </div>
+                    <p className="text-[10px] text-muted-foreground/60 -mt-2">
+                      Drag & drop or select multiple files at once — menus, brochures, photos, videos. The AI analyzes and tags each one automatically.
+                    </p>
 
                     {/* Health Signals */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1718,23 +1808,23 @@ export default function AISettingsPage() {
                         <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Knowledge Status</div>
                         <div className={cn(
                           "text-xs font-bold mt-1",
-                          docs.some(d => !d.embedding) 
-                            ? "text-amber-500 animate-pulse" 
-                            : docs.length > 0 
-                              ? "text-emerald-500" 
+                          docs.some(d => d.processing_status === 'pending' || d.processing_status === 'processing' || (!d.processing_status && !d.embedding))
+                            ? "text-amber-500 animate-pulse"
+                            : docs.length > 0
+                              ? "text-emerald-500"
                               : "text-muted-foreground"
                         )}>
-                          {docs.some(d => !d.embedding) 
-                            ? 'Processing' 
-                            : docs.length > 0 
-                              ? 'Active' 
+                          {docs.some(d => d.processing_status === 'pending' || d.processing_status === 'processing' || (!d.processing_status && !d.embedding))
+                            ? 'Processing'
+                            : docs.length > 0
+                              ? 'Active'
                               : 'Not Added'}
                         </div>
                       </div>
                       <div className="p-3 rounded-xl border bg-background/30 text-center">
                         <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Files Indexed</div>
                         <div className="text-xs font-bold mt-1 text-foreground">
-                          {docs.filter(d => d.embedding).length} of {docs.length}
+                          {docs.filter(d => d.processing_status === 'ready' || (!d.processing_status && d.embedding)).length} of {docs.length}
                         </div>
                       </div>
                       <div className="p-3 rounded-xl border bg-background/30 text-center">
@@ -1744,83 +1834,231 @@ export default function AISettingsPage() {
                       <div className="p-3 rounded-xl border bg-background/30 text-center">
                         <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">AI Readiness</div>
                         <div className="text-[11px] font-bold mt-1 text-foreground truncate">
-                          {docs.some(d => !d.embedding) ? 'Learning...' : 'Ready to Answer'}
+                          {docs.some(d => d.processing_status === 'pending' || d.processing_status === 'processing') ? 'Learning...' : 'Ready to Answer'}
                         </div>
                       </div>
                     </div>
 
                     {/* Uploaded Knowledge Documents Section */}
-                    <div className="text-xs font-bold text-foreground mt-4 block">
-                      Uploaded Knowledge
+                    <div className="flex items-center justify-between mt-4 gap-2">
+                      <div className="text-xs font-bold text-foreground">
+                        Uploaded Knowledge ({docs.length})
+                      </div>
+                      {docs.length > 0 && (
+                        <input
+                          type="text"
+                          value={mediaSearch}
+                          onChange={e => setMediaSearch(e.target.value)}
+                          placeholder="Search files, tags, descriptions..."
+                          className="h-7 px-2.5 rounded-lg text-[11px] bg-background border border-border/80 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 w-48"
+                        />
+                      )}
                     </div>
 
+                    {/* Category filter chips */}
+                    {docs.some(d => d.category) && (
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          onClick={() => setMediaCategoryFilter(null)}
+                          className={cn(
+                            "px-2.5 py-1 rounded-full text-[10px] font-bold border transition-colors",
+                            !mediaCategoryFilter ? "bg-foreground text-background border-foreground" : "bg-background border-border/80 text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          All
+                        </button>
+                        {Array.from(new Set(docs.map(d => d.category).filter(Boolean) as string[])).map(cat => (
+                          <button
+                            key={cat}
+                            onClick={() => setMediaCategoryFilter(prev => prev === cat ? null : cat)}
+                            className={cn(
+                              "px-2.5 py-1 rounded-full text-[10px] font-bold border transition-colors",
+                              mediaCategoryFilter === cat ? "bg-emerald-500 text-white border-emerald-500" : "bg-background border-border/80 text-muted-foreground hover:text-foreground"
+                            )}
+                          >
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Docs list */}
-                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                      {docs.map(doc => {
-                        const isIndexed = !!doc.embedding;
+                    <div className="space-y-2 max-h-[28rem] overflow-y-auto pr-1">
+                      {docs
+                        .filter(d => !mediaCategoryFilter || d.category === mediaCategoryFilter)
+                        .filter(d => {
+                          if (!mediaSearch.trim()) return true;
+                          const q = mediaSearch.trim().toLowerCase();
+                          return d.filename.toLowerCase().includes(q)
+                            || d.title?.toLowerCase().includes(q)
+                            || d.description?.toLowerCase().includes(q)
+                            || d.category?.toLowerCase().includes(q)
+                            || d.tags?.some(t => t.toLowerCase().includes(q));
+                        })
+                        .map(doc => {
+                        const status = doc.processing_status || (doc.embedding ? 'ready' : 'pending');
+                        const isReady = status === 'ready';
+                        const isFailed = status === 'failed';
                         const isOptimistic = (doc as any).isOptimistic;
-                        const ext = doc.file_type || doc.filename.split('.').pop() || 'txt';
+                        const ext = (doc.file_type || doc.filename.split('.').pop() || 'txt').toLowerCase();
+                        const isImage = ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
+                        const isVideo = ['mp4', 'mov', 'webm'].includes(ext);
+                        const isEditing = editingDocId === doc.id;
+                        const displayTitle = doc.title || doc.filename;
+
                         return (
-                          <div key={doc.id} className="flex items-center justify-between p-3.5 bg-background border border-border/80 rounded-xl hover:border-border transition-colors text-xs relative group">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div className={cn(
-                                "p-2.5 rounded-lg shrink-0",
-                                isIndexed ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500 animate-pulse"
-                              )}>
-                                <FileText className="w-4 h-4" />
-                              </div>
-                              <div className="min-w-0">
-                                <p className="font-bold text-foreground truncate">{doc.filename}</p>
-                                <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-muted-foreground">
-                                  <span className="uppercase tracking-wider font-semibold">{ext}</span>
-                                  <span>•</span>
-                                  <span className={cn(
-                                    "font-bold flex items-center gap-1",
-                                    isIndexed ? "text-emerald-500" : "text-amber-500"
-                                  )}>
-                                    {isIndexed ? (
-                                      <>
-                                        <Check className="w-3 h-3 text-emerald-500" /> Indexed
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Loader2 className="w-3 h-3 animate-spin" /> Processing knowledge...
-                                      </>
-                                    )}
-                                  </span>
+                          <div key={doc.id} className="p-3.5 bg-background border border-border/80 rounded-xl hover:border-border transition-colors text-xs relative group">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className={cn(
+                                  "shrink-0 rounded-lg overflow-hidden flex items-center justify-center",
+                                  isImage && doc.file_url ? "w-9 h-9" : "p-2.5",
+                                  !(isImage && doc.file_url) && (isFailed ? "bg-red-500/10 text-red-500" : isReady ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500 animate-pulse")
+                                )}>
+                                  {isImage && doc.file_url ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={doc.file_url} alt={displayTitle} className="w-9 h-9 object-cover" />
+                                  ) : isVideo ? (
+                                    <Play className="w-4 h-4" />
+                                  ) : (
+                                    <FileText className="w-4 h-4" />
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="font-bold text-foreground truncate">{displayTitle}</p>
+                                  <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-muted-foreground flex-wrap">
+                                    <span className="uppercase tracking-wider font-semibold">{ext}</span>
+                                    <span>•</span>
+                                    <span className={cn(
+                                      "font-bold flex items-center gap-1",
+                                      isFailed ? "text-red-500" : isReady ? "text-emerald-500" : "text-amber-500"
+                                    )}>
+                                      {isFailed ? (
+                                        <><AlertTriangle className="w-3 h-3" /> Failed</>
+                                      ) : isReady ? (
+                                        <><Check className="w-3 h-3 text-emerald-500" /> Ready</>
+                                      ) : (
+                                        <><Loader2 className="w-3 h-3 animate-spin" /> AI analyzing...</>
+                                      )}
+                                    </span>
+                                    {doc.category && <><span>•</span><span className="px-1.5 py-0.5 rounded bg-secondary/60 font-semibold">{doc.category}</span></>}
+                                    {!!doc.usage_count && <><span>•</span><span>Sent {doc.usage_count}×</span></>}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              {doc.file_url && (
-                                <a
-                                  href={doc.file_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors"
-                                  title="Preview Document"
+                              <div className="flex items-center gap-1 shrink-0">
+                                {doc.file_url && (
+                                  <a
+                                    href={doc.file_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors"
+                                    title="Preview"
+                                  >
+                                    <Library className="w-3.5 h-3.5" />
+                                  </a>
+                                )}
+                                {(isImage || isVideo || ext === 'pdf') && (
+                                  <button
+                                    onClick={() => {
+                                      if (isEditing) { setEditingDocId(null); return; }
+                                      setEditingDocId(doc.id);
+                                      setEditTitle(doc.title || '');
+                                      setEditDescription(doc.description || '');
+                                      setEditCategory(doc.category || '');
+                                      setEditTags((doc.tags || []).join(', '));
+                                    }}
+                                    className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors"
+                                    title="Edit details"
+                                  >
+                                    <Sparkle className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleDocDelete(doc.id, doc.filename)}
+                                  disabled={isOptimistic}
+                                  className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-30 cursor-pointer"
+                                  title="Delete Document"
                                 >
-                                  <Library className="w-3.5 h-3.5" />
-                                </a>
-                              )}
-                              <button
-                                onClick={() => handleDocDelete(doc.id, doc.filename)}
-                                disabled={isOptimistic}
-                                className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-30 cursor-pointer"
-                                title="Delete Document"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
+
+                            {!isEditing && doc.description && (
+                              <p className="text-[11px] text-muted-foreground mt-2 pl-11 line-clamp-2">{doc.description}</p>
+                            )}
+                            {!isEditing && !!doc.tags?.length && (
+                              <div className="flex flex-wrap gap-1 mt-1.5 pl-11">
+                                {doc.tags.slice(0, 8).map(tag => (
+                                  <span key={tag} className="px-1.5 py-0.5 rounded bg-secondary/50 text-[9px] text-muted-foreground font-medium">{tag}</span>
+                                ))}
+                              </div>
+                            )}
+                            {isFailed && doc.processing_error && (
+                              <p className="text-[10px] text-red-500 mt-2 pl-11">{doc.processing_error}</p>
+                            )}
+
+                            {isEditing && (
+                              <div className="mt-3 pt-3 border-t border-border/60 space-y-2">
+                                <input
+                                  type="text"
+                                  value={editTitle}
+                                  onChange={e => setEditTitle(e.target.value)}
+                                  placeholder="Title (e.g. Birthday Decoration Setup)"
+                                  className="w-full h-8 px-2.5 rounded-lg text-[11px] bg-secondary/30 border border-border/80 focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                                />
+                                <textarea
+                                  value={editDescription}
+                                  onChange={e => setEditDescription(e.target.value)}
+                                  placeholder="Description — what a customer would see/ask about"
+                                  rows={2}
+                                  className="w-full px-2.5 py-2 rounded-lg text-[11px] bg-secondary/30 border border-border/80 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 resize-none"
+                                />
+                                <div className="flex gap-2">
+                                  <select
+                                    value={editCategory}
+                                    onChange={e => setEditCategory(e.target.value)}
+                                    className="flex-1 h-8 px-2 rounded-lg text-[11px] bg-secondary/30 border border-border/80 focus:outline-none"
+                                  >
+                                    <option value="">No category</option>
+                                    {MEDIA_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                  </select>
+                                  <input
+                                    type="text"
+                                    value={editTags}
+                                    onChange={e => setEditTags(e.target.value)}
+                                    placeholder="tags, comma, separated"
+                                    className="flex-[1.5] h-8 px-2.5 rounded-lg text-[11px] bg-secondary/30 border border-border/80 focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                                  />
+                                </div>
+                                <div className="flex justify-end gap-2 pt-1">
+                                  <button
+                                    onClick={() => setEditingDocId(null)}
+                                    className="h-7 px-3 rounded-lg text-[10px] font-bold text-muted-foreground hover:bg-secondary/60"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    onClick={() => handleDocEditSave(doc.id)}
+                                    disabled={savingEdit}
+                                    className="h-7 px-3 rounded-lg text-[10px] font-bold bg-foreground text-background hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+                                  >
+                                    {savingEdit ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                                    Save
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
                       {docs.length === 0 && (
                         <div className="p-6 rounded-2xl border border-dashed border-border bg-secondary/10 flex flex-col items-center justify-center text-center space-y-2">
                           <HardDrive className="w-8 h-8 text-muted-foreground/50" />
-                          <div className="text-xs font-bold text-foreground">No menu or documents uploaded yet</div>
+                          <div className="text-xs font-bold text-foreground">No menu, photos, videos or documents uploaded yet</div>
                           <p className="text-[11px] text-muted-foreground max-w-xs leading-relaxed">
-                            Upload PDFs, TXT, CSV or JSON files to teach your AI about menus, timings, FAQs and business policies.
+                            Upload menus, brochures, photos and videos — the AI understands each one and sends the right file when a customer asks.
                           </p>
                         </div>
                       )}

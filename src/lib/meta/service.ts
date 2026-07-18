@@ -264,6 +264,60 @@ export async function sendTextMessage(
 }
 
 // ═══════════════════════════════════════
+// SEND: Location Message
+// ═══════════════════════════════════════
+export async function sendLocationMessage(
+  accessToken: string,
+  phoneNumberId: string,
+  destination: string,
+  latitude: number,
+  longitude: number,
+  name: string,
+  address: string
+): Promise<MetaSendResult> {
+  if (!accessToken || !phoneNumberId || !destination || latitude === undefined || longitude === undefined || !name || !address) {
+    throw new Error('Meta sendLocationMessage: missing required parameters');
+  }
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: cleanPhone(destination),
+    type: 'location',
+    location: {
+      latitude,
+      longitude,
+      name: name.slice(0, 255),
+      address: address.slice(0, 1000)
+    }
+  };
+
+  return withMetaRetry(async () => {
+    let res: Response;
+    try {
+      res = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
+        method: 'POST',
+        headers: headers(accessToken),
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch (err) {
+      throw new Error(`Meta network error: ${(err as Error).message}`);
+    }
+
+    if (!res.ok) {
+      throw await metaErrorFromResponse(res, 'location');
+    }
+
+    const data = await res.json();
+    return {
+      messageId: data.messages?.[0]?.id || '',
+      status: 'sent',
+    };
+  });
+}
+
+// ═══════════════════════════════════════
 // SEND: Interactive Buttons Message (Reply Buttons)
 // ═══════════════════════════════════════
 // WhatsApp Cloud API interactive message with up to 3 reply buttons.
@@ -564,6 +618,114 @@ export async function sendMediaMessage(
       messageId: data.messages?.[0]?.id || '',
       status: 'sent',
     };
+  });
+}
+
+// ═══════════════════════════════════════
+// SEND: Media Message by cached Meta media ID
+// ═══════════════════════════════════════
+// Same as sendMediaMessage but references an already-uploaded Meta media ID
+// instead of a link — avoids re-uploading the same knowledge-base asset to
+// Meta on every send. Callers should fall back to sendMediaMessage(link) if
+// this throws (the cached ID may have expired or been deleted on Meta's side).
+export async function sendMediaMessageById(
+  accessToken: string,
+  phoneNumberId: string,
+  destination: string,
+  mediaType: MetaMediaType,
+  mediaId: string,
+  caption?: string,
+  contextMessageId?: string
+): Promise<MetaSendResult> {
+  if (!accessToken || !phoneNumberId || !destination || !mediaId) {
+    throw new Error('Meta sendMediaMessageById: missing required parameters');
+  }
+
+  const mediaPayload: Record<string, string> = { id: mediaId };
+  if (caption && (mediaType === 'image' || mediaType === 'document')) {
+    mediaPayload.caption = caption;
+  }
+  if (mediaType === 'document' && caption) {
+    mediaPayload.filename = caption;
+  }
+
+  const payload: any = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: cleanPhone(destination),
+    type: mediaType,
+    [mediaType]: mediaPayload,
+  };
+
+  if (contextMessageId) {
+    payload.context = { message_id: contextMessageId };
+  }
+
+  return withMetaRetry(async () => {
+    let res: Response;
+    try {
+      res = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
+        method: 'POST',
+        headers: headers(accessToken),
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch (err) {
+      throw new Error(`Meta network error: ${(err as Error).message}`);
+    }
+
+    if (!res.ok) {
+      throw await metaErrorFromResponse(res, 'media-by-id');
+    }
+
+    const data = await res.json();
+    return {
+      messageId: data.messages?.[0]?.id || '',
+      status: 'sent',
+    };
+  }, 1); // don't burn retries on a stale media ID — caller falls back to link send
+}
+
+// ═══════════════════════════════════════
+// UPLOAD: Media to Meta (returns a reusable media ID)
+// ═══════════════════════════════════════
+// Uploads a knowledge-base asset to Meta once so subsequent sends can
+// reference it by ID instead of re-uploading via a signed link every time.
+export async function uploadMediaToMeta(
+  accessToken: string,
+  phoneNumberId: string,
+  buffer: Buffer,
+  mimeType: string,
+  filename: string
+): Promise<string> {
+  if (!accessToken || !phoneNumberId || !buffer?.length) {
+    throw new Error('Meta uploadMediaToMeta: missing required parameters');
+  }
+
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('file', new Blob([new Uint8Array(buffer)], { type: mimeType }), filename);
+
+  return withMetaRetry(async () => {
+    let res: Response;
+    try {
+      res = await fetch(`${META_BASE}/${phoneNumberId}/media`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+        body: form,
+        signal: AbortSignal.timeout(30000),
+      });
+    } catch (err) {
+      throw new Error(`Meta network error: ${(err as Error).message}`);
+    }
+
+    if (!res.ok) {
+      throw await metaErrorFromResponse(res, 'media-upload');
+    }
+
+    const data = await res.json();
+    if (!data.id) throw new Error('Meta media upload returned no id');
+    return data.id as string;
   });
 }
 

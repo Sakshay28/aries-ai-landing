@@ -24,6 +24,7 @@ import { TokenBucket, safeThroughputPerSecond } from '@/lib/broadcast/services/r
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { GoogleSheetsWorkerService } from '@/lib/integrations/google-sheets-worker';
 import { MicrosoftExcelWorkerService } from '@/lib/integrations/microsoft-excel-worker';
+import { MediaAnalysisWorkerService } from '@/lib/ai/media-analysis-worker';
 
 const WORKER_ID = process.env.WORKER_ID || `broadcast-worker-${os.hostname()}-${process.pid}`;
 const TICK_MS = Number(process.env.BROADCAST_TICK_MS || 1000);
@@ -122,6 +123,7 @@ async function main(): Promise<void> {
   let lastStallCheck = 0;
   let lastSchedulerTick = 0;
   let lastStaleReset = 0;
+  let lastMediaReconcile = 0;
 
   await heartbeat();
 
@@ -132,6 +134,12 @@ async function main(): Promise<void> {
       if (now - lastStaleReset >= 60_000) { await BroadcastEngineService.resetStaleProcessing().catch(() => {}); lastStaleReset = now; }
       if (now - lastSchedulerTick >= 30_000) { await SchedulerService.checkAndDispatchScheduled().catch(() => {}); lastSchedulerTick = now; }
       if (now - lastStallCheck >= 120_000) { await checkStall(); lastStallCheck = now; }
+      if (now - lastMediaReconcile >= 120_000) {
+        await MediaAnalysisWorkerService.processQueue(WORKER_ID, 20).catch(err => {
+          console.error('❌ Media Analysis Worker error:', err.message || err);
+        });
+        lastMediaReconcile = now;
+      }
 
       await dispatchLanes();
       await GoogleSheetsWorkerService.processQueue(WORKER_ID, 20).catch(err => {

@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { enqueueEmbedding } from '@/lib/ai/embedding-queue';
+import { enqueueMediaAnalysis } from '@/lib/ai/media-queue';
 import { checkRedisRateLimit } from '@/lib/redis/client';
 import { invalidateTenantAllCaches } from '@/lib/tenant/manager';
 import { getAI } from '@/lib/ai/client';
+import { computeSha256, validateFileSignature, findDuplicateByHash } from '@/lib/utils/media-validation';
 
 const TEXT_TYPES = new Set(['txt', 'md', 'csv', 'json', 'html', 'xml']);
 const MEDIA_TYPES = new Set(['mp4', 'mov', 'webm', 'jpg', 'jpeg', 'png', 'webp']);
@@ -21,7 +23,7 @@ export async function GET() {
 
   const { data, error } = await supabaseAdmin
     .from('knowledge_docs')
-    .select('id, filename, file_type, file_url, created_at, embedding')
+    .select('id, filename, file_type, file_url, created_at, embedding, title, description, ai_description, tags, category, processing_status, processing_error, usage_count, manually_edited')
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: false });
 
@@ -86,14 +88,33 @@ export async function POST(req: NextRequest) {
   }
 
   const isText = TEXT_TYPES.has(ext);
+  const isPdf = ext === 'pdf';
 
   let contentText = '';
   let fileUrl: string | null = null;
 
-  // ── Upload raw file to Supabase Storage ──────────────────
   const bytes = await file.arrayBuffer();
   const buffer = Buffer.from(bytes);
 
+  // ── Reject files whose bytes don't match their claimed type ───────
+  // (Stand-in for AV scanning — these are owner-only uploads to their own
+  // private tenant bucket, not public user-generated content, so we
+  // validate structure rather than run a full virus scan.)
+  if (!validateFileSignature(buffer, ext)) {
+    return NextResponse.json(
+      { error: `File content doesn't match its extension ".${ext}". The file may be corrupted or mislabeled.` },
+      { status: 400 }
+    );
+  }
+
+  // ── Soft duplicate check — warn, don't block ───────────────────────
+  const fileHash = computeSha256(buffer);
+  const duplicate = await findDuplicateByHash(tenantId, fileHash);
+  if (duplicate) {
+    return NextResponse.json({ success: true, duplicate: true, existingDoc: duplicate });
+  }
+
+  // ── Upload raw file to Supabase Storage ──────────────────
   const storagePath = `${tenantId}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
   const { error: uploadErr } = await supabaseAdmin.storage
     .from('knowledge-docs')
@@ -109,13 +130,11 @@ export async function POST(req: NextRequest) {
     fileUrl = storagePath;
   }
 
-  // ── Extract text for supported types (skip media — no text to extract) ──
-  if (isMedia) {
-    // Videos/images have no extractable text — stored as sendable media only
-  } else if (isText) {
+  // ── Extract text for supported types (media gets AI vision analysis instead) ──
+  if (isText) {
     const raw = buffer.toString('utf-8');
     contentText = raw.length > MAX_BYTES ? raw.slice(0, MAX_BYTES) + '\n...[truncated]' : raw;
-  } else if (ext === 'pdf') {
+  } else if (isPdf) {
     try {
       const genAIResponse = await getAI().models.generateContent({
         model: 'gemini-2.5-flash',
@@ -135,6 +154,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Media and PDFs go through async AI analysis (vision/video/tagging) before
+  // they're searchable — start as 'pending' so the UI can show a processing state.
+  const needsAnalysis = isMedia || isPdf;
+
   const { data, error } = await supabaseAdmin
     .from('knowledge_docs')
     .insert({
@@ -143,15 +166,29 @@ export async function POST(req: NextRequest) {
       file_type: ext,
       content_text: contentText,
       file_url: fileUrl,
+      file_hash: fileHash,
+      processing_status: needsAnalysis ? 'pending' : 'ready',
     })
-    .select('id, filename, file_type, file_url, created_at, embedding')
+    .select('id, filename, file_type, file_url, created_at, embedding, title, description, tags, category, processing_status')
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Generate + store embedding asynchronously (non-blocking — don't fail upload if this errors)
-  if (data?.id && contentText) {
-    enqueueEmbedding({ docId: data.id, contentText });
+  if (data?.id) {
+    if (needsAnalysis) {
+      enqueueMediaAnalysis({
+        docId:       data.id,
+        storagePath: storagePath,
+        bucket:      'knowledge-docs',
+        mimeType:    file.type || 'application/octet-stream',
+        fileType:    ext,
+        filename:    file.name,
+        contentText: isPdf ? contentText : undefined,
+      });
+    } else if (contentText) {
+      // Generate + store embedding asynchronously (non-blocking — don't fail upload if this errors)
+      enqueueEmbedding({ docId: data.id, contentText });
+    }
   }
 
   // Flush all tenant caches so the next AI request immediately uses the new document
@@ -181,4 +218,41 @@ export async function DELETE(req: NextRequest) {
   await invalidateTenantAllCaches(tenantId);
 
   return NextResponse.json({ success: true });
+}
+
+// ── PATCH: owner edits to title/description/tags/category ────────────
+// Marks the doc manually_edited=true so future re-analysis never
+// overwrites what the owner explicitly set.
+export async function PATCH(req: NextRequest) {
+  const tenantId = await getTenantId();
+  if (!tenantId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { searchParams } = new URL(req.url);
+  const id = searchParams.get('id');
+  if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+
+  const body = await req.json().catch(() => null);
+  if (!body) return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+
+  const update: Record<string, unknown> = { manually_edited: true, updated_at: new Date().toISOString() };
+  if (typeof body.title === 'string') update.title = body.title.slice(0, 200);
+  if (typeof body.description === 'string') update.description = body.description.slice(0, 2000);
+  if (typeof body.category === 'string') update.category = body.category.slice(0, 60);
+  if (Array.isArray(body.tags)) {
+    update.tags = body.tags.filter((t: unknown): t is string => typeof t === 'string').slice(0, 20);
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('knowledge_docs')
+    .update(update)
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+    .select('id, filename, file_type, file_url, created_at, embedding, title, description, tags, category, processing_status')
+    .single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await invalidateTenantAllCaches(tenantId);
+
+  return NextResponse.json({ success: true, data });
 }
