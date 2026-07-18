@@ -28,19 +28,6 @@ export interface AIButton {
   phone?: string;
 }
 
-export interface AIToolCall {
-  tool:
-    | "send_location"
-    | "send_menu"
-    | "send_image"
-    | "send_pdf"
-    | "send_catalog"
-    | "send_payment"
-    | "handover"
-    | "create_booking";
-  arguments: Record<string, any>;
-}
-
 export interface AIResponse {
   reply: string;
   extractedData: ExtractedData;
@@ -51,7 +38,6 @@ export interface AIResponse {
   nextStep: string;
   confidence: number;
   buttons?: AIButton[];
-  toolCalls?: AIToolCall[];
 }
 
 
@@ -367,21 +353,6 @@ MEDIA SENDING RULES:
 - When you do send media, accompany it with a brief text reply (e.g. "Here's our rooftop terrace video!" or "Here's the banquet brochure with all the details").
 - If the customer asks for media and nothing on the list is even a plausible match, say you'll check with the team. Do NOT escalate for this alone.` : ''}
 
-${tenantConfig.savedLocations && tenantConfig.savedLocations.length > 0 ? `AVAILABLE SAVED LOCATIONS (you can send these as native WhatsApp map cards):
-${tenantConfig.savedLocations.map(l => `- Category: "${l.category}" | Name: "${l.name}"`).join('\n')}
-
-LOCATION TOOL RULES:
-- When a customer asks for a location, GPS, directions, route, map, Google Maps link, address, valet parking, parking location, banquet entry, pickup point, warehouse location, entry/exit gate, landmark, route, GPS, etc., you MUST call the "send_location" tool instead of typing out a text address.
-- Set the query argument to the category or name of the location that matches best (e.g. "PARKING", "VALET", "MAIN", etc.).
-- Never invent coordinates or address texts. Always invoke the "send_location" tool.
-` : ''}
-
-AI TOOL CALLING RULES:
-- You can call tools/functions for the customer. To call a tool, add it to the "toolCalls" array in your JSON output.
-- Currently, you can call "send_location" to send a native WhatsApp map card.
-- Format: [{"tool": "send_location", "arguments": {"query": "parking"}}]
-- Always accompany the tool call with a friendly, conversational reply text (e.g., "I've shared our location card above 📍 Let me know if you'd also like parking directions or nearby landmarks.").
-
 RULES:
 - NEVER make up information you don't have
 - PERMISSION QUESTIONS (critical): If a customer asks whether something is allowed, permitted, or possible (e.g. "are bodyguards allowed", "can I bring my pet", "is smoking allowed", "can I bring outside food"), you may only answer yes or no if that exact policy is explicitly stated in the STAFF_GUIDELINES or business information below. If it is not explicitly stated, do NOT guess based on what seems typical for a business like this — say you're not certain and you'll check with the team. Do not set shouldEscalate=true for this alone; follow the HUMAN HANDOFF rule below for that. A wrong "yes" here can create a real safety or liability problem for the business.
@@ -470,9 +441,6 @@ You must respond with ONLY a JSON object (no markdown, no backticks) in this exa
     { "type": "quick_reply", "id": "btn_1", "title": "Reserve Table" },
     { "type": "url", "title": "Google Review", "url": "https://g.page/r/some_review_link/review" },
     { "type": "call", "title": "Call Us", "phone": "+919876543210" }
-  ],
-  "toolCalls": [
-    { "tool": "send_location", "arguments": { "query": "parking" } }
   ]
 }${SYSTEM_PROMPT_SAFETY_APPENDIX}`;
 }
@@ -504,7 +472,6 @@ export interface TenantAIConfig {
     category:    string;
     similarity:  number;
   }>;
-  savedLocations?: Array<{ name: string; category: string }>;
   systemPrompt?: string;
   // AI Behavior Controls (migration 20260618)
   languageMode?: 'auto' | 'english' | 'hindi';
@@ -787,20 +754,6 @@ function parseAIResponse(text: string): AIResponse {
       }
     }
 
-    let toolCalls: AIToolCall[] | undefined = undefined;
-    if (Array.isArray(parsed.toolCalls) && parsed.toolCalls.length > 0) {
-      toolCalls = parsed.toolCalls
-        .map((tc: any) => {
-          const tool = String(tc?.tool || '').trim();
-          const args = typeof tc?.arguments === 'object' && tc?.arguments ? tc.arguments : {};
-          return { tool, arguments: args };
-        })
-        .filter((tc: any) => [
-          "send_location", "send_menu", "send_image", "send_pdf",
-          "send_catalog", "send_payment", "handover", "create_booking"
-        ].includes(tc.tool)) as AIToolCall[];
-    }
-
     return {
       reply: parsed.reply || "Got it! How can I help?",
       extractedData: parsed.extractedData || {},
@@ -811,7 +764,6 @@ function parseAIResponse(text: string): AIResponse {
       nextStep: parsed.nextStep || 'ask_intent',
       confidence: parsed.confidence || 0.5,
       buttons,
-      toolCalls,
     };
   } catch {
     // Try to extract the reply field using regex if JSON is malformed/truncated

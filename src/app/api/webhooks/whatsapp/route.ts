@@ -19,7 +19,6 @@ import { sanitizeName } from '@/lib/utils/name';
 import { greetingName } from '@/lib/utils/contact-name';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 import { processMessageWithAI, isHumanHandoffRequest } from '@/lib/ai/engine';
-import { ToolRegistry } from '@/lib/ai/tools/registry';
 import { kwWordMatch, pickScriptedReply, allowStatusUpdate, hasActiveFlow } from '@/lib/webhook/decisions';
 import { checkSenderRateLimit } from '@/lib/abuse/prevention';
 import { checkAICostLimit, checkDailyAICostLimit, AI_FALLBACK_MESSAGE } from '@/lib/billing/costProtection';
@@ -1471,12 +1470,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       .eq('tenant_id', tenant.id)
       .not('file_url', 'is', null)
       .limit(50),
-    // Fetch active saved locations for prompt references
-    supabaseAdmin
-      .from('saved_locations')
-      .select('name, category')
-      .eq('tenant_id', tenant.id)
-      .eq('is_active', true),
   ]);
 
   // 12. Flow Engine Execution (runs concurrently with _aiBatchPromise above)
@@ -1512,7 +1505,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     { data: kbDocs },
     { data: kbEmbedCheck },
     { data: kbMediaFiles },
-    { data: savedLocationsRows }
   ] = await _aiBatchPromise;
 
   const history = (recentMsgs || [])
@@ -1642,7 +1634,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       category:    m.category,
       similarity:  m.similarity,
     })),
-    savedLocations: (savedLocationsRows || []) as Array<{ name: string; category: string }>,
     // Inject existing booking so AI can handle cancel/modify requests
     existingBooking: existingBookingRow ? {
       reservationId:  (existingBookingRow as any).reservation_id,
@@ -2057,22 +2048,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       }
     }
 
-    // 15c. Execute any tool calls requested by the AI
-    if (aiResponse.toolCalls && Array.isArray(aiResponse.toolCalls) && aiResponse.toolCalls.length > 0) {
-      for (const call of aiResponse.toolCalls) {
-        try {
-          await ToolRegistry.execute(call.tool, {
-            tenantId: tenant.id,
-            phone: cleanPhone,
-            conversationId: conversation.id,
-            accessToken: decryptedAccessToken || '',
-            phoneNumberId: tenant.wa_phone_number_id || '',
-          }, call.arguments);
-        } catch (toolErr) {
-          console.error(`⚠️ Failed to execute tool "${call.tool}":`, (toolErr as Error).message);
-        }
-      }
-    }
   }
   if (sendFailureMsg) {
     // Out-of-band: kick off the admin alert. Don't await — webhook must still
