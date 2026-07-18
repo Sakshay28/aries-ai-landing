@@ -1,0 +1,38 @@
+name: Business Alerts Heartbeat
+
+# Hobby-plan Vercel crons only run once per day, so the frequent staff-keepalive
+# and failed-alert retry loops are driven here instead (same pattern as
+# platform-drain.yml). Both endpoints are idempotent and internally deduped,
+# so a missed or doubled tick is harmless.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Staff session keepalive
+        continue-on-error: true
+        run: |
+          code=$(curl -s -o /tmp/ka.json -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 120 \
+            https://ariesai.in/api/cron/session-keepalive)
+          echo "cron/session-keepalive -> $code"
+          cat /tmp/ka.json || true
+          [ "$code" = "200" ] || exit 1
+
+      - name: Retry failed business notifications
+        continue-on-error: true
+        run: |
+          code=$(curl -s -o /tmp/nr.json -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 120 \
+            https://ariesai.in/api/cron/notification-retry)
+          echo "cron/notification-retry -> $code"
+          cat /tmp/nr.json || true
+          [ "$code" = "200" ] || exit 1
