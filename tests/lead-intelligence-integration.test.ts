@@ -165,6 +165,55 @@ describe('Decision Engine', () => {
     expect(result.reasoning).toContain('Decision');
     expect(result.reasoning).toContain('intent_payment_link');
   });
+
+  // ── V2 path: AI supplies a score, but never picks the pipeline stage ──────
+  describe('V2 analysis (stage-bearing) — gate-enforced, score-derived', () => {
+    it('ignores Gemini stage="qualified" when there is no closing signal', () => {
+      const result = runDecisionEngine({
+        ruleScore:        72, ruleStatus: 'hot', allBuyingSignals: ['asked_pricing'],
+        prevFinalStatus:  'hot',
+        // Gemini insists the lead is qualified, but no gate signal is present.
+        aiAnalysis:       { stage: 'qualified', score: 85, confidence: 96, reason: 'AI says closed' } as any,
+        aiConfidence:     96, industryProfile: 'general', isRepeatCustomer: false, messageCount: 12,
+      });
+      expect(result.finalStatus).not.toBe('qualified'); // gate not met
+      expect(result.qualificationMet).toBe(false);
+      expect(result.finalStatus).toBe('hot');            // score-derived (85 → hot)
+    });
+
+    it('qualifies only when a closing signal AND score >= 90 are present', () => {
+      const result = runDecisionEngine({
+        ruleScore:        90, ruleStatus: 'hot', allBuyingSignals: ['intent_payment_link'],
+        prevFinalStatus:  'hot',
+        aiAnalysis:       { stage: 'hot', score: 93, confidence: 90, reason: 'ready to pay' } as any,
+        aiConfidence:     90, industryProfile: 'general', isRepeatCustomer: false, messageCount: 20,
+      });
+      expect(result.qualificationMet).toBe(true);
+      expect(result.gateSignal).toBe('intent_payment_link');
+      expect(result.finalStatus).toBe('qualified'); // even though Gemini said 'hot'
+    });
+
+    it('never drops below the rule-score floor (AI-as-floor)', () => {
+      const result = runDecisionEngine({
+        ruleScore:        75, ruleStatus: 'hot', allBuyingSignals: [],
+        prevFinalStatus:  'hot',
+        aiAnalysis:       { stage: 'cold', score: 10, confidence: 92, reason: 'AI underrates' } as any,
+        aiConfidence:     92, industryProfile: 'general', isRepeatCustomer: false, messageCount: 8,
+      });
+      expect(result.finalScore).toBe(75);      // floored to rule score, not 10
+      expect(result.finalStatus).toBe('hot');  // not 'cold'
+    });
+
+    it('respects terminal converted/lost regardless of AI stage', () => {
+      const result = runDecisionEngine({
+        ruleScore:        95, ruleStatus: 'qualified', allBuyingSignals: ['intent_payment_link'],
+        prevFinalStatus:  'converted',
+        aiAnalysis:       { stage: 'warm', score: 40, confidence: 90 } as any,
+        aiConfidence:     90, industryProfile: 'general', isRepeatCustomer: false, messageCount: 30,
+      });
+      expect(result.finalStatus).toBe('converted');
+    });
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

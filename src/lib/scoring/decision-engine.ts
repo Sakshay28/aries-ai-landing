@@ -97,22 +97,41 @@ export function runDecisionEngine(input: DecisionEngineInput): DecisionEngineRes
   const {
     ruleScore, allBuyingSignals, prevFinalStatus,
     aiAnalysis, aiConfidence, industryProfile,
-    isRepeatCustomer, messageCount,
+    isRepeatCustomer,
   } = input;
 
-  // ── Step 1: Detect if V2 analysis is provided ───────────────────────────
+  // ── Step 1: V2 analysis — score-first, gate-enforced ────────────────────
+  // The AI supplies a score/reason; it does NOT get to pick the pipeline stage.
+  // Status is derived deterministically from the (floored) score + the
+  // qualification gate — same rules as the V1 path — so Gemini can never stamp a
+  // lead 'qualified' just by saying so, and can never drop it below the rule floor.
   if (aiAnalysis && 'stage' in aiAnalysis) {
     const v2 = aiAnalysis as GeminiConversationAnalysisV2;
-    const finalStatus = (v2.stage.toLowerCase()) as LeadStatus;
+
+    // AI-as-floor: the model's score can lift the rule score but never lower it.
+    const aiScore        = Math.max(0, Math.min(100, v2.score ?? ruleScore));
+    const compositeScore = Math.max(ruleScore, aiScore);
+
+    // Qualification requires an explicit closing signal — not the AI's word.
+    const qualGates  = resolveQualificationGates(industryProfile);
+    const gateSignal = allBuyingSignals.find(s => qualGates.has(s)) ?? null;
+    const qualMet    = gateSignal !== null && compositeScore >= THRESHOLDS.QUALIFIED;
+
+    const finalStatus = deriveStatus(compositeScore, qualMet, isRepeatCustomer, prevFinalStatus);
+    const aiLifted    = aiScore > ruleScore;
+
     return {
-      finalScore:       v2.score ?? ruleScore,
-      finalStatus:      finalStatus,
-      compositeMethod:  'ai_led',
-      aiWeightApplied:  1.0,
+      finalScore:       compositeScore,
+      finalStatus,
+      compositeMethod:  aiLifted ? 'ai_led' : 'rule_only',
+      aiWeightApplied:  aiLifted ? 1.0 : 0,
       aiConfidence:     v2.confidence ?? 0,
-      qualificationMet: finalStatus === 'qualified',
-      gateSignal:       null,
-      reasoning:        v2.reason || v2.explanation || '',
+      qualificationMet: qualMet,
+      gateSignal,
+      reasoning:
+        `V2: rule=${ruleScore}, ai=${aiScore} → composite=${compositeScore} (rule-floored). ` +
+        `Gemini stage='${v2.stage}' ignored for status; score-derived → ${finalStatus}. ` +
+        `Gate=${gateSignal ?? 'none'}. ${(v2.reason || v2.explanation || '').trim()}`.trim(),
     };
   }
 
@@ -148,7 +167,7 @@ export function runDecisionEngine(input: DecisionEngineInput): DecisionEngineRes
   const qualMet     = gateSignal !== null && compositeScore >= THRESHOLDS.QUALIFIED;
 
   // ── Step 6: Determine final status ──────────────────────────────────────
-  let finalStatus: LeadStatus = deriveStatus(compositeScore, qualMet, isRepeatCustomer, prevFinalStatus);
+  const finalStatus: LeadStatus = deriveStatus(compositeScore, qualMet, isRepeatCustomer, prevFinalStatus);
 
   // ── Step 7: Build reasoning string ──────────────────────────────────────
   const aiPart = aiAnalysis
