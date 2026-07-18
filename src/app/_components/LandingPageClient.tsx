@@ -3216,6 +3216,16 @@ export function Footer() {
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "#aaa"; }}>
             Terms of Service
           </Link>
+          <Link href="/security" style={{ color: "#aaa", textDecoration: "none", transition: "color 150ms" }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "#fff"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "#aaa"; }}>
+            Security
+          </Link>
+          <Link href="/data-rights" style={{ color: "#aaa", textDecoration: "none", transition: "color 150ms" }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "#fff"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "#aaa"; }}>
+            Data Rights
+          </Link>
           <Link href="/support" style={{ color: "#aaa", textDecoration: "none", transition: "color 150ms" }}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "#fff"; }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "#aaa"; }}>
