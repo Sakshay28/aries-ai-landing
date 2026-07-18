@@ -4,6 +4,7 @@ import { BroadcastEngineService } from '@/lib/broadcast/services/broadcast-engin
 import { TokenBucket, safeThroughputPerSecond } from '@/lib/broadcast/services/rate-limiter';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getRedisClient } from '@/lib/redis/client';
+import { notifyAdmin } from '@/lib/alerts/admin';
 
 export const dynamic = 'force-dynamic';
 // Unchanged (10s) so the deploy is valid on any Vercel plan. We time-box the
@@ -42,6 +43,71 @@ async function withinChainBudget(): Promise<boolean> {
   }
 }
 
+// This cron tick (GitHub Actions, every 10 min) is the ONE thing guaranteed to
+// run regardless of whether the persistent worker (worker.ts) is deployed or
+// alive — worker.ts's own stall/heartbeat checks are useless precisely when the
+// worker itself is down. /api/health exposes worker + DLQ status but nothing
+// was ever polling it, so a dead worker or a growing DLQ backlog had no path
+// to actually paging anyone. Piggyback the check here instead of adding new infra.
+async function checkPipelineHealth(): Promise<void> {
+  const { data: hb } = await supabaseAdmin
+    .from('worker_heartbeats')
+    .select('worker_id, last_beat_at')
+    .order('last_beat_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (hb) {
+    const ageMs = Date.now() - new Date(hb.last_beat_at).getTime();
+    if (ageMs > 5 * 60 * 1000) {
+      await notifyAdmin({
+        dedupeKey: 'broadcast-worker-heartbeat-stale',
+        subject: 'Broadcast worker heartbeat is stale',
+        summary: `Worker ${hb.worker_id} last reported ${Math.round(ageMs / 1000)}s ago. The persistent per-tenant drain worker may have crashed, been redeployed, or lost its DB connection — broadcasts are now relying solely on this 10-minute cron backstop, which is far slower.`,
+        context: { workerId: hb.worker_id, ageSeconds: Math.round(ageMs / 1000) },
+      }).catch(() => {});
+    }
+  }
+  // If hb is null, no worker has EVER registered a heartbeat — that's the
+  // expected state if the persistent worker was never deployed (see
+  // render.yaml). Not alerting on that here since it's a standing deployment
+  // decision, not a new failure; /api/health still surfaces it as "degraded".
+
+  const { count: dlqBacklog } = await supabaseAdmin
+    .from('dead_letter_queue')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'pending')
+    .eq('job_type', 'broadcast');
+  if ((dlqBacklog ?? 0) > 20) {
+    await notifyAdmin({
+      dedupeKey: 'broadcast-dlq-backlog-high',
+      subject: `${dlqBacklog} broadcast messages stuck in the Dead Letter Queue`,
+      summary: `${dlqBacklog} permanently-failed broadcast sends are sitting unretried in the DLQ. Review at /dashboard/system/dead-letter.`,
+      context: { dlqBacklog },
+    }).catch(() => {});
+  }
+
+  // Campaigns whose scheduled_for time has passed but are still 'scheduled' mean
+  // SchedulerService.checkAndDispatchScheduled() has been silently failing on its
+  // own internal catch (it never throws — see scheduler.service.ts) for at least
+  // one full tick. A single miss recovers next tick; a PERSISTENT failure would
+  // otherwise leave campaigns stuck 'scheduled' forever with nothing but a
+  // console.error to show for it.
+  const { count: overdueScheduled } = await supabaseAdmin
+    .from('broadcast_campaigns')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'scheduled')
+    .lt('scheduled_for', new Date(Date.now() - 15 * 60 * 1000).toISOString());
+  if ((overdueScheduled ?? 0) > 0) {
+    await notifyAdmin({
+      dedupeKey: 'broadcast-scheduled-overdue',
+      subject: `${overdueScheduled} scheduled broadcast(s) overdue by 15+ minutes`,
+      summary: `${overdueScheduled} campaign(s) are still 'scheduled' well past their scheduled_for time. The scheduler dispatch tick may be failing silently — check logs for "Scheduler cron execution failed".`,
+      context: { overdueScheduled },
+    }).catch(() => {});
+  }
+}
+
 function isAuthorized(req: NextRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) return false;
@@ -68,11 +134,29 @@ async function handler(req: NextRequest) {
 
   const start = Date.now();
 
+  // 0. Pipeline health check — see checkPipelineHealth() for why this lives here.
+  await checkPipelineHealth().catch(err => console.error('[queue] health check failed:', err));
+
   // 1. Dispatch any scheduled campaigns that are now due.
-  const triggered = await SchedulerService.checkAndDispatchScheduled();
+  //    checkAndDispatchScheduled() never throws (it has its own internal catch),
+  //    but resetStaleProcessing() previously could — and this handler had NO
+  //    top-level try/catch, so a throw here would abort the ENTIRE tick before
+  //    reaching step 3 below, meaning zero messages get sent for the whole
+  //    10-minute window even though the failure was in an unrelated recovery
+  //    step. Isolate each step so one failing sub-task can't block the drain.
+  let triggered = 0;
+  try {
+    triggered = await SchedulerService.checkAndDispatchScheduled();
+  } catch (err) {
+    console.error('[queue] checkAndDispatchScheduled threw unexpectedly:', err);
+  }
 
   // 2. Recover items left 'processing' by a crashed/killed prior run.
-  await BroadcastEngineService.resetStaleProcessing();
+  try {
+    await BroadcastEngineService.resetStaleProcessing();
+  } catch (err) {
+    console.error('[queue] resetStaleProcessing threw unexpectedly:', err);
+  }
 
   // 3. PARALLEL per-tenant drain. Each active tenant gets its own lane (paced by a
   //    per-number token bucket + the engine's Meta 24h tier budget), so one big

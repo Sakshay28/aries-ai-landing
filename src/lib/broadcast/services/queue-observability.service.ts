@@ -18,7 +18,13 @@ export class QueueObservabilityService {
    * Aggregates real-time stats from the broadcast queue and delivery states.
    */
   static async getQueueStats(campaignId: string): Promise<QueueObservabilityStats> {
-    try {
+    // Deliberately no top-level try/catch swallow here. A query failure used to
+    // be returned as an all-zero stats object — indistinguishable from "queue
+    // fully drained" — which made the frontend (QueueStatusCard) render a green
+    // "Completed" badge while the campaign could still have thousands of
+    // messages in flight. Let the error propagate so the API route returns a
+    // real failure and the UI can show "status unavailable" instead of lying.
+    {
       // 1. Fetch counts from broadcast_queue (which acts as the transient queue)
       const { data: queueData, error: qErr } = await supabaseAdmin
         .from('broadcast_queue')
@@ -88,20 +94,6 @@ export class QueueObservabilityService {
         totalRecipientCount,
         throughputPerMin,
         etaSecondsRemaining
-      };
-    } catch (err) {
-      console.error('❌ Failed to compute live queue observability stats:', err);
-      return {
-        queuedCount: 0,
-        processingCount: 0,
-        sentCount: 0,
-        deliveredCount: 0,
-        readCount: 0,
-        retryingCount: 0,
-        failedCount: 0,
-        totalRecipientCount: 0,
-        throughputPerMin: 0,
-        etaSecondsRemaining: 0
       };
     }
   }

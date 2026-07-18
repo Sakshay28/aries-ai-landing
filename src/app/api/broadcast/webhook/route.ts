@@ -129,6 +129,16 @@ export async function POST(req: NextRequest) {
             .eq('message_id', waMessageId)
             .maybeSingle();
 
+          // Out-of-order guard: Meta delivers webhooks at-least-once, NOT
+          // necessarily in order — network retries can reorder them. 'read' is
+          // the terminal-positive signal; nothing legitimately supersedes it.
+          // Without this, a late/re-delivered 'sent' or 'delivered' event
+          // arriving after 'read' would regress the stored status backward AND
+          // double-count that stage in analytics via increment_campaign_counter.
+          if (existing?.status === 'read' && ourStatus !== 'read') {
+            continue;
+          }
+
           const statusActuallyChanged = existing && existing.status !== ourStatus;
 
           // Update individual delivery status
