@@ -40,6 +40,12 @@ vi.mock('@/lib/broadcast/services/automation-engine.service', () => ({
 // row's real end state, not a canned response.
 type Row = Record<string, any>;
 
+// Per-table injected errors that only fire on .update() calls, leaving reads
+// on that same table unaffected — needed to model a real Postgres CHECK
+// constraint violation (the SELECT that finds the row succeeds; only the
+// UPDATE that tries to write a disallowed value fails).
+let updateErrorInjectors: Record<string, { message: string; code?: string; details?: string }> = {};
+
 class Table {
   rows: Row[] = [];
   constructor(rows: Row[] = []) { this.rows = rows; }
@@ -110,6 +116,9 @@ function makeChain(db: ReturnType<typeof buildDb>, tableName: string) {
 
   function execute(): { data: any; error: any; count?: number } {
     if (op === 'update') {
+      if (updateErrorInjectors[tableName]) {
+        return { data: null, error: updateErrorInjectors[tableName] };
+      }
       const targets = applyFiltersToTable();
       targets.forEach((r) => Object.assign(r, payload));
       return { data: targets, error: null };
@@ -181,7 +190,13 @@ function makeChain(db: ReturnType<typeof buildDb>, tableName: string) {
 
 interface RpcHandlers { [name: string]: (args: any) => any; }
 
-function installDb(seed: Partial<Record<string, Row[]>>, rpcHandlers: RpcHandlers = {}, tableErrors: Record<string, string> = {}) {
+function installDb(
+  seed: Partial<Record<string, Row[]>>,
+  rpcHandlers: RpcHandlers = {},
+  tableErrors: Record<string, string> = {},
+  updateErrors: Record<string, { message: string; code?: string; details?: string }> = {},
+) {
+  updateErrorInjectors = updateErrors;
   const db = buildDb(seed);
   vi.spyOn(supabaseAdmin, 'from').mockImplementation((tableName: string): any => {
     if (tableErrors[tableName]) {
@@ -414,6 +429,30 @@ describe('ADVERSARIAL — concurrent launch requests (Finding 6)', () => {
 
     const r3 = await BroadcastEngineService.launchCampaign(TENANT_ID, CAMPAIGN_ID);
     expect(r3.success).toBe(true);
+  });
+
+  it('a real DB error on the CAS-claim (e.g. a missing status enum value) is surfaced as-is, never mislabeled "duplicate request" (regression: prod outage 2026-07-18 — broadcast_campaigns_status_check rejected "launching" and every launch failed with a misleading duplicate message)', async () => {
+    const seed = baseSeed({
+      broadcast_campaigns: [{ id: CAMPAIGN_ID, tenant_id: TENANT_ID, status: 'draft', template_name: 'order_update', template_language: 'en' }],
+      broadcast_audiences: [{ campaign_id: CAMPAIGN_ID, audience_type: 'manual', tag_ids: [], filters: { manualContactIds: ['lead-1'] } }],
+      broadcast_templates_cache: [{ tenant_id: TENANT_ID, name: 'order_update', status: 'APPROVED', template_json: {} }],
+      leads: [{ id: 'lead-1', tenant_id: TENANT_ID, name: 'Test User', phone: '919999999999', tags: [], channel: 'whatsapp', last_message_at: new Date().toISOString() }],
+    } as any);
+    installDb(seed, {}, {}, {
+      broadcast_campaigns: {
+        message: 'new row for relation "broadcast_campaigns" violates check constraint "broadcast_campaigns_status_check"',
+        code: '23514',
+      },
+    });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await BroadcastEngineService.launchCampaign(TENANT_ID, CAMPAIGN_ID);
+
+    expect(result.success).toBe(false);
+    // Must carry the real Postgres error, not the generic duplicate-claim message.
+    expect(result.error).toMatch(/check constraint/i);
+    expect(result.error).not.toMatch(/duplicate request/i);
+    expect(errSpy).toHaveBeenCalledWith('[BROADCAST_LAUNCH] CAS-claim update failed:', expect.objectContaining({ code: '23514' }));
   });
 });
 

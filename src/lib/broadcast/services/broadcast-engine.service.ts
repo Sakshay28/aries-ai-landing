@@ -68,8 +68,17 @@ export class BroadcastEngineService {
           // A real DB error (bad constraint, connection issue, etc.) is not the
           // same thing as "someone else already claimed it" — conflating the two
           // previously hid a broadcast_campaigns_status_check violation behind a
-          // misleading "duplicate request" message for every single launch.
+          // misleading "duplicate request" message for every single launch. This
+          // branch means EVERY launch is broken tenant-wide (or platform-wide, if
+          // it's a schema issue), so page an admin rather than let it surface only
+          // as one customer's support ticket.
           console.error('[BROADCAST_LAUNCH] CAS-claim update failed:', claimErr);
+          await notifyAdmin({
+            dedupeKey: `broadcast-cas-claim-db-error:${claimErr.code || 'unknown'}`,
+            subject: 'Broadcast launch is failing for all campaigns — DB error on status claim',
+            summary: claimErr.message,
+            context: { tenantId, campaignId, code: claimErr.code, details: claimErr.details },
+          });
           return { success: false, error: `Launch failed: ${claimErr.message}` };
         }
         if (!claimed) {
