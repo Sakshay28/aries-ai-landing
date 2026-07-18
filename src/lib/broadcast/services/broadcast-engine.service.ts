@@ -64,7 +64,15 @@ export class BroadcastEngineService {
           .eq('status', 'draft')
           .select('id')
           .maybeSingle();
-        if (claimErr || !claimed) {
+        if (claimErr) {
+          // A real DB error (bad constraint, connection issue, etc.) is not the
+          // same thing as "someone else already claimed it" — conflating the two
+          // previously hid a broadcast_campaigns_status_check violation behind a
+          // misleading "duplicate request" message for every single launch.
+          console.error('[BROADCAST_LAUNCH] CAS-claim update failed:', claimErr);
+          return { success: false, error: `Launch failed: ${claimErr.message}` };
+        }
+        if (!claimed) {
           return { success: false, error: 'Campaign launch already in progress — duplicate request ignored.' };
         }
       } else if (!['scheduled', 'launching'].includes(campaign.status)) {
