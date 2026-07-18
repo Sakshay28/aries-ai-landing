@@ -29,6 +29,52 @@ interface SectionResult {
   error?: string;
 }
 
+// Fields that are genuine database columns but are internal, technical, or
+// diagnostic rather than something a business owner recognizes as "my data" —
+// ad-attribution tracking IDs, feature flags, and granular AI-scoring
+// internals that are almost always null and unreadable without the scoring
+// engine itself. A raw '*' export previously included these verbatim, which
+// made the file read like a database dump instead of an account summary.
+const INTERNAL_FIELD_PATTERNS: RegExp[] = [
+  /^meta_(campaign|ad|adset)_id$/,
+  /^fbclid$/,
+  /^ctwa_clid$/,
+  /^feature_flag_overrides$/,
+  /^wa_message_id$/,
+  /^wa_contact_synced_at$/,
+  /^score_breakdown$/,
+  /^scoring_reasoning$/,
+  /^manual_status/,
+  /^auto_status$/,
+  /^buying_signals$/,
+  /^negative_signals$/,
+  /^ai_(?!score$|summary$)/, // keep ai_score / ai_summary as the human-readable distillation, drop every other ai_* internal
+  /^assigned_at$/,
+  /^tenant_id$/, // redundant — every row in this file already belongs to this account
+];
+
+function isInternalField(key: string): boolean {
+  return INTERNAL_FIELD_PATTERNS.some(p => p.test(key));
+}
+
+// Removes internal/technical fields and empty values (null, undefined, empty
+// arrays) so the export reads as a clean account summary rather than a raw
+// row-for-row database dump full of "field: null" noise.
+function cleanRow(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (isInternalField(key)) continue;
+    if (value === null || value === undefined) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+function cleanRows(rows: unknown[]): Record<string, unknown>[] {
+  return rows.map(r => cleanRow(r as Record<string, unknown>));
+}
+
 async function fetchSection(
   table: string,
   tenantId: string,
@@ -110,18 +156,18 @@ export async function GET(_req: NextRequest) {
       exportedAt: new Date().toISOString(),
       tenantId,
       businessName: tenant.business_name,
-      account: tenant,
-      businessProfile: businessProfile.rows[0] ?? null,
-      team: team.rows,
-      leads: { rows: leads.rows, truncated: leads.truncated },
-      conversations: { rows: conversations.rows, truncated: conversations.truncated },
-      messages: { rows: messages.rows, truncated: messages.truncated },
-      bookings: { rows: bookings.rows, truncated: bookings.truncated },
-      restaurantBookings: { rows: restaurantBookings.rows, truncated: restaurantBookings.truncated },
-      knowledgeBase: knowledgeDocs.rows,
-      notes: notes.rows,
-      followUps: followUps.rows,
-      consentHistory: consentHistory.rows,
+      account: cleanRow(tenant),
+      businessProfile: businessProfile.rows[0] ? cleanRow(businessProfile.rows[0] as Record<string, unknown>) : null,
+      team: cleanRows(team.rows),
+      leads: { rows: cleanRows(leads.rows), truncated: leads.truncated },
+      conversations: { rows: cleanRows(conversations.rows), truncated: conversations.truncated },
+      messages: { rows: cleanRows(messages.rows), truncated: messages.truncated },
+      bookings: { rows: cleanRows(bookings.rows), truncated: bookings.truncated },
+      restaurantBookings: { rows: cleanRows(restaurantBookings.rows), truncated: restaurantBookings.truncated },
+      knowledgeBase: cleanRows(knowledgeDocs.rows),
+      notes: cleanRows(notes.rows),
+      followUps: cleanRows(followUps.rows),
+      consentHistory: cleanRows(consentHistory.rows),
     };
 
     logAudit({

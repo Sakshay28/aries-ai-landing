@@ -125,6 +125,81 @@ describe('GET /api/dashboard/settings/export', () => {
     );
   });
 
+  it('strips internal tracking fields and null noise from exported rows', async () => {
+    (getCurrentUser as any).mockResolvedValue(OWNER);
+    mockAllTables({
+      tenants: sectionChain([{ id: 't-1', business_name: 'Acme' }]),
+      leads: sectionChain([{
+        id: 'l-1',
+        name: 'Jane',
+        phone: '+919999999999',
+        lead_status: 'hot',
+        ai_score: 82,
+        ai_summary: 'Ready to book, asked about dates twice.',
+        // Everything below is exactly the kind of internal/technical noise
+        // reported as making the export unreadable — should all be dropped.
+        meta_campaign_id: null,
+        meta_ad_id: null,
+        meta_adset_id: null,
+        fbclid: null,
+        ctwa_clid: null,
+        feature_flag_overrides: null,
+        wa_contact_synced_at: null,
+        score_breakdown: {},
+        scoring_reasoning: null,
+        manual_status: null,
+        manual_status_at: null,
+        manual_status_by: null,
+        auto_status: 'new',
+        ai_buying_intent: null,
+        ai_urgency: null,
+        ai_trust: null,
+        ai_engagement: null,
+        ai_conversion_probability: null,
+        ai_sales_stage: null,
+        ai_confidence: null,
+        ai_momentum: null,
+        ai_objections: null,
+        ai_recommendation: null,
+        ai_explanation: null,
+        ai_last_analyzed_at: null,
+        ai_group_booking: null,
+        ai_group_size: null,
+        assigned_at: null,
+        buying_signals: [],
+        negative_signals: [],
+        tenant_id: 't-1',
+      }]),
+    });
+
+    const { GET } = await import('@/app/api/dashboard/settings/export/route');
+    const res = await GET(req());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    const [lead] = body.leads.rows;
+
+    // Meaningful, human-readable fields survive.
+    expect(lead).toMatchObject({
+      id: 'l-1', name: 'Jane', phone: '+919999999999', lead_status: 'hot',
+      ai_score: 82, ai_summary: 'Ready to book, asked about dates twice.',
+    });
+
+    // Internal, technical, or null fields are gone.
+    const droppedKeys = [
+      'meta_campaign_id', 'meta_ad_id', 'meta_adset_id', 'fbclid', 'ctwa_clid',
+      'feature_flag_overrides', 'wa_contact_synced_at', 'score_breakdown', 'scoring_reasoning',
+      'manual_status', 'manual_status_at', 'manual_status_by', 'auto_status',
+      'ai_buying_intent', 'ai_urgency', 'ai_trust', 'ai_engagement', 'ai_conversion_probability',
+      'ai_sales_stage', 'ai_confidence', 'ai_momentum', 'ai_objections', 'ai_recommendation',
+      'ai_explanation', 'ai_last_analyzed_at', 'ai_group_booking', 'ai_group_size', 'assigned_at',
+      'buying_signals', 'negative_signals', 'tenant_id',
+    ];
+    for (const key of droppedKeys) {
+      expect(lead).not.toHaveProperty(key);
+    }
+  });
+
   it('degrades gracefully when one section table errors, instead of failing the whole export', async () => {
     (getCurrentUser as any).mockResolvedValue(OWNER);
     mockAllTables({
