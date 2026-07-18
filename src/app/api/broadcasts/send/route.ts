@@ -54,6 +54,7 @@ export async function POST(req: NextRequest) {
     }, { campaignId });
 
     if (!res.success) {
+      console.error('[BROADCASTS_SEND] launchCampaign failed:', res.error);
       return NextResponse.json({ success: false, error: res.error || 'Failed to initialize campaign enqueuing' }, { status: 500 });
     }
 

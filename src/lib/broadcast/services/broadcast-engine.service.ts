@@ -90,7 +90,10 @@ export class BroadcastEngineService {
         // find it empty here. Sync on demand once rather than hard-failing on
         // a cache that was never given a chance to be populated.
         if (!cachedTemplate) {
-          await MetaTemplateSyncService.syncTemplates(tenantId);
+          const syncResult = await MetaTemplateSyncService.syncTemplates(tenantId);
+          if (!syncResult.success) {
+            console.error('[BROADCAST_LAUNCH] On-demand template sync failed:', syncResult.error);
+          }
           ({ data: cachedTemplate } = await supabaseAdmin
             .from('broadcast_templates_cache')
             .select('status')
