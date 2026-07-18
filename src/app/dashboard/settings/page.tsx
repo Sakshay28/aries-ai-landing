@@ -255,10 +255,12 @@ function PrivacyDataTab({ businessName }: { businessName: string }) {
       </SectionCard>
 
       {!loadingStatus && (
-        <div className="rounded-2xl border overflow-hidden" style={{ borderColor: '#EF4444' }}>
-          <div className="flex items-center gap-3 px-6 py-4 border-b" style={{ borderColor: '#EF4444', background: 'rgba(239,68,68,0.06)' }}>
-            <Trash2 className="w-4 h-4" style={{ color: '#EF4444' }} />
-            <span className="text-sm font-semibold" style={{ color: '#EF4444' }}>Danger Zone</span>
+        <div className="rounded-2xl border overflow-hidden" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
+          <div className="flex items-center gap-3 px-6 py-4 border-b" style={{ borderColor: 'var(--border)', background: 'var(--secondary)' }}>
+            <Trash2 className="w-4 h-4" style={{ color: 'var(--destructive)' }} />
+            <span className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>
+              {deletionStatus.status === 'pending' ? 'Account Deletion Scheduled' : 'Close Your Account'}
+            </span>
           </div>
           <div className="p-6 space-y-4">
             {deletionStatus.status === 'pending' ? (
@@ -271,7 +273,7 @@ function PrivacyDataTab({ businessName }: { businessName: string }) {
                 <button
                   onClick={cancelDeletion}
                   disabled={cancelling}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold"
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-opacity"
                   style={{ background: '#10B981', color: 'white', opacity: cancelling ? 0.7 : 1, cursor: cancelling ? 'wait' : 'pointer' }}
                 >
                   {cancelling ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
@@ -287,8 +289,8 @@ function PrivacyDataTab({ businessName }: { businessName: string }) {
                 </p>
                 <button
                   onClick={() => setConfirmOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold"
-                  style={{ background: '#EF4444', color: 'white', cursor: 'pointer' }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-90"
+                  style={{ background: 'var(--destructive)', color: 'var(--destructive-foreground)', cursor: 'pointer' }}
                 >
                   <Trash2 className="w-4 h-4" /> Delete My Account
                 </button>
@@ -311,9 +313,9 @@ function PrivacyDataTab({ businessName }: { businessName: string }) {
                   <button
                     onClick={requestDeletion}
                     disabled={deleting || confirmText.trim() !== businessName}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold"
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-opacity"
                     style={{
-                      background: '#EF4444', color: 'white',
+                      background: 'var(--destructive)', color: 'var(--destructive-foreground)',
                       opacity: deleting || confirmText.trim() !== businessName ? 0.5 : 1,
                       cursor: deleting || confirmText.trim() !== businessName ? 'not-allowed' : 'pointer',
                     }}
@@ -323,7 +325,7 @@ function PrivacyDataTab({ businessName }: { businessName: string }) {
                   </button>
                   <button
                     onClick={() => { setConfirmOpen(false); setConfirmText(''); }}
-                    className="px-4 py-2.5 rounded-xl text-sm font-semibold"
+                    className="px-4 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"
                     style={{ background: 'var(--secondary)', color: 'var(--foreground)', border: '1px solid var(--border)' }}
                   >
                     Cancel
