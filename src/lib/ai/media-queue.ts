@@ -91,6 +91,14 @@ async function runAnalysis(job: MediaAnalysisJobData): Promise<void> {
       contentText = existingText;
     }
 
+    // Store the embedding BEFORE flipping processing_status to 'ready' — a
+    // reader that sees 'ready' must always find a non-null embedding, or
+    // match_knowledge_docs (which requires embedding IS NOT NULL) would
+    // silently miss a doc the UI already claims is searchable.
+    if (contentText) {
+      await storeDocEmbedding(docId, contentText);
+    }
+
     // Never clobber an owner's manual edits — only refresh the raw AI fields
     // and the owner-facing fields if the owner hasn't touched them yet.
     const { data: current } = await supabaseAdmin
@@ -117,10 +125,6 @@ async function runAnalysis(job: MediaAnalysisJobData): Promise<void> {
       .update(update)
       .eq('id', docId);
     if (updateErr) throw new Error(updateErr.message);
-
-    if (contentText) {
-      await storeDocEmbedding(docId, contentText);
-    }
   } catch (err) {
     console.error('media-queue: analysis failed for', docId, (err as Error).message);
     Sentry.captureException(err as Error);
