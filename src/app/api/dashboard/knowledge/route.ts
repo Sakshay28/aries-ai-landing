@@ -1,12 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { enqueueEmbedding } from '@/lib/ai/embedding-queue';
 import { enqueueMediaAnalysis } from '@/lib/ai/media-queue';
 import { checkRedisRateLimit } from '@/lib/redis/client';
 import { invalidateTenantAllCaches } from '@/lib/tenant/manager';
-import { getAI } from '@/lib/ai/client';
 import { computeSha256, validateFileSignature, findDuplicateByHash } from '@/lib/utils/media-validation';
+
+export const maxDuration = 60; // clamped to 10s on Hobby — see MediaAnalysisWorkerService for the retry story on files whose analysis exceeds that
 
 const TEXT_TYPES = new Set(['txt', 'md', 'csv', 'json', 'html', 'xml']);
 const MEDIA_TYPES = new Set(['mp4', 'mov', 'webm', 'jpg', 'jpeg', 'png', 'webp']);
@@ -130,28 +131,13 @@ export async function POST(req: NextRequest) {
     fileUrl = storagePath;
   }
 
-  // ── Extract text for supported types (media gets AI vision analysis instead) ──
+  // ── Extract text for plain text types now (cheap, synchronous). PDFs go ──
+  // through async analysis (enqueueMediaAnalysis) instead of extracting here
+  // — a large PDF's Gemini call could otherwise approach this request's
+  // own timeout before the row is even inserted.
   if (isText) {
     const raw = buffer.toString('utf-8');
     contentText = raw.length > MAX_BYTES ? raw.slice(0, MAX_BYTES) + '\n...[truncated]' : raw;
-  } else if (isPdf) {
-    try {
-      const genAIResponse = await getAI().models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-          {
-            inlineData: {
-              mimeType: 'application/pdf',
-              data: buffer.toString('base64'),
-            },
-          },
-          'Extract all text content from this document exactly as it is written. Do not summarize, do not translate, do not add any comments. Just return the raw extracted text.',
-        ],
-      });
-      contentText = genAIResponse.text || '';
-    } catch (err) {
-      console.error('Failed to extract text from PDF using Gemini:', err);
-    }
   }
 
   // Media and PDFs go through async AI analysis (vision/video/tagging) before
@@ -174,20 +160,20 @@ export async function POST(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  // after() guarantees this keeps running past the response being sent —
+  // a plain fire-and-forget call has no such guarantee on Vercel.
   if (data?.id) {
     if (needsAnalysis) {
-      enqueueMediaAnalysis({
+      after(() => enqueueMediaAnalysis({
         docId:       data.id,
         storagePath: storagePath,
         bucket:      'knowledge-docs',
         mimeType:    file.type || 'application/octet-stream',
         fileType:    ext,
         filename:    file.name,
-        contentText: isPdf ? contentText : undefined,
-      });
+      }));
     } else if (contentText) {
-      // Generate + store embedding asynchronously (non-blocking — don't fail upload if this errors)
-      enqueueEmbedding({ docId: data.id, contentText });
+      after(() => enqueueEmbedding({ docId: data.id, contentText }));
     }
   }
 

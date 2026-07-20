@@ -108,16 +108,35 @@ Return ONLY a JSON object with these exact keys:
   }
 }
 
-// ── Classify already-extracted PDF text: tags + category only (cheap — ──
-// ── no re-upload of the PDF bytes, reuses the existing text extraction) ──
-export async function classifyPdfText(contentText: string, filename: string): Promise<Pick<MediaAnalysisResult, 'title' | 'tags' | 'category'>> {
-  if (!contentText.trim()) return { title: '', tags: [], category: '' };
+// ── Extract raw text from a PDF via Gemini (no size gate — the underlying ──
+// ── request either succeeds or throws, callers handle both gracefully) ──
+export async function extractPdfText(buffer: Buffer): Promise<string> {
+  try {
+    const response = await getAI().models.generateContent({
+      model: VISION_MODEL,
+      contents: [
+        { inlineData: { mimeType: 'application/pdf', data: buffer.toString('base64') } },
+        'Extract all text content from this document exactly as it is written. Do not summarize, do not translate, do not add any comments. Just return the raw extracted text.',
+      ],
+    });
+    return response.text || '';
+  } catch (err) {
+    console.error('media-analysis: extractPdfText failed:', (err as Error).message);
+    return '';
+  }
+}
+
+// ── Classify already-extracted PDF text: title/description/tags/category ──
+// ── (cheap — no re-upload of the PDF bytes, reuses the existing extraction) ──
+export async function classifyPdfText(contentText: string, filename: string): Promise<Pick<MediaAnalysisResult, 'title' | 'description' | 'tags' | 'category'>> {
+  if (!contentText.trim()) return { title: '', description: '', tags: [], category: '' };
 
   const prompt = `This is the extracted text of a business document named "${filename}", used in a WhatsApp AI assistant's knowledge base.
 
 Return ONLY a JSON object with these exact keys:
 {
   "title": "short 3-6 word title describing what this document is (e.g. 'Cocktail Menu', 'Banquet Package Brochure')",
+  "description": "1-2 sentence description of what this document contains, written so a customer's question about it can be matched to this description (e.g. 'Full food menu with starters, mains, and desserts, vegetarian and non-vegetarian options with prices in INR.')",
   "tags": ["5-12 short lowercase keyword tags a customer might use to ask for this document"],
   "category": "one of: ${CATEGORY_HINT} — pick the single best fit, or invent a short one if none fit"
 }
@@ -134,12 +153,13 @@ ${contentText.slice(0, 6000)}`;
     const raw = parseJsonResponse(response.text || '');
     return {
       title: typeof raw.title === 'string' ? raw.title.slice(0, 200) : '',
+      description: typeof raw.description === 'string' ? raw.description.slice(0, 2000) : '',
       tags:  Array.isArray(raw.tags) ? raw.tags.filter((t): t is string => typeof t === 'string').slice(0, 20) : [],
       category: typeof raw.category === 'string' ? raw.category.slice(0, 60) : '',
     };
   } catch (err) {
     console.error('media-analysis: classifyPdfText failed:', (err as Error).message);
-    return { title: '', tags: [], category: '' };
+    return { title: '', description: '', tags: [], category: '' };
   }
 }
 

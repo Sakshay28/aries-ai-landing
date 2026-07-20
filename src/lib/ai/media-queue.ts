@@ -18,7 +18,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { analyzeImage, analyzeVideo, classifyPdfText, buildContentText } from '@/lib/ai/media-analysis';
+import { analyzeImage, analyzeVideo, classifyPdfText, extractPdfText, buildContentText } from '@/lib/ai/media-analysis';
 import { storeDocEmbedding } from '@/lib/ai/rag';
 import * as Sentry from '@/lib/sentry-stub';
 
@@ -83,12 +83,25 @@ async function runAnalysis(job: MediaAnalysisJobData): Promise<void> {
       category = result.category;
       contentText = buildContentText(filename, result);
     } else if (fileType === 'pdf') {
-      const existingText = job.contentText || '';
-      const result = await classifyPdfText(existingText, filename);
+      // Text extraction happens here (self-contained, like image/video
+      // analysis) rather than synchronously in the upload route — a large
+      // PDF's Gemini extraction call could otherwise approach or exceed the
+      // serverless function's request timeout before the row is even
+      // inserted. The caller may still pass already-extracted text (e.g.
+      // the stuck-job reconciler re-using a previously extracted value).
+      let extractedText = job.contentText || '';
+      if (!extractedText) {
+        const { data: fileData, error: dlErr } = await supabaseAdmin.storage.from(bucket).download(storagePath);
+        if (dlErr || !fileData) throw new Error(dlErr?.message || 'download failed');
+        const buffer = Buffer.from(await fileData.arrayBuffer());
+        extractedText = await extractPdfText(buffer);
+      }
+      const result = await classifyPdfText(extractedText, filename);
       title = result.title;
+      description = result.description;
       tags = result.tags;
       category = result.category;
-      contentText = existingText;
+      contentText = extractedText;
     }
 
     // Store the embedding BEFORE flipping processing_status to 'ready' — a

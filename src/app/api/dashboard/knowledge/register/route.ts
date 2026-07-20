@@ -1,13 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { enqueueEmbedding } from '@/lib/ai/embedding-queue';
 import { enqueueMediaAnalysis } from '@/lib/ai/media-queue';
 import { invalidateTenantAllCaches } from '@/lib/tenant/manager';
-import { getAI } from '@/lib/ai/client';
 import { computeSha256, validateFileSignature, findDuplicateByHash } from '@/lib/utils/media-validation';
 
-const PDF_EXTRACT_MAX_BYTES = 20_000_000; // Gemini inlineData requests handle up to ~20MB comfortably
+export const maxDuration = 60; // clamped to 10s on Hobby — see MediaAnalysisWorkerService for the retry story on files whose analysis exceeds that
+
 const TEXT_TYPES = new Set(['txt', 'md', 'csv', 'json', 'html', 'xml']);
 const MIME_BY_EXT: Record<string, string> = {
   mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm',
@@ -25,14 +24,14 @@ export async function POST(req: NextRequest) {
   }
 
   const { storagePath, filename, ext } = body;
-  const isPdf = ext === 'pdf';
   const isText = TEXT_TYPES.has(ext);
-  const needsAnalysis = !isText; // pdf + image + video all go through analysis
+  const needsAnalysis = !isText; // pdf + image + video all go through async analysis
 
   // The file is already in storage (uploaded via the presigned URL before this
-  // call). Download it once here to validate its signature, hash it for
-  // duplicate detection, and (for PDFs) extract text.
-  let contentText = '';
+  // call). Download it once here to validate its signature and hash it for
+  // duplicate detection. PDF/image/video text extraction happens later,
+  // asynchronously, in enqueueMediaAnalysis — not here — so a large file's
+  // Gemini call can't approach this request's own timeout.
   let fileHash: string | null = null;
 
   if (!isText) {
@@ -60,26 +59,6 @@ export async function POST(req: NextRequest) {
       await supabaseAdmin.storage.from('knowledge-docs').remove([storagePath]);
       return NextResponse.json({ success: true, duplicate: true, existingDoc: duplicate });
     }
-
-    if (isPdf && buffer.length <= PDF_EXTRACT_MAX_BYTES) {
-      try {
-        const genAIResponse = await getAI().models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: [
-            {
-              inlineData: {
-                mimeType: 'application/pdf',
-                data: buffer.toString('base64'),
-              },
-            },
-            'Extract all text content from this document exactly as it is written. Do not summarize, do not translate, do not add any comments. Just return the raw extracted text.',
-          ],
-        });
-        contentText = genAIResponse.text || '';
-      } catch (err) {
-        console.error('Failed to extract text from PDF:', err);
-      }
-    }
   }
 
   const { data, error } = await supabaseAdmin
@@ -88,7 +67,7 @@ export async function POST(req: NextRequest) {
       tenant_id: tenantId,
       filename,
       file_type: ext,
-      content_text: contentText,
+      content_text: '',
       file_url: storagePath,
       file_hash: fileHash,
       processing_status: needsAnalysis ? 'pending' : 'ready',
@@ -98,20 +77,17 @@ export async function POST(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  if (data?.id) {
-    if (needsAnalysis) {
-      enqueueMediaAnalysis({
-        docId:       data.id,
-        storagePath,
-        bucket:      'knowledge-docs',
-        mimeType:    MIME_BY_EXT[ext] || 'application/octet-stream',
-        fileType:    ext,
-        filename,
-        contentText: isPdf ? contentText : undefined,
-      });
-    } else if (contentText) {
-      enqueueEmbedding({ docId: data.id, contentText });
-    }
+  // after() guarantees this keeps running past the response being sent —
+  // a plain fire-and-forget call has no such guarantee on Vercel.
+  if (data?.id && needsAnalysis) {
+    after(() => enqueueMediaAnalysis({
+      docId:    data.id,
+      storagePath,
+      bucket:   'knowledge-docs',
+      mimeType: MIME_BY_EXT[ext] || 'application/octet-stream',
+      fileType: ext,
+      filename,
+    }));
   }
 
   await invalidateTenantAllCaches(tenantId);
