@@ -1649,14 +1649,25 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   const ruledFilenames = new Set(resolvedMediaRules.flatMap(r => r.files.map(f => f.filename)));
   const semanticFilenames = new Set(mediaCandidates.map(m => m.filename));
-  const forcedCandidates = [...ruledFilenames]
+
+  // ── Guidelines-referenced files: any exact uploaded filename mentioned ──
+  // in the free-text Staff Guidelines is also a valid, force-included
+  // candidate. Cross-checked against the real catalog so a typo or a name
+  // that doesn't match any actual upload is silently ignored rather than
+  // causing a broken send.
+  const guidelinesText = (tenant.system_prompt || '').toLowerCase();
+  const guidelinesFilenames = new Set(
+    guidelinesText ? allKbMedia.filter(f => guidelinesText.includes(f.filename.toLowerCase())).map(f => f.filename) : []
+  );
+
+  const forcedCandidates = [...new Set([...ruledFilenames, ...guidelinesFilenames])]
     .filter(fn => !semanticFilenames.has(fn))
     .map(fn => allKbMedia.find(f => f.filename === fn))
     .filter((f): f is KbMediaFull => !!f)
     .map(f => ({
       filename: f.filename, file_type: f.file_type, title: f.title || '',
       description: f.description || '', tags: [] as string[], category: f.category || '',
-      similarity: 1, // business rule — always shown as a top candidate, not embedding-ranked
+      similarity: 1, // business rule or guidelines mention — always shown as a top candidate, not embedding-ranked
     }));
 
   const baseConfig = getTenantConfig(tenant);
