@@ -31,7 +31,7 @@ export async function GET() {
       outbound_webhook_url, system_prompt`;
   // Optional columns added by later migrations. Select them when present;
   // fall back to BASE_COLS if the migration hasn't run yet.
-  const OPT_COLS = `wa_mode, coexistence_auto_pause, coexistence_connected_at, welcome_image_url, bot_language_mode, response_length, prohibited_topics, always_mention_rules, competitors, competitor_deflection_reply, booking_alert_template, default_lead_assignee_id, lead_assigned_email_template, media_rules`;
+  const OPT_COLS = `wa_mode, coexistence_auto_pause, coexistence_connected_at, welcome_image_url, bot_language_mode, response_length, prohibited_topics, always_mention_rules, competitors, competitor_deflection_reply, booking_alert_template, default_lead_assignee_id, lead_assigned_email_template, media_rules, service_disabled, service_disabled_message`;
 
   let { data, error } = await supabaseAdmin
     .from('tenants')
@@ -175,6 +175,8 @@ export async function PATCH(req: NextRequest) {
     'default_lead_assignee_id', 'lead_assigned_email_template',
     // Media Rules (migration 20260719)
     'media_rules',
+    // Service-disabled kill switch (migration 20260720)
+    'service_disabled', 'service_disabled_message',
   ];
 
   const updates: Record<string, unknown> = {};
@@ -238,6 +240,8 @@ export async function PATCH(req: NextRequest) {
     'always_mention_rules', 'competitors', 'competitor_deflection_reply',
     'default_lead_assignee_id',
     'lead_assigned_email_template',
+    // Service-disabled kill switch (migration 20260720)
+    'service_disabled', 'service_disabled_message',
   ];
 
   let { data, error } = await supabaseAdmin

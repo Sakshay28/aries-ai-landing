@@ -295,6 +295,23 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // Decrypt token ONCE — reused for read receipt, media, AI reply, off-hours, booking
   const decryptedAccessToken = decryptToken(tenant.wa_access_token);
 
+  // ── Service-disabled kill switch ──
+  // Owner-facing toggle for "shut this bot off but still tell people why",
+  // as opposed to is_active=false which makes the tenant unresolvable and
+  // goes fully silent. Bypasses conversation history, RAG, and the AI engine
+  // entirely — every inbound message gets the same fixed reply, verbatim.
+  if (tenant.service_disabled) {
+    if (decryptedAccessToken && tenant.wa_phone_number_id) {
+      const disabledText = tenant.service_disabled_message?.trim() || 'This service is currently unavailable. Please check back later.';
+      try {
+        await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id, normalizePhoneNumber(msg.fromPhone), disabledText);
+      } catch (err) {
+        console.error('❌ Meta Webhook: failed to send service-disabled reply', err);
+      }
+    }
+    return;
+  }
+
   // 2b. Mark message as read immediately (triggers blue ticks on sender's phone)
   if (decryptedAccessToken && tenant.wa_phone_number_id) {
     markMessageAsRead(decryptedAccessToken, tenant.wa_phone_number_id, msg.messageId).catch(() => {});

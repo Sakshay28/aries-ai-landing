@@ -113,6 +113,10 @@ export interface Tenant {
   off_hours_message: string | null;
   off_hours_capture_lead: boolean;
 
+  // Service-disabled kill switch (migration 20260720)
+  service_disabled?: boolean | null;
+  service_disabled_message?: string | null;
+
   // Meta
   is_active: boolean;
   onboarding_completed: boolean;
