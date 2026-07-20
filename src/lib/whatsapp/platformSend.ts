@@ -82,6 +82,15 @@ import type { SystemEventType } from '@/lib/whatsapp/templateManager';
 
 const PLATFORM_KEEPALIVE_TEMPLATE = 'staff_keepalive';
 
+// Aries AI's own WABA phone_number_id (see header comment). Used whenever
+// PLATFORM_WA_PHONE_NUMBER_ID isn't set in the environment, so a missing/
+// misconfigured env var can't silently break platform-wide alert delivery.
+// The tenant row holding these credentials is NOT named "Aries AI" in the
+// DB (a prior lookup assumed business_name === 'Aries AI', which never
+// matched and made this fallback permanently dead) — key off the phone
+// number id instead, which is what actually identifies the platform WABA.
+const DEFAULT_PLATFORM_PHONE_NUMBER_ID = '1207672335754940';
+
 // Maps each system event to its platform template name + variable builder
 const EVENT_TEMPLATES: Record<string, {
   name: string;
@@ -184,22 +193,16 @@ let _cachedCreds: { token: string; phoneId: string; tenantId: string } | null = 
 async function getPlatformCreds(): Promise<{ token: string; phoneId: string; tenantId: string } | null> {
   if (_cachedCreds) return _cachedCreds;
 
-  // Primary: look up by the env var phone number ID (fastest, explicit)
-  // Fallback: look up by business_name so this works even without the env var
-  const phoneNumberId = process.env.PLATFORM_WA_PHONE_NUMBER_ID;
+  const phoneNumberId = process.env.PLATFORM_WA_PHONE_NUMBER_ID || DEFAULT_PLATFORM_PHONE_NUMBER_ID;
 
-  const query = supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('tenants')
-    .select('id, wa_access_token, wa_phone_number_id');
-
-  const { data, error } = await (
-    phoneNumberId
-      ? query.eq('wa_phone_number_id', phoneNumberId).maybeSingle()
-      : query.eq('business_name', 'Aries AI').maybeSingle()
-  );
+    .select('id, wa_access_token, wa_phone_number_id')
+    .eq('wa_phone_number_id', phoneNumberId)
+    .maybeSingle();
 
   if (error || !data?.wa_access_token || !data?.wa_phone_number_id) {
-    console.error('[platform-send] Could not load platform credentials:', error?.message ?? 'no Aries AI tenant found');
+    console.error('[platform-send] Could not load platform credentials:', error?.message ?? `no tenant found for phone_number_id ${phoneNumberId}`);
     return null;
   }
 
