@@ -31,7 +31,7 @@ export async function GET() {
       outbound_webhook_url, system_prompt`;
   // Optional columns added by later migrations. Select them when present;
   // fall back to BASE_COLS if the migration hasn't run yet.
-  const OPT_COLS = `wa_mode, coexistence_auto_pause, coexistence_connected_at, welcome_image_url, bot_language_mode, response_length, prohibited_topics, always_mention_rules, competitors, competitor_deflection_reply, booking_alert_template, default_lead_assignee_id, lead_assigned_email_template`;
+  const OPT_COLS = `wa_mode, coexistence_auto_pause, coexistence_connected_at, welcome_image_url, bot_language_mode, response_length, prohibited_topics, always_mention_rules, competitors, competitor_deflection_reply, booking_alert_template, default_lead_assignee_id, lead_assigned_email_template, media_rules`;
 
   let { data, error } = await supabaseAdmin
     .from('tenants')
@@ -126,6 +126,19 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'always_mention_rules must be up to 30 {topic, mention} objects.' }, { status: 400 });
     }
   }
+  if (body.media_rules !== undefined && body.media_rules !== null) {
+    const rules = body.media_rules;
+    const valid = Array.isArray(rules) && rules.length <= 20 && rules.every((r: unknown) =>
+      r && typeof r === 'object' &&
+      typeof (r as { topic?: unknown }).topic === 'string' && (r as { topic: string }).topic.length <= 200 &&
+      Array.isArray((r as { docIds?: unknown }).docIds) &&
+      (r as { docIds: unknown[] }).docIds.length <= 10 &&
+      (r as { docIds: unknown[] }).docIds.every((id: unknown) => typeof id === 'string' && id.length <= 100)
+    );
+    if (!valid) {
+      return NextResponse.json({ success: false, error: 'media_rules must be up to 20 {topic, docIds[]} objects (max 10 files per rule).' }, { status: 400 });
+    }
+  }
 
   // SSRF guard: reject an unsafe outbound_webhook_url before persisting it.
   if (
@@ -160,6 +173,8 @@ export async function PATCH(req: NextRequest) {
     'bot_language_mode', 'response_length', 'prohibited_topics',
     'always_mention_rules', 'competitors', 'competitor_deflection_reply',
     'default_lead_assignee_id', 'lead_assigned_email_template',
+    // Media Rules (migration 20260719)
+    'media_rules',
   ];
 
   const updates: Record<string, unknown> = {};

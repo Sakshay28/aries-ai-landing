@@ -492,5 +492,8 @@ export function getTenantConfig(tenant: Tenant) {
     alwaysMentionRules: tenant.always_mention_rules || [],
     competitors: tenant.competitors || [],
     competitorDeflectionReply: tenant.competitor_deflection_reply || '',
+    // Media Rules (migration 20260719) — resolved from docIds to actual
+    // file metadata in the webhook route, where knowledge_docs is available.
+    mediaRulesRaw: tenant.media_rules || [],
   };
 }

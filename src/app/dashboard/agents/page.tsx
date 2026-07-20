@@ -243,6 +243,13 @@ export default function AISettingsPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [dragOverKnowledge, setDragOverKnowledge] = useState(false);
 
+  // Media Rules state — "when topic X genuinely applies, prefer these files"
+  // (AI-judged, not keyword-triggered like Scripted Replies)
+  const [mediaRules, setMediaRules] = useState<Array<{ topic: string; docIds: string[] }>>([]);
+  const [newRuleTopic, setNewRuleTopic] = useState('');
+  const [newRuleDocIds, setNewRuleDocIds] = useState<string[]>([]);
+  const [savingMediaRule, setSavingMediaRule] = useState(false);
+
   // Welcome image upload state
   const [uploadingWelcomeImage, setUploadingWelcomeImage] = useState(false);
   const welcomeImageInputRef = useRef<HTMLInputElement>(null);
@@ -409,7 +416,8 @@ export default function AISettingsPage() {
         };
         setDraft(d);
         setOriginal(JSON.parse(JSON.stringify(d)));
-        
+        setMediaRules(settingsData.data.media_rules || []);
+
         // Show Onboarding Setup if no custom rules exist
         if (!d.welcome_message && !d.system_prompt && d.custom_faqs.length === 0) {
           setShowOnboarding(true);
@@ -779,6 +787,41 @@ export default function AISettingsPage() {
       toast.error(e instanceof Error ? e.message : 'Failed to save changes');
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  const saveMediaRules = async (next: Array<{ topic: string; docIds: string[] }>) => {
+    const res = await fetch('/api/dashboard/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ media_rules: next }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) throw new Error(json.error || 'Failed to save media rule');
+    setMediaRules(next);
+  };
+
+  const handleAddMediaRule = async () => {
+    if (!newRuleTopic.trim() || newRuleDocIds.length === 0) return;
+    setSavingMediaRule(true);
+    try {
+      await saveMediaRules([...mediaRules, { topic: newRuleTopic.trim(), docIds: newRuleDocIds }]);
+      setNewRuleTopic('');
+      setNewRuleDocIds([]);
+      toast.success('Media rule added');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save media rule');
+    } finally {
+      setSavingMediaRule(false);
+    }
+  };
+
+  const handleDeleteMediaRule = async (index: number) => {
+    try {
+      await saveMediaRules(mediaRules.filter((_, i) => i !== index));
+      toast.success('Media rule removed');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to remove media rule');
     }
   };
 
@@ -2062,6 +2105,76 @@ export default function AISettingsPage() {
                           </p>
                         </div>
                       )}
+                    </div>
+
+                    {/* Media Rules — AI-judged topic -> file associations */}
+                    <div className="pt-4 border-t border-border space-y-3">
+                      <div>
+                        <div className="text-xs font-bold text-foreground">Media Rules</div>
+                        <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                          Tell the AI what to prefer sending for a topic, in plain English — it still uses its own judgment about whether the topic genuinely applies. (Need an exact keyword-triggered rule instead? Use Scripted Replies above.)
+                        </p>
+                      </div>
+
+                      {mediaRules.map((rule, i) => (
+                        <div key={i} className="flex items-start justify-between gap-2 p-3 bg-background border border-border/80 rounded-xl text-xs">
+                          <div className="min-w-0">
+                            <p className="font-bold text-foreground">When "{rule.topic}" genuinely applies</p>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {rule.docIds.map(id => {
+                                const d = docs.find(dd => dd.id === id);
+                                return <span key={id} className="px-1.5 py-0.5 rounded bg-secondary/60 text-[10px] font-medium">{d?.title || d?.filename || 'file'}</span>;
+                              })}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteMediaRule(i)}
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors shrink-0"
+                            title="Delete rule"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+
+                      <div className="p-3.5 rounded-xl border border-border bg-secondary/20 space-y-2.5">
+                        <input
+                          type="text"
+                          value={newRuleTopic}
+                          onChange={e => setNewRuleTopic(e.target.value)}
+                          placeholder='Topic, e.g. "food and menu questions"'
+                          className="w-full h-9 px-3 rounded-lg text-xs bg-background border border-border/80 focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                        />
+                        <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
+                          {docs.filter(d => d.file_url && ['jpg', 'jpeg', 'png', 'webp', 'mp4', 'mov', 'webm', 'pdf'].includes((d.file_type || '').toLowerCase())).map(d => {
+                            const selected = newRuleDocIds.includes(d.id);
+                            return (
+                              <button
+                                key={d.id}
+                                type="button"
+                                onClick={() => setNewRuleDocIds(prev => selected ? prev.filter(id => id !== d.id) : [...prev, d.id])}
+                                className={cn(
+                                  "px-2.5 py-1 rounded-full text-[10px] font-bold border transition-colors",
+                                  selected ? "bg-emerald-500 text-white border-emerald-500" : "bg-background border-border/80 text-muted-foreground hover:text-foreground"
+                                )}
+                              >
+                                {d.title || d.filename}
+                              </button>
+                            );
+                          })}
+                          {docs.filter(d => d.file_url).length === 0 && (
+                            <p className="text-[10px] text-muted-foreground/60">Upload media above first, then pick files here.</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={handleAddMediaRule}
+                          disabled={savingMediaRule || !newRuleTopic.trim() || newRuleDocIds.length === 0}
+                          className="flex items-center gap-1.5 h-8 px-4 rounded-lg text-xs font-bold bg-foreground text-background hover:opacity-90 disabled:opacity-40 transition-all ml-auto"
+                        >
+                          {savingMediaRule ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                          {savingMediaRule ? 'Saving…' : 'Add Rule'}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

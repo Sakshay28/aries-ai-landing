@@ -1466,7 +1466,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     // Fetch sendable media files (videos, images, PDFs with file_url)
     supabaseAdmin
       .from('knowledge_docs')
-      .select('id, filename, file_type, file_url, meta_media_id')
+      .select('id, filename, file_type, file_url, meta_media_id, title, description, category')
       .eq('tenant_id', tenant.id)
       .not('file_url', 'is', null)
       .limit(50),
@@ -1612,6 +1612,36 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     activeAgents.find(agent => !agent.routing_keywords || agent.routing_keywords.length === 0) ??
     null;
 
+  // ── Media Rules: resolve owner-defined topic -> file associations, and ──
+  // force those files into the candidate list regardless of whether this
+  // particular message's embedding similarity would have surfaced them —
+  // the AI (not embedding-similarity) decides whether the rule's topic
+  // genuinely applies, per MEDIA RULES in the prompt.
+  type KbMediaFull = { id: string; filename: string; file_type: string; file_url: string; meta_media_id: string | null; title: string | null; description: string | null; category: string | null };
+  const allKbMedia = (kbMediaFiles || []) as KbMediaFull[];
+  const rawMediaRules = (tenant.media_rules || []) as Array<{ topic: string; docIds: string[] }>;
+  const resolvedMediaRules = rawMediaRules
+    .map(r => ({
+      topic: r.topic,
+      files: (r.docIds || [])
+        .map(id => allKbMedia.find(f => f.id === id))
+        .filter((f): f is KbMediaFull => !!f)
+        .map(f => ({ filename: f.filename, title: f.title || '', description: f.description || '', category: f.category || '' })),
+    }))
+    .filter(r => r.topic?.trim() && r.files.length > 0);
+
+  const ruledFilenames = new Set(resolvedMediaRules.flatMap(r => r.files.map(f => f.filename)));
+  const semanticFilenames = new Set(mediaCandidates.map(m => m.filename));
+  const forcedCandidates = [...ruledFilenames]
+    .filter(fn => !semanticFilenames.has(fn))
+    .map(fn => allKbMedia.find(f => f.filename === fn))
+    .filter((f): f is KbMediaFull => !!f)
+    .map(f => ({
+      filename: f.filename, file_type: f.file_type, title: f.title || '',
+      description: f.description || '', tags: [] as string[], category: f.category || '',
+      similarity: 1, // business rule — always shown as a top candidate, not embedding-ranked
+    }));
+
   const baseConfig = getTenantConfig(tenant);
   const tenantConfig = {
     ...baseConfig,
@@ -1625,15 +1655,19 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     } : {}),
     smartRules: (smartRulesRows || []) as Array<{ name: string; trigger_source: string; ai_summary: string }>,
     knowledgeDocs: knowledgeRows,
-    mediaCandidates: mediaCandidates.map(m => ({
-      filename:    m.filename,
-      file_type:   m.file_type,
-      title:       m.title,
-      description: m.description,
-      tags:        m.tags,
-      category:    m.category,
-      similarity:  m.similarity,
-    })),
+    mediaCandidates: [
+      ...mediaCandidates.map(m => ({
+        filename:    m.filename,
+        file_type:   m.file_type,
+        title:       m.title,
+        description: m.description,
+        tags:        m.tags,
+        category:    m.category,
+        similarity:  m.similarity,
+      })),
+      ...forcedCandidates,
+    ],
+    mediaRules: resolvedMediaRules,
     // Inject existing booking so AI can handle cancel/modify requests
     existingBooking: existingBookingRow ? {
       reservationId:  (existingBookingRow as any).reservation_id,

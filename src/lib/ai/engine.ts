@@ -343,9 +343,12 @@ ${tenantConfig.knowledgeDocs.map(d => `--- ${d.filename} ---\n${d.content_text}`
 ${tenantConfig.mediaCandidates && tenantConfig.mediaCandidates.length > 0 ? `AVAILABLE MEDIA (the system already semantically matched these to the customer's message — files you CAN send via WhatsApp):
 ${tenantConfig.mediaCandidates.map(f => `- "${f.filename}" (${f.file_type}, match confidence ${(f.similarity * 100).toFixed(0)}%)${f.category ? ` [${f.category}]` : ''}: ${f.description || 'no description'}${f.tags.length ? ` — tags: ${f.tags.join(', ')}` : ''}`).join('\n')}
 
+${tenantConfig.mediaRules && tenantConfig.mediaRules.length > 0 ? `MEDIA RULES (business-defined — YOU decide when a topic genuinely applies, based on the actual meaning of the customer's message, NOT simple keyword matching. When it does apply, strongly prefer sending the paired file(s) over any other candidate):
+${tenantConfig.mediaRules.map(r => `- When the topic "${r.topic}" genuinely applies → prefer: ${r.files.map(f => `"${f.filename}"`).join(', ')}`).join('\n')}
+` : ''}
 MEDIA SENDING RULES:
 - These candidates were already retrieved by semantic search against the customer's message — read each one's description/tags/category to judge which (if any) actually answer what the customer asked. Don't just pick the top one blindly.
-- Set "mediaToSend" in extractedData to an ARRAY of exact filenames from the list above, e.g. ["Birthday Decoration.jpg"]. Only include files you're confident actually match — a match confidence below ~50% is usually NOT relevant, don't include it just because it's on the list.
+- Set "mediaToSend" in extractedData to an ARRAY of exact filenames from the list above, e.g. ["Birthday Decoration.jpg"]. Only include files you're confident actually match — a match confidence below ~50% is usually NOT relevant, don't include it just because it's on the list (this floor does not apply to files matched via a MEDIA RULE above — trust the business-defined rule instead).
 - Cap your selection: at most 3 images, 1 video, and 1 PDF per reply — never more, even if more seem relevant. Pick the best ones.
 - If NOTHING on the list confidently matches what the customer asked, set "mediaToSend" to an empty array and ask a short clarifying question instead of guessing (e.g. "Could you tell me a bit more about what you're looking for?").
 - NEVER say "I can't send videos/files/media through this chat" — you CAN. Just set mediaToSend.
@@ -471,6 +474,13 @@ export interface TenantAIConfig {
     tags:        string[];
     category:    string;
     similarity:  number;
+  }>;
+  // Media Rules (migration 20260719) — resolved topic -> file associations.
+  // Unlike Scripted Replies (keyword-triggered), the AI judges when the
+  // topic genuinely applies rather than matching literal keywords.
+  mediaRules?: Array<{
+    topic: string;
+    files: Array<{ filename: string; title: string; description: string; category: string }>;
   }>;
   systemPrompt?: string;
   // AI Behavior Controls (migration 20260618)

@@ -105,6 +105,9 @@ export interface Tenant {
   competitors?: string[] | null;
   competitor_deflection_reply?: string | null;
 
+  // Media Rules (migration 20260719)
+  media_rules?: Array<{ topic: string; docIds: string[] }> | null;
+
   // Off-Hours Config (Fix #8)
   off_hours_enabled: boolean;        // master on/off switch for the automatic off-hours reply
   off_hours_message: string | null;
