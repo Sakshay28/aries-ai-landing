@@ -121,6 +121,7 @@ async function runAnalysis(job: MediaAnalysisJobData): Promise<void> {
       .single();
 
     const update: Record<string, unknown> = {
+      content_text:      contentText,
       ai_description:    description,
       processing_status: 'ready',
       processing_error:  null,
