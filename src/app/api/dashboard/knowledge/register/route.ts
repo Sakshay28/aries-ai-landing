@@ -7,7 +7,7 @@ import { invalidateTenantAllCaches } from '@/lib/tenant/manager';
 import { getAI } from '@/lib/ai/client';
 import { computeSha256, validateFileSignature, findDuplicateByHash } from '@/lib/utils/media-validation';
 
-const PDF_EXTRACT_MAX_BYTES = 5_000_000; // only extract text from PDFs under 5 MB
+const PDF_EXTRACT_MAX_BYTES = 20_000_000; // Gemini inlineData requests handle up to ~20MB comfortably
 const TEXT_TYPES = new Set(['txt', 'md', 'csv', 'json', 'html', 'xml']);
 const MIME_BY_EXT: Record<string, string> = {
   mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm',
