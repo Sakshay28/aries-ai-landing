@@ -264,6 +264,34 @@ async function isKnownStaffNumber(phone: string): Promise<boolean> {
   return _knownStaffCache.set.has(phone);
 }
 
+// True if `phone` was an alert recipient within the last `windowHours` hours, on ANY
+// tenant. Used to decide whether a cross-tenant staff number reaching the shared
+// platform number is *replying to an alert* (→ handle as staff) or just starting a
+// fresh conversation (→ let the customer AI engage). business_notifications.recipients
+// is a JSONB array of { phone, role, ... }; phones may be stored in mixed formats, so
+// we normalize both sides before comparing.
+async function hasRecentAlertTo(phone: string, windowHours = 12): Promise<boolean> {
+  const since = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabaseAdmin
+    .from('business_notifications')
+    .select('recipients')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(500);
+  if (error) {
+    // Fail safe: if we can't check, keep the staff-reply protection (treat as staff).
+    console.error('[webhook] hasRecentAlertTo query failed:', error.message);
+    return true;
+  }
+  for (const n of data ?? []) {
+    const recips = (n.recipients as Array<{ phone?: string }> | null) ?? [];
+    for (const r of recips) {
+      if (r?.phone && normalizePhoneNumber(r.phone) === phone) return true;
+    }
+  }
+  return false;
+}
+
 // ── Inbound Message Processing ──
 async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMetaWebhook>>) {
   if (!msg.messageId || !msg.fromPhone || !msg.appPhoneId) {
@@ -401,10 +429,22 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // Platform number: the Aries AI number blasts alerts to EVERY client's staff and
   // receives their replies. Those senders are staff of OTHER tenants, so they don't
   // match THIS tenant's own staff/manager numbers — without this, the customer AI
-  // engages them ("how can I help you plan your event?"). Treat any known
-  // staff/manager (across all tenants) reaching the platform number as staff.
-  if (!isStaffMessage && cleanPhone && isPlatformTenant(tenant)) {
-    isStaffMessage = await isKnownStaffNumber(cleanPhone);
+  // engages them ("how can I help you plan your event?").
+  //
+  // BUT the platform number is ALSO the customer-facing bot for the tenant that owns
+  // it (e.g. Romeo Lane). A number that happens to be another venue's staff should
+  // still be able to chat with THIS tenant's AI. So we only intercept a cross-tenant
+  // staff number when the message is plausibly an alert interaction:
+  //   (a) a staff control message — an ack / keepalive / "got it" button, OR
+  //   (b) a free-text reply within 12h of an alert actually sent to that number.
+  // Otherwise it's a fresh conversation → fall through to the customer AI.
+  const isStaffControlMessage =
+    (msg.buttonId?.startsWith('ack_notification:') ?? false) ||
+    msg.buttonId === 'staff_keepalive_confirm' ||
+    msg.buttonId === 'got_it' ||
+    msg.text?.toLowerCase() === 'got it';
+  if (!isStaffMessage && cleanPhone && isPlatformTenant(tenant) && await isKnownStaffNumber(cleanPhone)) {
+    isStaffMessage = isStaffControlMessage || await hasRecentAlertTo(cleanPhone);
   }
 
   // Early Intercept for Staff Alert Acknowledgements & Keepalives
