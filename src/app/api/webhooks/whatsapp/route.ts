@@ -264,17 +264,32 @@ async function isKnownStaffNumber(phone: string): Promise<boolean> {
   return _knownStaffCache.set.has(phone);
 }
 
-// True if `phone` was an alert recipient within the last `windowHours` hours, on ANY
-// tenant. Used to decide whether a cross-tenant staff number reaching the shared
-// platform number is *replying to an alert* (→ handle as staff) or just starting a
-// fresh conversation (→ let the customer AI engage). business_notifications.recipients
-// is a JSONB array of { phone, role, ... }; phones may be stored in mixed formats, so
-// we normalize both sides before comparing.
+// Only genuine, customer-driven staff alerts count as "the sender might be replying
+// to an alert". System pings — keepalives (staff_keepalive) and the periodic "alert
+// portal check-in" templates — go to the same staff numbers constantly, so counting
+// them would permanently keep every staff number in intercept mode and block them
+// from ever chatting with the platform-tenant's AI. Allow-list the real alert types
+// rather than block-listing system ones, so any future system message type is
+// excluded by default.
+const REAL_ALERT_EVENT_TYPES = [
+  'booking_confirmation',
+  'human_assistance',
+  'payment_confirmation',
+  'reservation_update',
+];
+
+// True if `phone` received a genuine booking/handoff/payment alert within the last
+// `windowHours` hours, on ANY tenant. Used to decide whether a cross-tenant staff
+// number reaching the shared platform number is *replying to an alert* (→ handle as
+// staff) or just starting a fresh conversation (→ let the customer AI engage).
+// business_notifications.recipients is a JSONB array of { phone, role, ... }; phones
+// may be stored in mixed formats, so we normalize both sides before comparing.
 async function hasRecentAlertTo(phone: string, windowHours = 12): Promise<boolean> {
   const since = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabaseAdmin
     .from('business_notifications')
     .select('recipients')
+    .in('event_type', REAL_ALERT_EVENT_TYPES)
     .gte('created_at', since)
     .order('created_at', { ascending: false })
     .limit(500);
