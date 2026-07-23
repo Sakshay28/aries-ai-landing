@@ -14,6 +14,7 @@ import { BroadcastExecutionTimeline } from './BroadcastExecutionTimeline';
 import { BroadcastAuditLog } from './BroadcastAuditLog';
 import { QueueStatusCard } from './QueueStatusCard';
 import { BroadcastPerformanceCard } from './BroadcastPerformanceCard';
+import { CampaignInsights } from './CampaignInsights';
 
 // ── Filter config ──────────────────────────────────────────────────────────────
 const FILTERS = [
@@ -277,8 +278,6 @@ function CampaignSkeleton({ i }: { i: number }) {
 function AnalyticsPanel({ campaign, onClose }: { campaign: Campaign; onClose: () => void }) {
   const [activeTab, setActiveTab] = useState<'overview' | 'timeline' | 'audit'>('overview');
   const { display: name } = cleanCampaignName(campaign.name);
-  const del = deliveryRate(campaign);
-  const read = readRate(campaign);
 
   const metrics = [
     { label: 'Audience',  value: campaign.audience_count,  icon: Users,    color: 'text-foreground' },
@@ -363,32 +362,10 @@ function AnalyticsPanel({ campaign, onClose }: { campaign: Campaign; onClose: ()
               ))}
             </div>
 
-            {/* Delivery funnel */}
-            {campaign.sent_count > 0 && (
-              <div className="space-y-4 p-4 border border-border/60 rounded-xl bg-background text-left">
-                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/70">Delivery Funnel</p>
-                {[
-                  { label: 'Delivery rate', value: campaign.delivered_count, max: campaign.sent_count, color: 'bg-emerald-400', pct: del },
-                  { label: 'Read rate',     value: campaign.read_count,      max: campaign.sent_count, color: 'bg-blue-400',    pct: read },
-                  ...(campaign.failed_count > 0 ? [{ label: 'Failed', value: campaign.failed_count, max: campaign.sent_count, color: 'bg-red-400', pct: Math.round((campaign.failed_count / campaign.sent_count) * 100) }] : []),
-                ].map(({ label, color, pct }) => (
-                  <div key={label} className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[12px] font-medium text-foreground/80">{label}</span>
-                      <span className="text-[12px] font-bold text-foreground tabular-nums">{pct}%</span>
-                    </div>
-                    <div className="h-2 bg-secondary/60 rounded-full overflow-hidden">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${pct}%` }}
-                        transition={{ duration: 0.8, ease: 'easeOut' }}
-                        className={`h-full rounded-full ${color}`}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            {/* Delivery funnel + failure breakdown + speed-to-read.
+                Backed by /api/broadcast/campaign/[id]/insights, whose math is
+                unit-tested in tests/campaign-insights.test.ts. */}
+            <CampaignInsights campaignId={campaign.id} />
 
             {/* 30-Day Performance Analytics (Phase 6) */}
             <BroadcastPerformanceCard />

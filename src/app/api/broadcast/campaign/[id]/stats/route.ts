@@ -37,26 +37,35 @@ export async function GET(
       return error ? 0 : (count || 0);
     };
 
-    const [pending, processing, retrying, queueSent, queueFailed, delivered, read] = await Promise.all([
+    const [pending, processing, retrying, queueSent, queueFailed, analyticsRes] = await Promise.all([
       getCount('broadcast_queue', 'pending'),
       getCount('broadcast_queue', 'processing'),
       getCount('broadcast_queue', 'retrying'),
       // Sent = queue items that reached Meta (authoritative before delivery receipts arrive)
       getCount('broadcast_queue', 'sent'),
       getCount('broadcast_queue', 'failed'),
-      // Delivered / read come from Meta webhook events via broadcast_deliveries
-      getCount('broadcast_deliveries', 'delivered'),
-      getCount('broadcast_deliveries', 'read'),
+      // Delivered / read / failed are the reconciled cumulative counts written by the
+      // Meta status webhook (increment_broadcast_analytics). Do NOT derive them by
+      // counting broadcast_deliveries rows per status: `status` is monotonic, so a
+      // message that was delivered THEN read carries status='read' only and would
+      // silently drop out of the delivered tally.
+      supabaseAdmin
+        .from('broadcast_analytics')
+        .select('delivered_count, read_count, failed_count')
+        .eq('campaign_id', campaignId)
+        .maybeSingle(),
     ]);
+
+    const analytics = analyticsRes.data;
 
     const totalRecipients = campaign.total_recipients || campaign.audience_count || campaign.recipient_count || 0;
     const queued = processing + retrying;
 
     // Merge campaign counter values (updated by increment_campaign_counter) for accuracy
     const sent     = Math.max(queueSent,   campaign.sent_count      || 0);
-    const failed   = Math.max(queueFailed, campaign.failed_count    || 0);
-    const deliv    = Math.max(delivered,   campaign.delivered_count || 0);
-    const readCnt  = Math.max(read,        campaign.read_count      || 0);
+    const failed   = Math.max(queueFailed, analytics?.failed_count    ?? campaign.failed_count    ?? 0);
+    const deliv    = analytics?.delivered_count ?? campaign.delivered_count ?? 0;
+    const readCnt  = analytics?.read_count      ?? campaign.read_count      ?? 0;
 
     const deliveryRate = sent > 0 ? Math.round((deliv   / sent) * 100) : 0;
     const readRate     = sent > 0 ? Math.round((readCnt / sent) * 100) : 0;

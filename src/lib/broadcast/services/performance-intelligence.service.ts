@@ -21,7 +21,7 @@ export class PerformanceIntelligenceService {
 
       const { data: campaigns, error: cErr } = await supabaseAdmin
         .from('broadcast_campaigns')
-        .select('id, name, template_name, created_at')
+        .select('id, name, template_name, created_at, sent_count')
         .eq('tenant_id', tenantId)
         .gte('created_at', thirtyDaysAgo.toISOString())
         .neq('status', 'draft')
@@ -50,22 +50,28 @@ export class PerformanceIntelligenceService {
 
       if (aErr) throw aErr;
 
-      let totalSent = 0;
       let totalDelivered = 0;
       let totalRead = 0;
       let totalReplies = 0;
 
       (analyticsList || []).forEach(row => {
-        totalSent += row.sent_count || 0;
         totalDelivered += row.delivered_count || 0;
         totalRead += row.read_count || 0;
         totalReplies += row.reply_count || 0;
       });
 
-      // Calculate rates
-      const deliveryRatePct = totalSent > 0 ? Math.round((totalDelivered / totalSent) * 100) : 96;
-      const readRatePct = totalSent > 0 ? Math.round((totalRead / totalSent) * 100) : 63;
-      const replyRatePct = totalSent > 0 ? Math.round((totalReplies / totalSent) * 100) : 18;
+      // `sent` is counted on broadcast_campaigns (increment_campaign_counter), NOT on
+      // broadcast_analytics — broadcast_analytics.sent_count is never written, so summing
+      // it always yielded 0, which silently tripped the `: 96 / : 63 / : 18` fallbacks
+      // below and made this panel display fabricated headline rates. Source the
+      // denominator from the real sent counter instead.
+      const totalSent = (campaigns || []).reduce((s, c) => s + (c.sent_count || 0), 0);
+
+      // Calculate rates. With no sent volume there is genuinely no data — report 0,
+      // never invented numbers.
+      const deliveryRatePct = totalSent > 0 ? Math.round((totalDelivered / totalSent) * 100) : 0;
+      const readRatePct = totalSent > 0 ? Math.round((totalRead / totalSent) * 100) : 0;
+      const replyRatePct = totalSent > 0 ? Math.round((totalReplies / totalSent) * 100) : 0;
 
       // 3. Find most frequently used successful template
       const templateCounts: Record<string, number> = {};

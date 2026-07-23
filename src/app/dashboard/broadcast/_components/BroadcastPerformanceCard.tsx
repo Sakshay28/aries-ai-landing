@@ -15,11 +15,11 @@ interface StatsData {
 
 export function BroadcastPerformanceCard() {
   const [stats, setStats] = useState<StatsData>({
-    deliveryRatePct: 96,
-    readRatePct: 63,
-    replyRatePct: 18,
-    bestSendHourText: '7:00 PM',
-    bestTemplateName: 'Reservation Reminder',
+    deliveryRatePct: 0,
+    readRatePct: 0,
+    replyRatePct: 0,
+    bestSendHourText: 'Not enough data',
+    bestTemplateName: 'Not enough data',
     totalCampaignsExecuted: 0
   });
   const [loading, setLoading] = useState(true);

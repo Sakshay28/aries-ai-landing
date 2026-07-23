@@ -53,10 +53,40 @@ export async function GET(req: NextRequest) {
     const page = hasMore ? (campaigns || []).slice(0, limit) : (campaigns || []);
     const nextCursor = hasMore ? page[page.length - 1]?.created_at : null;
 
-    const formattedCampaigns = page.map((camp) => ({
-      ...camp,
-      total_recipients: camp.audience_count || camp.recipient_count || 0,
-    }));
+    // Delivered / read / failed counts are the SOURCE-OF-TRUTH in broadcast_analytics,
+    // which the Meta status webhook increments via increment_broadcast_analytics().
+    // The like-named columns on broadcast_campaigns are legacy and never advance past
+    // 0, so reading them made every campaign show "Delivered 0 / Read 0" even when the
+    // delivery receipts had reconciled fine. Overlay the analytics row here. `sent_count`
+    // stays sourced from broadcast_campaigns (its real counter; broadcast_analytics.sent_count
+    // is never written).
+    const analyticsByCampaign = new Map<string, { delivered_count: number; read_count: number; failed_count: number }>();
+    if (page.length > 0) {
+      const { data: analyticsRows } = await supabaseAdmin
+        .from('broadcast_analytics')
+        .select('campaign_id, delivered_count, read_count, failed_count')
+        .in('campaign_id', page.map((c) => c.id));
+      for (const row of analyticsRows || []) {
+        analyticsByCampaign.set(row.campaign_id, {
+          delivered_count: row.delivered_count || 0,
+          read_count: row.read_count || 0,
+          failed_count: row.failed_count || 0,
+        });
+      }
+    }
+
+    const formattedCampaigns = page.map((camp) => {
+      const a = analyticsByCampaign.get(camp.id);
+      return {
+        ...camp,
+        // Prefer the reconciled analytics counts; fall back to the legacy column only
+        // when no analytics row exists yet (e.g. a brand-new campaign mid-send).
+        delivered_count: a ? a.delivered_count : (camp.delivered_count || 0),
+        read_count:      a ? a.read_count      : (camp.read_count || 0),
+        failed_count:    a ? a.failed_count    : (camp.failed_count || 0),
+        total_recipients: camp.audience_count || camp.recipient_count || 0,
+      };
+    });
 
     return NextResponse.json({ success: true, campaigns: formattedCampaigns, nextCursor });
 

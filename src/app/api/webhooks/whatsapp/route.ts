@@ -3126,12 +3126,21 @@ async function handleStatusUpdate(msg: NonNullable<ReturnType<typeof parseMetaWe
 
   // ── Broadcast Delivery Reconciliation Pipeline ──
   try {
+    // Capture WHY a broadcast message failed so the campaign "Why messages
+    // failed" breakdown can categorize it (normalizeFailureReason in
+    // campaign-insights.service). Without this, webhook-reported failures land
+    // with a null reason and show up only as "Unknown error".
+    const broadcastFailReason = mappedStatus === 'failed'
+      ? (msg.errorReason || (msg.errorCode != null ? `Meta error ${msg.errorCode}` : 'Delivery failed'))
+      : undefined;
+
     let deliveryQuery = supabaseAdmin
       .from('broadcast_deliveries')
       .update({
         status: mappedStatus,
         ...(mappedStatus === 'delivered' && { delivered_at: new Date().toISOString() }),
-        ...(mappedStatus === 'read' && { read_at: new Date().toISOString() })
+        ...(mappedStatus === 'read' && { read_at: new Date().toISOString() }),
+        ...(broadcastFailReason ? { failed_reason: broadcastFailReason } : {})
       })
       .eq('message_id', msg.messageId);
     if (tenantIdForStatus) deliveryQuery = deliveryQuery.eq('tenant_id', tenantIdForStatus);
