@@ -1,8 +1,5 @@
-// ═══════════════════════════════════════════════════════════
-// 📥 Contacts Import API — bulk CSV upload
-// ═══════════════════════════════════════════════════════════
-
 import { NextRequest, NextResponse } from 'next/server';
+import * as XLSX from 'xlsx';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { sanitizeInput, isValidEmail } from '@/lib/utils/safety';
@@ -12,34 +9,16 @@ import { computeColdStartBaseline } from '@/lib/scoring/cold-start';
 
 const MAX_ROWS = 5_000;
 
-// CSV Parser supporting quotes, commas, escapes, and CRLF
-function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = '';
-  let inQuotes = false;
-  let i = 0;
-
-  while (i < text.length) {
-    const ch = text[i];
-
-    if (inQuotes) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
-        inQuotes = false; i += 1; continue;
-      }
-      field += ch; i += 1; continue;
-    }
-
-    if (ch === '"') { inQuotes = true; i += 1; continue; }
-    if (ch === ',') { row.push(field); field = ''; i += 1; continue; }
-    if (ch === '\r') { i += 1; continue; }
-    if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; i += 1; continue; }
-    field += ch; i += 1;
-  }
-  
-  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
-  return rows.filter((r) => r.some((c) => c.trim().length > 0));
+// Universal Spreadsheet Parser supporting .xlsx, .xls, .csv, .tsv, .ods
+function parseSpreadsheetBuffer(buffer: Buffer): string[][] {
+  const workbook = XLSX.read(buffer, { type: 'buffer' });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+  const worksheet = workbook.Sheets[sheetName];
+  const rawRows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, defval: '' });
+  return rawRows
+    .map((row) => row.map((cell) => String(cell ?? '').trim()))
+    .filter((row) => row.some((cell) => cell.length > 0));
 }
 
 type ImportRow = {
@@ -60,8 +39,8 @@ export async function POST(req: NextRequest) {
     const defaultCountryCode = searchParams.get('cc') ?? '91';
     const mergeDuplicates = searchParams.get('merge') === 'true';
 
-    // ── 1. Read body (multipart OR json) ────────────────────
-    let csvText = '';
+    // ── 1. Read body & parse spreadsheet ─────────────────────
+    let rows: string[][] = [];
     const contentType = req.headers.get('content-type') ?? '';
 
     if (contentType.includes('multipart/form-data')) {
@@ -73,17 +52,21 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      if (file.size > 10 * 1024 * 1024) {
+      if (file.size > 15 * 1024 * 1024) {
         return NextResponse.json(
-          { success: false, message: 'File too large (maximum size is 10 MB).' },
+          { success: false, message: 'File too large (maximum size is 15 MB).' },
           { status: 413 }
         );
       }
-      csvText = await file.text();
+      const fileBuffer = Buffer.from(await file.arrayBuffer());
+      rows = parseSpreadsheetBuffer(fileBuffer);
     } else {
       try {
         const json = await req.json();
-        csvText = typeof json.csv === 'string' ? json.csv : '';
+        const csvText = typeof json.csv === 'string' ? json.csv : '';
+        if (csvText) {
+          rows = parseSpreadsheetBuffer(Buffer.from(csvText, 'utf-8'));
+        }
       } catch {
         return NextResponse.json(
           { success: false, message: 'Invalid request body payload.' },
@@ -92,50 +75,32 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!csvText.trim()) {
-      return NextResponse.json(
-        { success: false, message: 'The uploaded CSV file is empty.' },
-        { status: 400 }
-      );
-    }
-
-    // ── 2. Parse CSV ────────────────────────────────────────
-    let rows;
-    try {
-      rows = parseCsv(csvText);
-    } catch {
-      return NextResponse.json(
-        { success: false, message: 'CSV format not recognized. Please check file encoding.' },
-        { status: 400 }
-      );
-    }
-
     if (rows.length < 2) {
       return NextResponse.json(
-        { success: false, message: 'CSV must include a header row and at least one contact row.' },
+        { success: false, message: 'Spreadsheet must include a header row and at least one contact row.' },
         { status: 400 }
       );
     }
     if (rows.length - 1 > MAX_ROWS) {
       return NextResponse.json(
-        { success: false, message: `CSV contains too many rows (maximum limit is ${MAX_ROWS} contacts).` },
+        { success: false, message: `Spreadsheet contains too many rows (maximum limit is ${MAX_ROWS} contacts).` },
         { status: 413 }
       );
     }
 
     const header = rows[0].map((h) => h.trim().toLowerCase());
     const idx = {
-      phone: header.findIndex((h) => ['phone', 'mobile', 'whatsapp', 'phone_number', 'mobile number', 'contact_number'].includes(h)),
-      name: header.findIndex((h) => ['name', 'full name', 'full_name', 'contact', 'first name', 'first_name', 'last_name'].includes(h)),
-      email: header.findIndex((h) => ['email', 'email address', 'email_address'].includes(h)),
-      notes: header.findIndex((h) => ['notes', 'note', 'comment', 'description'].includes(h)),
+      phone: header.findIndex((h) => ['phone', 'mobile', 'whatsapp', 'phone_number', 'mobile number', 'contact_number', 'phone number', 'contact', 'cell', 'telephone', 'number', 'ph'].includes(h)),
+      name: header.findIndex((h) => ['name', 'full name', 'full_name', 'contact name', 'contact_name', 'first name', 'first_name', 'last_name', 'client', 'customer'].includes(h)),
+      email: header.findIndex((h) => ['email', 'email address', 'email_address', 'mail'].includes(h)),
+      notes: header.findIndex((h) => ['notes', 'note', 'comment', 'description', 'remark', 'remarks'].includes(h)),
       source: header.findIndex((h) => ['source', 'source_detail', 'origin', 'channel'].includes(h)),
       birthday: header.findIndex((h) => ['birthday', 'birth date', 'birth_date', 'dob', 'date of birth'].includes(h)),
     };
 
     if (idx.phone === -1) {
       return NextResponse.json(
-        { success: false, message: 'CSV header is missing a phone column. Supported: phone, mobile, whatsapp, phone_number.' },
+        { success: false, message: 'Spreadsheet header is missing a phone column. Supported headers: phone, mobile, whatsapp, phone_number, contact_number, mobile number.' },
         { status: 400 }
       );
     }
