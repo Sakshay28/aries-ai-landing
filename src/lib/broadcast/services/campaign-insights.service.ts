@@ -145,6 +145,16 @@ export function normalizeFailureReason(raw: string | null | undefined): Normaliz
     return { key: 'config_error', label: 'Configuration error' };
   }
 
+  // Meta Ecosystem Protection / Recipient Frequency Protection (Meta anti-spam rule for specific recipient)
+  if (/\b131049\b/.test(s) || /healthy ecosystem engagement|ecosystem engagement/.test(s)) {
+    return { key: 'ecosystem_protection', label: 'Meta recipient protection (Ecosystem health)' };
+  }
+
+  // Media upload or attachment error
+  if (/media upload|media error/.test(s)) {
+    return { key: 'media_error', label: 'Media upload / attachment error' };
+  }
+
   // Fallback: surface a bare Meta error code if we can find one, else generic.
   const code = raw.match(/\b(\d{3,6})\b/);
   if (code) {

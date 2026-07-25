@@ -1,7 +1,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { AudienceState, EstimateResult } from '@/app/dashboard/broadcast/types';
 import { cleanPhone } from '@/lib/meta/service';
-import { fetchLeadsByFilter, fetchLeadsByIds } from '@/lib/broadcast/fetch-leads';
+import { fetchLeadsByFilter, fetchLeadsByIds, fetchRecentLeads } from '@/lib/broadcast/fetch-leads';
 import { cleanContactName } from '@/lib/broadcast/recipient-name';
 
 interface ResolvedAudience {

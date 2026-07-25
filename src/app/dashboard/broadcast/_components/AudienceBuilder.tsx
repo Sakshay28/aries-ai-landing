@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Users, Tag, SlidersHorizontal, Zap, Plus, X, ChevronDown,
+  Users, Tag, SlidersHorizontal, Zap, Plus, X, ChevronDown, Clock,
   ShieldCheck, ShieldAlert, ShieldX, AlertTriangle, UserCheck,
   UploadCloud, FileSpreadsheet, Check, CheckCircle2, UserCheck2
 } from 'lucide-react';
@@ -14,12 +14,13 @@ import toast from 'react-hot-toast';
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface AudienceState {
-  type: 'all' | 'tags' | 'custom' | 'retarget' | 'csv' | 'manual';
+  type: 'all' | 'tags' | 'custom' | 'retarget' | 'csv' | 'manual' | 'recent';
   tags: string[];
   customFilters: CustomFilter[];
   retargetCampaignId: string | null;
   retargetCondition: 'unread' | 'no_reply' | 'clicked_cta' | 'not_clicked';
   retargetDelayDays: number;
+  recentCount?: number;
   manualContactIds?: string[];
   csvFile?: any;
 }
@@ -72,6 +73,12 @@ const AUDIENCE_CHOICES: ChoiceCard[] = [
     label: 'All Contacts',
     description: 'Target every active contact in your database',
     icon: Users,
+  },
+  {
+    id: 'recent',
+    label: 'Recently Added',
+    description: 'Target your newest contacts (e.g. last 50 added)',
+    icon: Clock,
   },
   {
     id: 'custom',
@@ -820,6 +827,61 @@ function EstimationCard({ estimate }: { estimate: EstimateResult }) {
   );
 }
 
+function RecentContactsPanel({
+  recentCount = 50,
+  onCountChange,
+  onClick,
+}: {
+  recentCount?: number;
+  onCountChange: (c: number) => void;
+  onClick?: () => void;
+}) {
+  return (
+    <div className="p-5 border border-indigo-500/20 rounded-2xl bg-indigo-500/[0.02] space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-9.5 h-9.5 rounded-xl bg-indigo-50 border border-indigo-100 dark:bg-indigo-900/30 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+            <Clock className="w-5 h-5" />
+          </div>
+          <div className="text-left">
+            <h4 className="text-[14px] font-bold text-foreground">Recently Added Contacts</h4>
+            <p className="text-[12px] text-muted-foreground mt-0.5">
+              Automatically targets your newest contacts sorted by date added without manual selection.
+            </p>
+          </div>
+        </div>
+        {onClick && (
+          <button
+            type="button"
+            onClick={onClick}
+            className="text-[12px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
+          >
+            Preview list →
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <span className="text-[12px] font-semibold text-muted-foreground mr-1">Target Batch Size:</span>
+        {[50, 100, 250, 500].map(count => (
+          <button
+            key={count}
+            type="button"
+            onClick={() => onCountChange(count)}
+            className={`h-8.5 px-3.5 text-[12px] font-bold rounded-xl border transition-all cursor-pointer ${
+              recentCount === count
+                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                : 'bg-background text-foreground border-border hover:bg-secondary/40'
+            }`}
+          >
+            Last {count} Contacts
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function AudienceBuilder({
@@ -835,7 +897,7 @@ export function AudienceBuilder({
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const setChoice = useCallback((tab: ChoiceId) => {
-    onChange({ ...audience, type: tab });
+    onChange({ ...audience, type: tab, recentCount: tab === 'recent' ? (audience.recentCount || 50) : audience.recentCount });
   }, [audience, onChange]);
 
   const toggleTag = useCallback((tag: string) => {
@@ -883,6 +945,13 @@ export function AudienceBuilder({
           >
             {activeTab === 'all' && (
               <AllContactsPanel totalContacts={totalContacts} onClick={onOpenRecipientsDrawer} />
+            )}
+            {activeTab === 'recent' && (
+              <RecentContactsPanel
+                recentCount={audience.recentCount || 50}
+                onCountChange={(count) => patchAudience({ recentCount: count })}
+                onClick={onOpenRecipientsDrawer}
+              />
             )}
             {activeTab === 'tags' && (
               <div>

@@ -278,14 +278,29 @@ export function ContactPickerDrawer({
               <span className="font-semibold text-muted-foreground/80">
                 Showing {contacts.length} match{contacts.length !== 1 ? 'es' : ''}
               </span>
-              <button
-                onClick={handleSelectAll}
-                className="font-bold text-indigo-600 hover:text-indigo-700"
-              >
-                {contacts.length > 0 && contacts.every(c => tempSelected.has(c.id))
-                  ? 'Deselect All on Page'
-                  : 'Select All on Page'}
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const top50 = contacts.slice(0, 50).map(c => c.id);
+                    const next = new Set(tempSelected);
+                    top50.forEach(id => next.add(id));
+                    setTempSelected(next);
+                  }}
+                  className="font-bold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800 transition-colors"
+                >
+                  ⚡ Select Newest 50
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSelectAll}
+                  className="font-bold text-indigo-600 hover:text-indigo-700"
+                >
+                  {contacts.length > 0 && contacts.every(c => tempSelected.has(c.id))
+                    ? 'Deselect All on Page'
+                    : 'Select All on Page'}
+                </button>
+              </div>
             </div>
 
             {/* Contacts list virtualized */}

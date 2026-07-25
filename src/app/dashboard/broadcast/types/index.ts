@@ -38,12 +38,13 @@ export interface ParsedButton {
 }
 
 export interface AudienceState {
-  type: 'all' | 'tags' | 'custom' | 'retarget' | 'csv' | 'manual';
+  type: 'all' | 'tags' | 'custom' | 'retarget' | 'csv' | 'manual' | 'recent';
   tags: string[];
   customFilters: CustomFilter[];
   retargetCampaignId: string | null;
   retargetCondition: 'unread' | 'no_reply' | 'clicked_cta' | 'not_clicked';
   retargetDelayDays: number;
+  recentCount?: number;
   manualContactIds?: string[];
   excludedContactIds?: string[];
   csvFile?: {

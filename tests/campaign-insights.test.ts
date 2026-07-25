@@ -62,6 +62,7 @@ describe('normalizeFailureReason', () => {
     ['paused template', 'Template issue'],
     ['Frequency cap: 3 broadcasts/day exceeded', 'Frequency cap reached'],
     ['Campaign configuration missing', 'Configuration error'],
+    ['This message was not delivered to maintain healthy ecosystem engagement.', 'Meta recipient protection (Ecosystem health)'],
   ];
   it.each(cases)('maps %j → %j', (raw, label) => {
     expect(normalizeFailureReason(raw).label).toBe(label);

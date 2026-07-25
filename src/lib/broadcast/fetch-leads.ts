@@ -76,5 +76,22 @@ export async function fetchLeadsByIds(
     if (data) out.push(...data);
   }
 
-  return out;
+/**
+ * Fetch the newest leads for a tenant ordered by created_at descending (e.g. recently added 50 contacts).
+ */
+export async function fetchRecentLeads(
+  tenantId: string,
+  columns: string,
+  limit: number = 50
+): Promise<any[]> {
+  const { data, error } = await supabaseAdmin
+    .from('leads')
+    .select(columns)
+    .eq('tenant_id', tenantId)
+    .not('phone', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
 }
+
