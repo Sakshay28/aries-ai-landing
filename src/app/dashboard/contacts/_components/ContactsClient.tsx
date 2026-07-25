@@ -425,13 +425,16 @@ export function ContactsClient() {
     }
   };
 
-  // --- CSV BULK IMPORT CONTROLLER ---
+  // --- SPREADSHEET BULK IMPORT CONTROLLER (.xlsx, .xls, .csv) ---
   const handleCsvFileDrop = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
     if (!file) return;
 
-    if (!file.name.endsWith('.csv')) {
-      setCsvError('Please select a valid CSV file (.csv).');
+    const fileNameLower = file.name.toLowerCase();
+    const isSupported = ['.csv', '.xlsx', '.xls', '.tsv', '.ods'].some(ext => fileNameLower.endsWith(ext));
+
+    if (!isSupported) {
+      setCsvError('Please select a valid Excel (.xlsx, .xls) or CSV (.csv) file.');
       return;
     }
 
@@ -440,24 +443,40 @@ export function ContactsClient() {
     setCsvUploading(true);
 
     try {
-      const text = await file.text();
-      const lines = text.split(/\r?\n/).filter(Boolean);
+      const XLSX = await import('xlsx');
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+
+      if (!firstSheetName) {
+        setCsvError('Spreadsheet contains no readable sheets.');
+        setCsvFile(null);
+        setCsvUploading(false);
+        return;
+      }
+
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rawMatrix: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, defval: '' });
+      const lines = rawMatrix
+        .map(row => row.map(cell => String(cell ?? '').trim()))
+        .filter(row => row.some(cell => cell.length > 0));
+
       if (lines.length < 2) {
-        setCsvError('CSV must contain a header and at least 1 data row.');
+        setCsvError('Spreadsheet must contain a header row and at least 1 data row.');
         setCsvFile(null);
         setCsvUploading(false);
         return;
       }
 
       // Parse headers
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/^["']|["']$/g, ''));
-      const phoneIndex = headers.findIndex(h => ['phone', 'mobile', 'whatsapp', 'phone_number', 'mobile number'].includes(h));
-      const nameIndex = headers.findIndex(h => ['name', 'full name', 'full_name', 'contact'].includes(h));
-      const emailIndex = headers.findIndex(h => ['email', 'email address', 'email_address'].includes(h));
-      const notesIndex = headers.findIndex(h => ['notes', 'note', 'comment'].includes(h));
+      const headers = lines[0].map(h => h.trim().toLowerCase().replace(/^["']|["']$/g, ''));
+      const phoneIndex = headers.findIndex(h => ['phone', 'mobile', 'whatsapp', 'phone_number', 'mobile number', 'contact_number', 'phone number', 'contact', 'cell', 'telephone', 'number', 'ph'].includes(h));
+      const nameIndex = headers.findIndex(h => ['name', 'full name', 'full_name', 'contact name', 'contact_name', 'first name', 'first_name', 'last_name', 'client', 'customer'].includes(h));
+      const emailIndex = headers.findIndex(h => ['email', 'email address', 'email_address', 'mail'].includes(h));
+      const notesIndex = headers.findIndex(h => ['notes', 'note', 'comment', 'description', 'remark', 'remarks'].includes(h));
 
       if (phoneIndex === -1) {
-        setCsvError('CSV must contain a phone column (e.g. "phone", "mobile").');
+        setCsvError('Spreadsheet must contain a phone column (e.g. "phone", "mobile", "phone_number").');
         setCsvFile(null);
         setCsvUploading(false);
         return;
@@ -468,8 +487,8 @@ export function ContactsClient() {
       const checkPhones: string[] = [];
 
       for (let i = 1; i < Math.min(lines.length, 11); i++) {
-        const cells = lines[i].split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
-        if (cells.length === 0 || !cells[phoneIndex]) continue;
+        const cells = lines[i];
+        if (!cells || !cells[phoneIndex]) continue;
 
         const phone = normalizePhone(cells[phoneIndex], workspaceDefaultCountryCode);
         const name = nameIndex !== -1 ? cells[nameIndex] || null : null;
@@ -863,7 +882,7 @@ export function ContactsClient() {
                     <div className="w-12 h-12 rounded-xl bg-indigo-500/10 flex items-center justify-center mb-4 text-indigo-600 dark:text-indigo-400">
                       <FileSpreadsheet className="w-6 h-6" />
                     </div>
-                    <span className="text-[14px] font-bold text-foreground">Upload CSV File</span>
+                    <span className="text-[14px] font-bold text-foreground">Upload Excel / CSV File</span>
                     <span className="text-[12px] text-muted-foreground mt-1 leading-normal">Clean list parsing, validations, and custom mapping.</span>
                   </button>
 
@@ -882,7 +901,7 @@ export function ContactsClient() {
             {csvImportStep === 'csv' && (
               <div className="space-y-6">
                 <div className="space-y-1">
-                  <h3 className="text-sm font-semibold text-foreground">Upload CSV Spreadsheet</h3>
+                  <h3 className="text-sm font-semibold text-foreground">Upload Excel / CSV Spreadsheet</h3>
                   <p className="text-[13px] text-muted-foreground leading-relaxed">
                     Required header: <span className="font-mono text-foreground bg-secondary px-1 py-0.5 rounded text-[12px]">phone</span>. Supported optional columns: <span className="font-mono text-foreground bg-secondary px-1 py-0.5 rounded text-[12px]">name</span>, <span className="font-mono text-foreground bg-secondary px-1 py-0.5 rounded text-[12px]">email</span>, <span className="font-mono text-foreground bg-secondary px-1 py-0.5 rounded text-[12px]">notes</span>.
                   </p>
@@ -894,7 +913,7 @@ export function ContactsClient() {
                 >
                   <UploadCloud className="w-10 h-10 text-muted-foreground/50 mb-3" />
                   <span className="text-[14px] font-bold text-foreground">
-                    {csvFile ? csvFile.name : 'Choose contact list CSV'}
+                    {csvFile ? csvFile.name : 'Choose Excel (.xlsx, .xls) or CSV file'}
                   </span>
                   <span className="text-[12px] text-muted-foreground mt-1">
                     {csvFile ? `${(csvFile.size / 1024).toFixed(1)} KB — click to replace` : 'or drag and drop spreadsheet here'}
@@ -902,7 +921,7 @@ export function ContactsClient() {
                   <input
                     id="contacts-csv-input"
                     type="file"
-                    accept=".csv,text/csv"
+                    accept=".xlsx,.xls,.csv,.tsv,.ods,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
                     className="hidden"
                     onChange={handleCsvFileDrop}
                   />
