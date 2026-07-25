@@ -535,7 +535,7 @@ export class BroadcastEngineService {
 
       const [{ data: mappings }, { data: tmpl }] = await Promise.all([
         supabaseAdmin.from('broadcast_variable_mapping').select('*').eq('campaign_id', cid),
-        supabaseAdmin.from('broadcast_templates_cache').select('template_json, header_media_url')
+        supabaseAdmin.from('broadcast_templates_cache').select('template_json')
           .eq('tenant_id', tenantId).eq('name', camp.template_name).maybeSingle(),
       ]);
 
@@ -556,7 +556,7 @@ export class BroadcastEngineService {
       if (tmpl?.template_json) {
         const parsed = TemplateParserService.parse({
           ...tmpl.template_json,
-          header_media_url: tmpl.header_media_url || tmpl.template_json.header_media_url
+          header_media_url: (tmpl.template_json as any).header_media_url
         });
 
         if (indices.length === 0 && parsed.detectedVariables.length > 0) {
@@ -567,7 +567,7 @@ export class BroadcastEngineService {
         }
 
         if (parsed.headerType !== 'NONE') {
-          const customMediaUrl = tmpl.header_media_url || camp.header_media_url || camp.media_url || (tmpl?.template_json as any)?.customHeaderMediaUrl || (tmpl?.template_json as any)?.headerMediaUrl;
+          const customMediaUrl = camp.header_media_url || camp.media_url || (tmpl?.template_json as any)?.header_media_url || (tmpl?.template_json as any)?.customHeaderMediaUrl || (tmpl?.template_json as any)?.headerMediaUrl;
           const effectiveMediaUrl = (customMediaUrl && !customMediaUrl.includes('scontent.whatsapp.net')) ? customMediaUrl : parsed.headerMediaUrl;
 
           headerConfigCache.set(cid, {
