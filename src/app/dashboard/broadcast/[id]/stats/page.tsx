@@ -67,22 +67,37 @@ export default function CampaignStatsPage() {
   }, [campaignId]);
 
   // Initial load — run once on mount
+  // Initial load & continuous polling so asynchronous Meta webhooks (delivered/read) update live
   useEffect(() => {
-    fetchStats();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignId]);
-
-  // Polling — stop when campaign reaches a terminal status
-  const isTerminal = stats?.status && ['completed', 'cancelled', 'failed'].includes(stats.status);
-  useEffect(() => {
-    if (isTerminal) return;
+    fetchStats(false);
     const interval = setInterval(() => {
       fetchStats(false);
-    }, 5000);
+    }, 4000);
 
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignId, isTerminal]);
+  }, [campaignId, fetchStats]);
+
+  // Realtime Supabase Subscription — update metrics instantly when Meta webhooks fire
+  useEffect(() => {
+    const supabase = createBrowserSupabaseClient();
+    const channel = supabase
+      .channel(`campaign-stats-${campaignId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'broadcast_analytics', filter: `campaign_id=eq.${campaignId}` },
+        () => fetchStats(false)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'broadcast_deliveries', filter: `campaign_id=eq.${campaignId}` },
+        () => fetchStats(false)
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [campaignId, fetchStats]);
 
   if (loading) {
     return (
