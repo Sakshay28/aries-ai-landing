@@ -121,6 +121,11 @@ export class BroadcastRecipientService {
           last_message_at: null
         }));
         sourceLabel = 'CSV Upload';
+
+      } else if (audience.type === 'recent') {
+        const limit = audience.recentCount || 50;
+        rawContacts = await fetchRecentLeads(tenantId, 'id, name, phone, tags, email, channel, last_message_at', limit);
+        sourceLabel = `Recently Added (Last ${limit})`;
       }
 
       // Fetch manual overrides if they exist

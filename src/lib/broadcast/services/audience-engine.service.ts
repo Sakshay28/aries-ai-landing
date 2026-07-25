@@ -129,6 +129,11 @@ export class AudienceEngineService {
           email: c.email || ''
         }));
 
+      } else if (audience.type === 'recent') {
+        // Recently added contacts, ordered by created_at DESC
+        const limit = audience.recentCount || 50;
+        rawContacts = await fetchRecentLeads(tenantId, 'id, name, phone, tags, email, notes, channel, last_message_at', limit);
+
       } else {
         rawContacts = [];
       }
