@@ -1,5 +1,6 @@
 import { VariableConfig } from '@/app/dashboard/broadcast/types';
 import { VariableEngineService } from './variable-engine.service';
+import { MetaApiError } from '@/lib/meta/service';
 
 export function isInvalidMediaUrl(url?: string): boolean {
   if (!url || typeof url !== 'string') return true;
@@ -36,9 +37,11 @@ export class MetaPayloadBuilderService {
         });
       } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerConfig.type)) {
         if (isInvalidMediaUrl(headerConfig.mediaUrl)) {
-          throw new Error(
+          throw new MetaApiError(
             `Template requires a ${headerConfig.type} header, but no valid public HTTPS media URL is configured. ` +
-            `Meta sample preview links (scontent.whatsapp.net) cannot be sent. Upload a media header image in template settings or campaign builder.`
+            `Upload a media header image in Template Settings or Campaign Builder before sending.`,
+            400,
+            { code: 100 }
           );
         }
         const typeLower = headerConfig.type.toLowerCase();
