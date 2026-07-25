@@ -345,6 +345,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
           retargetCampaignId: raw.csv_upload_id || null,
           retargetCondition: raw.filters?.retargetCondition || 'unread',
           retargetDelayDays: raw.filters?.retargetDelayDays || 1,
+          recentCount: raw.filters?.recentCount || 50,
           manualContactIds: raw.filters?.manualContactIds || [],
           excludedContactIds: raw.filters?.excludedContactIds || [],
           csvFile: raw.filters?.csvFile || null,

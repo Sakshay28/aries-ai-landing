@@ -949,7 +949,7 @@ export function AudienceBuilder({
             {activeTab === 'recent' && (
               <RecentContactsPanel
                 recentCount={audience.recentCount || 50}
-                onCountChange={(count) => patchAudience({ recentCount: count })}
+                onCountChange={(count) => patchAudience({ type: 'recent', recentCount: count })}
                 onClick={onOpenRecipientsDrawer}
               />
             )}
