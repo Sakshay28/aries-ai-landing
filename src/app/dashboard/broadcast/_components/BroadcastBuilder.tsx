@@ -449,7 +449,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   useEffect(() => {
     if (campaignId) scheduleAutosave();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignName, selectedTemplate?.name, audience.type, delivery.mode, delivery.scheduledAt]);
+  }, [campaignName, selectedTemplate?.name, audience.type, audience.recentCount, delivery.mode, delivery.scheduledAt]);
 
   // ── Test send ──────────────────────────────────────────────────────────────
   const handleTestSend = () => {

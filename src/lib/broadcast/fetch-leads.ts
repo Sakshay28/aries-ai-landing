@@ -92,7 +92,7 @@ export async function fetchRecentLeads(
     .select(columns)
     .eq('tenant_id', tenantId)
     .not('phone', 'is', null)
-    .order('created_at', { ascending: false })
+    .order('created_at', { ascending: false, nullsFirst: false })
     .limit(limit);
   if (error) throw error;
   return data || [];
