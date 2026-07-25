@@ -76,6 +76,9 @@ export async function fetchLeadsByIds(
     if (data) out.push(...data);
   }
 
+  return out;
+}
+
 /**
  * Fetch the newest leads for a tenant ordered by created_at descending (e.g. recently added 50 contacts).
  */
