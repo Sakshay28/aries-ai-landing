@@ -6,6 +6,7 @@ import { ArrowLeft, RefreshCw, BarChart3, Clock, FileText, Send, Users, CheckCir
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import { BroadcastExecutionTimeline } from '../../_components/BroadcastExecutionTimeline';
 import { BroadcastAuditLog } from '../../_components/BroadcastAuditLog';
+import { CampaignRecipientsTable } from '../../_components/CampaignRecipientsTable';
 import toast from 'react-hot-toast';
 
 interface CampaignStats {
@@ -31,7 +32,7 @@ export default function CampaignStatsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const [activeTab, setActiveTab] = useState<'metrics' | 'timeline' | 'audit'>('metrics');
+  const [activeTab, setActiveTab] = useState<'metrics' | 'recipients' | 'timeline' | 'audit'>('metrics');
 
   const handleRetryNow = async () => {
     setRetrying(true);
@@ -181,16 +182,17 @@ export default function CampaignStatsPage() {
       </header>
 
       {/* Tabs */}
-      <div className="px-6 border-b border-border/40 bg-card/5 flex items-center gap-4 shrink-0">
+      <div className="px-6 border-b border-border/40 bg-card/5 flex items-center gap-4 shrink-0 overflow-x-auto">
         {[
           { id: 'metrics', label: 'Overview Metrics', icon: BarChart3 },
+          { id: 'recipients', label: `Target Recipients (${stats.totalRecipients})`, icon: Users },
           { id: 'timeline', label: 'Execution Logs', icon: Clock },
           { id: 'audit', label: 'Security & Audit', icon: FileText },
         ].map(t => (
           <button
             key={t.id}
             onClick={() => setActiveTab(t.id as any)}
-            className={`h-11 px-1.5 text-[13px] font-semibold border-b-2 flex items-center gap-1.5 transition-all relative ${
+            className={`h-11 px-1.5 text-[13px] font-semibold border-b-2 flex items-center gap-1.5 transition-all relative shrink-0 cursor-pointer ${
               activeTab === t.id
                 ? 'border-indigo-600 text-indigo-600 font-bold'
                 : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -275,6 +277,10 @@ export default function CampaignStatsPage() {
               </div>
             )}
           </div>
+        )}
+
+        {activeTab === 'recipients' && (
+          <CampaignRecipientsTable campaignId={campaignId} />
         )}
 
         {activeTab === 'timeline' && (
