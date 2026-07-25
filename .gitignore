@@ -49,3 +49,6 @@ next-env.d.ts
 .scripts/
 scratch/
 ngrok.log
+
+# non-code assets kept alongside the repo for convenience, not shipped
+/marketing/

@@ -338,23 +338,6 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // Decrypt token ONCE — reused for read receipt, media, AI reply, off-hours, booking
   const decryptedAccessToken = decryptToken(tenant.wa_access_token);
 
-  // ── Service-disabled kill switch ──
-  // Owner-facing toggle for "shut this bot off but still tell people why",
-  // as opposed to is_active=false which makes the tenant unresolvable and
-  // goes fully silent. Bypasses conversation history, RAG, and the AI engine
-  // entirely — every inbound message gets the same fixed reply, verbatim.
-  if (tenant.service_disabled) {
-    if (decryptedAccessToken && tenant.wa_phone_number_id) {
-      const disabledText = tenant.service_disabled_message?.trim() || 'This service is currently unavailable. Please check back later.';
-      try {
-        await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id, normalizePhoneNumber(msg.fromPhone), disabledText);
-      } catch (err) {
-        console.error('❌ Meta Webhook: failed to send service-disabled reply', err);
-      }
-    }
-    return;
-  }
-
   // 2b. Mark message as read immediately (triggers blue ticks on sender's phone)
   if (decryptedAccessToken && tenant.wa_phone_number_id) {
     markMessageAsRead(decryptedAccessToken, tenant.wa_phone_number_id, msg.messageId).catch(() => {});
@@ -1005,6 +988,27 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     .from('conversations')
     .update({ last_message_at: new Date().toISOString() })
     .eq('id', conversation.id);
+
+  // ── Service-disabled kill switch ──
+  // Owner-facing toggle for "shut this bot off but still tell people why",
+  // as opposed to is_active=false which makes the tenant unresolvable and goes
+  // fully silent. The inbound message/conversation above are already persisted
+  // (so the dashboard still shows who's messaging), but everything past this
+  // point — webhooks, opt-out handling, escalation, off-hours, AI — is skipped
+  // in favor of one fixed reply, sent and logged the same way every time.
+  if (tenant.service_disabled) {
+    const disabledText = tenant.service_disabled_message?.trim() || 'This service is currently unavailable. Please check back later.';
+    if (decryptedAccessToken && tenant.wa_phone_number_id) {
+      await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id, cleanPhone, disabledText);
+      await supabaseAdmin.from('messages').insert({
+        tenant_id: tenant.id, conversation_id: conversation.id,
+        direction: 'outbound', content: disabledText,
+        message_type: 'text', channel: 'whatsapp',
+        status: 'sent', ai_generated: false,
+      });
+    }
+    return;
+  }
 
   // 9. Fire Outbound Integration Webhook
   // SSRF guard: only fire to public HTTPS hosts. Blocks cloud-metadata,
@@ -3104,9 +3108,21 @@ async function handleStatusUpdate(msg: NonNullable<ReturnType<typeof parseMetaWe
       return;
     }
 
+    // Meta's status webhook is the ONLY source for why an accepted send later
+    // failed (e.g. 131047 = 24h re-engagement window closed). The synchronous
+    // send path already maps that code to 'SESSION_EXPIRED' so the chat UI's
+    // "send template" banner (ChatArea.tsx) can trigger — mirror that here so
+    // async webhook-reported failures show the same banner instead of a bare
+    // red ⚠️ with no explanation.
+    const failureErrorMessage = mappedStatus === 'failed'
+      ? (msg.errorCode === 131047
+          ? 'SESSION_EXPIRED'
+          : (msg.errorReason || (msg.errorCode ? `Meta error ${msg.errorCode}` : 'Delivery failed')))
+      : undefined;
+
     let updateQuery = supabaseAdmin
       .from('messages')
-      .update({ status: mappedStatus })
+      .update({ status: mappedStatus, ...(failureErrorMessage ? { error_message: failureErrorMessage } : {}) })
       .eq('wa_message_id', msg.messageId);
     if (tenantIdForStatus) updateQuery = updateQuery.eq('tenant_id', tenantIdForStatus);
     const { data: updated, error } = await updateQuery.select('id');

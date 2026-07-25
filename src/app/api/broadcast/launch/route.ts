@@ -76,6 +76,22 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
+    // 3a. Reject Meta's sample template. It is APPROVED and shows up in the
+    // template picker like any other, but Meta refuses it from real business
+    // numbers (error #131058 "Hello World templates can only be sent from the
+    // Public Test Numbers"), so the campaign fails for 100% of recipients. It is
+    // the default template present in every new WhatsApp Business account, which
+    // makes it the easy accidental pick — a real client shipped three campaigns
+    // on it and every one reported 0 sent with no visible reason. The equivalent
+    // client-side preflight check can be bypassed (stale tab, direct API call),
+    // so the refusal has to live here too.
+    if (String(campaign.template_name || '').trim().toLowerCase() === 'hello_world') {
+      return NextResponse.json({
+        success: false,
+        error: 'Meta only allows the sample "hello_world" template to be sent from its own test numbers, so this campaign would fail for every recipient. Create a template in Meta Business Manager, then press Sync on the Templates page and pick it here.',
+      }, { status: 400 });
+    }
+
     // 3b. Enforce the plan's broadcast recipient cap at launch time.
     const recipientCount = campaign.audience_count ?? 0;
     const cap = checkBroadcastCap(tenant.plan ?? 'starter', recipientCount);

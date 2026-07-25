@@ -28,6 +28,14 @@ export class MetaApiError extends Error {
   // True for Meta messaging-tier / pair-rate limits — the engine should pace down,
   // not just blindly retry (sending harder makes the quality rating worse).
   isTierLimited: boolean;
+  // True for errors where the request itself is invalid — a template that doesn't
+  // exist, is paused, has the wrong parameter count, or (#131058) is a sample
+  // template Meta only permits from its own test numbers. Retrying an identical
+  // payload can NEVER succeed: the broadcast engine used to walk these through the
+  // full 1/5/15/30/60-minute backoff ladder (6 attempts over ~111 minutes) before
+  // giving up, so a campaign whose template was simply misconfigured sat in
+  // "SENDING" with 0/0/0 for two hours and the owner had no idea why.
+  isPermanent: boolean;
 
   constructor(message: string, status: number, opts: { code?: number; retryAfterMs?: number; fbtraceId?: string } = {}) {
     super(message);
@@ -45,9 +53,62 @@ export class MetaApiError extends Error {
     //   133016 = too many requests for this number
     const rateCodes = new Set([4, 80007, 130429, 131048, 131056, 133016]);
     const tierCodes = new Set([131048, 131056, 130472]);
+    // Permanently-invalid request codes. Deliberately conservative: anything not
+    // listed here keeps the old retry behaviour, so an unrecognised transient
+    // fault is never mistaken for a permanent one.
+    //   100    = invalid parameter
+    //   131008 = required parameter is missing
+    //   131009 = parameter value is not valid
+    //   131026 = message undeliverable (recipient can't receive template messages)
+    //   131058 = sample templates (hello_world) only sendable from test numbers
+    //   132000 = template param count mismatch
+    //   132001 = template does not exist in this language
+    //   132005 = template hydrated text too long
+    //   132007 = template content violates format policy
+    //   132012 = template param format mismatch
+    //   132015 = template is paused for quality reasons
+    //   132016 = template is disabled
+    //   133010 = phone number not registered on the WhatsApp Business platform
+    const permanentCodes = new Set([
+      100, 131008, 131009, 131026, 131058,
+      132000, 132001, 132005, 132007, 132012, 132015, 132016,
+      133010,
+    ]);
     this.isRateLimited = status === 429 || (opts.code != null && rateCodes.has(opts.code));
     this.isTierLimited = opts.code != null && tierCodes.has(opts.code);
+    // A throttle always wins over the permanent classification (131048/131056 are
+    // in neither set, but guard anyway so a future code in both stays retryable).
+    this.isPermanent = !this.isRateLimited && !this.isTierLimited
+      && opts.code != null && permanentCodes.has(opts.code);
   }
+}
+
+// Turn Meta's raw error envelope into something a business owner can act on.
+// The queue's failure_reason is surfaced verbatim in the campaign analytics
+// flyout, and `Meta Cloud API template error 400: {"error":{"message":"(#131058)
+// ...` is not a sentence anyone can act on.
+export function explainMetaError(err: unknown): string {
+  if (!(err instanceof MetaApiError)) {
+    return (err as Error)?.message || 'Unknown network error';
+  }
+  const suffix = err.fbtraceId ? ` (Meta trace ${err.fbtraceId})` : '';
+  const known: Record<number, string> = {
+    131058: 'Meta blocks the sample "hello_world" template from real business numbers — it only works from Meta\'s own test numbers. Pick one of your own approved templates instead.',
+    132001: 'This template does not exist in the selected language, or it has not been approved by Meta yet.',
+    132000: 'The template needs a different number of variables than this campaign supplies. Re-map the variables and relaunch.',
+    132012: 'One of the template variables is in a format Meta rejects (for example a newline or tab inside a variable).',
+    132015: 'Meta has paused this template because of low quality ratings. Edit the template or use a different one.',
+    132016: 'This template has been disabled by Meta and can no longer be sent.',
+    132005: 'The message is too long once the variables are filled in. Shorten the variable values or the template.',
+    131026: 'This number cannot receive WhatsApp template messages (not on WhatsApp, or it has blocked business messages).',
+    133010: 'Your WhatsApp number is not fully registered on the Cloud API. Finish number registration in Meta Business Manager.',
+    190: 'Your WhatsApp access token has expired or been revoked. Reconnect WhatsApp in Settings.',
+  };
+  if (err.code != null && known[err.code]) return known[err.code] + suffix;
+  // Fall back to Meta's own human-readable message rather than the whole envelope.
+  const m = err.message.match(/"message":"([^"]+)"/);
+  if (m) return `Meta rejected the message: ${m[1].replace(/\\"/g, '"')}${suffix}`;
+  return err.message;
 }
 
 // Build a MetaApiError from a non-OK Response, parsing Meta's error code and
@@ -160,7 +221,7 @@ export async function markMessageAsRead(
   if (!accessToken || !phoneNumberId || !messageId) return;
 
   try {
-    await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
+    const res = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
       method: 'POST',
       headers: headers(accessToken),
       body: JSON.stringify({
@@ -170,8 +231,13 @@ export async function markMessageAsRead(
       }),
       signal: AbortSignal.timeout(5000),
     });
-  } catch {
-    // Non-fatal — don't block message processing for a read receipt
+    if (!res.ok) {
+      const err = await metaErrorFromResponse(res, 'mark_as_read');
+      console.error(`❌ markMessageAsRead failed for ${messageId}:`, err.message);
+    }
+  } catch (err) {
+    // Non-fatal — don't block message processing for a read receipt, but log it
+    console.error(`❌ markMessageAsRead threw for ${messageId}:`, err instanceof Error ? err.message : err);
   }
 }
 

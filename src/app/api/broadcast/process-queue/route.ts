@@ -14,7 +14,18 @@ export const maxDuration = 10;
 
 // Stop the parallel drain loop with headroom under maxDuration so the function
 // returns cleanly (no mid-flight kill). Tunable via env for larger limits.
-const DRAIN_BUDGET_MS = Number(process.env.BROADCAST_DRAIN_BUDGET_MS || 8000);
+//
+// This is a HARD deadline, not a between-rounds hint. It used to be checked only
+// at the top of each round, so a round starting at 7.9s with 10 sequential Meta
+// sends per lane (~600ms each) ran to ~14s and Vercel killed the invocation —
+// which is exactly the "504 Gateway Timeout" the cron provider kept emailing
+// about, and why campaigns were left half-finalized. The deadline is now pushed
+// down into the send loop (ProcessOpts.deadlineAt) so lanes stop cleanly.
+const DRAIN_BUDGET_MS = Number(process.env.BROADCAST_DRAIN_BUDGET_MS || 7000);
+// Slice of the budget reserved for a round's own work. We refuse to START a round
+// unless this much time remains, so the deadline handoff has room to release
+// unclaimed rows and return.
+const ROUND_RESERVE_MS = Number(process.env.BROADCAST_ROUND_RESERVE_MS || 2500);
 // How many tenants to drain in parallel per round (one lane each).
 const MAX_LANES = Number(process.env.BROADCAST_MAX_LANES || 25);
 // Per-tenant batch per round — kept small so each lane returns within the budget
@@ -133,9 +144,13 @@ async function handler(req: NextRequest) {
   }
 
   const start = Date.now();
+  const deadlineAt = start + DRAIN_BUDGET_MS;
 
-  // 0. Pipeline health check — see checkPipelineHealth() for why this lives here.
-  await checkPipelineHealth().catch(err => console.error('[queue] health check failed:', err));
+  // 0. Pipeline health + campaign reconciliation are deferred to after() at the
+  //    very end of this handler so they do NOT consume the send budget: between
+  //    them they make several Supabase round-trips and can fire Resend emails, and
+  //    on a slow network that alone could eat most of a 10s function limit before
+  //    a single message was sent. Neither affects the response.
 
   // 1. Dispatch any scheduled campaigns that are now due.
   //    checkAndDispatchScheduled() never throws (it has its own internal catch),
@@ -166,7 +181,10 @@ async function handler(req: NextRequest) {
   let exhaustedBudget = false;
 
   for (;;) {
-    if (Date.now() - start >= DRAIN_BUDGET_MS) { exhaustedBudget = true; break; }
+    // Refuse to start a round we don't have room to finish. Checking only
+    // `elapsed >= budget` here was the timeout bug: it let a round begin with
+    // milliseconds left and then run for seconds.
+    if (Date.now() + ROUND_RESERVE_MS >= deadlineAt) { exhaustedBudget = true; break; }
 
     const { data: tenants, error } = await supabaseAdmin
       .rpc('get_active_broadcast_tenants', { max_tenants: MAX_LANES });
@@ -189,7 +207,7 @@ async function handler(req: NextRequest) {
           limiter = new TokenBucket(rate, rate);
           buckets.set(t.tenant_id, limiter);
         }
-        return BroadcastEngineService.processTenantQueue(t.tenant_id, PER_TENANT_BATCH, { limiter });
+        return BroadcastEngineService.processTenantQueue(t.tenant_id, PER_TENANT_BATCH, { limiter, deadlineAt });
       })
     );
 
@@ -197,6 +215,9 @@ async function handler(req: NextRequest) {
     processed += round;
     // round === 0 means every active tenant is throttled / tier-capped / drained.
     if (round === 0) break;
+    // A lane that stopped on the deadline reports partial progress; treat the
+    // budget as spent so we chain instead of starting another round.
+    if (Date.now() >= deadlineAt) { exhaustedBudget = true; break; }
   }
 
   // 4. If we stopped because we ran out of time (not work), chain one more run so a
@@ -218,6 +239,17 @@ async function handler(req: NextRequest) {
       });
     }
   }
+
+  // 5. Background bookkeeping. Registered LAST so the self-chain above runs first
+  //    (after() callbacks execute in registration order) — a big backlog shouldn't
+  //    wait on alerting queries before the next drain link fires.
+  after(async () => {
+    await checkPipelineHealth().catch(err => console.error('[queue] health check failed:', err));
+    // Recover campaigns left stranded in 'sending' by an earlier interrupted tick.
+    const fixed = await BroadcastEngineService.reconcileFinishedCampaigns()
+      .catch(err => { console.error('[queue] reconcileFinishedCampaigns failed:', err); return 0; });
+    if (fixed) console.warn(`[queue] Reconciled ${fixed} orphaned campaign(s) stuck on 'sending'.`);
+  });
 
   console.log(`[queue] Tick done — triggered: ${triggered}, processed: ${processed}, chained: ${exhaustedBudget}`);
   return NextResponse.json({

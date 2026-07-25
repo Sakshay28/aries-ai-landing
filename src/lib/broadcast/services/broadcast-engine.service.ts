@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { sendTemplateMessage, MetaApiError } from '@/lib/meta/service';
+import { sendTemplateMessage, MetaApiError, explainMetaError } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { AudienceEngineService } from './audience-engine.service';
 import { MetaPayloadBuilderService } from './meta-payload-builder.service';
@@ -24,6 +24,13 @@ interface ProcessOpts {
   // Per-number pacer. Supplied by the persistent worker so sustained throughput
   // stays under Meta's limit. Omitted by the Vercel backstop (tiny batches).
   limiter?: TokenBucket;
+  // Wall-clock deadline (epoch ms) after which this batch stops sending and
+  // releases whatever it hasn't touched back to 'pending'. The serverless cron
+  // caller has a hard function limit (10s on Hobby); without a deadline pushed
+  // down to the send loop, a batch of N sequential Meta calls would blow past it
+  // and Vercel would kill the request mid-flight — a 504 to the cron provider AND
+  // a tick that never ran its end-of-batch campaign-completion bookkeeping.
+  deadlineAt?: number;
 }
 
 export class BroadcastEngineService {
@@ -342,6 +349,92 @@ export class BroadcastEngineService {
     }
   }
 
+  /**
+   * Finalize campaigns whose queue is fully drained but whose status was never
+   * flipped off 'sending'.
+   *
+   * The end-of-batch completion check (step E in processItemsForTenant) only runs
+   * as a side effect of the same invocation that happened to process the campaign's
+   * last queue item. If that invocation dies first — the serverless function hits
+   * its time limit, the container is recycled, the process is killed — the rows are
+   * already terminal but the campaign is orphaned in 'sending' with no recovery
+   * path anywhere: resetStaleProcessing() only rescues 'processing' ROWS, and it
+   * finds nothing to do here precisely because the queue is already empty. The
+   * campaign then shows "SENDING" with a frozen 0/0/0 in the dashboard forever.
+   * (Observed in production: campaign a4443261, 1 recipient, failed, stuck
+   * 'sending' from 2026-07-23 onward.)
+   *
+   * Idempotent and cheap — one indexed query plus one update per orphan — so it is
+   * safe to run on every cron tick.
+   */
+  static async reconcileFinishedCampaigns(): Promise<number> {
+    // Only consider campaigns that have had time to settle, so we never race a
+    // drain that is mid-flight right now (its rows are 'processing', but there is
+    // a window between the last row going terminal and step E committing).
+    const settledBefore = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+    const { data: candidates, error } = await supabaseAdmin
+      .from('broadcast_campaigns')
+      .select('id, tenant_id')
+      .eq('status', 'sending')
+      .lt('updated_at', settledBefore)
+      .limit(50);
+
+    if (error) {
+      console.error('❌ reconcileFinishedCampaigns lookup failed:', error.message);
+      return 0;
+    }
+    if (!candidates?.length) return 0;
+
+    let fixed = 0;
+    for (const camp of candidates) {
+      const { count, error: countErr } = await supabaseAdmin
+        .from('broadcast_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('campaign_id', camp.id)
+        .in('status', ['pending', 'retrying', 'processing']);
+
+      // A live queue means it's genuinely still sending — leave it alone.
+      if (countErr || count !== 0) continue;
+
+      const { count: sentCount } = await supabaseAdmin
+        .from('broadcast_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('campaign_id', camp.id)
+        .eq('status', 'sent');
+      const { count: failedCount } = await supabaseAdmin
+        .from('broadcast_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('campaign_id', camp.id)
+        .eq('status', 'failed');
+
+      // Guard on status so we can't clobber a concurrent cancel/pause.
+      const { data: updated } = await supabaseAdmin
+        .from('broadcast_campaigns')
+        .update({ status: 'completed', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', camp.id)
+        .eq('status', 'sending')
+        .select('id')
+        .maybeSingle();
+      if (!updated) continue;
+
+      fixed++;
+      const allFailed = (sentCount ?? 0) === 0 && (failedCount ?? 0) > 0;
+      console.warn(`[BROADCAST] Reconciled orphaned campaign ${camp.id} → completed (sent=${sentCount}, failed=${failedCount}).`);
+
+      await ExecutionEventService.logEvent(
+        camp.tenant_id,
+        camp.id,
+        'campaign_completed',
+        'Campaign finalized by reconciliation',
+        `Queue was fully drained (${sentCount ?? 0} sent, ${failedCount ?? 0} failed) but the campaign was still marked "sending" — a previous processing run was interrupted before it could finalize. Status corrected automatically.`,
+        allFailed ? 'error' : 'warning'
+      ).catch(() => {});
+    }
+
+    return fixed;
+  }
+
   /** Atomically claim a global batch (RPC, with a two-step fallback if missing). */
   private static async claimGlobalBatch(limit: number): Promise<any[] | null> {
     const { data: atomicItems, error: lockErr } = await supabaseAdmin
@@ -377,7 +470,7 @@ export class BroadcastEngineService {
    * failure, and updates statuses. Shared by both the global and per-tenant paths.
    */
   private static async processItemsForTenant(tenantId: string, items: any[], opts: ProcessOpts = {}): Promise<number> {
-    const { forceNow = false, limiter } = opts;
+    const { forceNow = false, limiter, deadlineAt } = opts;
     let processed = 0;
 
     // A. Resolve tenant credentials and local settings
@@ -470,6 +563,20 @@ export class BroadcastEngineService {
     const consecutiveFailures = new Map<string, number>();
     const campaignLiveStatusCache = new Map<string, string>();
     for (const item of items) {
+      // Out of time: hand the rest of this claimed batch back so the next tick
+      // (or the chained run) picks it up, rather than being killed mid-send with
+      // rows stranded in 'processing' until resetStaleProcessing() notices.
+      if (deadlineAt && Date.now() >= deadlineAt) {
+        const remaining = items.slice(items.indexOf(item)).map(i => i.id);
+        await supabaseAdmin
+          .from('broadcast_queue')
+          .update({ status: 'pending', locked_at: null })
+          .in('id', remaining)
+          .eq('status', 'processing');
+        console.log(`[BROADCAST] Deadline hit — released ${remaining.length} claimed item(s) back to pending.`);
+        break;
+      }
+
       try {
         const campaign          = campaignCache.get(item.campaign_id);
         const variablesMap      = varMapCache.get(item.campaign_id) || {};
@@ -672,7 +779,7 @@ export class BroadcastEngineService {
         }
 
       } catch (err) {
-        const errorMsg = (err as Error).message || 'Unknown network error';
+        const errorMsg = explainMetaError(err);
         console.error(`❌ Meta dispatch failure to ${item.phone}:`, errorMsg);
         consecutiveFailures.set(item.campaign_id, (consecutiveFailures.get(item.campaign_id) ?? 0) + 1);
 
@@ -716,7 +823,17 @@ export class BroadcastEngineService {
 
         const nextAttempt = (item.attempt_count || 0) + 1;
 
-        if (!isThrottled && nextAttempt <= RETRY_BACKOFF_MINUTES.length) {
+        // A permanently-invalid request (unknown/paused template, wrong variable
+        // count, sample template on a real number, unreachable recipient) cannot
+        // be fixed by waiting. Skip the backoff ladder entirely and fail now, so
+        // the campaign reaches a terminal state with an actionable reason instead
+        // of sitting in "SENDING" for ~111 minutes re-sending a doomed payload.
+        const isPermanent = err instanceof MetaApiError && err.isPermanent;
+        if (isPermanent) {
+          console.warn(`[BROADCAST] Permanent Meta rejection (code ${(err as MetaApiError).code}) for ${item.phone} — failing without retry.`);
+        }
+
+        if (!isThrottled && !isPermanent && nextAttempt <= RETRY_BACKOFF_MINUTES.length) {
           const delayMins = RETRY_BACKOFF_MINUTES[nextAttempt - 1];
           const nextTime = new Date();
           nextTime.setMinutes(nextTime.getMinutes() + delayMins);
@@ -739,7 +856,12 @@ export class BroadcastEngineService {
             .update({
               status: 'failed',
               attempt_count: nextAttempt,
-              failure_reason: `Max attempts reached. Final error: ${errorMsg}`,
+              // Don't claim "max attempts reached" when we deliberately never
+              // retried — that reading sent people hunting for a flaky network
+              // instead of the actual template misconfiguration.
+              failure_reason: isPermanent
+                ? errorMsg
+                : `Max attempts reached. Final error: ${errorMsg}`,
               processed_at: new Date().toISOString(),
               locked_at: null
             })

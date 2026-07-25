@@ -19,13 +19,24 @@ export async function POST(
 
     const { data: campaign, error: campErr } = await supabaseAdmin
       .from('broadcast_campaigns')
-      .select('id, status, total_recipients')
+      .select('id, status, total_recipients, template_name')
       .eq('id', campaignId)
       .eq('tenant_id', tenantId)
       .single();
 
     if (campErr || !campaign) {
       return NextResponse.json({ success: false, error: 'Campaign not found' }, { status: 404 });
+    }
+
+    // Retrying a campaign built on Meta's sample template just re-runs a send
+    // Meta will reject for every recipient (#131058). Say so instead of resetting
+    // the queue for another doomed pass — "Retry Now" was the button the affected
+    // client kept pressing while nothing ever went out.
+    if (String(campaign.template_name || '').trim().toLowerCase() === 'hello_world') {
+      return NextResponse.json({
+        success: false,
+        error: 'This campaign uses Meta\'s sample "hello_world" template, which Meta only permits from its own test numbers — retrying cannot succeed. Create a real template in Meta Business Manager, press Sync on the Templates page, then build a new campaign with it.',
+      }, { status: 400 });
     }
 
     if (!['sending', 'draft', 'paused'].includes(campaign.status)) {

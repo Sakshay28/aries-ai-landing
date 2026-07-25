@@ -110,6 +110,24 @@ export function validateCampaignPreflight(
     message: templateValid ? undefined : 'Please select a message template',
   });
 
+  // 2b. Sample-template check. Meta rejects `hello_world` from real business
+  // numbers with error #131058 ("Hello World templates can only be sent from the
+  // Public Test Numbers"), so a campaign built on it fails for 100% of recipients
+  // with nothing visible in the UI but a frozen 0-sent counter. It's the default
+  // template in every new WhatsApp Business account, so it's the easy accidental
+  // pick — block it at launch instead of letting the whole send die silently.
+  if (templateValid) {
+    const isSampleTemplate = values.template_name!.trim().toLowerCase() === 'hello_world';
+    checks.push({
+      id: 'template_not_sample',
+      label: 'Template is sendable from your number',
+      status: isSampleTemplate ? 'fail' : 'pass',
+      message: isSampleTemplate
+        ? 'Meta only allows the sample "hello_world" template from its own test numbers — it will fail for every recipient. Choose one of your approved templates.'
+        : undefined,
+    });
+  }
+
   // 3. Variable Mapping Check
   let varsValid = true;
   let varsMessage: string | undefined;
