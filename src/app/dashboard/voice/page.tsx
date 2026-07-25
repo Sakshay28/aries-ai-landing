@@ -1,3 +1,5 @@
+"use client";
+
 import { Phone } from 'lucide-react';
 import { ComingSoon } from '@/components/ui/coming-soon';
 

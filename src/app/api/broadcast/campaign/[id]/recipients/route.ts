@@ -4,7 +4,7 @@ import { getTenantId } from '@/lib/auth/getTenantId';
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const tenantId = await getTenantId();
@@ -12,7 +12,7 @@ export async function GET(
       return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
     }
 
-    const campaignId = params.id;
+    const { id: campaignId } = await params;
 
     // Fetch queue items for this campaign
     const { data: queueItems, error: queueErr } = await supabaseAdmin
