@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
-    const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10) || 50, 200);
+    const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10) || 50, 5000);
     const offset = Math.max(parseInt(searchParams.get('offset') ?? '0', 10) || 0, 0);
     const search = (searchParams.get('q') ?? '').trim();
     const filter = searchParams.get('filter'); // 'all' | 'recent' | 'whatsapp' | 'manual' | 'imported'
@@ -103,6 +103,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       success: true,
       data: data ?? [],
+      totalCount: count ?? 0,
       counts: {
         all: allCount.count ?? 0,
         recent: recentCount.count ?? 0,

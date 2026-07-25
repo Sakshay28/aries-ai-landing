@@ -7,7 +7,7 @@ import {
   MessageSquare, UserCircle2, ArrowLeft, ArrowRight, MoreHorizontal, 
   Sparkles, CheckCircle2, AlertCircle, Phone, Mail, Clock, 
   Download, UploadCloud, FileSpreadsheet, Database, X, 
-  CheckSquare, Square, ChevronRight, Edit2, Trash2, Calendar
+  CheckSquare, Square, ChevronLeft, ChevronRight, Edit2, Trash2, Calendar
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
@@ -120,6 +120,9 @@ export function ContactsClient() {
   // Local State
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [totalContactsCount, setTotalContactsCount] = useState(0);
   const [filterCounts, setFilterCounts] = useState<Record<string, number>>({
     all: 0, recent: 0, whatsapp: 0, manual: 0, imported: 0
   });
@@ -151,13 +154,19 @@ export function ContactsClient() {
   const duplicateCheckDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const supabase = createBrowserSupabaseClient();
 
+  // Reset to page 1 on filter or search query change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeFilter, searchQuery]);
+
   // ── DATA FETCHING (SERVER TRUTH) ──────────────────────────
   const fetchContactsData = useCallback(async () => {
     setLoading(true);
     try {
+      const offset = (currentPage - 1) * pageSize;
       const params = new URLSearchParams();
-      params.append('limit', '50');
-      params.append('offset', '0');
+      params.append('limit', pageSize.toString());
+      params.append('offset', offset.toString());
       params.append('cc', workspaceDefaultCountryCode);
       if (activeFilter !== 'all') {
         params.append('filter', activeFilter);
@@ -188,6 +197,9 @@ export function ContactsClient() {
           };
         }));
         
+        const countValue = typeof json.totalCount === 'number' ? json.totalCount : (json.counts?.[activeFilter] ?? json.data?.length ?? 0);
+        setTotalContactsCount(countValue);
+
         if (json.counts) {
           setFilterCounts(json.counts);
         }
@@ -200,7 +212,7 @@ export function ContactsClient() {
     } finally {
       setLoading(false);
     }
-  }, [activeFilter, searchQuery, workspaceDefaultCountryCode]);
+  }, [activeFilter, searchQuery, currentPage, pageSize, workspaceDefaultCountryCode]);
 
   // Trigger fetch when parameters or manual invalidations happen
   useEffect(() => {
@@ -1311,6 +1323,61 @@ export function ContactsClient() {
 
                     </motion.div>
                   ))}
+                </div>
+              )}
+
+              {/* Pagination & Page Size Control Footer */}
+              {contacts.length > 0 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-6 py-4 border-t border-border/60 bg-secondary/20 text-[13px] text-muted-foreground font-medium">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span>
+                      Showing <strong className="text-foreground tabular-nums">{Math.min(((currentPage - 1) * pageSize) + 1, totalContactsCount)}</strong> to <strong className="text-foreground tabular-nums">{Math.min(currentPage * pageSize, totalContactsCount)}</strong> of <strong className="text-foreground tabular-nums">{totalContactsCount}</strong> contacts
+                    </span>
+                    
+                    {/* Page Size Dropdown */}
+                    <div className="flex items-center gap-1.5 ml-2">
+                      <span className="text-[12px]">Rows per page:</span>
+                      <select
+                        value={pageSize}
+                        onChange={(e) => {
+                          setPageSize(Number(e.target.value));
+                          setCurrentPage(1);
+                        }}
+                        className="h-8 px-2 bg-card border border-border rounded-lg text-[12px] text-foreground font-semibold focus:outline-none cursor-pointer"
+                      >
+                        <option value={50}>50</option>
+                        <option value={100}>100</option>
+                        <option value={250}>250</option>
+                        <option value={500}>500</option>
+                        <option value={5000}>All ({totalContactsCount})</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Navigation Buttons */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      disabled={currentPage <= 1}
+                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                      className="h-8 px-3 rounded-lg border border-border bg-card hover:bg-secondary text-foreground text-[12px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1 cursor-pointer"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      <span>Previous</span>
+                    </button>
+                    
+                    <span className="text-[12px] font-semibold text-foreground px-2 tabular-nums">
+                      Page {currentPage} of {Math.max(Math.ceil(totalContactsCount / pageSize), 1)}
+                    </span>
+
+                    <button
+                      disabled={currentPage >= Math.ceil(totalContactsCount / pageSize)}
+                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, Math.ceil(totalContactsCount / pageSize)))}
+                      className="h-8 px-3 rounded-lg border border-border bg-card hover:bg-secondary text-foreground text-[12px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>Next</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
