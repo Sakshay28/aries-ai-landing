@@ -564,9 +564,12 @@ export class BroadcastEngineService {
         }
 
         if (parsed.headerType !== 'NONE') {
+          const customMediaUrl = camp.header_media_url || camp.media_url || (tmpl?.template_json as any)?.customHeaderMediaUrl || (tmpl?.template_json as any)?.headerMediaUrl;
+          const effectiveMediaUrl = (customMediaUrl && !customMediaUrl.includes('scontent.whatsapp.net')) ? customMediaUrl : parsed.headerMediaUrl;
+
           headerConfigCache.set(cid, {
             type: parsed.headerType,
-            mediaUrl: parsed.headerMediaUrl,
+            mediaUrl: effectiveMediaUrl,
             text: parsed.headerText,
           });
         }

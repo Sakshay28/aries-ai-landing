@@ -1,6 +1,18 @@
 import { VariableConfig } from '@/app/dashboard/broadcast/types';
 import { VariableEngineService } from './variable-engine.service';
 
+export function isInvalidMediaUrl(url?: string): boolean {
+  if (!url || typeof url !== 'string') return true;
+  const trimmed = url.trim().toLowerCase();
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return true;
+  // Meta's sample handles from template approval contain expiring query tokens (_nc_ and oe=)
+  // which expire quickly and cause Meta's outbound downloader to fail with "Media upload error".
+  if (trimmed.includes('_nc_') && trimmed.includes('oe=')) {
+    return true;
+  }
+  return false;
+}
+
 export class MetaPayloadBuilderService {
   /**
    * Conforms resolved campaign variables into exact Meta template components schema payloads.
@@ -22,7 +34,13 @@ export class MetaPayloadBuilderService {
           type: 'text',
           text: headerConfig.text
         });
-      } else if (headerConfig.mediaUrl) {
+      } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerConfig.type)) {
+        if (isInvalidMediaUrl(headerConfig.mediaUrl)) {
+          throw new Error(
+            `Template requires a ${headerConfig.type} header, but no valid public HTTPS media URL is configured. ` +
+            `Meta sample preview links (scontent.whatsapp.net) cannot be sent. Upload a media header image in template settings or campaign builder.`
+          );
+        }
         const typeLower = headerConfig.type.toLowerCase();
         headerParams.push({
           type: typeLower,
@@ -60,3 +78,4 @@ export class MetaPayloadBuilderService {
     return components;
   }
 }
+

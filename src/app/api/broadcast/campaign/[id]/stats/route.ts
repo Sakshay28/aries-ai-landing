@@ -37,13 +37,14 @@ export async function GET(
       return error ? 0 : (count || 0);
     };
 
-    const [pending, processing, retrying, queueSent, queueFailed, analyticsRes] = await Promise.all([
+    const [pending, processing, retrying, queueSent, queueFailed, deliveriesFailed, analyticsRes] = await Promise.all([
       getCount('broadcast_queue', 'pending'),
       getCount('broadcast_queue', 'processing'),
       getCount('broadcast_queue', 'retrying'),
       // Sent = queue items that reached Meta (authoritative before delivery receipts arrive)
       getCount('broadcast_queue', 'sent'),
       getCount('broadcast_queue', 'failed'),
+      getCount('broadcast_deliveries', 'failed'),
       // Delivered / read / failed are the reconciled cumulative counts written by the
       // Meta status webhook (increment_broadcast_analytics). Do NOT derive them by
       // counting broadcast_deliveries rows per status: `status` is monotonic, so a
@@ -63,7 +64,7 @@ export async function GET(
 
     // Merge campaign counter values (updated by increment_campaign_counter) for accuracy
     const sent     = Math.max(queueSent,   campaign.sent_count      || 0);
-    const failed   = Math.max(queueFailed, analytics?.failed_count    ?? campaign.failed_count    ?? 0);
+    const failed   = Math.max(queueFailed, deliveriesFailed, analytics?.failed_count ?? 0, campaign.failed_count ?? 0);
     const deliv    = analytics?.delivered_count ?? campaign.delivered_count ?? 0;
     const readCnt  = analytics?.read_count      ?? campaign.read_count      ?? 0;
 

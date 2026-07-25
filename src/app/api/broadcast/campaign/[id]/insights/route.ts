@@ -76,11 +76,12 @@ export async function GET(
     const sent = campaign.sent_count || 0;
 
     // ── Funnel ──
+    const deliveryFailedCount = deliveries.filter((d) => d.status === 'failed').length;
     const funnel = buildFunnel({
       sent,
       delivered: analytics?.delivered_count ?? 0,
       read: analytics?.read_count ?? 0,
-      failed: analytics?.failed_count ?? 0,
+      failed: Math.max(analytics?.failed_count ?? 0, deliveryFailedCount, queueFailures.length),
     });
 
     // ── Failures ──
