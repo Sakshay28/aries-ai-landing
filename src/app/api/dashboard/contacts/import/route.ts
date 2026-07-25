@@ -88,14 +88,39 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const header = rows[0].map((h) => h.trim().toLowerCase());
+    const rawHeaders = rows[0].map((h) => h.trim().toLowerCase());
+    const cleanHeader = (h: string) => h.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanedHeaders = rows[0].map(cleanHeader);
+
     const idx = {
-      phone: header.findIndex((h) => ['phone', 'mobile', 'whatsapp', 'phone_number', 'mobile number', 'contact_number', 'phone number', 'contact', 'cell', 'telephone', 'number', 'ph'].includes(h)),
-      name: header.findIndex((h) => ['name', 'full name', 'full_name', 'contact name', 'contact_name', 'first name', 'first_name', 'last_name', 'client', 'customer'].includes(h)),
-      email: header.findIndex((h) => ['email', 'email address', 'email_address', 'mail'].includes(h)),
-      notes: header.findIndex((h) => ['notes', 'note', 'comment', 'description', 'remark', 'remarks'].includes(h)),
-      source: header.findIndex((h) => ['source', 'source_detail', 'origin', 'channel'].includes(h)),
-      birthday: header.findIndex((h) => ['birthday', 'birth date', 'birth_date', 'dob', 'date of birth'].includes(h)),
+      phone: cleanedHeaders.findIndex((h, i) =>
+        ['phone', 'mobile', 'whatsapp', 'phonenumber', 'mobilenumber', 'contactnumber', 'contact', 'cell', 'telephone', 'number', 'ph'].includes(h) ||
+        h.includes('phone') || h.includes('mobile') || h.includes('whatsapp') || h.includes('contact') || h.includes('number') ||
+        rawHeaders[i].includes('phone') || rawHeaders[i].includes('mobile') || rawHeaders[i].includes('number')
+      ),
+      name: cleanedHeaders.findIndex((h, i) =>
+        ['name', 'fullname', 'contactname', 'firstname', 'lastname', 'client', 'customer'].includes(h) ||
+        h.includes('name') || h.includes('client') || h.includes('customer') ||
+        rawHeaders[i].includes('name')
+      ),
+      email: cleanedHeaders.findIndex((h, i) =>
+        ['email', 'emailaddress', 'mail'].includes(h) ||
+        h.includes('email') || h.includes('mail') ||
+        rawHeaders[i].includes('email')
+      ),
+      notes: cleanedHeaders.findIndex((h, i) =>
+        ['notes', 'note', 'comment', 'description', 'remark', 'remarks'].includes(h) ||
+        h.includes('note') || h.includes('remark') || h.includes('comment') ||
+        rawHeaders[i].includes('note')
+      ),
+      source: cleanedHeaders.findIndex((h, i) =>
+        ['source', 'sourcedetail', 'origin', 'channel'].includes(h) ||
+        h.includes('source') || rawHeaders[i].includes('source')
+      ),
+      birthday: cleanedHeaders.findIndex((h, i) =>
+        ['birthday', 'birthdate', 'dob', 'dateofbirth'].includes(h) ||
+        h.includes('birth') || h.includes('dob') || rawHeaders[i].includes('birth')
+      ),
     };
 
     if (idx.phone === -1) {

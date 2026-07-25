@@ -480,12 +480,31 @@ export function ContactsClient() {
         return;
       }
 
-      // Parse headers
-      const headers = lines[0].map(h => h.trim().toLowerCase().replace(/^["']|["']$/g, ''));
-      const phoneIndex = headers.findIndex(h => ['phone', 'mobile', 'whatsapp', 'phone_number', 'mobile number', 'contact_number', 'phone number', 'contact', 'cell', 'telephone', 'number', 'ph'].includes(h));
-      const nameIndex = headers.findIndex(h => ['name', 'full name', 'full_name', 'contact name', 'contact_name', 'first name', 'first_name', 'last_name', 'client', 'customer'].includes(h));
-      const emailIndex = headers.findIndex(h => ['email', 'email address', 'email_address', 'mail'].includes(h));
-      const notesIndex = headers.findIndex(h => ['notes', 'note', 'comment', 'description', 'remark', 'remarks'].includes(h));
+      // Parse headers (sanitize punctuation like trailing hyphens, dashes, colons, and spaces)
+      const cleanHeader = (h: string) => h.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      const rawHeaders = lines[0].map(h => h.trim().toLowerCase());
+      const cleanedHeaders = lines[0].map(cleanHeader);
+
+      const phoneIndex = cleanedHeaders.findIndex((h, idx) =>
+        ['phone', 'mobile', 'whatsapp', 'phonenumber', 'mobilenumber', 'contactnumber', 'contact', 'cell', 'telephone', 'number', 'ph'].includes(h) ||
+        h.includes('phone') || h.includes('mobile') || h.includes('whatsapp') || h.includes('contact') || h.includes('number') ||
+        rawHeaders[idx].includes('phone') || rawHeaders[idx].includes('mobile') || rawHeaders[idx].includes('number')
+      );
+      const nameIndex = cleanedHeaders.findIndex((h, idx) =>
+        ['name', 'fullname', 'contactname', 'firstname', 'lastname', 'client', 'customer'].includes(h) ||
+        h.includes('name') || h.includes('client') || h.includes('customer') ||
+        rawHeaders[idx].includes('name')
+      );
+      const emailIndex = cleanedHeaders.findIndex((h, idx) =>
+        ['email', 'emailaddress', 'mail'].includes(h) ||
+        h.includes('email') || h.includes('mail') ||
+        rawHeaders[idx].includes('email')
+      );
+      const notesIndex = cleanedHeaders.findIndex((h, idx) =>
+        ['notes', 'note', 'comment', 'description', 'remark', 'remarks'].includes(h) ||
+        h.includes('note') || h.includes('remark') || h.includes('comment') ||
+        rawHeaders[idx].includes('note')
+      );
 
       if (phoneIndex === -1) {
         setCsvError('Spreadsheet must contain a phone column (e.g. "phone", "mobile", "phone_number").');

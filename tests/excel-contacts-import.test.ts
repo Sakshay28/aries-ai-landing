@@ -41,4 +41,35 @@ describe('Excel (.xlsx) and CSV Spreadsheet Import Engine', () => {
     expect(parsedRows[0]).toEqual(['name', 'phone', 'notes']);
     expect(parsedRows[1]).toEqual(['Test Contact', '918233451667', 'VIP Guest']);
   });
+
+  it('correctly matches headers with trailing hyphens or symbols like Name- and Phone Number-', () => {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['Name-', 'Phone Number-'],
+      ['pallavi', '9717704002'],
+      ['yogesh sharma', '9828389367'],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+
+    const xlsxBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const parsedRows = parseSpreadsheetBuffer(xlsxBuffer);
+
+    const rawHeaders = parsedRows[0].map((h) => h.trim().toLowerCase());
+    const cleanHeader = (h: string) => h.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanedHeaders = parsedRows[0].map(cleanHeader);
+
+    const phoneIndex = cleanedHeaders.findIndex((h, i) =>
+      ['phone', 'mobile', 'whatsapp', 'phonenumber', 'mobilenumber', 'contactnumber', 'contact', 'cell', 'telephone', 'number', 'ph'].includes(h) ||
+      h.includes('phone') || h.includes('mobile') || h.includes('whatsapp') || h.includes('contact') || h.includes('number') ||
+      rawHeaders[i].includes('phone') || rawHeaders[i].includes('mobile') || rawHeaders[i].includes('number')
+    );
+    const nameIndex = cleanedHeaders.findIndex((h, i) =>
+      ['name', 'fullname', 'contactname', 'firstname', 'lastname', 'client', 'customer'].includes(h) ||
+      h.includes('name') || h.includes('client') || h.includes('customer') ||
+      rawHeaders[i].includes('name')
+    );
+
+    expect(nameIndex).toBe(0);
+    expect(phoneIndex).toBe(1);
+  });
 });
