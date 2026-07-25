@@ -921,7 +921,7 @@ export function ContactsClient() {
                   <input
                     id="contacts-csv-input"
                     type="file"
-                    accept=".xlsx,.xls,.csv,.tsv,.ods,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                    accept=".xlsx,.xls,.csv,.tsv,.ods"
                     className="hidden"
                     onChange={handleCsvFileDrop}
                   />
