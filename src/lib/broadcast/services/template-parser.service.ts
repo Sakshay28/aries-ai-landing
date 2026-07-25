@@ -35,7 +35,10 @@ export class TemplateParserService {
     if (headerComp) {
       headerType = (headerComp.format || 'TEXT') as ParsedComponents['headerType'];
       headerText = headerComp.text || undefined;
-      headerMediaUrl = headerComp.example?.header_handle?.[0] || undefined;
+      const customUrl = templateJson?.header_media_url || templateJson?.customHeaderMediaUrl || templateJson?.headerMediaUrl;
+      headerMediaUrl = (customUrl && !customUrl.includes('_nc_'))
+        ? customUrl
+        : (headerComp.example?.header_handle?.[0] || undefined);
     }
 
     // 2. Resolve body & variables
