@@ -88,12 +88,28 @@ export async function POST(request: Request) {
     const rand = Math.random().toString(36).slice(2, 8);
     const path = `${tenantId}/templates/${timestamp}-${rand}.${allowed.ext}`;
 
-    const buffer = Buffer.from(await file.arrayBuffer());
+    let buffer = Buffer.from(await file.arrayBuffer());
+    let contentType = file.type;
+
+    // Auto-compress images to ~200-500 KB to guarantee staying under Meta's 5 MB header limit
+    if (file.type.startsWith('image/')) {
+      try {
+        const sharp = (await import('sharp')).default;
+        const compressed = await sharp(buffer)
+          .resize({ width: 1200, withoutEnlargement: true })
+          .jpeg({ quality: 80, progressive: true })
+          .toBuffer();
+        buffer = Buffer.from(compressed);
+        contentType = 'image/jpeg';
+      } catch (e) {
+        console.warn('Image sharp compression skipped:', e);
+      }
+    }
 
     const { error: uploadError } = await supabaseAdmin.storage
       .from(BUCKET)
       .upload(path, buffer, {
-        contentType: file.type,
+        contentType,
         upsert: false,
       });
 
