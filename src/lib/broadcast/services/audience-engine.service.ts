@@ -213,13 +213,10 @@ export class AudienceEngineService {
           continue;
         }
 
-        // Consent check: contact must have prior inbound interaction
-        const leadChannel = (lead.channel || '').toLowerCase();
-        const hasConsent = leadChannel === 'whatsapp' || !!lead.last_message_at;
-        if (!hasConsent) {
-          noConsentRemoved++;
-          continue;
-        }
+        // Note: WhatsApp approved templates can be sent to any valid number.
+        // Consent enforcement (last_message_at / channel check) is NOT required
+        // for template messages — Meta's own policy governs this at delivery time.
+        // We only enforce opt-outs (explicit unsubscribes) which are below.
 
         // Deduplication rules
         if (seenPhones.has(phoneCleaned) || seenContactIds.has(lead.id)) {

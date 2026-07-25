@@ -219,7 +219,8 @@ export async function POST(req: NextRequest) {
           retargetDelayDays: audience.retargetDelayDays || 1,
           manualContactIds: audience.manualContactIds || [],
           excludedContactIds: audience.excludedContactIds || [],
-          csvFile: audience.csvFile || null
+          csvFile: audience.csvFile || null,
+          recentCount: audience.recentCount || 50
         }
       };
 

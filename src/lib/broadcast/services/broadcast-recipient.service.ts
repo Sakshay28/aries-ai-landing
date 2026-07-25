@@ -299,26 +299,9 @@ export class BroadcastRecipientService {
           continue;
         }
 
-        // B2. Consent check: contact must have prior inbound interaction
-        const leadChannel = (lead.channel || '').toLowerCase();
-        const hasConsent = leadChannel === 'whatsapp' || !!lastMsgAt;
-        if (!hasConsent) {
-          noConsentRemoved++;
-          finalRecords.push({
-            campaign_id: campaignId,
-            tenant_id: tenantId,
-            contact_id: leadId.startsWith('csv-') ? null : leadId,
-            phone_number: phoneCleaned,
-            name: leadName,
-            email: leadEmail,
-            source_type: recordSourceType,
-            source_label: recordSourceLabel,
-            status: 'no_consent',
-            last_interaction_at: lastMsgAt,
-            normalized_number: phoneCleaned,
-          });
-          continue;
-        }
+        // Note: WhatsApp approved templates can be sent to any valid number.
+        // Consent enforcement is NOT required for template messages — Meta governs
+        // this at delivery time. We only enforce explicit opt-outs below.
 
         // C. Deduplication check
         if (seenPhones.has(phoneCleaned) || seenContactIds.has(leadId)) {
@@ -434,7 +417,8 @@ export class BroadcastRecipientService {
           retargetDelayDays: campaignAudience.filters?.retargetDelayDays || 1,
           manualContactIds: campaignAudience.filters?.manualContactIds || [],
           excludedContactIds: campaignAudience.filters?.excludedContactIds || [],
-          csvFile: campaignAudience.filters?.csvFile || null
+          csvFile: campaignAudience.filters?.csvFile || null,
+          recentCount: campaignAudience.filters?.recentCount || 50,
         };
 
         return await this.resolveBroadcastAudience(tenantId, campaignId, audienceState);

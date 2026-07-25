@@ -157,6 +157,7 @@ export class BroadcastEngineService {
         manualContactIds: audienceConfig.filters?.manualContactIds || [],
         excludedContactIds: audienceConfig.filters?.excludedContactIds || [],
         csvFile: audienceConfig.filters?.csvFile || null,
+        recentCount: audienceConfig.filters?.recentCount || 50,
       });
 
       if (resolved.total === 0) {
