@@ -515,6 +515,7 @@ export class BroadcastEngineService {
     const campaignCache    = new Map<string, any>();
     const varIndicesCache  = new Map<string, string[]>();
     const varMapCache      = new Map<string, Record<string, any>>();
+    const headerConfigCache = new Map<string, { type: 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'TEXT' | 'NONE'; mediaUrl?: string; text?: string }>();
     const deliverySettingsCache = new Map<string, any>();
 
     const [campResults, settingsResults] = await Promise.all([
@@ -545,12 +546,28 @@ export class BroadcastEngineService {
 
       let indices = [...new Set((mappings || []).map((v: any) => String(v.variable_key)))].sort((a, b) => Number(a) - Number(b));
 
-      if (indices.length === 0 && tmpl?.template_json) {
+      // Always parse the cached template JSON, even when explicit variable
+      // mappings exist, so the header (image/video/document) config is
+      // available below. A template with a media header needs that media
+      // link sent as a header parameter on EVERY send — Meta only stores the
+      // approval-time example, not a reusable asset — so skipping this for
+      // templates that already have body variable mappings previously
+      // dropped the header entirely and Meta rejected the send.
+      if (tmpl?.template_json) {
         const parsed = TemplateParserService.parse(tmpl.template_json);
-        if (parsed.detectedVariables.length > 0) {
+
+        if (indices.length === 0 && parsed.detectedVariables.length > 0) {
           indices = parsed.detectedVariables;
           parsed.detectedVariables.forEach((idx, i) => {
             vMap[idx] = { index: idx, sourceType: i === 0 ? 'crm_field' : 'static', crmField: i === 0 ? 'name' : undefined, staticValue: i === 0 ? undefined : ' ' };
+          });
+        }
+
+        if (parsed.headerType !== 'NONE') {
+          headerConfigCache.set(cid, {
+            type: parsed.headerType,
+            mediaUrl: parsed.headerMediaUrl,
+            text: parsed.headerText,
           });
         }
       }
@@ -581,6 +598,7 @@ export class BroadcastEngineService {
         const campaign          = campaignCache.get(item.campaign_id);
         const variablesMap      = varMapCache.get(item.campaign_id) || {};
         const detectedVarIndices = varIndicesCache.get(item.campaign_id) || [];
+        const headerConfig      = headerConfigCache.get(item.campaign_id);
 
         if (!campaign) {
           await supabaseAdmin
@@ -725,7 +743,8 @@ export class BroadcastEngineService {
         const metaComponents = MetaPayloadBuilderService.buildPayload(
           variablesMap,
           detectedVarIndices,
-          leadRecord
+          leadRecord,
+          headerConfig
         );
 
         const languageCode = item.language_code || campaign.template_language || 'en';
