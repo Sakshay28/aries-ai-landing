@@ -933,9 +933,17 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                   <button
                     type="button"
                     onClick={() => setDrawerOpen(true)}
-                    className="text-[13px] font-bold text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-all leading-none text-left whitespace-nowrap"
+                    className="text-[13px] font-bold text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-all leading-none text-left whitespace-nowrap flex items-center gap-2"
                   >
-                    {estimate.total.toLocaleString()} targets ready
+                    <span>{estimate.total.toLocaleString()} targets ready</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 tracking-tight">
+                      {audience.type === 'recent' ? `Recently Added (${audience.recentCount || 50})` :
+                       audience.type === 'all' ? 'All Contacts' :
+                       audience.type === 'tags' ? `Tags (${audience.tags.join(', ')})` :
+                       audience.type === 'manual' ? 'Manual Selection' :
+                       audience.type === 'csv' ? 'CSV Upload' :
+                       audience.type === 'retarget' ? 'Retargeting' : 'Segments'}
+                    </span>
                   </button>
                   <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1.5 font-medium flex items-center gap-1 leading-none select-none whitespace-nowrap">
                     {delivery.mode === 'scheduled' ? (
