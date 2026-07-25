@@ -123,9 +123,53 @@ export async function POST(req: NextRequest) {
       ),
     };
 
+    // ── CONTENT-BASED AUTO-DETECTION FALLBACK ──
+    // If header wording didn't match, inspect actual cell data in the first 20 rows!
+    if (idx.phone === -1 && rows.length > 1) {
+      const maxCols = Math.max(...rows.map((r) => r.length));
+      let bestPhoneCol = -1;
+      let maxPhoneMatches = 0;
+
+      for (let col = 0; col < maxCols; col++) {
+        let matches = 0;
+        const sampleRows = rows.slice(1, 21);
+        for (const row of sampleRows) {
+          const cell = String(row[col] || '').trim();
+          const digits = cell.replace(/\D/g, '');
+          if (digits.length >= 7 && digits.length <= 15) {
+            matches++;
+          }
+        }
+        if (matches > maxPhoneMatches) {
+          maxPhoneMatches = matches;
+          bestPhoneCol = col;
+        }
+      }
+
+      if (bestPhoneCol !== -1 && maxPhoneMatches > 0) {
+        idx.phone = bestPhoneCol;
+      }
+    }
+
+    if (idx.name === -1 && idx.phone !== -1 && rows.length > 1) {
+      const maxCols = Math.max(...rows.map((r) => r.length));
+      for (let col = 0; col < maxCols; col++) {
+        if (col === idx.phone) continue;
+        const sampleRows = rows.slice(1, 10);
+        const hasText = sampleRows.some((row) => {
+          const val = String(row[col] || '').trim();
+          return val.length > 0 && isNaN(Number(val)) && !val.includes('@');
+        });
+        if (hasText) {
+          idx.name = col;
+          break;
+        }
+      }
+    }
+
     if (idx.phone === -1) {
       return NextResponse.json(
-        { success: false, message: 'Spreadsheet header is missing a phone column. Supported headers: phone, mobile, whatsapp, phone_number, contact_number, mobile number.' },
+        { success: false, message: 'Spreadsheet does not contain phone numbers. Please ensure your spreadsheet has a column with phone numbers.' },
         { status: 400 }
       );
     }

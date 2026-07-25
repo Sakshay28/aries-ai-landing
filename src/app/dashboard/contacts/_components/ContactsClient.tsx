@@ -485,12 +485,12 @@ export function ContactsClient() {
       const rawHeaders = lines[0].map(h => h.trim().toLowerCase());
       const cleanedHeaders = lines[0].map(cleanHeader);
 
-      const phoneIndex = cleanedHeaders.findIndex((h, idx) =>
+      let phoneIndex = cleanedHeaders.findIndex((h, idx) =>
         ['phone', 'mobile', 'whatsapp', 'phonenumber', 'mobilenumber', 'contactnumber', 'contact', 'cell', 'telephone', 'number', 'ph'].includes(h) ||
         h.includes('phone') || h.includes('mobile') || h.includes('whatsapp') || h.includes('contact') || h.includes('number') ||
         rawHeaders[idx].includes('phone') || rawHeaders[idx].includes('mobile') || rawHeaders[idx].includes('number')
       );
-      const nameIndex = cleanedHeaders.findIndex((h, idx) =>
+      let nameIndex = cleanedHeaders.findIndex((h, idx) =>
         ['name', 'fullname', 'contactname', 'firstname', 'lastname', 'client', 'customer'].includes(h) ||
         h.includes('name') || h.includes('client') || h.includes('customer') ||
         rawHeaders[idx].includes('name')
@@ -506,8 +506,52 @@ export function ContactsClient() {
         rawHeaders[idx].includes('note')
       );
 
+      // ── CONTENT-BASED AUTO-DETECTION FALLBACK ──
+      // If header wording didn't match, inspect actual cell data in the first 20 rows!
+      if (phoneIndex === -1 && lines.length > 1) {
+        const maxCols = Math.max(...lines.map(r => r.length));
+        let bestPhoneCol = -1;
+        let maxPhoneMatches = 0;
+
+        for (let col = 0; col < maxCols; col++) {
+          let matches = 0;
+          const sampleRows = lines.slice(1, 21);
+          for (const row of sampleRows) {
+            const cell = String(row[col] || '').trim();
+            const digits = cell.replace(/\D/g, '');
+            if (digits.length >= 7 && digits.length <= 15) {
+              matches++;
+            }
+          }
+          if (matches > maxPhoneMatches) {
+            maxPhoneMatches = matches;
+            bestPhoneCol = col;
+          }
+        }
+
+        if (bestPhoneCol !== -1 && maxPhoneMatches > 0) {
+          phoneIndex = bestPhoneCol;
+        }
+      }
+
+      if (nameIndex === -1 && phoneIndex !== -1 && lines.length > 1) {
+        const maxCols = Math.max(...lines.map(r => r.length));
+        for (let col = 0; col < maxCols; col++) {
+          if (col === phoneIndex) continue;
+          const sampleRows = lines.slice(1, 10);
+          const hasText = sampleRows.some(row => {
+            const val = String(row[col] || '').trim();
+            return val.length > 0 && isNaN(Number(val)) && !val.includes('@');
+          });
+          if (hasText) {
+            nameIndex = col;
+            break;
+          }
+        }
+      }
+
       if (phoneIndex === -1) {
-        setCsvError('Spreadsheet must contain a phone column (e.g. "phone", "mobile", "phone_number").');
+        setCsvError('Spreadsheet does not contain phone numbers. Please ensure your spreadsheet has a column with phone numbers.');
         setCsvFile(null);
         setCsvUploading(false);
         return;

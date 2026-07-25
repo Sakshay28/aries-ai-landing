@@ -72,4 +72,63 @@ describe('Excel (.xlsx) and CSV Spreadsheet Import Engine', () => {
     expect(nameIndex).toBe(0);
     expect(phoneIndex).toBe(1);
   });
+
+  it('auto-detects phone and name columns from cell content when headers are completely arbitrary (e.g. ColA, ColB)', () => {
+    const rows = [
+      ['ColA', 'ColB'],
+      ['pallavi', '9717704002'],
+      ['yogesh sharma', '9828389367'],
+      ['shakti singh', '9829081516'],
+    ];
+
+    const rawHeaders = rows[0].map((h) => h.trim().toLowerCase());
+    const cleanHeader = (h: string) => h.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanedHeaders = rows[0].map(cleanHeader);
+
+    let phoneIndex = cleanedHeaders.findIndex((h, i) =>
+      ['phone', 'mobile', 'whatsapp', 'phonenumber', 'mobilenumber', 'contactnumber', 'contact', 'cell', 'telephone', 'number', 'ph'].includes(h)
+    );
+    let nameIndex = cleanedHeaders.findIndex((h, i) =>
+      ['name', 'fullname', 'contactname', 'firstname', 'lastname'].includes(h)
+    );
+
+    // Content-based fallback
+    if (phoneIndex === -1 && rows.length > 1) {
+      const maxCols = Math.max(...rows.map((r) => r.length));
+      let bestPhoneCol = -1;
+      let maxPhoneMatches = 0;
+
+      for (let col = 0; col < maxCols; col++) {
+        let matches = 0;
+        for (const row of rows.slice(1)) {
+          const cell = String(row[col] || '').trim();
+          const digits = cell.replace(/\D/g, '');
+          if (digits.length >= 7 && digits.length <= 15) matches++;
+        }
+        if (matches > maxPhoneMatches) {
+          maxPhoneMatches = matches;
+          bestPhoneCol = col;
+        }
+      }
+      if (bestPhoneCol !== -1) phoneIndex = bestPhoneCol;
+    }
+
+    if (nameIndex === -1 && phoneIndex !== -1 && rows.length > 1) {
+      const maxCols = Math.max(...rows.map((r) => r.length));
+      for (let col = 0; col < maxCols; col++) {
+        if (col === phoneIndex) continue;
+        const hasText = rows.slice(1).some((row) => {
+          const val = String(row[col] || '').trim();
+          return val.length > 0 && isNaN(Number(val));
+        });
+        if (hasText) {
+          nameIndex = col;
+          break;
+        }
+      }
+    }
+
+    expect(phoneIndex).toBe(1);
+    expect(nameIndex).toBe(0);
+  });
 });
