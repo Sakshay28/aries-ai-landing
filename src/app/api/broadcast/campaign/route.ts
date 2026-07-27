@@ -141,6 +141,26 @@ export async function POST(req: NextRequest) {
 
     console.log('[BROADCAST_SAVE] Saving campaign:', { campaignId, campaignName, templateName });
 
+    // One-active-snapshot rule: once a campaign is locked (launching/sending/
+    // paused/completed/…), its recipient list is frozen to the immutable
+    // snapshot. Reject any audience / filter / tag / CSV modification rather
+    // than silently regenerating recipients under a live send. Draft and
+    // scheduled campaigns remain dynamic and fully editable.
+    if (campaignId && audience) {
+      const { data: existing } = await supabaseAdmin
+        .from('broadcast_campaigns')
+        .select('status')
+        .eq('id', campaignId)
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+      if (existing && !['draft', 'scheduled'].includes(existing.status)) {
+        return NextResponse.json({
+          success: false,
+          error: `This campaign is "${existing.status}" and its recipient list is locked. Audience changes are not allowed — duplicate the campaign to send to a different audience.`,
+        }, { status: 409 });
+      }
+    }
+
     const campaignPayload = {
       tenant_id:         tenantId,
       name:              campaignName,

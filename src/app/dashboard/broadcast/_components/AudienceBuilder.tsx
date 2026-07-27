@@ -112,11 +112,12 @@ const AUDIENCE_CHOICES: ChoiceCard[] = [
   },
 ];
 
+// Only fields backed by a real, selectable leads column are offered. 'country'
+// (no such column) and 'last_interaction' (needs date-range comparison the
+// operators don't support) were removed — they silently matched zero contacts.
 const FILTER_FIELDS = [
-  { value: 'country',          label: 'Country'          },
-  { value: 'lead_score',       label: 'Lead Score'       },
-  { value: 'last_interaction', label: 'Last Interaction' },
-  { value: 'channel',          label: 'Channel'          },
+  { value: 'lead_score', label: 'Lead Score' },
+  { value: 'channel',    label: 'Channel'    },
 ] as const;
 
 const FILTER_OPERATORS = [
@@ -547,7 +548,7 @@ function CustomFilterPanel({
   return (
     <div className="space-y-4">
       <p className="text-[12px] text-muted-foreground/85 leading-relaxed">
-        Build smart customer cohorts based on database fields, country codes, and interaction metrics:
+        Build smart customer cohorts by lead score and channel:
       </p>
 
       <div className="space-y-2.5">

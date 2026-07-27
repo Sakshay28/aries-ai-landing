@@ -1,8 +1,8 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { AudienceState } from '@/app/dashboard/broadcast/types';
 import { cleanPhone } from '@/lib/meta/service';
-import { fetchLeadsByFilter, fetchLeadsByIds, fetchRecentLeads } from '@/lib/broadcast/fetch-leads';
 import { cleanContactName, logInvalidContactName, type ContactNameSource } from '@/lib/broadcast/recipient-name';
+import { resolveTargetContacts } from './audience-targeting';
 
 export interface RecipientRecord {
   campaign_id: string;
@@ -46,103 +46,12 @@ export class BroadcastRecipientService {
     // (src/app/api/broadcast/recipients/route.ts) already have their own
     // try/catch that turns a thrown error into a real success:false response.
     {
-      let rawContacts: any[] = [];
-      let sourceLabel = 'All Contacts';
-
-      // 1. Fetch raw contacts based on targeting type
-      if (audience.type === 'all') {
-        rawContacts = await fetchLeadsByFilter(tenantId, 'id, name, phone, tags, email, channel, last_message_at');
-        sourceLabel = 'All Contacts';
-
-      } else if (audience.type === 'tags' && audience.tags.length > 0) {
-        rawContacts = await fetchLeadsByFilter(tenantId, 'id, name, phone, tags, email, channel, last_message_at', { tags: audience.tags });
-        sourceLabel = `Tag → ${audience.tags.join(', ')}`;
-
-      } else if (audience.type === 'custom' && audience.customFilters.length > 0) {
-        const allLeads = await fetchLeadsByFilter(tenantId, 'id, name, phone, tags, email, channel, last_message_at, lead_score');
-        rawContacts = allLeads.filter(lead => {
-          return audience.customFilters.every(filter => {
-            if (!filter.field || !filter.value) return true;
-            const leadObj = lead as Record<string, any>;
-            const leadVal = String(leadObj[filter.field] || leadObj[filter.field.toLowerCase()] || '').toLowerCase();
-            const filterVal = filter.value.toLowerCase();
-
-            if (filter.operator === '=') return leadVal === filterVal;
-            if (filter.operator === 'contains') return leadVal.includes(filterVal);
-            if (filter.operator === '>') return Number(leadVal) > Number(filterVal);
-            if (filter.operator === '<') return Number(leadVal) < Number(filterVal);
-            return true;
-          });
-        });
-        sourceLabel = 'Segment Filter';
-
-      } else if (audience.type === 'retarget' && audience.retargetCampaignId) {
-        const { data: parentMsgs, error: parentMsgsErr } = await supabaseAdmin
-          .from('broadcast_deliveries')
-          .select('contact_id, status')
-          .eq('campaign_id', audience.retargetCampaignId);
-
-        if (parentMsgsErr) throw parentMsgsErr;
-
-        const targetContactIds: string[] = [];
-        if (audience.retargetCondition === 'unread') {
-          const readIds = new Set((parentMsgs || []).filter(m => m.status === 'read').map(m => m.contact_id));
-          (parentMsgs || []).forEach(m => {
-            if (m.contact_id && !readIds.has(m.contact_id)) targetContactIds.push(m.contact_id);
-          });
-        } else if (audience.retargetCondition === 'no_reply') {
-          // Only target contacts who did NOT send an inbound reply to the parent campaign
-          const { data: inboundReplies } = await supabaseAdmin
-            .from('messages')
-            .select('contact_id')
-            .eq('campaign_id', audience.retargetCampaignId)
-            .eq('direction', 'inbound');
-          const repliedContactIds = new Set((inboundReplies || []).map((r: any) => r.contact_id).filter(Boolean));
-          const sentIds = (parentMsgs || []).map(m => m.contact_id).filter(Boolean) as string[];
-          sentIds.filter(id => !repliedContactIds.has(id)).forEach(id => targetContactIds.push(id));
-        }
-
-        if (targetContactIds.length > 0) {
-          rawContacts = await fetchLeadsByIds(tenantId, 'id, name, phone, tags, email, channel, last_message_at', targetContactIds);
-        }
-        sourceLabel = `Retargeting → ${audience.retargetCondition}`;
-
-      } else if (audience.type === 'manual' && audience.manualContactIds && audience.manualContactIds.length > 0) {
-        rawContacts = await fetchLeadsByIds(tenantId, 'id, name, phone, tags, email, channel, last_message_at', audience.manualContactIds);
-        sourceLabel = 'Manual Selection';
-
-      } else if (audience.type === 'csv' && audience.csvFile && Array.isArray(audience.csvFile.contacts)) {
-        rawContacts = audience.csvFile.contacts.map((c: any, idx: number) => ({
-          id: c.id || `csv-${idx}`,
-          name: cleanContactName(c.name || c.contact_name),
-          phone: c.phone || c.phone_number,
-          tags: c.tags || [],
-          email: c.email || '',
-          last_message_at: null
-        }));
-        sourceLabel = 'CSV Upload';
-
-      } else if (audience.type === 'recent') {
-        const limit = audience.recentCount || 50;
-        rawContacts = await fetchRecentLeads(tenantId, 'id, name, phone, tags, email, channel, last_message_at', limit);
-        sourceLabel = `Recently Added (Last ${limit})`;
-      }
-
-      // Fetch manual overrides if they exist
-      let manualLeads: any[] = [];
-      const manualIds = audience.manualContactIds || [];
-      if (manualIds.length > 0) {
-        manualLeads = await fetchLeadsByIds(tenantId, 'id, name, phone, tags, email, channel, last_message_at', manualIds);
-      }
-
-      // Merge targeted contacts and manual additions
-      const targetedIds = new Set(rawContacts.map(c => c.id));
-      const manualAdditions = manualLeads.filter(c => !targetedIds.has(c.id));
-      
-      const mergedContacts = [
-        ...rawContacts.map(c => ({ ...c, isManualAddition: false })),
-        ...manualAdditions.map(c => ({ ...c, isManualAddition: true }))
-      ];
+      // Targeting (audience type → contacts + additive manual selections) is
+      // resolved by the single shared core (audience-targeting.ts) — identical
+      // to the send resolver, so the approved preview can never diverge from the
+      // sent set. Compliance classification stays below (this path emits rich
+      // per-recipient status records for the UI).
+      const { contacts: mergedContacts, sourceLabel } = await resolveTargetContacts(tenantId, audience);
 
       // 2. Perform deduplication, compliance filters, and phone validations
       // Pre-fetch opt-out list from DB (the broadcast_optouts table is the authoritative source)
@@ -344,16 +253,23 @@ export class BroadcastRecipientService {
 
       // 3. Cache the resolved list in the database (wrapped in self-healing try-catch)
       try {
+        // Scope BOTH the delete and the insert to the transient preview cache
+        // (frozen=false). A locked campaign's immutable send snapshot
+        // (frozen=true, written by BroadcastEngineService.lockCampaignAndEnqueue)
+        // must never be clobbered by a late preview re-estimate — that would
+        // silently mutate what actually gets sent.
         await supabaseAdmin
           .from('broadcast_campaign_recipient_cache')
           .delete()
-          .eq('campaign_id', campaignId);
+          .eq('tenant_id', tenantId)
+          .eq('campaign_id', campaignId)
+          .eq('frozen', false);
 
         if (finalRecords.length > 0) {
           // Batch inserting in chunks of 200 rows for high reliability
           const chunkSize = 200;
           for (let i = 0; i < finalRecords.length; i += chunkSize) {
-            const chunk = finalRecords.slice(i, i + chunkSize);
+            const chunk = finalRecords.slice(i, i + chunkSize).map(rec => ({ ...rec, frozen: false }));
             const { error: insertErr } = await supabaseAdmin
               .from('broadcast_campaign_recipient_cache')
               .insert(chunk);
@@ -391,16 +307,37 @@ export class BroadcastRecipientService {
     // to re-swallow whatever resolveBroadcastAudience threw (including after
     // that method's own fix) back into a fake all-zero result.
     {
-      const { data, error } = await supabaseAdmin
+      // Snapshot authority for reads: once a campaign is locked, the immutable
+      // frozen snapshot IS the recipient list — prefer it over any transient
+      // preview rows so stats/exports/analytics reflect exactly what was queued
+      // and sent. Only unlaunched campaigns fall back to the preview cache /
+      // dynamic resolution.
+      // Tenant scoping is MANDATORY here: supabaseAdmin bypasses RLS and the
+      // campaignId comes from the client, so filtering by campaign_id alone
+      // would let a caller read another tenant's snapshot (names + phones) by
+      // supplying that tenant's campaign UUID (IDOR).
+      const { data: frozen } = await supabaseAdmin
         .from('broadcast_campaign_recipient_cache')
         .select('*')
-        .eq('campaign_id', campaignId);
+        .eq('tenant_id', tenantId)
+        .eq('campaign_id', campaignId)
+        .eq('frozen', true);
+
+      const { data, error } = (frozen && frozen.length > 0)
+        ? { data: frozen, error: null }
+        : await supabaseAdmin
+            .from('broadcast_campaign_recipient_cache')
+            .select('*')
+            .eq('tenant_id', tenantId)
+            .eq('campaign_id', campaignId)
+            .eq('frozen', false);
 
       if (error || !data || data.length === 0) {
         // Fallback: Resolve dynamically from campaign targeting settings
         const { data: campaignAudience } = await supabaseAdmin
           .from('broadcast_audiences')
           .select('*')
+          .eq('tenant_id', tenantId)
           .eq('campaign_id', campaignId)
           .maybeSingle();
 

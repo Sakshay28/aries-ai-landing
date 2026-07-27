@@ -135,7 +135,10 @@ export async function POST(req: NextRequest) {
     }
 
     // 4. Immediate send — resolve audience & populate queue
-    const result = await BroadcastEngineService.launchCampaign(tenantId, campaignId);
+    const result = await BroadcastEngineService.launchCampaign(tenantId, campaignId, {
+      lockedBy: launchUser?.id ?? null,
+      lockReason: 'manual_launch',
+    });
     console.log('[BROADCAST_LAUNCH] Queue result:', result);
 
     if (!result.success) {

@@ -9,8 +9,9 @@
 // keyset pagination (immune to the row cap as long as pageSize ≤ cap) so the
 // audience resolver and the estimator both see every matching contact.
 //
-// Shared by AudienceEngineService (send) and BroadcastRecipientService
-// (estimate) so the two cannot diverge.
+// Called only by the shared targeting core (audience-targeting.ts), which both
+// the send resolver (AudienceEngineService) and the preview resolver
+// (BroadcastRecipientService) delegate to — so the two cannot diverge.
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
 const PAGE_SIZE = 1000;   // ≤ default db-max-rows; safe for any project setting

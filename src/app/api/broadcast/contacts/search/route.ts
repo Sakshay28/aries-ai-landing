@@ -10,7 +10,12 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
-    const query = searchParams.get('q') || '';
+    // Sanitize before interpolating into a PostgREST .or() filter string below.
+    // The raw value is spliced straight into `name.ilike.%q%,phone.ilike.%q%,...`,
+    // so an unescaped comma / parenthesis / star / percent / backslash could
+    // break the filter grammar or inject an extra OR condition. Strip those
+    // metacharacters and cap the length; ilike substring matching still works.
+    const query = (searchParams.get('q') || '').replace(/[,()*%\\]/g, '').trim().slice(0, 100);
     const tag = searchParams.get('tag') || '';
     const optedInOnly = searchParams.get('optedIn') === 'true';
     const limit = parseInt(searchParams.get('limit') || '50', 10);

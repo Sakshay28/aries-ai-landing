@@ -186,40 +186,62 @@ export function RecipientDrawer({
   }, [filteredRecipients, crmSearchResults, searchQuery, activeFilter, tempManualContactIds, tempExcludedContactIds]);
 
   // Bulk Actions
+  //
+  // These MUST operate over the COMPLETE resolved recipient set (`recipients`),
+  // not the currently-filtered/visible `allListItems`. Iterating the filtered
+  // view was the root cause of "deselect all, pick 50, sends to everyone": on an
+  // "All Contacts" base, Deselect All only excluded the rows the search/filter
+  // happened to show, so every un-shown contact stayed included and the launch
+  // re-resolved the full base minus a handful of exclusions. `recipients` is the
+  // full, pagination-safe set returned by the estimate (see fetch-leads.ts), so
+  // excluding across it is deterministic and complete.
   const handleSelectAll = () => {
     const nextExcluded = new Set(tempExcludedContactIds);
     const nextManual = new Set(tempManualContactIds);
 
-    allListItems.forEach(item => {
-      if (item.status === 'eligible') {
-        if (item.isManual) {
-          nextManual.add(item.id);
-        } else {
-          nextExcluded.delete(item.id);
-        }
+    // Full base cohort
+    recipients.forEach(r => {
+      if (r.status !== 'eligible') return;
+      const id = r.contact_id || (r as { id?: string }).id;
+      if (!id) return;
+      if (r.source_type === 'manual') {
+        nextManual.add(id);
+      } else {
+        nextExcluded.delete(id);
       }
+    });
+    // Plus any CRM-search results currently surfaced (explicit additions)
+    allListItems.forEach(item => {
+      if (item.isManual && item.status === 'eligible') nextManual.add(item.id);
     });
 
     setTempExcludedContactIds(nextExcluded);
     setTempManualContactIds(nextManual);
-    toast.success('Selected all visible eligible contacts');
+    toast.success('Selected all eligible recipients');
   };
 
   const handleDeselectAll = () => {
     const nextExcluded = new Set(tempExcludedContactIds);
     const nextManual = new Set(tempManualContactIds);
 
-    allListItems.forEach(item => {
-      if (item.isManual) {
-        nextManual.delete(item.id);
+    // Full base cohort
+    recipients.forEach(r => {
+      const id = r.contact_id || (r as { id?: string }).id;
+      if (!id) return;
+      if (r.source_type === 'manual') {
+        nextManual.delete(id);
       } else {
-        nextExcluded.add(item.id);
+        nextExcluded.add(id);
       }
+    });
+    // Plus any CRM-search additions currently surfaced
+    allListItems.forEach(item => {
+      if (item.isManual) nextManual.delete(item.id);
     });
 
     setTempExcludedContactIds(nextExcluded);
     setTempManualContactIds(nextManual);
-    toast.success('Deselected all visible contacts');
+    toast.success('Deselected all recipients');
   };
 
   const handleResetAudience = () => {

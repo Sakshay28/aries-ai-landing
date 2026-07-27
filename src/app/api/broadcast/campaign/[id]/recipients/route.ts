@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
+import { cleanContactName } from '@/lib/broadcast/recipient-name';
 
 export async function GET(
   req: NextRequest,
@@ -42,13 +43,15 @@ export async function GET(
     // Merge status: delivery receipt status (read > delivered > sent > failed) takes precedence
     const recipientList = (queueItems || []).map((q) => {
       const delivery = deliveryMap.get(q.phone);
-      const name = q.payload?.name || null;
+      // cleanContactName coerces placeholders (e.g. "there") to null via the
+      // shared helper — never inline a bare placeholder literal here.
+      const name = cleanContactName(q.payload?.name);
       const status = delivery?.status || q.status;
 
       return {
         id: q.id,
         phone: q.phone,
-        name: name && name !== 'there' ? name : null,
+        name,
         status, // 'read' | 'delivered' | 'sent' | 'failed' | 'cancelled' | 'pending'
         delivered_at: delivery?.delivered_at || null,
         read_at: delivery?.read_at || null,

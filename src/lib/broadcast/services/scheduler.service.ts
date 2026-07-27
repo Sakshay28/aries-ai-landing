@@ -40,7 +40,10 @@ export class SchedulerService {
         }
 
         // launchCampaign checks for 'draft' or 'scheduled' — patch it to also accept 'launching'
-        const res = await BroadcastEngineService.launchCampaign(campaign.tenant_id, campaign.id);
+        const res = await BroadcastEngineService.launchCampaign(campaign.tenant_id, campaign.id, {
+          lockedBy: 'scheduler',
+          lockReason: 'scheduled_dispatch',
+        });
 
         if (res.success) {
           triggered++;

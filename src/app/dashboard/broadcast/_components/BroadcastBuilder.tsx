@@ -639,14 +639,22 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
 
   // ── Recipient resolution ───────────────────────────────────────────────────
   useEffect(() => {
+    // Once a campaign is locked (anything past draft/scheduled), its recipients
+    // are FROZEN. Read the immutable snapshot (GET → getCampaignRecipients, which
+    // prefers the frozen rows) so the list AND the CSV export reflect exactly who
+    // was queued and sent — never a live re-resolve that could drift from the
+    // snapshot. Drafts and scheduled campaigns use the live estimate (POST).
+    const isLocked = !!campaign?.status && !['draft', 'scheduled'].includes(campaign.status);
     const resolve = async () => {
       setRecipientsLoading(true);
       try {
-        const res  = await fetch('/api/broadcast/recipients', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ campaignId: campaignId || null, audience }),
-        });
+        const res = isLocked && campaignId
+          ? await fetch(`/api/broadcast/recipients?campaignId=${encodeURIComponent(campaignId)}`)
+          : await fetch('/api/broadcast/recipients', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ campaignId: campaignId || null, audience }),
+            });
         const data = await res.json();
         if (data.success) {
           setRecipientsData({

@@ -233,7 +233,11 @@ const CAMPAIGN_ID = 'campaign-1';
 
 function baseSeed(overrides: Partial<Record<string, Row[]>> = {}) {
   return {
-    tenants: [{ id: TENANT_ID, wa_access_token: 'enc:v1:x:y:z', wa_phone_number_id: 'PN1', timezone: 'Asia/Kolkata', wa_messaging_tier: 'TIER_10K', wa_daily_conversation_cap: null }],
+    // plan drives the launch-time broadcast recipient cap (checkBroadcastCap).
+    // A TIER_10K messaging tenant is realistically on the 'growth' plan (10k
+    // cap), which the 1,200-recipient pagination-stress test needs; 'starter'
+    // (1k) would otherwise trip the cap and mask what that test is checking.
+    tenants: [{ id: TENANT_ID, plan: 'growth', wa_access_token: 'enc:v1:x:y:z', wa_phone_number_id: 'PN1', timezone: 'Asia/Kolkata', wa_messaging_tier: 'TIER_10K', wa_daily_conversation_cap: null }],
     broadcast_optouts: [],
     broadcast_campaigns: [{ id: CAMPAIGN_ID, tenant_id: TENANT_ID, status: 'sending', template_name: 'order_update', template_language: 'en', updated_at: new Date().toISOString(), auto_resumed: false }],
     broadcast_delivery_settings: [],

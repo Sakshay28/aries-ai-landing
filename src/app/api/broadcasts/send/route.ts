@@ -6,14 +6,29 @@ import { BroadcastEngineService } from '@/lib/broadcast/services/broadcast-engin
 import { AuditLogService } from '@/lib/broadcast/services/audit-log.service';
 import { ExecutionEventService } from '@/lib/broadcast/services/execution-event.service';
 import { TelemetryService } from '@/lib/broadcast/services/telemetry.service';
+import { checkLaunchRateLimit } from '@/lib/abuse/prevention';
 
 export const maxDuration = 10;
+
+const LAUNCH_ROLES = new Set(['owner', 'admin', 'manager']);
 
 export async function POST(req: NextRequest) {
   try {
     const tenantId = await getTenantId();
     if (!tenantId) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Same authorization guards as /api/broadcast/launch — both launch routes
+    // must gate identically. Launching sends real messages and consumes quota,
+    // so restrict to owner/admin/manager and rate-limit per tenant.
+    const user = await getCurrentUser();
+    if (!user || !LAUNCH_ROLES.has(user.role)) {
+      return NextResponse.json({ success: false, error: 'Forbidden: insufficient permissions to launch broadcasts' }, { status: 403 });
+    }
+    const rl = await checkLaunchRateLimit(tenantId);
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many launch attempts. Please wait a few minutes.' }, { status: 429 });
     }
 
     const { campaignId } = await req.json();
@@ -50,7 +65,7 @@ export async function POST(req: NextRequest) {
 
     // Launch campaign enqueuing pipeline enwrapped in a telemetry benchmark
     const res = await TelemetryService.benchmarkAsync(tenantId, 'launch_duration', async () => {
-      return await BroadcastEngineService.launchCampaign(tenantId, campaignId);
+      return await BroadcastEngineService.launchCampaign(tenantId, campaignId, { lockReason: 'manual_launch' });
     }, { campaignId });
 
     if (!res.success) {

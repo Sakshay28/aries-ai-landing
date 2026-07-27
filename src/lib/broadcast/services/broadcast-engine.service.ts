@@ -9,6 +9,8 @@ import { ExecutionEventService } from './execution-event.service';
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { pushToDLQ } from '@/lib/queue/deadLetter';
 import { TokenBucket, metaTierCap, remainingTierBudget } from './rate-limiter';
+import { checkBroadcastCap } from '@/lib/abuse/prevention';
+import { createHash } from 'crypto';
 
 const RETRY_BACKOFF_MINUTES = [1, 5, 15, 30, 60];
 // Cap for Meta rate/tier-limit re-queues, which historically never incremented
@@ -38,7 +40,11 @@ export class BroadcastEngineService {
    * Resolves the target audience cohort, E.164 formats them, filters opt-outs,
    * and populates the database queue table in pending state.
    */
-  static async launchCampaign(tenantId: string, campaignId: string): Promise<{ success: boolean; queuedCount?: number; error?: string }> {
+  static async launchCampaign(
+    tenantId: string,
+    campaignId: string,
+    lockContext: { lockedBy?: string | null; lockReason?: string } = {},
+  ): Promise<{ success: boolean; queuedCount?: number; error?: string }> {
     try {
       // 1. Fetch Campaign Core — always filter by tenant_id to prevent cross-tenant access
       const { data: campaign } = await supabaseAdmin
@@ -50,6 +56,18 @@ export class BroadcastEngineService {
 
       if (!campaign) {
         return { success: false, error: 'Campaign not found' };
+      }
+
+      // Reject Meta's sample template at the single lock choke point so EVERY
+      // launch path is protected — /api/broadcast/launch, /api/broadcasts/send,
+      // and the scheduler all funnel through here. Meta refuses hello_world from
+      // real business numbers (#131058), failing 100% of recipients. Checked
+      // before the CAS-claim so a rejected campaign is never even moved off draft.
+      if (String(campaign.template_name || '').trim().toLowerCase() === 'hello_world') {
+        return {
+          success: false,
+          error: 'Meta only allows the sample "hello_world" template to be sent from its own test numbers, so this campaign would fail for every recipient. Create a template in Meta Business Manager, press Sync on the Templates page, and pick it here.',
+        };
       }
 
       // Guard against re-launch AND concurrent double-launch. There are two live
@@ -160,57 +178,54 @@ export class BroadcastEngineService {
         recentCount: audienceConfig.filters?.recentCount || 50,
       });
 
+      // Zero eligible recipients is NOT a silent success. Previously this marked
+      // the campaign 'completed' with 0 sent, which hid a mis-saved audience
+      // (empty manual selection, a filter that matches nobody, everyone opted
+      // out) behind a green "done" state. Revert the CAS-claimed status back to
+      // 'draft' so the user can fix the audience and relaunch, and return an
+      // actionable error.
       if (resolved.total === 0) {
-        // Complete the campaign instantly if there are no qualified recipients
         await supabaseAdmin
           .from('broadcast_campaigns')
-          .update({ status: 'completed', audience_count: 0, updated_at: new Date().toISOString() })
+          .update({ status: 'draft', audience_count: 0, updated_at: new Date().toISOString() })
           .eq('id', campaignId);
-        return { success: true, queuedCount: 0 };
+        return { success: false, error: 'No eligible recipients for this audience. Everyone selected may be opted out, invalid, or the selection is empty. Adjust the audience and try again.' };
       }
 
-      // 4. Batch enqueuing leads into broadcast_queue
-      const now = new Date().toISOString();
-      const templateLanguage = campaign.template_language || 'en';
-      const queueEntries = resolved.contacts.map(contact => {
-        const isCsvContact = typeof contact.id === 'string' && contact.id.startsWith('csv-');
-        return {
-          tenant_id:       tenantId,
-          campaign_id:     campaignId,
-          contact_id:      isCsvContact ? null : contact.id,
-          phone:           contact.phone,
-          status:          'pending',
-          attempt_count:   0,
-          next_attempt_at: now,
-          language_code:   templateLanguage,
-          payload: {
-            name: contact.name,
-          },
-        };
-      });
-
-      // Ingest in chunks of 500. Use upsert with onConflict to be idempotent:
-      // if the unique constraint (campaign_id, contact_id) already exists (double-click/retry),
-      // DO NOTHING rather than inserting a duplicate row.
-      const chunkSize = 500;
-      for (let i = 0; i < queueEntries.length; i += chunkSize) {
-        const chunk = queueEntries.slice(i, i + chunkSize);
-        const { error: insertErr } = await supabaseAdmin
-          .from('broadcast_queue')
-          .upsert(chunk, { onConflict: 'campaign_id,contact_id', ignoreDuplicates: true });
-        if (insertErr) throw insertErr;
+      // Authoritative plan-cap enforcement. The launch route's pre-check reads
+      // campaign.audience_count, which is 0 until this function sets it below —
+      // so the cap there never actually triggered. Enforce it here against the
+      // freshly resolved count, before anything is enqueued, and revert to
+      // 'draft' on breach so nothing is half-sent.
+      {
+        const { data: capTenant } = await supabaseAdmin
+          .from('tenants')
+          .select('plan')
+          .eq('id', tenantId)
+          .single();
+        const cap = checkBroadcastCap(capTenant?.plan ?? 'starter', resolved.total);
+        if (!cap.allowed) {
+          await supabaseAdmin
+            .from('broadcast_campaigns')
+            .update({ status: 'draft', audience_count: resolved.total, updated_at: new Date().toISOString() })
+            .eq('id', campaignId);
+          return {
+            success: false,
+            error: `This campaign resolves to ${resolved.total.toLocaleString()} recipients, which exceeds your plan limit of ${cap.cap.toLocaleString()}. Reduce the audience or upgrade your plan.`,
+          };
+        }
       }
 
-      // 5. Transition Campaign status to sending
-      await supabaseAdmin
-        .from('broadcast_campaigns')
-        .update({
-          status: 'sending',
-          audience_count: resolved.total,
-          spam_risk: resolved.spamRisk,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', campaignId);
+      // 4. LOCK CAMPAIGN — freeze an immutable recipient snapshot, enqueue FROM
+      //    it, and verify Selected == Snapshot == Queue before a single message
+      //    can be claimed. Any invariant failure aborts with ZERO sends. This is
+      //    the ONLY place an audience becomes a send queue; both launch routes
+      //    and the scheduler funnel through launchCampaign, so there is exactly
+      //    one locking pipeline.
+      const lock = await this.lockCampaignAndEnqueue(tenantId, campaignId, campaign, resolved, lockContext);
+      if (!lock.success) {
+        return { success: false, error: lock.error };
+      }
 
       // Create default analytics record. ignoreDuplicates so a re-entrant call
       // (e.g. scheduler retry after a partial prior failure) can never reset an
@@ -226,12 +241,172 @@ export class BroadcastEngineService {
           failed_count: 0
         }, { onConflict: 'campaign_id', ignoreDuplicates: true });
 
-      return { success: true, queuedCount: resolved.total };
+      return { success: true, queuedCount: lock.queuedCount };
 
     } catch (e) {
       console.error('❌ Launch Campaign Engine failed:', e);
       return { success: false, error: (e as Error).message || 'Failed to start campaign dispatch' };
     }
+  }
+
+  /**
+   * LOCK CAMPAIGN — converts an audience into an immutable, verified recipient
+   * snapshot and enqueues from it. Called only by launchCampaign, which every
+   * launch path (both routes + the scheduler) already funnels through, so there
+   * is exactly one locking pipeline and no post-lock re-resolution anywhere.
+   *
+   * Invariants (any failure aborts the launch with ZERO messages sent):
+   *   • Selected IDs == Snapshot IDs   — the snapshot write dropped/duped nobody
+   *   • Snapshot IDs == Queue IDs      — the enqueue dropped/duped nobody
+   *   • recomputed hash == stored hash — the snapshot was not mutated on write
+   *
+   * Queue rows are inserted as normally claimable, but the campaign stays
+   * 'launching' until the invariants pass and it is committed to 'sending'. The
+   * per-item worker guard in processItemsForTenant refuses to dispatch any row
+   * whose campaign is not yet 'sending', so a row claimed in the window before
+   * commit is returned to pending, never sent. On abort, the queue rows and the
+   * frozen snapshot are deleted and the campaign returns to 'draft' — a failed
+   * lock sends zero messages.
+   */
+  private static async lockCampaignAndEnqueue(
+    tenantId: string,
+    campaignId: string,
+    campaign: { audience_type?: string; template_language?: string | null; snapshot_version?: number | null },
+    resolved: { total: number; spamRisk: string; contacts: Array<{ id: string; name: string | null; phone: string }> },
+    lockContext: { lockedBy?: string | null; lockReason?: string } = {},
+  ): Promise<{ success: boolean; queuedCount?: number; error?: string }> {
+    const now = new Date().toISOString();
+
+    // Stable recipient identity used across selected/snapshot/queue. CSV rows
+    // have no real lead id (contact_id is stored NULL), so they key by phone.
+    const isCsv = (id: string) => typeof id === 'string' && id.startsWith('csv-');
+    const contactIdOf = (id: string): string | null => (isCsv(id) ? null : id);
+    const keyFor = (contactId: string | null, phone: string) =>
+      contactId ? `id:${contactId}` : `ph:${phone}`;
+
+    const selectedKeys = [...new Set(resolved.contacts.map(c => keyFor(contactIdOf(c.id), c.phone)))].sort();
+    const snapshotHash = createHash('sha256').update(selectedKeys.join(' ')).digest('hex');
+    const snapshotVersion = (campaign.snapshot_version ?? 0) + 1;
+    const snapshotId = `snap_${campaignId}_v${snapshotVersion}_${snapshotHash.slice(0, 12)}`;
+
+    const abort = async (error: string): Promise<{ success: false; error: string }> => {
+      await supabaseAdmin.from('broadcast_queue').delete()
+        .eq('campaign_id', campaignId).in('status', ['pending', 'retrying', 'processing']);
+      await supabaseAdmin.from('broadcast_campaign_recipient_cache').delete()
+        .eq('campaign_id', campaignId).eq('frozen', true);
+      await supabaseAdmin.from('broadcast_campaigns')
+        .update({ status: 'draft', audience_count: resolved.total, updated_at: new Date().toISOString() })
+        .eq('id', campaignId);
+      return { success: false, error };
+    };
+
+    try {
+      // 0. Clean slate — drop any prior frozen snapshot and any non-terminal
+      //    queue rows from an earlier aborted lock so the lock is deterministic.
+      await supabaseAdmin.from('broadcast_campaign_recipient_cache').delete()
+        .eq('campaign_id', campaignId).eq('frozen', true);
+      await supabaseAdmin.from('broadcast_queue').delete()
+        .eq('campaign_id', campaignId).in('status', ['pending', 'retrying', 'processing']);
+
+      // 1. Write the immutable snapshot (frozen=true, eligible only).
+      const CHUNK = 500;
+      const snapshotRows = resolved.contacts.map(c => ({
+        campaign_id: campaignId,
+        tenant_id: tenantId,
+        contact_id: contactIdOf(c.id),
+        phone_number: c.phone,
+        name: c.name,
+        email: null,
+        source_type: campaign.audience_type ?? null,
+        source_label: 'Locked Snapshot',
+        status: 'eligible',
+        normalized_number: c.phone,
+        frozen: true,
+        snapshot_id: snapshotId,
+        snapshot_version: snapshotVersion,
+      }));
+      for (let i = 0; i < snapshotRows.length; i += CHUNK) {
+        const { error } = await supabaseAdmin
+          .from('broadcast_campaign_recipient_cache')
+          .insert(snapshotRows.slice(i, i + CHUNK));
+        if (error) throw error;
+      }
+
+      // 2. INVARIANT — Selected IDs == Snapshot IDs (read the snapshot back).
+      const { data: snapRows, error: snapErr } = await supabaseAdmin
+        .from('broadcast_campaign_recipient_cache')
+        .select('contact_id, phone_number, name')
+        .eq('campaign_id', campaignId).eq('frozen', true).eq('status', 'eligible');
+      if (snapErr) throw snapErr;
+      const snapshotKeys = [...new Set((snapRows || []).map(r => keyFor(r.contact_id, r.phone_number)))].sort();
+      if (!this.sameKeySet(selectedKeys, snapshotKeys)) {
+        return await abort(`Snapshot integrity check failed: resolved ${selectedKeys.length} recipients but the snapshot stored ${snapshotKeys.length}. Launch aborted; no messages sent.`);
+      }
+      // Immutability self-check: the snapshot read back hashes to the same value.
+      const reHash = createHash('sha256').update(snapshotKeys.join(' ')).digest('hex');
+      if (reHash !== snapshotHash) {
+        return await abort('Snapshot hash mismatch after write. Launch aborted; no messages sent.');
+      }
+
+      // 3. Enqueue FROM the snapshot. Rows are normally claimable; the campaign
+      //    is still 'launching' and the worker guard refuses to dispatch any row
+      //    whose campaign is not 'sending', so nothing goes out until step 5.
+      const templateLanguage = campaign.template_language || 'en';
+      const queueRows = (snapRows || []).map(r => ({
+        tenant_id: tenantId,
+        campaign_id: campaignId,
+        contact_id: r.contact_id,
+        phone: r.phone_number,
+        status: 'pending',
+        attempt_count: 0,
+        next_attempt_at: now,
+        language_code: templateLanguage,
+        payload: { name: r.name ?? null },
+      }));
+      for (let i = 0; i < queueRows.length; i += CHUNK) {
+        const { error } = await supabaseAdmin.from('broadcast_queue').insert(queueRows.slice(i, i + CHUNK));
+        if (error) throw error;
+      }
+
+      // 4. INVARIANT — Snapshot IDs == Queue IDs (read the queue back).
+      const { data: qRows, error: qErr } = await supabaseAdmin
+        .from('broadcast_queue')
+        .select('contact_id, phone')
+        .eq('campaign_id', campaignId);
+      if (qErr) throw qErr;
+      const queueKeys = [...new Set((qRows || []).map(r => keyFor(r.contact_id, r.phone)))].sort();
+      if (!this.sameKeySet(snapshotKeys, queueKeys) || (qRows || []).length !== snapshotKeys.length) {
+        return await abort(`Queue integrity check failed: snapshot has ${snapshotKeys.length} recipients but the queue has ${queueKeys.length} unique (${(qRows || []).length} rows). Launch aborted; no messages sent.`);
+      }
+
+      // 5. COMMIT — flip to 'sending' and record snapshot metadata. Only now
+      //    will the worker guard permit these rows to dispatch.
+      await supabaseAdmin.from('broadcast_campaigns').update({
+        status: 'sending',
+        audience_count: snapshotKeys.length,
+        spam_risk: resolved.spamRisk,
+        recipient_snapshot_at: now,
+        snapshot_created_at: now,
+        snapshot_recipient_count: snapshotKeys.length,
+        snapshot_id: snapshotId,
+        snapshot_hash: snapshotHash,
+        snapshot_version: snapshotVersion,
+        locked_by: lockContext.lockedBy ?? 'system',
+        lock_reason: lockContext.lockReason ?? 'launch',
+        updated_at: now,
+      }).eq('id', campaignId);
+
+      return { success: true, queuedCount: snapshotKeys.length };
+    } catch (e) {
+      return await abort((e as Error).message || 'Lock failed; no messages sent.');
+    }
+  }
+
+  /** Set equality over two pre-sorted, de-duplicated key arrays. */
+  private static sameKeySet(a: string[], b: string[]): boolean {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -707,6 +882,22 @@ export class BroadcastEngineService {
               locked_at: null,
               processed_at: liveStatus === 'cancelled' ? new Date().toISOString() : null,
             })
+            .eq('id', item.id);
+          processed++;
+          continue;
+        }
+        // Snapshot-lock guard: a campaign is only sendable once the lock has
+        // COMMITTED it to 'sending'. lockCampaignAndEnqueue inserts claimable
+        // queue rows while the campaign is still 'launching', then flips to
+        // 'sending' only after Selected==Snapshot==Queue passes. If a row is
+        // claimed in that microsecond window (or the campaign is otherwise not
+        // yet launched), return it to pending UNTOUCHED — never dispatch it. The
+        // lock then either commits to 'sending' (next tick sends it) or aborts
+        // (its cleanup deletes the row), so a failed/incomplete lock sends zero.
+        if (liveStatus === 'launching' || liveStatus === 'draft' || liveStatus === 'scheduled') {
+          await supabaseAdmin
+            .from('broadcast_queue')
+            .update({ status: 'pending', locked_at: null })
             .eq('id', item.id);
           processed++;
           continue;
