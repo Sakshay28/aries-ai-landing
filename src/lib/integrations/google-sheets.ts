@@ -419,14 +419,25 @@ export async function syncAllLeads(tenantId: string): Promise<{ synced: number }
     ? customMappings
     : { ...DEFAULT_COLUMN_MAPPINGS, ...customMappings };
 
-  const { data: leads, error } = await supabaseAdmin
-    .from('leads')
-    .select('*, assigned_user:assigned_to(full_name, email)')
-    .eq('tenant_id', tenantId)
-    .order('created_at', { ascending: true });
+  // Paginate: PostgREST caps a single select at 1000 rows, which silently
+  // truncated a full sync for tenants with >1000 leads. Page through all rows.
+  const PAGE = 1000;
+  const leads: any[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error } = await supabaseAdmin
+      .from('leads')
+      .select('*, assigned_user:assigned_to(full_name, email)')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: true })
+      .range(from, from + PAGE - 1);
 
-  if (error) throw new Error(`Leads query failed: ${error.message}`);
-  if (!leads || leads.length === 0) return { synced: 0 };
+    if (error) throw new Error(`Leads query failed: ${error.message}`);
+    if (!page || page.length === 0) break;
+    leads.push(...page);
+    if (page.length < PAGE) break;
+  }
+
+  if (leads.length === 0) return { synced: 0 };
 
   await ensureSheetExists(tenantId, config.spreadsheet_id, sheetName);
 
