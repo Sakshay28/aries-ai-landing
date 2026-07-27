@@ -211,12 +211,16 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       console.error('❌ Meta Webhook processing error:', err);
     }
-    // Drain Excel sync queue for any jobs enqueued by DB triggers above
-    MicrosoftExcelWorkerService.processQueue('webhook', 10).catch(err =>
+    // Drain the sync queues for any jobs enqueued by the DB triggers above.
+    // These MUST be awaited: after() freezes/kills the serverless instance once
+    // this callback returns, so a fire-and-forget drain gets suspended mid-flight
+    // — leaving already-claimed jobs orphaned in status='processing' forever
+    // (the incident that stalled Google Sheets sync for 25 days). The claim RPC's
+    // visibility-timeout reclaim is the backstop; awaiting is the primary fix.
+    await MicrosoftExcelWorkerService.processQueue('webhook', 10).catch(err =>
       console.error('⚠️ Excel sync drain error (non-fatal):', err)
     );
-    // Drain Google Sheets sync queue for any jobs enqueued by DB triggers above
-    GoogleSheetsWorkerService.processQueue('webhook', 10).catch(err =>
+    await GoogleSheetsWorkerService.processQueue('webhook', 10).catch(err =>
       console.error('⚠️ Google Sheets sync drain error (non-fatal):', err)
     );
   });
