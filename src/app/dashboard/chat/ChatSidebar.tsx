@@ -7,6 +7,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { SkeletonRow } from "@/components/ui/skeleton";
 import { useContactsStore, Contact } from "@/lib/store/contactsStore";
+import { matchesInboxView, matchesTab, isAssignedToMe } from "@/lib/chat/inbox-filter";
 
 interface ChatConversation {
   id: string;
@@ -192,6 +193,30 @@ export default function ChatSidebar() {
           }
         }
       )
+      // Lead re-assignment: the "Assigned to me" view reads leads.assigned_to,
+      // and a manual reassignment writes ONLY the leads row (no conversation
+      // event). Without this, a reassigned agent's inbox would only update on the
+      // 20s poll. We reload solely when assigned_to actually changes so routine
+      // lead updates (score/status) don't thrash the sidebar. Requires the leads
+      // table in the supabase_realtime publication with REPLICA IDENTITY FULL —
+      // see migration 20260727_leads_realtime_assignment.sql. Degrades safely to
+      // the poll if that migration hasn't been applied yet.
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "leads",
+          filter: `tenant_id=eq.${tenantId}`,
+        },
+        (payload) => {
+          const next = payload.new as { tenant_id?: string; assigned_to?: string | null };
+          const prev = payload.old as { assigned_to?: string | null };
+          if (next?.tenant_id === tenantId && next.assigned_to !== prev?.assigned_to) {
+            load();
+          }
+        }
+      )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           console.log('[Sidebar Realtime] ✅ Subscribed for tenant:', tenantId);
@@ -226,15 +251,17 @@ export default function ChatSidebar() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // How many conversations are assigned to me (independent of the active tab) —
+  // drives the "Assigned to me" badge and lets an agent see at a glance that the
+  // view is populated.
+  const assignedCount = convos.filter(c => isAssignedToMe(c, me)).length;
+
   const filtered = convos.filter(c => {
-    if (mineOnly && c.assigned_to !== me) return false;
-    if (activeTab === 'requesting') {
-      if (!c.escalated) return false;
-    } else if (activeTab === 'intervened') {
-      if (!c.bot_paused) return false;
-    } else {
-      if (c.bot_paused) return false;
-    }
+    // State + assignment gate — see src/lib/chat/inbox-filter.ts. Critically,
+    // "Assigned to me" (mineOnly) is an ASSIGNMENT view and is NOT narrowed by
+    // the active/requesting/intervened tab, so a chat a human has taken over
+    // (bot_paused=true) still shows for its assignee instead of vanishing.
+    if (!matchesInboxView(c, { mineOnly, me, activeTab })) return false;
 
     if (!search.trim()) return true;
     const q = search.toLowerCase();
@@ -260,11 +287,7 @@ export default function ChatSidebar() {
         {/* Tabs */}
         <div className="flex gap-1 p-0.5 bg-secondary rounded-lg mb-3">
           {(['active', 'requesting', 'intervened'] as const).map((tab) => {
-            const count = convos.filter(c => {
-              if (tab === 'requesting') return c.escalated;
-              if (tab === 'intervened') return c.bot_paused;
-              return !c.bot_paused;
-            }).length;
+            const count = convos.filter(c => matchesTab(c, tab)).length;
 
             return (
               <button
@@ -309,11 +332,16 @@ export default function ChatSidebar() {
             <button
               onClick={() => setMineOnly(true)}
               className={cn(
-                "px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors",
+                "px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors flex items-center gap-1",
                 mineOnly ? "bg-indigo-500/15 text-indigo-500" : "text-muted-foreground hover:text-foreground"
               )}
             >
               Assigned to me
+              {assignedCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-indigo-500/20 text-indigo-500">
+                  {assignedCount}
+                </span>
+              )}
             </button>
           </div>
         )}
