@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getCurrentUser } from '@/lib/auth/getCurrentUser';
+import { selectInBatches } from '@/lib/supabase/select-in-batches';
+import { notifyAdmin } from '@/lib/alerts/admin';
 
 export async function GET(req: NextRequest) {
   try {
@@ -58,15 +60,35 @@ export async function GET(req: NextRequest) {
     }
     const convos = Array.from(bestByContact.values());
 
-    // ── Batch-fetch leads (single query) ────────────────────────────────────
-    const leadIds = convos.map((c: any) => c.lead_id).filter(Boolean);
+    // ── Batch-fetch leads ─────────────────────────────────────────────────────
+    // CRITICAL: a single `.in('id', leadIds)` fails with HTTP 400 once the id list
+    // exceeds ~300 (the id=in.(…) filter overflows the request URL). supabase-js
+    // then returns { data: null } and, if we swallow it, EVERY conversation is
+    // enriched with assigned_to=null — which silently broke "Assigned to me" for
+    // every tenant with 300+ contacts (2026-07-27 RCA). Chunk the lookup and fail
+    // loudly instead of returning a hole. See src/lib/supabase/select-in-batches.ts.
+    const leadIds = [...new Set(convos.map((c: any) => c.lead_id).filter(Boolean))] as string[];
     const leadsMap: Record<string, { name: string | null; phone: string | null; assigned_to: string | null }> = {};
     if (leadIds.length > 0) {
-      const { data: leads } = await supabaseAdmin
-        .from('leads')
-        .select('id, name, phone, assigned_to')
-        .in('id', leadIds);
-      (leads ?? []).forEach((l: any) => {
+      let leads: Array<{ id: string; name: string | null; phone: string | null; assigned_to: string | null }>;
+      try {
+        leads = await selectInBatches(leadIds, (batch) =>
+          supabaseAdmin.from('leads').select('id, name, phone, assigned_to').in('id', batch)
+        );
+      } catch (e: any) {
+        // Do NOT return conversations with all-null assignments (the old silent bug).
+        // Surface loudly so the sidebar shows a retry banner instead of a wrong,
+        // empty "Assigned to me".
+        console.error('Conversations: lead enrichment failed:', e?.message);
+        notifyAdmin({
+          dedupeKey: `chat-conversations-lead-enrich-${tenantId}`,
+          subject: 'Chat inbox: lead assignment enrichment failed',
+          summary: `GET /api/dashboard/chat/conversations could not batch-load ${leadIds.length} leads for tenant ${tenantId}. "Assigned to me" would be wrong; request failed instead.`,
+          context: { tenantId, leadCount: leadIds.length, error: e?.message },
+        }).catch(() => {});
+        return NextResponse.json({ success: false, error: 'Failed to load assignments' }, { status: 500 });
+      }
+      leads.forEach((l) => {
         leadsMap[l.id] = { name: l.name, phone: l.phone, assigned_to: l.assigned_to ?? null };
       });
     }
