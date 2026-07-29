@@ -2,7 +2,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { sendTemplateMessage, MetaApiError, explainMetaError } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { AudienceEngineService } from './audience-engine.service';
-import { MetaPayloadBuilderService } from './meta-payload-builder.service';
+import { MetaPayloadBuilderService, isInvalidMediaUrl } from './meta-payload-builder.service';
 import { TemplateParserService } from './template-parser.service';
 import { MetaTemplateSyncService } from './meta-template-sync.service';
 import { ExecutionEventService } from './execution-event.service';
@@ -122,7 +122,7 @@ export class BroadcastEngineService {
       if (campaign.template_name) {
         let { data: cachedTemplate } = await supabaseAdmin
           .from('broadcast_templates_cache')
-          .select('status')
+          .select('status, template_json')
           .eq('name', campaign.template_name)
           .eq('tenant_id', tenantId)
           .maybeSingle();
@@ -138,7 +138,7 @@ export class BroadcastEngineService {
           }
           ({ data: cachedTemplate } = await supabaseAdmin
             .from('broadcast_templates_cache')
-            .select('status')
+            .select('status, template_json')
             .eq('name', campaign.template_name)
             .eq('tenant_id', tenantId)
             .maybeSingle());
@@ -150,6 +150,37 @@ export class BroadcastEngineService {
         }
         if (templateStatus === 'UNKNOWN') {
           return { success: false, error: `Template "${campaign.template_name}" approval status is unknown. Sync templates from Meta before launching.` };
+        }
+
+        // Media-header guard: a template with an IMAGE / VIDEO / DOCUMENT header
+        // needs a public HTTPS media link on EVERY send, or Meta rejects it
+        // (#100). Fail the launch NOW with an actionable message instead of
+        // queueing recipients that each fail at Meta. The send engine resolves
+        // the link from broadcast_campaigns.header_media_url first (set via the
+        // media upload field in the builder).
+        try {
+          const parsedTpl = TemplateParserService.parse((cachedTemplate as { template_json?: Record<string, unknown> })?.template_json || {});
+          if (parsedTpl.headerType === 'IMAGE' || parsedTpl.headerType === 'VIDEO' || parsedTpl.headerType === 'DOCUMENT') {
+            const exampleUrl = parsedTpl.headerMediaUrl && !parsedTpl.headerMediaUrl.includes('scontent.whatsapp.net')
+              ? parsedTpl.headerMediaUrl
+              : undefined;
+            const camp = campaign as { header_media_url?: string; media_url?: string };
+            const effective = camp.header_media_url || camp.media_url || exampleUrl;
+            if (isInvalidMediaUrl(effective)) {
+              await supabaseAdmin
+                .from('broadcast_campaigns')
+                .update({ status: 'draft', updated_at: new Date().toISOString() })
+                .eq('id', campaignId);
+              const kind = parsedTpl.headerType.toLowerCase();
+              return {
+                success: false,
+                error: `This template has a ${kind} header, so every message needs a header ${kind}. Open the campaign, upload the header ${kind} under the template, then launch again.`,
+              };
+            }
+          }
+        } catch {
+          // A parse failure must not block an otherwise-valid launch — the
+          // per-recipient payload builder still guards the media URL at send time.
         }
       }
 

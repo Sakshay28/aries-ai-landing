@@ -9,6 +9,7 @@ const campaignSaveSchema = z.object({
   templateName: z.string().max(200).optional(),
   templateCategory: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']).optional(),
   templateLanguage: z.string().max(10).optional(),
+  headerMediaUrl: z.string().max(2000).nullable().optional(),
   deliveryMode: z.enum(['now', 'scheduled', 'recurring']).optional(),
   scheduledAt: z.string().nullable().optional(),
   audience: z.object({
@@ -131,6 +132,7 @@ export async function POST(req: NextRequest) {
       templateName,
       templateCategory,
       templateLanguage,
+      headerMediaUrl,
       deliveryMode,
       scheduledAt,
       audience,
@@ -167,6 +169,7 @@ export async function POST(req: NextRequest) {
       template_name:     templateName || '',
       template_category: templateCategory || 'MARKETING',
       template_language: templateLanguage || 'en',
+      header_media_url:  headerMediaUrl || null,
       delivery_mode:     deliveryMode || 'now',
       scheduled_for:     scheduledAt || null,
       updated_at:        new Date().toISOString(),
