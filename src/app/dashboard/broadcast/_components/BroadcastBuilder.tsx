@@ -13,6 +13,7 @@ import toast from 'react-hot-toast';
 import { TemplateSelector } from './TemplateSelector';
 import { WhatsAppPreview } from './WhatsAppPreview';
 import { VariableMapper } from './VariableMapper';
+import { MediaHeaderUpload } from './MediaHeaderUpload';
 import { PhoneInput } from '@/components/ui/phone-input';
 import { AudienceBuilder } from './AudienceBuilder';
 import { DeliverySettings } from './DeliverySettings';
@@ -187,6 +188,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   const [campaignName,    setCampaignName]    = useState(campaign?.name ?? '');
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [variables,       setVariables]       = useState<Record<string, VariableConfig>>({});
+  const [headerMediaUrl,  setHeaderMediaUrl]  = useState<string>('');
   const [audience,        setAudience]        = useState<AudienceState>(DEFAULT_AUDIENCE);
   const [delivery,        setDelivery]        = useState<DeliveryConfig>(DEFAULT_DELIVERY);
   const [automationRules, setAutomationRules] = useState<AutomationRule[]>(DEFAULT_AUTOMATION);
@@ -216,10 +218,10 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
 
   // Always-current state snapshot for closures (avoids stale closure issues)
   const stateRef = useRef({
-    campaignId, campaignName, selectedTemplate, variables, audience, delivery, automationRules,
+    campaignId, campaignName, selectedTemplate, variables, headerMediaUrl, audience, delivery, automationRules,
   });
   // Keep it up to date on every render
-  stateRef.current = { campaignId, campaignName, selectedTemplate, variables, audience, delivery, automationRules };
+  stateRef.current = { campaignId, campaignName, selectedTemplate, variables, headerMediaUrl, audience, delivery, automationRules };
 
   // ── On mount ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -324,6 +326,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
       }
       setCampaignName(cleanName);
       setCampaignId(id);
+      setHeaderMediaUrl(c.header_media_url || '');
 
       // Variables
       const varMap: Record<string, VariableConfig> = {};
@@ -406,6 +409,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
           templateName:     s.selectedTemplate?.name,
           templateCategory: s.selectedTemplate?.category,
           templateLanguage: s.selectedTemplate?.language,
+          headerMediaUrl:   s.headerMediaUrl || null,
           deliveryMode:     s.delivery.mode,
           scheduledAt:      s.delivery.scheduledAt,
           audience:         s.audience,
@@ -610,7 +614,19 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
       status: (selectedTemplate?.status === 'APPROVED' ? 'pass' : 'fail') as 'pass' | 'fail' | 'warn',
       message: selectedTemplate?.status === 'APPROVED' ? undefined : 'Template not yet approved by Meta',
     },
-  ], [campaignName, selectedTemplate, variables, audience, delivery, automationRules, detectedVarIndices, estimate.total]);
+    (() => {
+      // Media-header templates cannot send without a public https header media URL.
+      const ht = (selectedTemplate?.headerType || '').toUpperCase();
+      const needsMedia = ht === 'IMAGE' || ht === 'VIDEO' || ht === 'DOCUMENT';
+      const hasMedia = /^https:\/\//i.test((headerMediaUrl || '').trim());
+      return {
+        id: 'header_media',
+        label: needsMedia ? `Header ${ht.toLowerCase()} attached` : 'No media header required',
+        status: (!needsMedia || hasMedia ? 'pass' : 'fail') as 'pass' | 'fail' | 'warn',
+        message: !needsMedia || hasMedia ? undefined : `This template needs a header ${ht.toLowerCase()} — upload one above`,
+      };
+    })(),
+  ], [campaignName, selectedTemplate, variables, headerMediaUrl, audience, delivery, automationRules, detectedVarIndices, estimate.total]);
 
   const canLaunch = useMemo(() => validationChecks.every(c => c.status !== 'fail'), [validationChecks]);
 
@@ -632,6 +648,10 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
     if (unmappedVariableCount > 0) issues.push(`${unmappedVariableCount} variable(s) unmapped`);
     if (estimate.total === 0) issues.push('no audience selected');
     if (selectedTemplate?.status !== 'APPROVED') issues.push('template not approved');
+    const ht = (selectedTemplate?.headerType || '').toUpperCase();
+    if ((ht === 'IMAGE' || ht === 'VIDEO' || ht === 'DOCUMENT') && !/^https:\/\//i.test((headerMediaUrl || '').trim())) {
+      issues.push(`header ${ht.toLowerCase()} not uploaded`);
+    }
     return `Cannot launch: ${issues.join(', ')}`;
   };
 
@@ -763,6 +783,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                     onSelect={tpl => {
                       setSelectedTemplate(tpl);
                       setVariables({});
+                      setHeaderMediaUrl(''); // different template = different (or no) header media
                       if (tpl) {
                         setTimeout(() => {
                           const el = variableMappingRef.current || document.getElementById('section-variables');
@@ -777,6 +798,10 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                     loading={templatesLoading}
                   />
                 </div>
+
+                {/* Media header attach — renders ONLY for IMAGE/VIDEO/DOCUMENT templates */}
+                <MediaHeaderUpload template={selectedTemplate} value={headerMediaUrl} onChange={setHeaderMediaUrl} />
+
                 {selectedTemplate && (
                   <div className="template-next-step-banner">
                     <span>✅ Template selected</span>
