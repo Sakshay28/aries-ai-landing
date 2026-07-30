@@ -6,6 +6,8 @@ import { BroadcastEngineService } from '@/lib/broadcast/services/broadcast-engin
 import { AuditLogService } from '@/lib/broadcast/services/audit-log.service';
 import { ExecutionEventService } from '@/lib/broadcast/services/execution-event.service';
 import { checkBroadcastCap, checkLaunchRateLimit } from '@/lib/abuse/prevention';
+import { notifyAdmin } from '@/lib/alerts/admin';
+import { detectPendingMigration, pendingMigrationUserMessage, pendingMigrationAdminSummary } from '@/lib/db/migration-error';
 
 export const maxDuration = 60;
 
@@ -197,6 +199,19 @@ export async function POST(req: NextRequest) {
 
   } catch (error: any) {
     console.error('[BROADCAST_LAUNCH] Unhandled error:', error);
+    // Pending-migration guard (see campaign save route): surface an actionable
+    // 503 + operator alert rather than a raw 500 when the live DB is missing a
+    // column/table the launch path writes.
+    const pending = detectPendingMigration(error);
+    if (pending.isPending) {
+      notifyAdmin({
+        dedupeKey: `pending-migration-broadcast-launch-${pending.missing || 'unknown'}`,
+        subject: 'Broadcast launch failed — pending DB migration not applied',
+        summary: pendingMigrationAdminSummary(pending, 'broadcast launch'),
+        context: { missing: pending.missing },
+      }).catch(() => {});
+      return NextResponse.json({ success: false, error: pendingMigrationUserMessage(pending) }, { status: 503 });
+    }
     return NextResponse.json({
       success: false,
       error: error.message || 'Failed to launch campaign',

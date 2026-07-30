@@ -863,6 +863,18 @@ export class BroadcastEngineService {
               .from('broadcast_queue')
               .update({ status: 'pending', locked_at: null })
               .eq('id', item.id);
+            // Make the hold VISIBLE. Without this the campaign sits on 'sending'
+            // with recipients "in queue" and no explanation until 9 AM, which
+            // reads as a stuck/broken broadcast (the #1 false-alarm). One deduped
+            // timeline event per campaign per hold — not one per 10-min tick.
+            ExecutionEventService.logEventOnce(
+              tenantId,
+              item.campaign_id,
+              'campaign_quiet_hours_held',
+              'Paused for quiet hours',
+              `Sending is paused between 9 PM and 9 AM (${tz}) to protect deliverability — this is not a failure. Remaining messages resume automatically at 9 AM. To send immediately, turn off Quiet Hours in Delivery Settings or press "Retry Now".`,
+              'info'
+            ).catch(() => {});
             processed++;
             continue;
           }

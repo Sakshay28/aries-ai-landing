@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { z } from 'zod';
+import { notifyAdmin } from '@/lib/alerts/admin';
+import { detectPendingMigration, pendingMigrationUserMessage, pendingMigrationAdminSummary } from '@/lib/db/migration-error';
 
 const campaignSaveSchema = z.object({
   campaignId: z.string().uuid().nullable().optional(),
@@ -304,6 +306,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, campaignId: activeId });
   } catch (error) {
     console.error('[BROADCAST_SAVE] Error:', error);
+    // Pending-migration guard: a column/table the code writes doesn't exist in
+    // the live DB (a migration shipped but was never applied). Return an
+    // actionable 503 + page the operator instead of a mystery 500.
+    const pending = detectPendingMigration(error);
+    if (pending.isPending) {
+      notifyAdmin({
+        dedupeKey: `pending-migration-broadcast-save-${pending.missing || 'unknown'}`,
+        subject: 'Broadcast save failed — pending DB migration not applied',
+        summary: pendingMigrationAdminSummary(pending, 'broadcast campaign save'),
+        context: { missing: pending.missing },
+      }).catch(() => {});
+      return NextResponse.json({ success: false, error: pendingMigrationUserMessage(pending) }, { status: 503 });
+    }
     return NextResponse.json({ success: false, error: (error as Error).message || 'Failed to save campaign' }, { status: 500 });
   }
 }
