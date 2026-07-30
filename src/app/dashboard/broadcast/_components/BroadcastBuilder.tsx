@@ -53,7 +53,11 @@ const DEFAULT_AUDIENCE: AudienceState = {
 
 const DEFAULT_DELIVERY: DeliveryConfig = {
   mode: 'now', scheduledAt: null, timezone: 'Asia/Kolkata',
-  quietHoursEnabled: true, throttleRate: 300, advancedOpen: false,
+  // Quiet hours default OFF: a single operator launches all broadcasts here and
+  // controls timing manually, so a "send now" must actually send now rather than
+  // silently defer to 9 AM. The toggle remains in Delivery Settings to re-enable
+  // the 9 PM–9 AM hold per campaign when desired.
+  quietHoursEnabled: false, throttleRate: 300, advancedOpen: false,
 };
 
 const DEFAULT_AUTOMATION: AutomationRule[] = [

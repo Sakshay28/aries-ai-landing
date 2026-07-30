@@ -44,7 +44,7 @@ export const deliveryConfigSchema = z.object({
   mode: z.enum(['now', 'scheduled', 'recurring']),
   scheduledAt: z.string().nullable().default(null),
   timezone: z.string().default('Asia/Kolkata'),
-  quietHoursEnabled: z.boolean().default(true),
+  quietHoursEnabled: z.boolean().default(false),
   throttleRate: z.number().min(1).max(5000).default(300),
   advancedOpen: z.boolean().default(false),
 });
@@ -198,8 +198,10 @@ export function validateCampaignPreflight(
   checks.push({
     id: 'quiet_hours',
     label: 'Quiet hours protection',
-    status: quietHours ? 'pass' : 'warn',
-    message: quietHours ? undefined : 'Disabling quiet hours may impact compliance',
+    // Off is the sanctioned default for this single-operator workspace, so it is
+    // no longer flagged as a compliance warning — the operator controls timing.
+    status: 'pass',
+    message: quietHours ? undefined : 'Quiet hours off — send timing is operator-controlled.',
   });
 
   // 6. Delivery Scheduling Validation

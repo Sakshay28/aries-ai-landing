@@ -261,7 +261,9 @@ export async function POST(req: NextRequest) {
         campaign_id: activeId,
         send_mode: delivery.mode || 'now',
         throttle_per_minute: delivery.throttleRate || 300,
-        quiet_hours: delivery.quietHoursEnabled !== false,
+        // Default OFF when unspecified (was `!== false`, i.e. default ON). Only
+        // persist quiet_hours when the operator explicitly turns the toggle on.
+        quiet_hours: delivery.quietHoursEnabled === true,
         business_hours: false,
         timezone: delivery.timezone || 'Asia/Kolkata',
         retry_failed: true,
