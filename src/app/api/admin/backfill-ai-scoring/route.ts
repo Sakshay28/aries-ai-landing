@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin }             from '@/lib/supabase/admin';
 import { getCurrentUser }            from '@/lib/auth/getCurrentUser';
+import { selectInBatches }           from '@/lib/supabase/select-in-batches';
 
 const BATCH_SIZE = 500; // max leads to queue in one call (well above 20-client ceiling)
 
@@ -45,13 +46,19 @@ export async function POST(_req: NextRequest) {
   // ── 2. Get the latest conversation_id for each lead ───────────────────────
   //    We pull all conversations for these leads and deduplicate in JS to get
   //    the most recent one per lead (DISTINCT ON isn't available in the client).
-  const { data: convRows, error: convErr } = await supabaseAdmin
-    .from('conversations')
-    .select('id, lead_id, created_at')
-    .in('lead_id', leadIds)
-    .order('created_at', { ascending: false });
-
-  if (convErr) {
+  //    Batched: leadIds can reach BATCH_SIZE (500) and a single .in() of that
+  //    size 400s in PostgREST. Each lead's rows land in one batch, so the
+  //    "first row wins" dedupe below is unaffected.
+  let convRows: Array<{ id: string; lead_id: string; created_at: string }>;
+  try {
+    convRows = await selectInBatches(leadIds, (batch) =>
+      supabaseAdmin
+        .from('conversations')
+        .select('id, lead_id, created_at')
+        .in('lead_id', batch)
+        .order('created_at', { ascending: false })
+    );
+  } catch (convErr: any) {
     return NextResponse.json({ error: convErr.message }, { status: 500 });
   }
 

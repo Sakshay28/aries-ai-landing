@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { selectInBatches } from '@/lib/supabase/select-in-batches';
 import { withTenantGuard } from '@/lib/auth/tenantGuard';
 import { getCurrentUser } from '@/lib/auth/getCurrentUser';
 
@@ -63,11 +64,20 @@ export async function GET(req: NextRequest) {
   for (const b of bookings || []) if (b.customer_phone) phones.add(b.customer_phone);
 
   if (phones.size > 0) {
-    const { data: guests } = await supabaseAdmin
-      .from('restaurant_guests')
-      .select(GUEST_SELECT)
-      .eq('restaurant_id', tenantId)
-      .in('customer_phone', Array.from(phones));
+    // Chunked so the guest phone list can't overflow the .in() URL limit.
+    // Enrichment only — degrade to empty on error rather than failing the board.
+    let guests: any[] = [];
+    try {
+      guests = await selectInBatches(Array.from(phones), (batch) =>
+        supabaseAdmin
+          .from('restaurant_guests')
+          .select(GUEST_SELECT)
+          .eq('restaurant_id', tenantId)
+          .in('customer_phone', batch)
+      );
+    } catch (e) {
+      console.error('[restaurant/tables] guest enrichment failed:', e);
+    }
     for (const g of guests || []) guestMemory[g.customer_phone] = g;
   }
 

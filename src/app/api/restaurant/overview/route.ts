@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withTenantGuard } from '@/lib/auth/tenantGuard';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { selectInBatches } from '@/lib/supabase/select-in-batches';
 
 function getISTDateStr(): string {
   return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -65,11 +66,20 @@ export async function GET(req: NextRequest) {
   let vipRecordsMap: Record<string, { tags: string[]; vip_status: boolean; customer_name: string | null }> = {};
 
   if (confirmedPhones.length > 0) {
-    const { data: guestRecords } = await supabaseAdmin
-      .from('restaurant_guests')
-      .select('customer_phone, customer_name, tags, vip_status')
-      .eq('restaurant_id', tenantId)
-      .in('customer_phone', confirmedPhones);
+    // Chunked so a busy day's confirmed-phone list can't overflow the .in() URL
+    // limit. Enrichment only — degrade to empty on error, don't fail the overview.
+    let guestRecords: Array<{ customer_phone: string; customer_name: string | null; tags: string[] | null; vip_status: boolean | null }> = [];
+    try {
+      guestRecords = await selectInBatches(confirmedPhones as string[], (batch) =>
+        supabaseAdmin
+          .from('restaurant_guests')
+          .select('customer_phone, customer_name, tags, vip_status')
+          .eq('restaurant_id', tenantId)
+          .in('customer_phone', batch)
+      );
+    } catch (e) {
+      console.error('[restaurant/overview] guest enrichment failed:', e);
+    }
 
     (guestRecords ?? []).forEach(g => {
       vipRecordsMap[g.customer_phone] = {
@@ -85,13 +95,20 @@ export async function GET(req: NextRequest) {
       .map(([phone]) => phone);
 
     if (vipPhones.length > 0) {
-      const { data: visits } = await supabaseAdmin
-        .from('restaurant_bookings')
-        .select('customer_phone, booking_date')
-        .eq('restaurant_id', tenantId)
-        .in('customer_phone', vipPhones)
-        .eq('booking_status', 'completed')
-        .order('booking_date', { ascending: false });
+      let visits: Array<{ customer_phone: string; booking_date: string | null }> = [];
+      try {
+        visits = await selectInBatches(vipPhones, (batch) =>
+          supabaseAdmin
+            .from('restaurant_bookings')
+            .select('customer_phone, booking_date')
+            .eq('restaurant_id', tenantId)
+            .in('customer_phone', batch)
+            .eq('booking_status', 'completed')
+            .order('booking_date', { ascending: false })
+        );
+      } catch (e) {
+        console.error('[restaurant/overview] VIP visit history failed:', e);
+      }
 
       // Attach visit count + last visit to vipRecordsMap
       const visitCountMap: Record<string, { count: number; lastVisit: string | null }> = {};

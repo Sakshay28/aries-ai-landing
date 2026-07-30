@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withTenantGuard } from '@/lib/auth/tenantGuard';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { selectInBatches } from '@/lib/supabase/select-in-batches';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
 import { sendBusinessEvent } from '@/lib/whatsapp/businessNotify';
 
@@ -49,24 +50,39 @@ export async function GET(req: NextRequest) {
   let visitCountMap: Record<string, number> = {};
 
   if (phones.length > 0) {
-    // Fetch VIP guest records
-    const { data: guestRecs } = await supabaseAdmin
-      .from('restaurant_guests')
-      .select('customer_phone, vip_status, tags')
-      .eq('restaurant_id', tenantId)
-      .in('customer_phone', phones);
+    // Fetch VIP guest records — chunked so a busy venue's phone list can't
+    // overflow the .in() URL limit. Enrichment only, so degrade to empty on error.
+    let guestRecs: Array<{ customer_phone: string; vip_status: boolean | null; tags: string[] | null }> = [];
+    try {
+      guestRecs = await selectInBatches(phones as string[], (batch) =>
+        supabaseAdmin
+          .from('restaurant_guests')
+          .select('customer_phone, vip_status, tags')
+          .eq('restaurant_id', tenantId)
+          .in('customer_phone', batch)
+      );
+    } catch (e) {
+      console.error('[restaurant/bookings] guest enrichment failed:', e);
+    }
 
     (guestRecs ?? []).forEach(g => {
       if (g.vip_status || g.tags?.includes('VIP')) vipSet.add(g.customer_phone);
     });
 
-    // Fetch completed visit counts for these phones (batched)
-    const { data: visits } = await supabaseAdmin
-      .from('restaurant_bookings')
-      .select('customer_phone')
-      .eq('restaurant_id', tenantId)
-      .in('customer_phone', phones)
-      .eq('booking_status', 'completed');
+    // Fetch completed visit counts for these phones (chunked)
+    let visits: Array<{ customer_phone: string }> = [];
+    try {
+      visits = await selectInBatches(phones as string[], (batch) =>
+        supabaseAdmin
+          .from('restaurant_bookings')
+          .select('customer_phone')
+          .eq('restaurant_id', tenantId)
+          .in('customer_phone', batch)
+          .eq('booking_status', 'completed')
+      );
+    } catch (e) {
+      console.error('[restaurant/bookings] visit-count enrichment failed:', e);
+    }
 
     (visits ?? []).forEach(v => {
       visitCountMap[v.customer_phone] = (visitCountMap[v.customer_phone] ?? 0) + 1;

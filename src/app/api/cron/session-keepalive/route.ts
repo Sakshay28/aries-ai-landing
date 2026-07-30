@@ -23,6 +23,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { selectInBatches } from '@/lib/supabase/select-in-batches';
 import { sendTextMessage, sendTemplateMessage, sendInteractiveButtonsMessage } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { sanitizeName } from '@/lib/utils/name';
@@ -277,25 +278,36 @@ async function fallbackQuery(
 
   const convIds = Array.from(latestByConv.keys());
 
-  // Skip conversations that already received an outbound in the dedup window
-  const { data: recentOutbound } = await supabaseAdmin
-    .from('messages')
-    .select('conversation_id')
-    .in('conversation_id', convIds)
-    .eq('direction', 'outbound')
-    .gte('created_at', dedupCutoff);
+  // convIds can span every active conversation for a large tenant; a single .in()
+  // of >~300 ids 400s in PostgREST, so both lookups are chunked. A batch failure
+  // is a real error — skip this run rather than act on partial data (a keepalive
+  // cron missing one 30-min tick is harmless; double-sending or a crash isn't).
+  let recentOutbound: Array<{ conversation_id: string }>;
+  let activeConvs: any[];
+  try {
+    recentOutbound = await selectInBatches(convIds, (batch) =>
+      supabaseAdmin
+        .from('messages')
+        .select('conversation_id')
+        .in('conversation_id', batch)
+        .eq('direction', 'outbound')
+        .gte('created_at', dedupCutoff)
+    );
+    activeConvs = await selectInBatches(convIds, (batch) =>
+      supabaseAdmin
+        .from('conversations')
+        .select('id, tenant_id, sender_id, leads(phone, name), bot_paused, escalated')
+        .in('id', batch)
+        .eq('is_active', true)
+        .or('bot_paused.eq.true,escalated.eq.true')
+    );
+  } catch (e) {
+    console.error('[session-keepalive] batched lookup failed, skipping this run:', e);
+    return { sent: 0, skipped: 0 };
+  }
 
-  const alreadySent = new Set((recentOutbound ?? []).map(m => m.conversation_id));
-
-  // Only conversations where staff is actively handling (bot paused or escalated)
-  const { data: activeConvs } = await supabaseAdmin
-    .from('conversations')
-    .select('id, tenant_id, sender_id, leads(phone, name), bot_paused, escalated')
-    .in('id', convIds)
-    .eq('is_active', true)
-    .or('bot_paused.eq.true,escalated.eq.true');
-
-  const eligible = (activeConvs ?? []).filter(c => !alreadySent.has(c.id));
+  const alreadySent = new Set(recentOutbound.map(m => m.conversation_id));
+  const eligible = activeConvs.filter(c => !alreadySent.has(c.id));
 
   return processConversations(eligible.map(c => {
     const leads = c.leads as unknown as { phone: string | null; name: string | null } | { phone: string | null; name: string | null }[] | null;

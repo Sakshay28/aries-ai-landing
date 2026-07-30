@@ -14,6 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { runInBatches } from '@/lib/supabase/select-in-batches';
 
 export const maxDuration = 60; // clamped to 10s on Hobby — the time guard below respects that
 
@@ -56,8 +57,12 @@ async function handler(req: NextRequest) {
     if (!batch || batch.length === 0) break;
 
     const ids = batch.map((m: { id: string }) => m.id);
-    const { error: deleteError } = await supabaseAdmin.from('messages').delete().in('id', ids);
-    if (deleteError) {
+    // Chunked delete: `ids` is up to BATCH_SIZE (1000) and a single
+    // DELETE … .in('id', ids) of that size 400s in PostgREST — which silently
+    // aborted the purge, letting message content pile up past the 90-day policy.
+    try {
+      await runInBatches(ids, (chunk) => supabaseAdmin.from('messages').delete().in('id', chunk));
+    } catch (deleteError: any) {
       console.error('❌ [message-retention] failed to delete batch:', deleteError.message);
       break;
     }
