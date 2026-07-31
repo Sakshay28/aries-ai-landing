@@ -444,9 +444,20 @@ export class BroadcastEngineService {
   // GLOBAL DRAIN (Vercel backstop). Claims one batch across ALL tenants and
   // processes it. The persistent worker uses processTenantQueue() per tenant for
   // true parallelism + fairness; this remains as a safety net if the worker is
-  // down. Kept behaviorally identical to the pre-refactor version.
+  // down.
+  //
+  // Both callers of this method (launch's inline first-batch, and the "Retry
+  // Now" route) run on a 10s Vercel maxDuration. This used to claim up to
+  // `limit` items and process them with NO deadline handed to
+  // processItemsForTenant — unlike /api/broadcast/process-queue, which computes
+  // one. If Vercel killed the function mid-loop (routine for a batch of 20-50
+  // sequential Meta sends), every claimed-but-unprocessed item was orphaned in
+  // 'processing' with no release, stuck until resetStaleProcessing()'s 10-minute
+  // staleness window next ran — so a "Retry Now" click looked "stuck again"
+  // instead of actually retrying. budgetMs mirrors process-queue's own
+  // DRAIN_BUDGET_MS so this call path gets the same graceful early-release.
   // ───────────────────────────────────────────────────────────────────────────
-  static async processQueue(limit = 100, forceNow = false): Promise<number> {
+  static async processQueue(limit = 100, forceNow = false, budgetMs = 7000): Promise<number> {
     try {
       await this.resetStaleProcessing();
 
@@ -467,6 +478,8 @@ export class BroadcastEngineService {
 
       console.log(`[QUEUE_JOB] Processing ${queueItems.length} queue items`);
 
+      const deadlineAt = Date.now() + budgetMs;
+
       // Group by tenant and process each group with the shared per-tenant routine.
       const tenantGroupMap = new Map<string, any[]>();
       queueItems.forEach(item => {
@@ -477,7 +490,7 @@ export class BroadcastEngineService {
 
       let processed = 0;
       for (const [tenantId, items] of tenantGroupMap.entries()) {
-        processed += await this.processItemsForTenant(tenantId, items, { forceNow });
+        processed += await this.processItemsForTenant(tenantId, items, { forceNow, deadlineAt });
       }
       return processed;
     } catch (e) {
