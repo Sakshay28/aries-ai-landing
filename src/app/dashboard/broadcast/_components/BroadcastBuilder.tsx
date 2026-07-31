@@ -439,7 +439,14 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
       console.error('[BROADCAST_SAVE] Failed:', err.message);
       setSaveStatus('error');
       if (!silent) toast.error(err.message || 'Failed to save campaign');
-      return stateRef.current.campaignId;
+      // Return null, not the pre-existing campaignId, on failure. Callers
+      // (handleLaunch, executeTestSend) treat a truthy return as "the campaign
+      // now reflects current form state" — returning the old id here made that
+      // true even when THIS save just failed, so handleLaunch's own
+      // `if (!savedId) throw` guard never fired for an existing campaign and
+      // launch proceeded straight from whatever was last successfully saved
+      // (e.g. the audience/name from before the user's latest edits).
+      return null;
     } finally {
       if (!silent) setIsSaving(false);
     }
@@ -457,7 +464,32 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   useEffect(() => {
     if (campaignId) scheduleAutosave();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignName, selectedTemplate?.name, audience.type, audience.recentCount, delivery.mode, delivery.scheduledAt]);
+  }, [campaignName, selectedTemplate?.name, delivery.mode, delivery.scheduledAt]);
+
+  // Audience changes save IMMEDIATELY, not debounced. The campaign list's
+  // quick "Send" row-action (handleSend → /api/broadcasts/send) launches
+  // straight from whatever is already persisted in broadcast_audiences — it
+  // sends no audience payload of its own. A debounced save here left a window
+  // where a user could pick an audience, then Send before the 1.5s timer
+  // landed, launching against the STALE (often default 'all') audience that
+  // was saved when the draft was first created. This also covers manual
+  // add/remove from the Recipients drawer, which previously wasn't wired to
+  // autosave at all.
+  useEffect(() => {
+    if (campaignId) save(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    campaignId,
+    audience.type,
+    audience.recentCount,
+    JSON.stringify(audience.tags),
+    JSON.stringify(audience.customFilters),
+    audience.retargetCampaignId,
+    audience.retargetCondition,
+    audience.retargetDelayDays,
+    JSON.stringify(audience.manualContactIds),
+    JSON.stringify(audience.excludedContactIds),
+  ]);
 
   // ── Test send ──────────────────────────────────────────────────────────────
   const handleTestSend = () => {
@@ -916,8 +948,11 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                         toast.error('Enter a campaign name first');
                         return;
                       }
-                      await save(false);
-                      toast.success('Draft saved');
+                      // save() already toasts its own error on failure — only
+                      // claim success when it actually returned an id, instead
+                      // of unconditionally telling the user "Draft saved".
+                      const savedId = await save(false);
+                      if (savedId) toast.success('Draft saved');
                     }}
                     onLaunch={handleLaunch}
                     onTestSend={handleTestSend}
@@ -1043,8 +1078,10 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                   toast.error('Enter a campaign name first');
                   return;
                 }
-                await save(false);
-                toast.success('Draft saved');
+                // save() already toasts its own error on failure — only claim
+                // success when it actually returned an id.
+                const savedId = await save(false);
+                if (savedId) toast.success('Draft saved');
               }}
               disabled={isSaving}
               className="save-draft-btn button-nowrap h-10 px-3.5 text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/40 rounded-xl transition-all duration-150 flex items-center justify-center gap-1.5"
