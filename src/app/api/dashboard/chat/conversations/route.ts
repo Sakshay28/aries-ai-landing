@@ -23,9 +23,12 @@ export async function GET(req: NextRequest) {
     // needed anymore. This used to also fetch up to 5000 messages tenant-wide on every
     // call (every 20s poll + every realtime event tenant-wide), which was the dominant
     // cost behind the dashboard chat lag.
-    const { data: rawConvos, error: convErr } = await supabaseAdmin
+    const { data: rawConvos, error: convErr, count: rawCount } = await supabaseAdmin
       .from('conversations')
-      .select('id, last_message_at, is_active, bot_paused, sender_id, lead_id, escalated, message_count, last_message_preview, last_message_type')
+      .select(
+        'id, last_message_at, is_active, bot_paused, sender_id, lead_id, escalated, message_count, last_message_preview, last_message_type',
+        { count: 'exact' },
+      )
       .eq('tenant_id', tenantId)
       .order('last_message_at', { ascending: false, nullsFirst: false })
       .limit(2000); // fetch wide; collapsed to one thread per contact below
@@ -35,8 +38,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: convErr.message }, { status: 500 });
     }
 
+    // Change-digest for the sidebar's cheap fallback poll. `maxTs` = newest
+    // last_message_at (rows are ordered desc, nulls last, so rawConvos[0] holds it
+    // even when the 2000-row cap is hit); `count` is the exact tenant-wide total.
+    // The sidebar polls a tiny /conversations/digest returning the same shape and
+    // only re-fetches this full list when (count, maxTs) changes — see 2026-08-01
+    // egress reduction (this full list was ~350KB fetched every 20s per agent).
+    const digest = {
+      count: rawCount ?? (rawConvos?.length ?? 0),
+      maxTs: (rawConvos?.[0] as { last_message_at: string | null } | undefined)?.last_message_at ?? null,
+    };
+
     if (!rawConvos || rawConvos.length === 0) {
-      return NextResponse.json({ success: true, conversations: [], tenantId, me: { id: me.id } });
+      return NextResponse.json({ success: true, conversations: [], tenantId, me: { id: me.id }, digest });
     }
 
     // ── Collapse to one thread per contact ────────────────────────────────────
@@ -108,7 +122,7 @@ export async function GET(req: NextRequest) {
     enriched.sort((a: any, b: any) =>
       (b.last_message_at ?? '').localeCompare(a.last_message_at ?? ''));
 
-    return NextResponse.json({ success: true, conversations: enriched, tenantId, me: { id: me.id } });
+    return NextResponse.json({ success: true, conversations: enriched, tenantId, me: { id: me.id }, digest });
   } catch (error: any) {
     console.error('Conversations error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
