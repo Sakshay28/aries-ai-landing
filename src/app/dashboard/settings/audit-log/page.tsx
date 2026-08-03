@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
-import { ClipboardList, RefreshCw, Loader2, User, Calendar, ShieldAlert } from "lucide-react";
+import { ArrowLeft, ClipboardList, RefreshCw, Loader2, User, Calendar, ShieldAlert } from "lucide-react";
 
 interface AuditEntry {
   id: string;
@@ -75,6 +76,13 @@ export default function AuditLogPage() {
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-5">
+      <Link
+        href="/dashboard/settings?tab=privacy"
+        className="inline-flex items-center gap-1.5 text-[12px] font-medium transition-opacity hover:opacity-80"
+        style={{ color: "var(--muted-foreground)" }}
+      >
+        <ArrowLeft className="w-3.5 h-3.5" /> Back to Settings
+      </Link>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)" }}>

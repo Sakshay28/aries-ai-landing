@@ -12,6 +12,7 @@ import {
 import { toast } from 'sonner';
 import { PhoneInput } from '@/components/ui/phone-input';
 import WaProfileTab from '@/components/settings/WaProfileTab';
+import SavedLocationsTab from '@/components/settings/SavedLocationsTab';
 
 interface SettingsData {
   business_name: string;
@@ -103,6 +104,7 @@ const TABS = [
   { id: 'leads', label: 'Lead Routing', icon: Target },
   { id: 'followup', label: 'Follow-ups', icon: Bell },
   { id: 'offhours', label: 'Off-Hours', icon: Clock },
+  { id: 'locations', label: 'Saved Locations', icon: MapPin },
   { id: 'privacy', label: 'Privacy & Data', icon: ShieldCheck },
 ];
 
@@ -785,14 +787,14 @@ export default function SettingsPage() {
 
       {/* Tabs */}
       <div
-        className="flex gap-1 p-1 rounded-xl overflow-x-auto"
+        className="flex flex-wrap gap-1.5 p-1.5 rounded-xl"
         style={{ background: 'var(--secondary)' }}
       >
         {TABS.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap"
             style={{
               background: activeTab === tab.id ? 'var(--card)' : 'transparent',
               color: activeTab === tab.id ? 'var(--foreground)' : 'var(--muted-foreground)',
@@ -1910,6 +1912,9 @@ export default function SettingsPage() {
           </SectionCard>
         </motion.div>
       )}
+
+      {/* Tab: Saved Locations */}
+      {activeTab === 'locations' && <SavedLocationsTab />}
 
       {/* Tab: Privacy & Data */}
       {activeTab === 'privacy' && <PrivacyDataTab businessName={settings.business_name} />}
