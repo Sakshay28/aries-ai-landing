@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { UserPlus, Building2, Search, Save, CheckCircle2, AlertCircle, LogIn, RefreshCw, Clock, XCircle, ShieldAlert, Trash2 } from 'lucide-react';
+import { UserPlus, Building2, Search, Save, CheckCircle2, AlertCircle, LogIn, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 type TenantRow = {
@@ -70,47 +70,6 @@ const SECTIONS: { title: string; fields: { key: string; label: string; secret?: 
 
 const SECRET_KEYS = ['wa_access_token', 'wa_app_secret'];
 const ALL_KEYS = SECTIONS.flatMap(s => s.fields.map(f => f.key));
-
-const TEMPLATE_LABELS: Record<string, string> = {
-  staff_keepalive: 'Staff keepalive',
-  human_assistance: 'Human handoff alert',
-};
-
-function TemplateStatusBadge({ status }: { status: string }) {
-  if (status === 'APPROVED') {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400 px-2 py-0.5 rounded-full">
-        <CheckCircle2 className="w-3 h-3" /> Approved
-      </span>
-    );
-  }
-  if (status === 'PENDING' || status === 'IN_APPEAL') {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400 px-2 py-0.5 rounded-full">
-        <Clock className="w-3 h-3" /> {status === 'IN_APPEAL' ? 'In appeal' : 'Pending Meta'}
-      </span>
-    );
-  }
-  if (status === 'FAILED') {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 dark:bg-red-950/40 dark:text-red-400 px-2 py-0.5 rounded-full">
-        <ShieldAlert className="w-3 h-3" /> WABA restricted
-      </span>
-    );
-  }
-  if (status === 'REJECTED') {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 dark:bg-red-950/40 dark:text-red-400 px-2 py-0.5 rounded-full">
-        <XCircle className="w-3 h-3" /> Rejected
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
-      <AlertCircle className="w-3 h-3" /> Not registered
-    </span>
-  );
-}
 
 export function OnboardClient() {
   const [tenants, setTenants] = useState<TenantRow[]>([]);
@@ -350,10 +309,6 @@ export function OnboardClient() {
     }
   };
 
-  const allTemplatesApproved = Object.keys(TEMPLATE_LABELS).length > 0 &&
-    Object.keys(TEMPLATE_LABELS).every(k => templates[k]?.status === 'APPROVED');
-  const anyTemplateRestricted = Object.values(templates).some(t => t.status === 'FAILED');
-
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-hidden">
       <header className="px-6 lg:px-8 pt-6 pb-4 border-b border-border shrink-0">
@@ -460,61 +415,6 @@ export function OnboardClient() {
                   </button>
                 </div>
               </div>
-
-              {/* ── WhatsApp Alert Templates ── */}
-              <section className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
-                <div className="px-5 py-3 border-b border-border bg-secondary/30 flex items-center justify-between gap-4">
-                  <div>
-                    <h2 className="text-sm font-semibold">WhatsApp Alert Templates</h2>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                      Required for staff to receive booking, handoff, and payment alerts when their 24h window is closed.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => provisionTemplates(anyTemplateRestricted)}
-                    disabled={provisioningTemplates || allTemplatesApproved}
-                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shrink-0"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${provisioningTemplates ? 'animate-spin' : ''}`} />
-                    {provisioningTemplates ? 'Provisioning…' : anyTemplateRestricted ? 'Retry (after Meta verification)' : allTemplatesApproved ? 'All active' : 'Provision templates'}
-                  </button>
-                </div>
-                <div className="p-5 space-y-3">
-                  {Object.entries(TEMPLATE_LABELS).map(([eventType, label]) => {
-                    const t = templates[eventType];
-                    return (
-                      <div key={eventType} className="flex items-center justify-between gap-4">
-                        <div>
-                          <div className="text-sm font-medium">{label}</div>
-                          <div className="text-[11px] text-muted-foreground font-mono">{eventType}</div>
-                        </div>
-                        <TemplateStatusBadge status={t?.status ?? 'NOT_REGISTERED'} />
-                      </div>
-                    );
-                  })}
-
-                  {anyTemplateRestricted && (
-                    <div className="mt-3 p-3 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-400">
-                      <strong>WABA restricted from creating templates.</strong> The client&apos;s Meta Business Account needs to be verified.
-                      Guide them to <span className="font-mono">business.facebook.com → Settings → Business Info → Start Verification</span>.
-                      Once verified, click &ldquo;Retry&rdquo; above — templates register instantly on a verified WABA.
-                    </div>
-                  )}
-
-                  {!anyTemplateRestricted && !allTemplatesApproved && Object.keys(templates).length > 0 && (
-                    <div className="mt-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-400">
-                      Templates submitted to Meta. Approval for UTILITY templates typically takes a few minutes.
-                      Refresh to check status.
-                    </div>
-                  )}
-
-                  {allTemplatesApproved && (
-                    <div className="mt-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-700 dark:text-emerald-400">
-                      All templates approved. Staff will automatically receive WhatsApp alerts — no manual action needed from their side.
-                    </div>
-                  )}
-                </div>
-              </section>
 
               {SECTIONS.map(section => (
                 <section key={section.title} className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
