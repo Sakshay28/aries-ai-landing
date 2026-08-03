@@ -107,6 +107,11 @@ const TRIGGER_LABELS: Record<string, { label: string; desc: string }> = {
   escalation_resolved:   { label: 'Escalation Resolved',    desc: 'When staff resolves an escalated conversation' },
   payment_received:        { label: 'Payment Received',           desc: 'When a payment is confirmed via Razorpay' },
   session_window_expiring: { label: 'WhatsApp Session Expiring',  desc: "Fires ~22h after the customer's last message — keeps the 24h window alive so staff can always reply freely" },
+  shopify_order_created:      { label: 'Shopify · Order Placed',        desc: 'When a Shopify order is created — send an order confirmation' },
+  shopify_order_paid:         { label: 'Shopify · Order Paid',          desc: 'When a Shopify order payment is captured' },
+  shopify_order_fulfilled:    { label: 'Shopify · Order Shipped',       desc: 'When a Shopify order is fulfilled — send a tracking update' },
+  shopify_order_cancelled:    { label: 'Shopify · Order Cancelled',     desc: 'When a Shopify order is cancelled — soft apology + support handoff' },
+  shopify_checkout_abandoned: { label: 'Shopify · Abandoned Checkout',  desc: 'When a shopper starts checkout but does not complete it — send a recovery nudge (requires phone or email on the checkout)' },
 };
 
 // Triggers that schedule relative to a FUTURE event (delay = time BEFORE it),

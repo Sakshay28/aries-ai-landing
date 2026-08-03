@@ -55,6 +55,7 @@ export interface ExtractedData {
   requestPayment?: string;   // "true" when customer is ready to pay
   paymentAmount?: string;    // numeric string in INR e.g. "5000"
   mediaToSend?: string[];    // filenames from AVAILABLE MEDIA to send to the customer (max 3 images / 1 video / 1 pdf)
+  sendShopifyProducts?: string[]; // Shopify product handles for images the webhook route should send after the text
 }
 
 export type Intent =
@@ -355,7 +356,12 @@ MEDIA SENDING RULES:
 - NEVER say "I can't send videos/files/media through this chat" — you CAN. Just set mediaToSend.
 - NEVER say "I'll share a link" or "click here" for media — set mediaToSend and the file(s) arrive directly.
 - When you do send media, accompany it with a brief text reply (e.g. "Here's our rooftop terrace video!" or "Here's the banquet brochure with all the details").
-- If the customer asks for media and nothing on the list is even a plausible match, say you'll check with the team. Do NOT escalate for this alone.` : ''}
+- If the customer asks for media and nothing on the list is even a plausible match, say you'll check with the team. Do NOT escalate for this alone.
+
+SHOPIFY PRODUCT IMAGES:
+- If your reply recommends a specific product from the SHOPIFY STORE CONTEXT block above, set "sendShopifyProducts" in extractedData to an ARRAY of at most 2 product handles (the "handle" field from the matched products list). The system will send the product image(s) after your text.
+- Only include products you actually named or clearly recommended in your reply. Do not send images the customer didn't ask for or wouldn't recognise.
+- Never include a product handle that isn't in the matched-products list above.` : ''}
 
 RULES:
 - NEVER make up information you don't have
@@ -375,6 +381,9 @@ ${(tenantConfig.visitCount ?? 0) >= 2 ? `
 RETURNING CUSTOMER: This guest has visited ${tenantConfig.visitCount} times before${tenantConfig.lastVisitDate ? ` (last visit ${tenantConfig.lastVisitDate})` : ''}. Acknowledge them warmly as a valued regular (e.g. "Great to have you back!"). Do NOT overdo it — one short warm line is enough.
 ` : ''}
 
+${tenantConfig.shopifyContextText ? `
+${tenantConfig.shopifyContextText}
+` : ''}
 ${tenantConfig.existingBooking ? `
 CUSTOMER'S EXISTING BOOKING (use this for modify/cancel requests):
 - Reservation ID: ${tenantConfig.existingBooking.reservationId}
@@ -437,7 +446,8 @@ You must respond with ONLY a JSON object (no markdown, no backticks) in this exa
     "specialRequests": null,
     "requestPayment": null,
     "paymentAmount": null,
-    "mediaToSend": []
+    "mediaToSend": [],
+    "sendShopifyProducts": []
   },
   "nextStep": "what info to collect next: greeting, ask_intent, ask_guests, ask_date, ask_occasion, ask_name, ask_phone, ask_email, confirmation, completed, escalated",
   "confidence": 0.95,
@@ -500,6 +510,14 @@ export interface TenantAIConfig {
     status: string;
     customerName: string;
   } | null;
+  // Shopify context — matched products / order / policies / discounts.
+  // Built by getShopifyContext() when the tenant is connected AND the
+  // message has an ecom-shaped intent. Null otherwise.
+  shopifyContextText?: string | null;
+  // Product handles the AI decided to send images for. Populated by the AI
+  // in extractedData.sendShopifyProducts; the webhook route reads it after
+  // the text reply to attach the product image(s).
+  shopifyMatchedProductHandles?: string[];
   // Repeat-visitor recognition
   visitCount?: number;
   lastVisitDate?: string | null;

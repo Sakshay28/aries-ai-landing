@@ -38,7 +38,7 @@ const RESOURCE_ROWS: Array<{ key: keyof StatusSummary["counts"]; label: string; 
 export function ShopifyDashboard() {
   const [status, setStatus] = useState<StatusSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<null | "connect" | "sync" | "disconnect" | "webhooks">(null);
+  const [busy, setBusy] = useState<null | "connect" | "sync" | "disconnect" | "webhooks" | "templates">(null);
   const [form, setForm] = useState({ store_url: "", access_token: "", shared_secret: "", api_version: "" });
 
   const load = useCallback(async () => {
@@ -95,8 +95,13 @@ export function ShopifyDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "sync" }),
       });
-      if (!res.ok) throw new Error((await res.json()).error || "Sync failed");
-      toast.success("Full sync queued");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Sync failed");
+      if (data.enqueued === false && data.reason === "full_sync_in_progress") {
+        toast.message("A full sync is already running — no duplicate enqueued.");
+      } else {
+        toast.success("Full sync queued");
+      }
       await load();
     } catch (err) {
       toast.error((err as Error).message);
@@ -116,6 +121,33 @@ export function ShopifyDashboard() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Webhook registration failed");
       toast.success(`Webhooks — created ${data.result.created}, existing ${data.result.existing}, failed ${data.result.failed}`);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const provisionTemplates = async () => {
+    setBusy("templates");
+    try {
+      const res = await fetch("/api/integrations/shopify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "provision_templates" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Template provisioning failed");
+      const { created, skipped_existing, failed } = data.result;
+      const parts = [
+        created.length ? `${created.length} submitted for approval` : "",
+        skipped_existing.length ? `${skipped_existing.length} already exist` : "",
+        failed.length ? `${failed.length} failed` : "",
+      ].filter(Boolean).join(" · ");
+      toast.success(`Templates: ${parts || "no changes"}`);
+      if (failed.length) {
+        console.warn("[shopify] template provision failures:", failed);
+      }
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
@@ -159,6 +191,7 @@ export function ShopifyDashboard() {
           onSync={runSync}
           onDisconnect={disconnect}
           onWebhooks={registerWebhooks}
+          onTemplates={provisionTemplates}
         />
       ) : (
         <ConnectForm form={form} setForm={setForm} onConnect={connect} busy={busy === "connect"} />
@@ -252,11 +285,12 @@ function ConnectForm({ form, setForm, onConnect, busy }: {
 }
 
 // ─── Connected view ─────────────────────────────────────────
-function ConnectedView({ status, busy, onSync, onWebhooks, onDisconnect }: {
+function ConnectedView({ status, busy, onSync, onWebhooks, onTemplates, onDisconnect }: {
   status: StatusSummary;
-  busy: null | "connect" | "sync" | "disconnect" | "webhooks";
+  busy: null | "connect" | "sync" | "disconnect" | "webhooks" | "templates";
   onSync: () => void;
   onWebhooks: () => void;
+  onTemplates: () => void;
   onDisconnect: () => void;
 }) {
   const badge = status.sync_status === "syncing"
@@ -314,6 +348,15 @@ function ConnectedView({ status, busy, onSync, onWebhooks, onDisconnect }: {
               className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-60"
             >
               Re-register webhooks
+            </button>
+            <button
+              onClick={onTemplates}
+              disabled={busy !== null}
+              className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-60"
+              title="Submit the 5 canned WhatsApp templates (order confirmation, shipping, cancellation, cart recovery, review request) to Meta for approval."
+            >
+              {busy === "templates" ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              Provision templates
             </button>
             <button
               onClick={onDisconnect}

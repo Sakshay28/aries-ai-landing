@@ -35,13 +35,27 @@ const ONESHOT_RESOURCES = ['collections', 'pages', 'blogs', 'policies', 'discoun
 
 // ─── Enqueue helpers ────────────────────────────────────────
 
-export async function enqueueFullSync(tenantId: string, opts: { lookbackDays?: number } = {}): Promise<void> {
+export async function enqueueFullSync(tenantId: string, opts: { lookbackDays?: number } = {}): Promise<{ enqueued: boolean; reason?: string }> {
+  // Idempotency: a merchant hitting "Full sync" while one is in flight would
+  // otherwise stack duplicate seed jobs and duplicate API rate-limit burn.
+  const { count } = await supabaseAdmin
+    .from('shopify_sync_jobs')
+    .select('id', { count: 'exact', head: true })
+    .eq('tenant_id', tenantId)
+    .eq('job_type', 'full_sync')
+    .in('status', ['pending', 'processing']);
+
+  if ((count ?? 0) > 0) {
+    return { enqueued: false, reason: 'full_sync_in_progress' };
+  }
+
   await supabaseAdmin.from('shopify_sync_jobs').insert({
     tenant_id: tenantId,
     job_type: 'full_sync',
     resource: null,
     payload: { lookback_days: opts.lookbackDays ?? 90 },
   });
+  return { enqueued: true };
 }
 
 export async function enqueueResourceSync(tenantId: string, resource: string, cursor: string | null, payload: Record<string, unknown> = {}): Promise<void> {

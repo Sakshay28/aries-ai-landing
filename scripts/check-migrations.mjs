@@ -82,6 +82,9 @@ const CHECKS = [
   { file: '20260608_security_hardening_indexes.sql',       type: 'manual', note: 'idx_messages_conv_tenant_created + idx_conv_active' },
   { file: '20260611_broadcast_production_hardening.sql',   type: 'table',  target: 'broadcast_contact_sends' },
   { file: '20260611_inbox_production_hardening.sql',       type: 'bucket', target: 'whatsapp-media' },
+  { file: '20260801_shopify_integration.sql',              type: 'table',  target: 'shopify_products' },
+  { file: '20260802_automation_shopify_triggers.sql',      type: 'manual', note: "SELECT conname FROM pg_constraint WHERE conname='automations_trigger_event_check' AND pg_get_constraintdef(oid) LIKE '%shopify_order_created%';" },
+  { file: '20260802_broadcast_shopify_audience.sql',       type: 'manual', note: "SELECT conname FROM pg_constraint WHERE conname='broadcast_audiences_audience_type_check' AND pg_get_constraintdef(oid) LIKE '%shopify_segment%';" },
 ];
 
 // Columns the CODE expects but that have no migration file yet — drift catchers.

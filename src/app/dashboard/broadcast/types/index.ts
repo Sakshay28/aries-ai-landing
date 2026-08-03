@@ -38,7 +38,7 @@ export interface ParsedButton {
 }
 
 export interface AudienceState {
-  type: 'all' | 'tags' | 'custom' | 'retarget' | 'csv' | 'manual' | 'recent';
+  type: 'all' | 'tags' | 'custom' | 'retarget' | 'csv' | 'manual' | 'recent' | 'shopify_segment';
   tags: string[];
   customFilters: CustomFilter[];
   retargetCampaignId: string | null;
@@ -47,6 +47,19 @@ export interface AudienceState {
   recentCount?: number;
   manualContactIds?: string[];
   excludedContactIds?: string[];
+  // Shopify segment (audience.type === 'shopify_segment')
+  shopifySegment?: {
+    // Ordered in last N days (any status)
+    orderedWithinDays?: number | null;
+    // Minimum lifetime spend (in the shop's currency)
+    minTotalSpent?: number | null;
+    // Minimum number of orders
+    minOrdersCount?: number | null;
+    // 'ordered' → has any order; 'no_order' → has 0 orders (browsers)
+    orderStatus?: 'any' | 'ordered' | 'no_order';
+    // Shopify customer tag (single, exact match) — optional
+    customerTag?: string | null;
+  };
   csvFile?: {
     name: string;
     size: string;

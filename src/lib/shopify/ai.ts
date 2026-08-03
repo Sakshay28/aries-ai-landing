@@ -15,6 +15,12 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { shopifyClientForTenant, ShopifyClient } from './client';
 import { normalizePhoneNumber } from '@/lib/whatsapp/phone';
+import { getRedisClient } from '@/lib/redis/client';
+
+// Live inventory refresh cache: coalesce identical bursts (multiple chat
+// sessions asking about the same variant) into one Shopify API call. Short
+// TTL keeps the answer honest without burning the 40-token bucket.
+const INVENTORY_CACHE_TTL_SECONDS = 45;
 
 export interface ProductSummary {
   id: string;
@@ -172,28 +178,18 @@ export async function getProduct(
     option3: v.option3 as string | null,
   }));
 
-  // Optional live inventory refresh — one API call for all variants.
+  // Optional live inventory refresh — one API call for all variants, cached
+  // in Redis for 45s so hot products don't burn our rate-limit bucket.
   if (args.refresh_inventory && variants?.length) {
     const inventoryItemIds = (variants || []).map(v => v.inventory_item_id).filter((x): x is number => !!x);
     if (inventoryItemIds.length) {
-      const client = await getClient(tenantId);
-      if (client) {
-        try {
-          const res = await client.rest<{ inventory_levels: Array<{ inventory_item_id: number; available: number }> }>(
-            'GET', 'inventory_levels.json', { query: { inventory_item_ids: inventoryItemIds.join(',') } },
-          );
-          const liveMap = new Map<number, number>();
-          for (const lvl of res.body.inventory_levels || []) {
-            liveMap.set(lvl.inventory_item_id, (liveMap.get(lvl.inventory_item_id) || 0) + (lvl.available || 0));
+      const liveMap = await fetchLiveInventory(tenantId, inventoryItemIds);
+      if (liveMap) {
+        for (let i = 0; i < variantRows.length; i++) {
+          const invId = variants?.[i]?.inventory_item_id as number | null;
+          if (invId != null && liveMap.has(invId)) {
+            variantRows[i].inventory_quantity = liveMap.get(invId)!;
           }
-          for (let i = 0; i < variantRows.length; i++) {
-            const invId = variants?.[i]?.inventory_item_id as number | null;
-            if (invId != null && liveMap.has(invId)) {
-              variantRows[i].inventory_quantity = liveMap.get(invId)!;
-            }
-          }
-        } catch (err) {
-          console.warn('[shopify:ai] live inventory refresh failed', (err as Error).message);
         }
       }
     }
@@ -435,4 +431,55 @@ export async function recommendUpsell(
 
   const { data } = await q.limit(limit);
   return (data || []).map(r => toSummary(r, storeUrl));
+}
+
+// ─── Live inventory cache ───────────────────────────────────
+/**
+ * Fetch on-hand inventory quantities for a set of inventory_item_ids, using
+ * a short-lived Redis cache to coalesce concurrent lookups. Returns null when
+ * the tenant has no Shopify client OR the request fails.
+ */
+async function fetchLiveInventory(tenantId: string, inventoryItemIds: number[]): Promise<Map<number, number> | null> {
+  if (inventoryItemIds.length === 0) return new Map();
+
+  const redis = getRedisClient();
+  const idsKey = [...inventoryItemIds].sort((a, b) => a - b).join(',');
+  const cacheKey = `shopify:inv:${tenantId}:${idsKey}`;
+
+  if (redis) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return new Map(JSON.parse(cached) as Array<[number, number]>);
+      }
+    } catch (err) {
+      console.warn('[shopify:ai] inventory cache read failed', (err as Error).message);
+    }
+  }
+
+  const client = await getClient(tenantId);
+  if (!client) return null;
+
+  try {
+    const res = await client.rest<{ inventory_levels: Array<{ inventory_item_id: number; available: number }> }>(
+      'GET', 'inventory_levels.json', { query: { inventory_item_ids: inventoryItemIds.join(',') } },
+    );
+    const map = new Map<number, number>();
+    for (const lvl of res.body.inventory_levels || []) {
+      // Sum across ALL locations — a variant with 3 in Delhi + 2 in Mumbai
+      // reads as 5 available.
+      map.set(lvl.inventory_item_id, (map.get(lvl.inventory_item_id) || 0) + (lvl.available || 0));
+    }
+    if (redis) {
+      try {
+        await redis.set(cacheKey, JSON.stringify(Array.from(map.entries())), 'EX', INVENTORY_CACHE_TTL_SECONDS);
+      } catch (err) {
+        console.warn('[shopify:ai] inventory cache write failed', (err as Error).message);
+      }
+    }
+    return map;
+  } catch (err) {
+    console.warn('[shopify:ai] live inventory refresh failed', (err as Error).message);
+    return null;
+  }
 }

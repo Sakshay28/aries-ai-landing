@@ -14,7 +14,7 @@ import toast from 'react-hot-toast';
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface AudienceState {
-  type: 'all' | 'tags' | 'custom' | 'retarget' | 'csv' | 'manual' | 'recent';
+  type: 'all' | 'tags' | 'custom' | 'retarget' | 'csv' | 'manual' | 'recent' | 'shopify_segment';
   tags: string[];
   customFilters: CustomFilter[];
   retargetCampaignId: string | null;
@@ -22,6 +22,14 @@ export interface AudienceState {
   retargetDelayDays: number;
   recentCount?: number;
   manualContactIds?: string[];
+  excludedContactIds?: string[];
+  shopifySegment?: {
+    orderedWithinDays?: number | null;
+    minTotalSpent?: number | null;
+    minOrdersCount?: number | null;
+    orderStatus?: 'any' | 'ordered' | 'no_order';
+    customerTag?: string | null;
+  };
   csvFile?: any;
 }
 

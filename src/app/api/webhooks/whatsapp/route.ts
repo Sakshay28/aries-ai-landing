@@ -11,6 +11,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { isDuplicateMessage, getRedisClient, acquireOffHoursLock, acquireOnceNotice } from '@/lib/redis/client';
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs, retrieveRelevantMedia } from '@/lib/ai/rag';
+import { getShopifyContext, renderShopifyContextForPrompt } from '@/lib/shopify/aiContext';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
 import { parseMetaWebhook, sendTextMessage, sendMediaMessage, sendMediaMessageById, uploadMediaToMeta, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
 import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus, resolveOrCreateConversation } from '@/lib/whatsapp/businessNotify';
@@ -1671,9 +1672,15 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // exists. Run alongside the text RAG call rather than after it so the two
   // Gemini embedding round-trips overlap instead of stacking latency.
   const hasMedia = (kbMediaFiles?.length ?? 0) > 0;
-  const [ragDocs, mediaCandidates] = await Promise.all([
+  const hasShopify = !!tenant.shopify_store_url;
+  const [ragDocs, mediaCandidates, shopifyContext] = await Promise.all([
     needsTextRag ? retrieveRelevantDocs(tenant.id, msg.text, 3).catch(() => []) : Promise.resolve([]),
     hasMedia ? retrieveRelevantMedia(tenant.id, msg.text, 8, 0.35).catch(() => []) : Promise.resolve([]),
+    hasShopify ? getShopifyContext({
+      tenantId: tenant.id,
+      message: msg.text,
+      lead: lead ? { phone: (lead as { phone?: string }).phone, email: (lead as { email?: string }).email, shopify_customer_id: (lead as { shopify_customer_id?: string }).shopify_customer_id } : null,
+    }).catch(() => null) : Promise.resolve(null),
   ]);
   if (ragDocs.length > 0) knowledgeRows = ragDocs;
 
@@ -1746,6 +1753,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     } : {}),
     smartRules: (smartRulesRows || []) as Array<{ name: string; trigger_source: string; ai_summary: string }>,
     knowledgeDocs: knowledgeRows,
+    shopifyContextText: shopifyContext ? renderShopifyContextForPrompt(shopifyContext) : null,
     mediaCandidates: [
       ...mediaCandidates.map(m => ({
         filename:    m.filename,
@@ -2169,6 +2177,51 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
           console.log(`✅ Sent media attachment "${matchedMedia.filename}" to ${cleanPhone}`);
         } catch (mediaErr) {
           console.error(`⚠️ Failed to send media "${filename}":`, (mediaErr as Error).message);
+        }
+      }
+    }
+
+    // 15c. Send Shopify product images if AI recommended any and the
+    // matched-products context surfaced them. Cap at 2 to keep replies tidy.
+    const productHandles = (aiResponse.extractedData as { sendShopifyProducts?: string[] })?.sendShopifyProducts;
+    if (Array.isArray(productHandles) && productHandles.length > 0 && shopifyContext?.matched_products?.length && decryptedAccessToken && tenant.wa_phone_number_id) {
+      const byHandle = new Map(shopifyContext.matched_products.map(p => [p.handle, p]));
+      const MAX_PRODUCT_IMAGES = 2;
+      let sent = 0;
+      for (const handle of productHandles) {
+        if (sent >= MAX_PRODUCT_IMAGES) break;
+        const p = byHandle.get(handle);
+        if (!p?.image_url) continue;
+        try {
+          const priceLabel = p.price_min != null
+            ? (p.price_max && p.price_max !== p.price_min ? `${p.currency || ''} ${p.price_min}–${p.price_max}` : `${p.currency || ''} ${p.price_min}`)
+            : '';
+          const caption = [p.title, priceLabel, p.url].filter(Boolean).join('\n');
+          const res = await sendMediaMessage(
+            decryptedAccessToken,
+            tenant.wa_phone_number_id as string,
+            cleanPhone,
+            'image',
+            p.image_url,
+            caption || undefined,
+          );
+          sent++;
+          void supabaseAdmin.from('messages').insert({
+            tenant_id: tenant.id,
+            conversation_id: conversation.id,
+            direction: 'outbound',
+            content: `[Shopify product] ${p.title}`,
+            message_type: 'image',
+            channel: 'whatsapp',
+            status: 'sent',
+            ai_generated: true,
+            media_url: p.image_url,
+            file_name: `${handle}.jpg`,
+            mime_type: 'image/jpeg',
+            wa_message_id: res.messageId,
+          });
+        } catch (err) {
+          console.error(`⚠️ Shopify product image send failed (${handle}):`, (err as Error).message);
         }
       }
     }

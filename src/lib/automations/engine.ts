@@ -36,7 +36,12 @@ export type TriggerEvent =
   | 'escalation_triggered'
   | 'escalation_resolved'
   | 'payment_received'
-  | 'session_window_expiring';
+  | 'session_window_expiring'
+  | 'shopify_order_created'
+  | 'shopify_order_paid'
+  | 'shopify_order_fulfilled'
+  | 'shopify_order_cancelled'
+  | 'shopify_checkout_abandoned';
 
 export interface AutomationPayload {
   tenantId: string;

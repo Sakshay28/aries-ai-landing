@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import {
-  connectTenant, disconnectTenant, getStatus, triggerFullSync, validateCredentials, registerWebhooks,
+  connectTenant, disconnectTenant, getStatus, triggerFullSync, validateCredentials, registerWebhooks, reprovisionTemplates,
 } from '@/lib/shopify/service';
 import { ShopifyClient, DEFAULT_API_VERSION } from '@/lib/shopify/client';
 import { decryptTokenV2 } from '@/lib/security/keyManager';
@@ -56,8 +56,13 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === 'sync') {
-    await triggerFullSync(tenantId, { lookbackDays: body.lookback_days });
-    return NextResponse.json({ ok: true });
+    const result = await triggerFullSync(tenantId, { lookbackDays: body.lookback_days });
+    return NextResponse.json({ ok: true, ...result });
+  }
+
+  if (action === 'provision_templates') {
+    const result = await reprovisionTemplates(tenantId);
+    return NextResponse.json({ ok: true, result });
   }
 
   if (action === 'register_webhooks') {

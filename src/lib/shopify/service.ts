@@ -14,6 +14,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { encryptTokenV2, decryptTokenV2 } from '@/lib/security/keyManager';
+import { env } from '@/lib/env';
 import {
   ShopifyClient,
   normaliseStoreDomain,
@@ -21,6 +22,7 @@ import {
   shopifyClientForTenant,
 } from './client';
 import { enqueueFullSync } from './queue';
+import { provisionShopifyTemplates } from './templates';
 
 export interface ConnectInput {
   tenantId: string;
@@ -110,7 +112,20 @@ export async function connectTenant(input: ConnectInput): Promise<{ ok: true; sh
     console.error('[shopify:connect] enqueue full sync failed', (err as Error).message);
   });
 
+  // Provision the four canned WhatsApp templates so post-purchase automations
+  // (order confirmation / shipping / cancellation / cart recovery / review) can
+  // fire outside the 24h window. Best-effort — tenant may not have WhatsApp
+  // credentials yet; templates can be re-provisioned later from the admin UI.
+  provisionShopifyTemplates(input.tenantId).catch(err => {
+    console.error('[shopify:connect] provision templates failed', (err as Error).message);
+  });
+
   return { ok: true, shop: validation.shop };
+}
+
+/** Re-provision Shopify WhatsApp templates on demand. */
+export async function reprovisionTemplates(tenantId: string): ReturnType<typeof provisionShopifyTemplates> {
+  return provisionShopifyTemplates(tenantId);
 }
 
 // ─── Webhooks registration ──────────────────────────────────
@@ -126,7 +141,12 @@ export const REQUIRED_WEBHOOK_TOPICS = [
 ] as const;
 
 export async function registerWebhooks(tenantId: string, client: ShopifyClient): Promise<{ created: number; existing: number; failed: number }> {
-  const publicBase = requiredEnv('APP_PUBLIC_URL');
+  const publicBase = env.NEXT_PUBLIC_APP_URL;
+  if (!publicBase || publicBase.startsWith('http://localhost')) {
+    // Shopify won't accept a localhost webhook address; loud fail with
+    // an actionable message rather than 22 identical 422s from Meta.
+    throw new Error('NEXT_PUBLIC_APP_URL is missing or points at localhost — set it to the deployed prod origin (e.g. https://ariesai.in) before registering Shopify webhooks.');
+  }
   const address = `${publicBase.replace(/\/+$/, '')}/api/webhooks/shopify`;
 
   // List existing webhooks so we don't double-register.
@@ -169,7 +189,7 @@ export async function disconnectTenant(tenantId: string): Promise<void> {
     const client = shopifyClientForTenant(tenant);
     if (client) {
       try {
-        const publicBase = process.env.APP_PUBLIC_URL || '';
+        const publicBase = env.NEXT_PUBLIC_APP_URL || '';
         const address = `${publicBase.replace(/\/+$/, '')}/api/webhooks/shopify`;
         const res = await client.rest<{ webhooks: Array<{ id: number; address: string }> }>(
           'GET', 'webhooks.json', { query: { limit: 250 } },
@@ -204,8 +224,8 @@ export async function disconnectTenant(tenantId: string): Promise<void> {
 }
 
 // ─── Trigger full sync ──────────────────────────────────────
-export async function triggerFullSync(tenantId: string, opts: { lookbackDays?: number } = {}): Promise<void> {
-  await enqueueFullSync(tenantId, opts);
+export async function triggerFullSync(tenantId: string, opts: { lookbackDays?: number } = {}): Promise<{ enqueued: boolean; reason?: string }> {
+  return enqueueFullSync(tenantId, opts);
 }
 
 // ─── Status summary ─────────────────────────────────────────
@@ -248,11 +268,6 @@ async function countJobs(tenantId: string, status: string): Promise<number> {
   return count || 0;
 }
 
-function requiredEnv(key: string): string {
-  const v = process.env[key];
-  if (!v) throw new Error(`missing env: ${key}`);
-  return v;
-}
 
 // re-export for downstream
 export { decryptTokenV2 };

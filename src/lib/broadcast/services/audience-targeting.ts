@@ -126,6 +126,72 @@ export async function resolveTargetContacts(
     const limit = audience.recentCount || 50;
     rawContacts = await fetchRecentLeads(tenantId, COLS, limit);
     sourceLabel = `Recently Added (Last ${limit})`;
+
+  } else if (audience.type === 'shopify_segment') {
+    // Resolve Shopify segment: pull matching shopify_customers, project down to
+    // their linked leads, then filter to leads WITH a phone. Merchants can
+    // combine total_spent, orders_count, recency and customer tag filters.
+    const seg = audience.shopifySegment || {};
+    let q = supabaseAdmin.from('shopify_customers')
+      .select('lead_id, orders_count, total_spent, tags, shopify_updated_at')
+      .eq('tenant_id', tenantId)
+      .not('lead_id', 'is', null);
+
+    if (seg.minTotalSpent != null && seg.minTotalSpent > 0) {
+      q = q.gte('total_spent', seg.minTotalSpent);
+    }
+    if (seg.minOrdersCount != null && seg.minOrdersCount > 0) {
+      q = q.gte('orders_count', seg.minOrdersCount);
+    }
+    if (seg.orderStatus === 'ordered') {
+      q = q.gt('orders_count', 0);
+    } else if (seg.orderStatus === 'no_order') {
+      q = q.eq('orders_count', 0);
+    }
+    if (seg.customerTag && seg.customerTag.trim().length > 0) {
+      q = q.contains('tags', [seg.customerTag.trim()]);
+    }
+
+    const { data: customerRows, error: shopErr } = await q.limit(50000);
+    if (shopErr) throw shopErr;
+
+    let leadIds = ((customerRows || []) as Array<{ lead_id: string | null }>).map(r => r.lead_id).filter((id): id is string => !!id);
+
+    // orderedWithinDays: intersect with shopify_orders in the window.
+    if (seg.orderedWithinDays != null && seg.orderedWithinDays > 0 && leadIds.length > 0) {
+      const cutoff = new Date(Date.now() - seg.orderedWithinDays * 24 * 60 * 60 * 1000).toISOString();
+      // Chunk the .in() so we don't blow the URL length ceiling on big shops.
+      // Naming matters: the .in() overflow guard requires the argument name to
+      // be `batch`, `chunk`, or `slice` to signal this is a bounded slice.
+      const chunkSize = 500;
+      const recentLeadSet = new Set<string>();
+      for (let i = 0; i < leadIds.length; i += chunkSize) {
+        const chunk = leadIds.slice(i, i + chunkSize);
+        const { data: orderRows, error: orderErr } = await supabaseAdmin.from('shopify_orders')
+          .select('lead_id')
+          .eq('tenant_id', tenantId)
+          .gte('shopify_created_at', cutoff)
+          .in('lead_id', chunk);
+        if (orderErr) throw orderErr;
+        for (const r of (orderRows || []) as Array<{ lead_id: string | null }>) {
+          if (r.lead_id) recentLeadSet.add(r.lead_id);
+        }
+      }
+      leadIds = leadIds.filter(id => recentLeadSet.has(id));
+    }
+
+    if (leadIds.length > 0) {
+      rawContacts = await fetchLeadsByIds(tenantId, COLS, leadIds);
+    }
+
+    const parts: string[] = [];
+    if (seg.orderStatus === 'ordered') parts.push('has ordered');
+    else if (seg.orderStatus === 'no_order') parts.push('never ordered');
+    if (seg.orderedWithinDays) parts.push(`ordered ≤ ${seg.orderedWithinDays}d`);
+    if (seg.minTotalSpent) parts.push(`spent ≥ ${seg.minTotalSpent}`);
+    if (seg.minOrdersCount) parts.push(`≥ ${seg.minOrdersCount} orders`);
+    if (seg.customerTag) parts.push(`tag "${seg.customerTag}"`);
+    sourceLabel = `Shopify Segment${parts.length ? ' → ' + parts.join(', ') : ''}`;
   }
 
   // Additive manual selections — contacts ADDED on top of the base targeting

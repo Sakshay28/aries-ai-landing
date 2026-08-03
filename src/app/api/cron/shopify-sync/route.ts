@@ -25,6 +25,35 @@ async function handler(req: NextRequest) {
   // crashed, function timed out). SKIP LOCKED means the reclaim is safe.
   const { data: reclaimed } = await supabaseAdmin.rpc('reclaim_stuck_shopify_jobs', { p_timeout_minutes: 10 });
 
+  // Prune expired order snapshots. snapshot_expires_at is stamped 90 days out
+  // at ingest time; anything past that is stale and only inflating egress. We
+  // don't count the row-limit precisely — Supabase caps deletes at 1000 rows
+  // per call by default, which is plenty for daily cleanup on a single shop.
+  let purgedOrders = 0;
+  try {
+    const { count } = await supabaseAdmin
+      .from('shopify_orders')
+      .delete({ count: 'exact' })
+      .lt('snapshot_expires_at', new Date().toISOString());
+    purgedOrders = count ?? 0;
+  } catch (err) {
+    console.warn('[shopify cron] order snapshot purge failed:', (err as Error).message);
+  }
+
+  // Prune old webhook idempotency rows too — the UNIQUE(webhook_id) index is
+  // small but the payload column is JSONB and adds up over months.
+  let purgedWebhookEvents = 0;
+  try {
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { count } = await supabaseAdmin
+      .from('shopify_webhook_events')
+      .delete({ count: 'exact' })
+      .lt('received_at', cutoff);
+    purgedWebhookEvents = count ?? 0;
+  } catch (err) {
+    console.warn('[shopify cron] webhook event purge failed:', (err as Error).message);
+  }
+
   const startedAt = Date.now();
   const totalTarget = 60;
   let processed = 0;
@@ -40,6 +69,8 @@ async function handler(req: NextRequest) {
     ok: true,
     processed,
     reclaimed_stuck: reclaimed ?? 0,
+    purged_order_snapshots: purgedOrders,
+    purged_webhook_events: purgedWebhookEvents,
     duration_ms: Date.now() - startedAt,
   });
 }
