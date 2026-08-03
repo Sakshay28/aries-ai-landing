@@ -9,7 +9,7 @@ import {
   PlayCircle, Code2, Paintbrush, Hourglass, FileText,
   ListChecks, Zap, MoreVertical, Pencil, Copy, Trash2,
   LayoutGrid, GitBranch, FileSignature, MousePointerClick,
-  CalendarCheck, Mail, Sliders, Tag, Globe,
+  CalendarCheck, Mail, Sliders, Tag, Globe, MapPin,
 } from "lucide-react";
 import { useFlowStore } from "../store";
 import { validateNode, type ValidationSeverity } from "../utils";
@@ -44,6 +44,7 @@ export const NODE_CATEGORY: Record<string, { color: string; label: string }> = {
   collect_data:  { color: '#F59E0B', label: 'COLLECT' },
   send_gallery:    { color: '#10B981', label: 'GALLERY' },
   send_buttons:    { color: '#10B981', label: 'BUTTONS' },
+  send_location:   { color: '#10B981', label: 'LOCATION' },
   button_trigger:  { color: '#3B82F6', label: 'BUTTON CLICK' },
   ctwa_trigger:    { color: '#1D6DDB', label: 'META AD CLICK' },
   intent_routing:  { color: '#8B5CF6', label: 'INTENT ROUTING' },
@@ -925,6 +926,22 @@ export const UpdateTagNode = React.memo(function UpdateTagNode({ id, data, selec
       <Handle type="source" position={Position.Bottom} id="output" isConnectable className="flow-handle flow-handle--green" />
       <Card id={id} selected={selected} color="#10B981" Icon={Tag} title={data.label || "Update Tag"}>
         <Badge label={data.tag || "Set tag..."} color="#10b981" />
+      </Card>
+    </Root>
+  );
+});
+
+export const SendLocationNode = React.memo(function SendLocationNode({ id, data, selected }: any) {
+  return (
+    <Root width={264}>
+      <Handle type="target" position={Position.Top} id="input" isConnectable className="flow-handle flow-handle--white" />
+      <Handle type="source" position={Position.Bottom} id="success" isConnectable className="flow-handle flow-handle--green" style={{ left: '28%' }} />
+      <Handle type="source" position={Position.Bottom} id="failure" isConnectable className="flow-handle flow-handle--red" style={{ left: '72%' }} />
+      <Card id={id} selected={selected} color="#10B981" Icon={MapPin} title={data.label || "Send Location"}
+        footer={<OutLabels items={[{ label: "SUCCESS", color: "#10b981", dir: "↙" }, { label: "FAILURE", color: "#ef4444", dir: "↘" }]} />}
+      >
+        <KV k="Name" v={data.locationName || "Store Name"} />
+        <KV k="Address" v={data.locationAddress || "Address"} />
       </Card>
     </Root>
   );

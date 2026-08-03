@@ -31,6 +31,7 @@ export const nodeCategories = [
       { id: "send_audio", type: "standard", icon: Mic, label: "Send Audio", desc: "Voice message" },
       { id: "send_buttons", type: "send_buttons", icon: LayoutGrid, label: "Interactive Buttons", desc: "Tap to reply" },
       { id: "send_list", type: "standard", icon: List, label: "List Menu", desc: "Scrollable options" },
+      { id: "send_location", type: "send_location", icon: MapPin, label: "Send Location", desc: "Native map card" },
       { id: "format", type: "format", icon: Paintbrush, label: "Format Response", desc: "Reshape output" },
       { id: "handoff", type: "handoff", icon: UserIcon, label: "Human Handoff", desc: "Transfer to agent" },
       { id: "assign_agent", type: "standard", icon: UserPlus, label: "Assign to Agent", desc: "Round-robin" },
@@ -158,6 +159,15 @@ export const getDefaultNodeData = (id: string) => {
         { id: "btn_1", label: "Option 1", value: "opt_1" },
         { id: "btn_2", label: "Option 2", value: "opt_2" },
       ],
+    },
+    send_location: {
+      label: "Send Location",
+      latitude: "",
+      longitude: "",
+      locationName: "",
+      locationAddress: "",
+      savedLocationId: "",
+      googleMapsUrl: "",
     },
     button_trigger: {
       label: "Button Click",

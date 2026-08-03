@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Settings2, Edit3, X, Layers, Code2, AlertTriangle } from "lucide-react";
+import { Settings2, Edit3, X, Layers, Code2, AlertTriangle, MapPin } from "lucide-react";
 import { useFlowStore } from "../store";
 import { NODE_CATEGORY } from "./CustomNodes";
 import { getUpstreamButtonsNode, getFlowVariables, validateNode, WA_LIMITS, type FlowVariable } from "../utils";
@@ -681,6 +681,10 @@ function ContentTab({
     return <FormFieldListConfig localData={localData} commitField={commitField} flushField={flushField} />;
   }
 
+  if (nodeType === "send_location") {
+    return <SendLocationConfig localData={localData} commitField={commitField} flushField={flushField} />;
+  }
+
   return (
     <div
       className="rounded-[12px] p-4"
@@ -734,6 +738,150 @@ function AdvancedTab({
         <WebhookAdvancedConfig nodeId={nodeIdStr} localData={localData} commitField={commitField} />
       )}
     </>
+  );
+}
+
+// ─── CONFIG COMPONENT: SEND LOCATION ─────────────────────────────────────────
+function SendLocationConfig({ localData, commitField, flushField }: { localData: Record<string, any>; commitField: (f: string, v: any) => void; flushField: (f: string, v: any) => void }) {
+  const [savedLocations, setSavedLocations] = useState<any[]>([]);
+  const [resolving, setResolving] = useState(false);
+  const [resolveError, setResolveError] = useState("");
+
+  useEffect(() => {
+    fetch('/api/locations')
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) setSavedLocations(data);
+        else if (data && Array.isArray(data.locations)) setSavedLocations(data.locations);
+      })
+      .catch(console.error);
+  }, []);
+
+  const handleResolveMapsLink = async () => {
+    const url = localData.googleMapsUrl;
+    if (!url) return;
+    setResolving(true);
+    setResolveError("");
+    try {
+      const res = await fetch('/api/locations/resolve-gmaps', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await res.json();
+      if (res.ok && data) {
+        if (data.latitude) { commitField('latitude', data.latitude); flushField('latitude', data.latitude); }
+        if (data.longitude) { commitField('longitude', data.longitude); flushField('longitude', data.longitude); }
+        if (data.name) { commitField('locationName', data.name); flushField('locationName', data.name); }
+        if (data.address) { commitField('locationAddress', data.address); flushField('locationAddress', data.address); }
+      } else {
+        setResolveError(data.error || "Failed to resolve link");
+      }
+    } catch (e) {
+      setResolveError("Failed to connect");
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  const isSavedSelected = !!localData.savedLocationId;
+  const lat = parseFloat(localData.latitude);
+  const lng = parseFloat(localData.longitude);
+  const latValid = !isNaN(lat) && lat >= -90 && lat <= 90;
+  const lngValid = !isNaN(lng) && lng >= -180 && lng <= 180;
+
+  const f1 = useFocusStyle();
+  const f2 = useFocusStyle();
+  const f3 = useFocusStyle();
+  const f4 = useFocusStyle();
+  const f5 = useFocusStyle();
+
+  return (
+    <div className="space-y-4">
+      <Field label="Use Saved Location">
+        <select 
+          value={localData.savedLocationId || ""} 
+          onChange={e => {
+            const val = e.target.value;
+            commitField("savedLocationId", val);
+            flushField("savedLocationId", val);
+            if (val) {
+              const loc = savedLocations.find(l => l.id === val);
+              if (loc) {
+                commitField("locationName", loc.name); flushField("locationName", loc.name);
+                commitField("locationAddress", loc.address); flushField("locationAddress", loc.address);
+                commitField("latitude", loc.latitude); flushField("latitude", loc.latitude);
+                commitField("longitude", loc.longitude); flushField("longitude", loc.longitude);
+              }
+            }
+          }}
+          className={SELECT_CLS} style={INP_STYLE}
+        >
+          <option value="">-- Manual Entry --</option>
+          {savedLocations.map(l => (
+            <option key={l.id} value={l.id}>{l.name}</option>
+          ))}
+        </select>
+      </Field>
+
+      <div style={{ opacity: isSavedSelected ? 0.5 : 1, pointerEvents: isSavedSelected ? 'none' : 'auto' }} className="space-y-4">
+        <Field label="Google Maps URL (Optional)">
+          <div className="flex gap-2">
+            <input 
+              type="text" 
+              value={localData.googleMapsUrl || ""} 
+              onChange={e => commitField("googleMapsUrl", e.target.value)} 
+              onBlur={e => flushField("googleMapsUrl", e.target.value)}
+              placeholder="https://maps.app.goo.gl/..." 
+              className={INPUT_CLS + " flex-1"} 
+              style={f1.style}
+              onFocus={f1.onFocus}
+            />
+            <button 
+              onClick={handleResolveMapsLink} 
+              disabled={resolving || !localData.googleMapsUrl}
+              style={{ ...BTN_STYLE, opacity: resolving || !localData.googleMapsUrl ? 0.5 : 1 }}
+            >
+              {resolving ? "Resolving..." : "Resolve"}
+            </button>
+          </div>
+          {resolveError && <p className="text-[10px] text-red-400 mt-1">{resolveError}</p>}
+        </Field>
+
+        <Field label="Location Name *">
+          <input type="text" value={localData.locationName || ""} onChange={e => commitField("locationName", e.target.value)} onBlur={e => flushField("locationName", e.target.value)} placeholder="Store Name" className={INPUT_CLS} style={f2.style} onFocus={f2.onFocus} />
+        </Field>
+        
+        <Field label="Address *">
+          <input type="text" value={localData.locationAddress || ""} onChange={e => commitField("locationAddress", e.target.value)} onBlur={e => flushField("locationAddress", e.target.value)} placeholder="123 Main St, City" className={INPUT_CLS} style={f3.style} onFocus={f3.onFocus} />
+        </Field>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Latitude *">
+            <input type="number" step="any" value={localData.latitude || ""} onChange={e => commitField("latitude", e.target.value)} onBlur={e => flushField("latitude", e.target.value)} placeholder="e.g. 37.7749" className={INPUT_CLS} style={{ ...(f4.style), borderColor: localData.latitude && !latValid ? '#ef4444' : f4.style.borderColor }} onFocus={f4.onFocus} />
+          </Field>
+          <Field label="Longitude *">
+            <input type="number" step="any" value={localData.longitude || ""} onChange={e => commitField("longitude", e.target.value)} onBlur={e => flushField("longitude", e.target.value)} placeholder="e.g. -122.4194" className={INPUT_CLS} style={{ ...(f5.style), borderColor: localData.longitude && !lngValid ? '#ef4444' : f5.style.borderColor }} onFocus={f5.onFocus} />
+          </Field>
+        </div>
+      </div>
+
+      <Field label="Preview">
+        <div className="rounded-[12px] p-3 flex items-start gap-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+          <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(16,185,129,0.15)", color: "#10b981" }}>
+            <MapPin className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h4 className="text-[13px] font-semibold text-white truncate">{localData.locationName || "Location Name"}</h4>
+            <p className="text-[11px] mt-0.5 truncate" style={{ color: "rgba(255,255,255,0.6)" }}>{localData.locationAddress || "Address"}</p>
+            <p className="text-[10px] mt-1 font-mono" style={{ color: "rgba(255,255,255,0.4)" }}>
+              {localData.latitude || "Lat"}, {localData.longitude || "Lng"}
+            </p>
+            <button className="mt-2 text-[11px] font-medium" style={{ color: "#3b82f6" }}>Open in Google Maps</button>
+          </div>
+        </div>
+      </Field>
+    </div>
   );
 }
 

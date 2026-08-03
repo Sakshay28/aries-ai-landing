@@ -37,6 +37,7 @@ import type { Tenant } from '@/lib/types';
 import { getFlowVariables } from './variables';
 import { logTrace, logFlowExecution, type FlowExecutionLog } from '@/lib/observability/trace';
 import { triggerEscalationAlert } from '@/lib/whatsapp/businessNotify';
+import { sendLocationToWhatsApp } from '@/lib/location/service';
 
 // ── Types ────────────────────────────────────────────────────
 interface FlowNode {
@@ -97,6 +98,7 @@ interface ExecContext {
   variables: Record<string, unknown>; // inter-node data bag — persisted across wait_for_reply
   dryRun?:  boolean;       // if true: skip all side-effects (no WhatsApp sends, no DB writes)
   trace?:   TraceStep[];   // populated during dry-run to describe what would happen
+  flowId?:  string;        // active flow ID for analytics
 }
 
 // ── Fuzzy keyword match: word-boundary aware ─────────────────
@@ -535,6 +537,9 @@ async function executeFlowGraph(
   startId: string,
   flowMeta?: { id: string; updatedAt?: string }
 ): Promise<boolean> {
+  if (flowMeta?.id) {
+    ctx.flowId = flowMeta.id;
+  }
   let messageSent = false;
   let currentId: string | null = startId;
   const visited = new Set<string>();
@@ -960,10 +965,80 @@ async function executeNode(
     }
   }
 
+  // ── Send Native Location Message ──────────────────────────
+  if (type === 'send_location') {
+    let latVal = Number(interpolate(String(node.data?.latitude || ''), ctx));
+    let lngVal = Number(interpolate(String(node.data?.longitude || ''), ctx));
+    let nameVal = interpolate(String(node.data?.locationName || ''), ctx);
+    let addrVal = interpolate(String(node.data?.locationAddress || ''), ctx);
+    const savedLocationId = node.data?.savedLocationId ? String(node.data.savedLocationId) : undefined;
+
+    if (savedLocationId) {
+      try {
+        const { data: savedLoc } = await supabaseAdmin
+          .from('saved_locations')
+          .select('*')
+          .eq('id', savedLocationId)
+          .maybeSingle();
+        if (savedLoc) {
+          latVal = savedLoc.latitude;
+          lngVal = savedLoc.longitude;
+          nameVal = savedLoc.name;
+          addrVal = savedLoc.address;
+        }
+      } catch (dbErr) {
+        console.error('Flow engine: failed to load saved location:', dbErr);
+      }
+    }
+
+    if (ctx.dryRun) {
+      ctx.trace?.push({
+        nodeId: node.id,
+        nodeType: type,
+        action: 'send_location',
+        payload: `Location: ${nameVal} (${latVal}, ${lngVal})`,
+        variables: { ...ctx.variables },
+        nextId: getNextNode(node.id, null, edges)
+      });
+      return { nextId: getNextNode(node.id, null, edges), sent: true };
+    }
+
+    try {
+      const sendCtx = {
+        tenantId: ctx.tenantId,
+        phone: ctx.phone,
+        conversationId: ctx.conversationId,
+        accessToken: ctx.accessToken,
+        phoneNumberId: ctx.phoneNumberId,
+        source: 'flow' as const,
+        flowId: ctx.flowId
+      };
+
+      const result = await sendLocationToWhatsApp(
+        sendCtx,
+        {
+          latitude: latVal,
+          longitude: lngVal,
+          name: nameVal || 'Location',
+          address: addrVal || 'Address'
+        },
+        savedLocationId
+      );
+
+      if (!result.success) {
+        throw new Error(result.error || 'Meta dispatch rejected');
+      }
+
+      return { nextId: getNextNode(node.id, 'success', edges) || getNextNode(node.id, null, edges), sent: true };
+    } catch (e) {
+      console.error(`Flow engine: sendLocationToWhatsApp failed for node ${node.id}:`, (e as Error).message);
+      return { nextId: getNextNode(node.id, 'failure', edges) || getNextNode(node.id, 'error', edges) || getNextNode(node.id, null, edges) };
+    }
+  }
+
   // ── Send Text Message ─────────────────────────────────────
   if (
     type === 'standard' ||
-    type === 'send_location' ||
     type === 'collect_input' ||
     type === 'ask_question'
   ) {
