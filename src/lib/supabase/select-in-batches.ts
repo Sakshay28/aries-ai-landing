@@ -56,3 +56,32 @@ export async function selectInBatches<T>(
   }
   return out;
 }
+
+/**
+ * The UPDATE/DELETE counterpart of {@link selectInBatches}. `UPDATE … .in('id', ids)`
+ * and `DELETE … .in('id', ids)` hit the exact same URL-length 400 for large id
+ * lists, so a bulk write silently no-ops. This runs the write one safe chunk at a
+ * time and THROWS on any batch error (the write must never partially/​silently fail).
+ *
+ * @param ids      the full list of ids to operate on
+ * @param runBatch runs one `.in(...)` write for a chunk; returns supabase-js's `{ error }`
+ * @param batchSize max ids per statement (default 200)
+ * @throws         if ANY batch returns an error
+ */
+export async function runInBatches(
+  ids: string[],
+  runBatch: (batch: string[]) => PromiseLike<{ error: { message: string } | null }>,
+  batchSize: number = DEFAULT_IN_BATCH_SIZE,
+): Promise<void> {
+  if (batchSize < 1) throw new Error('runInBatches: batchSize must be >= 1');
+  for (let i = 0; i < ids.length; i += batchSize) {
+    const batch = ids.slice(i, i + batchSize);
+    if (batch.length === 0) continue;
+    const { error } = await runBatch(batch);
+    if (error) {
+      throw new Error(
+        `runInBatches: batch ${i}–${i + batch.length} of ${ids.length} failed: ${error.message}`,
+      );
+    }
+  }
+}

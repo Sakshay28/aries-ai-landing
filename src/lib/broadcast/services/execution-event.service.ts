@@ -53,6 +53,43 @@ export class ExecutionEventService {
   }
 
   /**
+   * Like logEvent, but suppresses duplicates: if an event of the same type for
+   * the same campaign already exists within `windowMs`, nothing is inserted.
+   *
+   * For states that are re-evaluated on every cron tick — e.g. a quiet-hours hold
+   * that re-fires every 10 minutes until 9 AM — this keeps the timeline to ONE
+   * entry per hold instead of one per tick. `windowMs` should comfortably exceed
+   * the state's duration (the 9 PM–9 AM quiet window is at most 12h).
+   */
+  static async logEventOnce(
+    tenantId: string,
+    campaignId: string,
+    eventType: string,
+    title: string,
+    description: string,
+    severity: 'info' | 'warning' | 'error' | 'success' = 'info',
+    windowMs: number = 12 * 60 * 60 * 1000,
+    metadata: Record<string, any> = {}
+  ): Promise<ExecutionEvent | null> {
+    try {
+      const since = new Date(Date.now() - windowMs).toISOString();
+      const { data: existing } = await supabaseAdmin
+        .from('broadcast_execution_events')
+        .select('id')
+        .eq('campaign_id', campaignId)
+        .eq('event_type', eventType)
+        .gte('created_at', since)
+        .limit(1)
+        .maybeSingle();
+      if (existing) return null;
+    } catch {
+      // If the existence check itself fails, fall through and log — a rare
+      // duplicate is strictly better than a silently missing timeline entry.
+    }
+    return this.logEvent(tenantId, campaignId, eventType, title, description, severity, metadata);
+  }
+
+  /**
    * Fetches the complete chronological history of events for a specific campaign.
    */
   static async getTimeline(campaignId: string): Promise<ExecutionEvent[]> {

@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin }             from '@/lib/supabase/admin';
 import { getTenantId }               from '@/lib/auth/getTenantId';
+import { selectInBatches }           from '@/lib/supabase/select-in-batches';
 
 const BATCH_LIMIT = 1000; // max per call — well above typical tenant size
 
@@ -44,13 +45,19 @@ export async function POST(_req: NextRequest) {
   const leadIds = leads.map(l => l.id);
 
   // ── 2. Get the most recent conversation_id for each lead ──────────────────
-  const { data: convRows, error: convErr } = await supabaseAdmin
-    .from('conversations')
-    .select('id, lead_id, created_at')
-    .in('lead_id', leadIds)
-    .order('created_at', { ascending: false });
-
-  if (convErr) {
+  // Batched: leadIds can reach BATCH_LIMIT (1000), and a single .in() of that
+  // size 400s in PostgREST. Each lead's conversations land in exactly one batch,
+  // so the per-lead "first row wins" ordering below still holds.
+  let convRows: Array<{ id: string; lead_id: string; created_at: string }>;
+  try {
+    convRows = await selectInBatches(leadIds, (batch) =>
+      supabaseAdmin
+        .from('conversations')
+        .select('id, lead_id, created_at')
+        .in('lead_id', batch)
+        .order('created_at', { ascending: false })
+    );
+  } catch (convErr: any) {
     return NextResponse.json({ error: convErr.message }, { status: 500 });
   }
 

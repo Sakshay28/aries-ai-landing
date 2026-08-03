@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { normalizePhone } from '@/lib/utils/phone';
+import { selectInBatches } from '@/lib/supabase/select-in-batches';
 
 const checkSchema = z.object({
   phones: z.array(z.string().trim()),
@@ -36,14 +37,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, duplicates: [] });
     }
 
-    // Query database for existing matches scoped to this tenant in a single batch query
-    const { data, error } = await supabaseAdmin
-      .from('leads')
-      .select('id, phone')
-      .eq('tenant_id', tenantId)
-      .in('phone', normalizedPhones);
-
-    if (error) {
+    // Query database for existing matches scoped to this tenant. Chunked: an
+    // import can carry thousands of phones and a single .in() of that size 400s
+    // in PostgREST — which previously made the whole list look duplicate-free
+    // and silently re-imported existing contacts.
+    let data: Array<{ id: string; phone: string }>;
+    try {
+      data = await selectInBatches(normalizedPhones as string[], (batch) =>
+        supabaseAdmin.from('leads').select('id, phone').eq('tenant_id', tenantId).in('phone', batch)
+      );
+    } catch (error) {
       console.error('POST /api/dashboard/contacts/import/check error:', error);
       return NextResponse.json({ success: false, message: 'Database error checking duplicates.' }, { status: 500 });
     }

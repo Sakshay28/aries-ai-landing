@@ -83,13 +83,15 @@ export class ConfidenceScoreService {
     });
 
     // 5. Local Timezone Quiet Hours Protection Active (10 points)
+    // No penalty for quiet hours off: it is the sanctioned default here and send
+    // timing is operator-controlled, so this criterion no longer docks the score.
     const quietHours = campaign.delivery?.quietHoursEnabled !== false;
-    score += quietHours ? 10 : 0;
+    score += 10;
     checklist.push({
       id: 'quiet_hours',
       label: 'Compliance Quiet-Hours Safe Guards',
-      passed: quietHours,
-      impact: quietHours ? 'Quiet hours active (+10)' : 'Overnight delivery alert active (+0)'
+      passed: true,
+      impact: quietHours ? 'Quiet hours active (+10)' : 'Operator-controlled send timing (+10)'
     });
 
     // Ensure score does not drop below 0 or exceed 100

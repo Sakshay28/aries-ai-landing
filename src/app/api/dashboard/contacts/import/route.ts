@@ -6,6 +6,7 @@ import { sanitizeInput, isValidEmail } from '@/lib/utils/safety';
 import { normalizePhone, isValidPhone } from '@/lib/utils/phone';
 import { cleanContactName } from '@/lib/broadcast/recipient-name';
 import { computeColdStartBaseline } from '@/lib/scoring/cold-start';
+import { selectInBatches } from '@/lib/supabase/select-in-batches';
 
 const MAX_ROWS = 5_000;
 
@@ -234,14 +235,20 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 4. De-duplicate Against DB Scopes ──
-    const candidatePhones = Array.from(candidateMap.keys());
-    const { data: existingLeads, error: existingErr } = await supabaseAdmin
-      .from('leads')
-      .select('id, phone, name, email, notes, channel')
-      .eq('tenant_id', tenantId)
-      .in('phone', candidatePhones);
-
-    if (existingErr) {
+    // Chunked: candidatePhones can reach MAX_ROWS (5000). A single .in() of that
+    // size 400s in PostgREST, which would make every row look new and re-import
+    // existing contacts as duplicates — so this must fail loud, not silently.
+    const candidatePhones = Array.from(candidateMap.keys()) as string[];
+    let existingLeads: Array<{ id: string; phone: string; name: string | null; email: string | null; notes: string | null; channel: string | null }>;
+    try {
+      existingLeads = await selectInBatches(candidatePhones, (batch) =>
+        supabaseAdmin
+          .from('leads')
+          .select('id, phone, name, email, notes, channel')
+          .eq('tenant_id', tenantId)
+          .in('phone', batch)
+      );
+    } catch (existingErr) {
       console.error('Import dedup query error:', existingErr);
       return NextResponse.json({ success: false, message: 'Database error during duplicate resolution.' }, { status: 500 });
     }
