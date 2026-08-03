@@ -29,7 +29,6 @@ const BATCHED_ARGS = new Set(['batch', 'chunk', 'slice']);
 
 // key = "<repo-relative path>::<argument identifier>"  →  reason it is bounded.
 const ALLOWLIST: Record<string, string> = {
-  'src/app/api/restaurant/bookings/import/route.ts::providedSlotIds': 'slot ids from one import — a venue has a few dozen slots',
   'src/app/api/admin/provision/route.ts::ids': 'admin acting on a handful of tenant ids',
   'src/app/api/admin/approvals/route.ts::ids': 'admin acting on a handful of tenant ids',
   'src/app/api/dashboard/conversations/route.ts::convIds': 'bounded by .limit(Math.min(limit,50))',
@@ -38,7 +37,6 @@ const ALLOWLIST: Record<string, string> = {
   'src/app/api/dashboard/notifications/route.ts::ids': 'notification ids from one page/selection',
   'src/app/api/data-deletion/route.ts::tenantIds': 'deletes a specific tenant (usually one)',
   'src/app/api/webhooks/whatsapp/route.ts::dupeIds': 'duplicate conversations for ONE contact — tiny',
-  'src/app/api/cron/restaurant/route.ts::tenantIds': 'restaurant tenants — bounded by client count (revisit >200)',
   'src/app/api/cron/ai-scoring/route.ts::jobIds': 'bounded by BATCH_SIZE = 3',
   'src/lib/webhook/coexistence.ts::dupeIds': 'duplicate conversations for ONE contact — tiny',
   'src/lib/followup/engine.ts::ids': 'bounded by .limit(200) hard cap per call',

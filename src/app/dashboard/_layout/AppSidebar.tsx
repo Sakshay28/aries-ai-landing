@@ -19,17 +19,10 @@ import {
   Settings,
   Bot,
   Activity,
-  CalendarDays,
-  UtensilsCrossed,
-  CalendarX,
-  Clock,
-  ListOrdered,
-  ContactRound,
   Radar,
   Target,
   ShieldCheck,
   UserPlus,
-  LayoutGrid,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -75,14 +68,6 @@ export default function AppSidebar({ userEmail, modules = [], businessType = "",
   const { isOpen, isMobileOpen, toggle, setMobileOpen } = useSidebar();
   const pathname = usePathname();
 
-  // Restaurant section shows automatically when business_type is any food/hospitality type.
-  // Also shows if explicitly granted via modules array (for edge cases).
-  // No manual SQL or config needed — just set business_type correctly at signup.
-  const RESTAURANT_TYPES = ["restaurant", "cafe", "food", "bakery", "bar", "bistro", "dhaba", "hotel", "eatery", "kitchen", "diner"];
-  const hasRestaurant =
-    modules.includes("restaurant_reservations") ||
-    RESTAURANT_TYPES.some((t) => businessType.toLowerCase().includes(t));
-
   const isActive = (href: string) =>
     href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href);
 
@@ -100,7 +85,6 @@ export default function AppSidebar({ userEmail, modules = [], businessType = "",
         initials={initials}
         userEmail={userEmail}
         displayName={displayName}
-        hasRestaurant={hasRestaurant}
         isPlatformAdmin={isPlatformAdmin}
       />
 
@@ -119,7 +103,6 @@ export default function AppSidebar({ userEmail, modules = [], businessType = "",
           initials={initials}
           userEmail={userEmail}
           displayName={displayName}
-          hasRestaurant={hasRestaurant}
           isPlatformAdmin={isPlatformAdmin}
         />
       </aside>
@@ -135,7 +118,6 @@ function DesktopSidebar(props: {
   initials: string;
   userEmail?: string;
   displayName: string;
-  hasRestaurant: boolean;
   isPlatformAdmin: boolean;
 }) {
   return (
@@ -150,7 +132,6 @@ function DesktopSidebar(props: {
         initials={props.initials}
         userEmail={props.userEmail}
         displayName={props.displayName}
-        hasRestaurant={props.hasRestaurant}
         isPlatformAdmin={props.isPlatformAdmin}
       />
     </aside>
@@ -164,7 +145,6 @@ function SidebarBody({
   initials,
   userEmail,
   displayName,
-  hasRestaurant,
   isPlatformAdmin,
 }: {
   isOpen: boolean;
@@ -173,7 +153,6 @@ function SidebarBody({
   initials: string;
   userEmail?: string;
   displayName: string;
-  hasRestaurant: boolean;
   isPlatformAdmin: boolean;
 }) {
   const pathname = usePathname();
@@ -247,60 +226,6 @@ function SidebarBody({
         {navigationItems.map((item) => (
           <NavButton key={item.label} item={item} isOpen={isOpen} isActive={isActive(item.href)} userPlan={plan} />
         ))}
-
-        {/* Restaurant section — module-gated */}
-        {hasRestaurant && (
-          <>
-            {isOpen && (
-              <p className="mt-4 mb-1 px-3 text-[10px] font-bold tracking-widest text-muted-foreground/60 uppercase select-none">
-                Restaurant
-              </p>
-            )}
-            {!isOpen && <div className="my-2 border-t border-sidebar-border/40" />}
-            <NavButton
-              item={{ label: "Overview", icon: CalendarDays, href: "/dashboard/restaurant" }}
-              isOpen={isOpen}
-              isActive={isActive("/dashboard/restaurant")}
-              userPlan={plan}
-            />
-            <NavButton
-              item={{ label: "Tables", icon: LayoutGrid, href: "/dashboard/restaurant/tables" }}
-              isOpen={isOpen}
-              isActive={isActive("/dashboard/restaurant/tables")}
-              userPlan={plan}
-            />
-            <NavButton
-              item={{ label: "Bookings", icon: UtensilsCrossed, href: "/dashboard/restaurant/bookings" }}
-              isOpen={isOpen}
-              isActive={isActive("/dashboard/restaurant/bookings")}
-              userPlan={plan}
-            />
-            <NavButton
-              item={{ label: "Slot Management", icon: Clock, href: "/dashboard/restaurant/slots" }}
-              isOpen={isOpen}
-              isActive={isActive("/dashboard/restaurant/slots")}
-              userPlan={plan}
-            />
-            <NavButton
-              item={{ label: "Guests", icon: ContactRound, href: "/dashboard/restaurant/guests" }}
-              isOpen={isOpen}
-              isActive={isActive("/dashboard/restaurant/guests")}
-              userPlan={plan}
-            />
-            <NavButton
-              item={{ label: "Waitlist", icon: ListOrdered, href: "/dashboard/restaurant/waitlist" }}
-              isOpen={isOpen}
-              isActive={isActive("/dashboard/restaurant/waitlist")}
-              userPlan={plan}
-            />
-            <NavButton
-              item={{ label: "Block Dates", icon: CalendarX, href: "/dashboard/restaurant/blocked-dates" }}
-              isOpen={isOpen}
-              isActive={isActive("/dashboard/restaurant/blocked-dates")}
-              userPlan={plan}
-            />
-          </>
-        )}
 
       </nav>
 
