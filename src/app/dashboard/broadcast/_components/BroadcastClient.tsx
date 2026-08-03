@@ -292,7 +292,7 @@ function AnalyticsPanel({ campaign, onClose }: { campaign: Campaign; onClose: ()
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: '100%', opacity: 0 }}
       transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-      className="fixed inset-y-0 right-0 w-full sm:w-[480px] bg-card border-l border-border shadow-2xl z-50 flex flex-col"
+      className="fixed inset-y-0 right-0 w-full sm:w-[480px] bg-white dark:bg-card border-l border-border shadow-2xl z-50 flex flex-col will-change-transform"
     >
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/60 shrink-0">

@@ -200,7 +200,7 @@ export function ContactPickerDrawer({
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 260 }}
-            className="fixed inset-y-0 right-0 w-full sm:w-[520px] bg-card border-l border-border shadow-2xl z-50 flex flex-col overflow-hidden"
+            className="fixed inset-y-0 right-0 w-full sm:w-[520px] bg-white dark:bg-card border-l border-border shadow-2xl z-50 flex flex-col overflow-hidden will-change-transform"
           >
             {/* Drawer Header */}
             <div className="px-6 py-4.5 border-b border-border/45 flex items-center justify-between shrink-0">
