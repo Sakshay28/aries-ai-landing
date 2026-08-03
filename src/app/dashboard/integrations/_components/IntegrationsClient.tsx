@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle2, ArrowRight, CreditCard, Truck, FileSpreadsheet, Briefcase, Webhook, X, Loader2, AlertCircle, ExternalLink, Unplug, CalendarCheck, RefreshCw, Zap } from 'lucide-react';
+import { CheckCircle2, ArrowRight, CreditCard, Truck, FileSpreadsheet, Briefcase, Webhook, X, Loader2, AlertCircle, ExternalLink, Unplug, CalendarCheck, RefreshCw, Zap, ShoppingBag } from 'lucide-react';
 import { toast } from 'sonner';
 
 // ── Integration definitions ──────────────────────────────────
@@ -44,6 +44,26 @@ interface IntegrationDef {
 }
 
 const INTEGRATIONS: IntegrationDef[] = [
+  {
+    id: 'shopify',
+    name: 'Shopify',
+    description: 'Connect a Shopify Custom App to sync your catalog, orders, and customers — powers AI shopping, order tracking, and broadcasts.',
+    icon: ShoppingBag,
+    color: 'text-[#95BF47]',
+    bgColor: 'bg-[#95BF47]/10',
+    docsUrl: 'https://help.shopify.com/en/manual/apps/app-types/custom-apps',
+    eventBadges: ['Catalog sync', 'Order updates', 'Abandoned carts', 'Customer sync'],
+    fields: [],
+    isRedirect: true,
+    redirectUrl: '/dashboard/integrations/shopify',
+    redirectLabel: 'Open Shopify integration',
+    redirectBullets: [
+      'AI answers product, price, stock, policy and order-tracking questions on WhatsApp',
+      'Automated order confirmations, shipping updates, and abandoned-cart recovery',
+      'Full catalog + collections + customers + orders + policies + FAQs synced locally',
+      'Real-time updates via webhooks (HMAC-verified, idempotent)',
+    ],
+  },
   {
     id: 'google_sheets',
     name: 'Google Sheets',
