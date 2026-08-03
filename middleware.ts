@@ -29,6 +29,12 @@ export async function middleware(request: NextRequest) {
   forwardedHeaders.set('x-brand', brand);
   forwardedHeaders.set('x-pathname', pathname);
 
+  // SECURITY: always strip any client-supplied trust headers before we might set
+  // our own below. Without this, an unauthenticated request could hand itself
+  // someone else's user id and have it trusted by downstream handlers.
+  forwardedHeaders.delete('x-verified-user-id');
+  forwardedHeaders.delete('x-verified-user-email');
+
   // Rewrite Libra root requests to the dedicated /libra landing.
   // (Aries keeps the root path so existing links/SEO are unchanged.)
   if (brand === 'libra' && pathname === '/') {
@@ -132,11 +138,33 @@ export async function middleware(request: NextRequest) {
     return redirectResponse;
   }
 
-  // Auth route but already logged in → redirect to dashboard
-  if (isAuthRoute && user) {
+  // Signup while already logged in still bounces to dashboard — no reason to
+  // let someone start a second signup mid-session.
+  //
+  // /login is different: people land there deliberately to switch accounts
+  // (e.g. signing in with a different Google account than the one already
+  // active on this browser). Silently redirecting them straight back to
+  // /dashboard here is what actually causes the confusing "I signed in as a
+  // different account but landed on my old one" report — the Google flow
+  // never even got a chance to run. So /login renders normally and shows its
+  // own "already signed in as X" banner instead (see x-verified-user-email
+  // below), letting the user explicitly continue or log out and switch.
+  if (pathname.startsWith('/signup') && user) {
     const redirectResponse = NextResponse.redirect(new URL('/dashboard', request.url));
     copyHardenedCookies(redirectResponse);
     return redirectResponse;
+  }
+
+  // Forward the identity we just verified so downstream layouts/route handlers
+  // (dashboard layout, getTenantId()) can skip a second Supabase Auth round trip
+  // per request. Headers were already stripped above, so this is the only place
+  // they can be (re-)populated — never from client input.
+  if (user) {
+    forwardedHeaders.set('x-verified-user-id', user.id);
+    forwardedHeaders.set('x-verified-user-email', user.email ?? '');
+    const enrichedResponse = NextResponse.next({ request: { headers: forwardedHeaders } });
+    copyHardenedCookies(enrichedResponse);
+    response = enrichedResponse;
   }
 
   // Admin routes: require is_platform_admin in addition to authentication.
