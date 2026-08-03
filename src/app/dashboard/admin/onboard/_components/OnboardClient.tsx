@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { UserPlus, Building2, Search, Save, CheckCircle2, AlertCircle, LogIn, RefreshCw, Clock, XCircle, ShieldAlert } from 'lucide-react';
+import { UserPlus, Building2, Search, Save, CheckCircle2, AlertCircle, LogIn, RefreshCw, Clock, XCircle, ShieldAlert, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 type TenantRow = {
@@ -122,6 +122,7 @@ export function OnboardClient() {
   const [loadingTenant, setLoadingTenant] = useState(false);
   const [saving, setSaving] = useState(false);
   const [impersonating, setImpersonating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [parentTenantId, setParentTenantId] = useState<string>('');
   const [templates, setTemplates] = useState<TemplateMap>({});
   const [provisioningTemplates, setProvisioningTemplates] = useState(false);
@@ -309,6 +310,46 @@ export function OnboardClient() {
     }
   };
 
+  const deleteClient = async () => {
+    if (!selectedId) return;
+    const current = tenants.find(t => t.id === selectedId);
+    const name = ((form.business_name as string) || current?.business_name || 'Unnamed').trim();
+    const typed = window.prompt(
+      `⚠️ PERMANENTLY delete "${name}"?\n\n` +
+        `This wipes the tenant and ALL its data — messages, conversations, leads, ` +
+        `bookings, broadcasts — and cannot be undone.\n\n` +
+        `Type the business name exactly to confirm:`
+    );
+    if (typed === null) return; // cancelled
+    if (typed.trim() !== name) {
+      toast.error('Name did not match — deletion cancelled.');
+      return;
+    }
+    setDeleting(true);
+    try {
+      const res = await fetch('/api/admin/provision', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: selectedId, confirm_name: typed.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`"${name}" deleted permanently`);
+        setTenants(prev => prev.filter(t => t.id !== selectedId));
+        setSelectedId(null);
+        setForm({});
+        setOwnerEmail('');
+        setTemplates({});
+      } else {
+        toast.error(data.error || 'Delete failed');
+      }
+    } catch {
+      toast.error('Delete failed');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const allTemplatesApproved = Object.keys(TEMPLATE_LABELS).length > 0 &&
     Object.keys(TEMPLATE_LABELS).every(k => templates[k]?.status === 'APPROVED');
   const anyTemplateRestricted = Object.values(templates).some(t => t.status === 'FAILED');
@@ -389,21 +430,36 @@ export function OnboardClient() {
             <div className="h-full flex items-center justify-center text-sm text-muted-foreground">Loading client…</div>
           ) : (
             <div className="max-w-[680px] mx-auto w-full space-y-8">
-              {ownerEmail && (
-                <div className="flex items-center justify-between gap-4">
-                  <div className="text-xs text-muted-foreground">
-                    Editing tenant owned by <span className="font-medium text-foreground">{ownerEmail}</span>
-                  </div>
+              <div className="flex items-center justify-between gap-4">
+                <div className="text-xs text-muted-foreground">
+                  {ownerEmail ? (
+                    <>Editing tenant owned by <span className="font-medium text-foreground">{ownerEmail}</span></>
+                  ) : (
+                    'Editing tenant'
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {ownerEmail && (
+                    <button
+                      onClick={loginAsClient}
+                      disabled={impersonating}
+                      className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                    >
+                      <LogIn className="w-3.5 h-3.5" />
+                      {impersonating ? 'Redirecting…' : 'Login as client'}
+                    </button>
+                  )}
                   <button
-                    onClick={loginAsClient}
-                    disabled={impersonating}
-                    className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 shrink-0"
+                    onClick={deleteClient}
+                    disabled={deleting}
+                    title="Permanently delete this client and all its data"
+                    className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
                   >
-                    <LogIn className="w-3.5 h-3.5" />
-                    {impersonating ? 'Redirecting…' : 'Login as client'}
+                    <Trash2 className="w-3.5 h-3.5" />
+                    {deleting ? 'Deleting…' : 'Delete client'}
                   </button>
                 </div>
-              )}
+              </div>
 
               {/* ── WhatsApp Alert Templates ── */}
               <section className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">

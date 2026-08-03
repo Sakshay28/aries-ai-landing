@@ -10,6 +10,7 @@
 //   GET  /api/admin/provision              → list all tenants
 //   GET  /api/admin/provision?tenant_id=X  → one tenant's settings (masked)
 //   PATCH /api/admin/provision             → update tenant X's fields
+//   DELETE /api/admin/provision            → hard-delete tenant X (+ all data)
 // ═══════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -19,6 +20,7 @@ import { encryptToken } from '@/lib/utils/crypto';
 import { invalidateTenantAllCaches } from '@/lib/tenant/manager';
 import { trimCredentialFields } from '@/lib/utils/credentials';
 import { logAudit } from '@/lib/audit/logger';
+import { notifyAdmin } from '@/lib/alerts/admin';
 
 const forbidden = () => NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
@@ -193,4 +195,81 @@ export async function PATCH(req: NextRequest) {
   });
 
   return NextResponse.json({ success: true });
+}
+
+// ═══════════════════════════════════════════════════════════
+// 🗑️ Hard-delete a tenant and everything it owns.
+// ═══════════════════════════════════════════════════════════
+// Irreversible. Every child table FK references tenants ON DELETE CASCADE,
+// so removing the row cascades messages/conversations/leads/bookings/
+// broadcasts/etc. We additionally clean up the orphaned Supabase auth.users
+// logins for that tenant's members — but never the acting admin's own login,
+// and never any platform admin's login (they may belong to other tenants).
+//
+// Guard: the caller must echo back the exact business_name in `confirm_name`,
+// so a stray request can't nuke the wrong tenant.
+export async function DELETE(req: NextRequest) {
+  const me = await getCurrentUser();
+  if (!me?.is_platform_admin) return forbidden();
+
+  const body = await req.json().catch(() => null);
+  const tenantId = body?.tenant_id;
+  if (!tenantId || typeof tenantId !== 'string') {
+    return NextResponse.json({ success: false, error: 'tenant_id is required' }, { status: 400 });
+  }
+
+  // Load the tenant so we can (a) confirm it exists and (b) verify the name echo.
+  const { data: tenant } = await supabaseAdmin
+    .from('tenants')
+    .select('id, business_name')
+    .eq('id', tenantId)
+    .single();
+  if (!tenant) {
+    return NextResponse.json({ success: false, error: 'Tenant not found' }, { status: 404 });
+  }
+
+  // Typed-name confirmation — the client sends what the admin typed. Compare
+  // trimmed; treat an unnamed tenant's expected value as the literal 'Unnamed'.
+  const expected = (tenant.business_name || 'Unnamed').trim();
+  if (typeof body?.confirm_name !== 'string' || body.confirm_name.trim() !== expected) {
+    return NextResponse.json(
+      { success: false, error: `Confirmation text must exactly match the business name ("${expected}").` },
+      { status: 400 },
+    );
+  }
+
+  // Capture the tenant's auth logins BEFORE the cascade removes public.users.
+  const { data: members } = await supabaseAdmin
+    .from('users')
+    .select('id, email, is_platform_admin')
+    .eq('tenant_id', tenantId);
+
+  // Delete the tenant row — cascades through all tenant-scoped tables.
+  const { error: delErr } = await supabaseAdmin.from('tenants').delete().eq('id', tenantId);
+  if (delErr) {
+    return NextResponse.json({ success: false, error: delErr.message }, { status: 500 });
+  }
+
+  // Best-effort auth cleanup. Skip the acting admin and any platform admin so we
+  // never lock ourselves (or another operator) out. Non-fatal on failure.
+  let authDeleted = 0;
+  for (const u of members || []) {
+    if (u.id === me.id || u.is_platform_admin) continue;
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(u.id);
+    if (!error) authDeleted++;
+  }
+
+  await invalidateTenantAllCaches(tenantId);
+  console.log(`🗑️ [admin/provision] tenant ${tenantId} ("${expected}") hard-deleted by ${me.email}`);
+
+  // The tenant's own audit_logs cascade away with it, so record this out-of-band
+  // (email + Sentry) — the only durable trail of who removed which client.
+  await notifyAdmin({
+    dedupeKey: `tenant-deleted-${tenantId}`,
+    subject: `Client hard-deleted: ${expected}`,
+    summary: `Platform admin ${me.email} permanently deleted tenant "${expected}" (${tenantId}) and all its data. ${authDeleted} auth login(s) removed.`,
+    context: { tenant_id: tenantId, business_name: expected, actor: me.email, auth_logins_removed: authDeleted },
+  }).catch(() => {});
+
+  return NextResponse.json({ success: true, auth_logins_removed: authDeleted });
 }
