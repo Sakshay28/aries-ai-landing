@@ -99,6 +99,14 @@ export default function ChatSidebar() {
   const routerRef = useRef(router);
   routerRef.current = router;
 
+  // Baseline change-digest from the last full load. The 20s fallback poll compares
+  // a tiny /conversations/digest against this and only does the heavy full fetch
+  // when (count, maxTs) changed — the big Supabase egress win (2026-08-01).
+  const lastDigestRef = useRef<{ count: number | null; maxTs: string | null }>({ count: null, maxTs: null });
+  // Coalesces bursts of Realtime events into a single reload (avoids a full-list
+  // refetch per inbound/outbound message when a chat is active).
+  const loadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // ─── STABLE load() — no dependencies that change on URL navigation ───────
   // Using a ref-based pattern so the Realtime callback always calls the latest
   // version without needing to re-subscribe the channel.
@@ -119,6 +127,9 @@ export default function ChatSidebar() {
       }
       setConvos(data.conversations);
       setLoadError(false);
+      // Refresh the digest baseline so the next fallback poll compares against
+      // what we just loaded (server returns the same {count, maxTs} shape).
+      if (data.digest) lastDigestRef.current = data.digest;
       if (data.tenantId) {
         setTenantId(data.tenantId);
       }
@@ -144,6 +155,14 @@ export default function ChatSidebar() {
       setSlowLoad(false);
     }
   }, []); // ← intentionally empty: uses refs for activeId and router
+
+  // Debounced reload for Realtime events: a burst of message/conversation events
+  // (common during an active chat) collapses into one full-list fetch instead of
+  // one per event — a big cut in redundant egress when Realtime is delivering.
+  const scheduleLoad = useCallback(() => {
+    if (loadDebounceRef.current) clearTimeout(loadDebounceRef.current);
+    loadDebounceRef.current = setTimeout(() => { loadDebounceRef.current = null; load(); }, 800);
+  }, [load]);
 
   const queryTrigger = useContactsStore((state) => state.queryTrigger);
   const getContactByPhone = useContactsStore((state) => state.getContactByPhone);
@@ -174,7 +193,7 @@ export default function ChatSidebar() {
         },
         (payload) => {
           if (payload.new && (payload.new as any).tenant_id === tenantId) {
-            load();
+            scheduleLoad();
           }
         }
       )
@@ -189,7 +208,7 @@ export default function ChatSidebar() {
         },
         (payload) => {
           if (payload.new && (payload.new as any).tenant_id === tenantId) {
-            load();
+            scheduleLoad();
           }
         }
       )
@@ -213,7 +232,7 @@ export default function ChatSidebar() {
           const next = payload.new as { tenant_id?: string; assigned_to?: string | null };
           const prev = payload.old as { assigned_to?: string | null };
           if (next?.tenant_id === tenantId && next.assigned_to !== prev?.assigned_to) {
-            load();
+            scheduleLoad();
           }
         }
       )
@@ -227,16 +246,50 @@ export default function ChatSidebar() {
 
     return () => {
       supabase.removeChannel(channel);
+      if (loadDebounceRef.current) { clearTimeout(loadDebounceRef.current); loadDebounceRef.current = null; }
     };
-  }, [tenantId, load]);
+  }, [tenantId, load, scheduleLoad]);
 
   // ─── Polling fallback — guarantees sidebar updates even without Realtime ───
-  // 20s: this query fetches up to 2000 conversations + 5000 messages per call, so its
-  // poll frequency is the single biggest lever on Supabase egress/Disk-IO (was 5s — see
-  // 2026-07-02 usage investigation). Realtime (above) already covers the common case.
+  // The full list is up to ~2000 rows + all leads (~350KB), and refetching it every
+  // 20s per open agent was the single biggest Supabase egress driver (Egress Exceeded,
+  // 2026-08-01 audit; see also 2026-07-02). Now the 20s tick fetches a tiny
+  // /conversations/digest ({count, maxTs}, ~200 bytes) and only triggers the heavy
+  // load() when it differs from the last full load. Any missed message moves (count,
+  // maxTs), so the fallback still self-heals; on any digest error we fall back to a
+  // full load (previous behaviour), so the inbox can never get stuck stale.
   useEffect(() => {
-    const interval = setInterval(() => { load(); }, 20_000);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    let inFlight = false;
+    const tick = async () => {
+      // Skip a tick if the previous digest fetch is still pending (slow network)
+      // so stalled requests can't pile up across ticks.
+      if (inFlight) return;
+      inFlight = true;
+      const controller = new AbortController();
+      const abortTimer = setTimeout(() => controller.abort(), 8_000);
+      try {
+        const res = await fetch(`/api/dashboard/chat/conversations/digest?_t=${Date.now()}`, {
+          signal: controller.signal,
+        });
+        const d = await res.json();
+        if (cancelled) return;
+        if (!d?.success) { load(); return; }
+        const last = lastDigestRef.current;
+        if (last.count === null || d.count !== last.count || d.maxTs !== last.maxTs) {
+          load();
+        }
+      } catch {
+        // Network error or abort — fall back to a full load so the inbox can
+        // never silently go stale.
+        if (!cancelled) load();
+      } finally {
+        clearTimeout(abortTimer);
+        inFlight = false;
+      }
+    };
+    const interval = setInterval(tick, 20_000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [load]);
 
   // ─── Keyboard shortcut ⌘K / Ctrl+K ──────────────────────────────────────

@@ -3,7 +3,7 @@
 import {
   Send, Bot, User, Check, CheckCheck, Clock, AlertCircle, ArrowDown, Paperclip, Smile,
   Sparkles, Search, MoreVertical, Copy, Reply, MoreHorizontal, X, Loader2, Trash2, HelpCircle,
-  ArrowLeft, Smartphone, FileText, ChevronRight, LayoutList, Plus, Minus,
+  ArrowLeft, Smartphone, FileText, ChevronRight, LayoutList, Plus, Minus, MapPin, RefreshCw,
 } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from "framer-motion";
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from "react";
@@ -228,6 +228,13 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   ]);
   const [sendingInteractive, setSendingInteractive] = useState(false);
 
+  // ── Location picker ──
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const [savedLocationsList, setSavedLocationsList] = useState<any[]>([]);
+  const [loadingLocations, setLoadingLocations] = useState(false);
+  const [resolvingGmaps, setResolvingGmaps] = useState(false);
+  const [sendingLocation, setSendingLocation] = useState(false);
+
   // ── 24h session-expired template picker ──
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [templatesList, setTemplatesList] = useState<any[]>([]);
@@ -307,6 +314,127 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const conversationId = searchParams.get('conversationId');
+
+  // ── Location picker states & handlers ──
+  const [selectedLocId, setSelectedLocId] = useState<string>('');
+  const [manualLocName, setManualLocName] = useState('');
+  const [manualLocAddress, setManualLocAddress] = useState('');
+  const [manualLocLat, setManualLocLat] = useState('');
+  const [manualLocLng, setManualLocLng] = useState('');
+  const [manualLocGmapsUrl, setManualLocGmapsUrl] = useState('');
+
+  // Load saved locations when modal is opened
+  useEffect(() => {
+    if (!locationPickerOpen) return;
+    const loadSavedLocations = async () => {
+      setLoadingLocations(true);
+      try {
+        const res = await fetch('/api/locations');
+        const json = await res.json();
+        if (json.success) {
+          setSavedLocationsList(json.data || []);
+        } else {
+          toast.error(json.error || 'Failed to fetch saved locations');
+        }
+      } catch (err) {
+        toast.error('Network error fetching locations');
+      } finally {
+        setLoadingLocations(false);
+      }
+    };
+    loadSavedLocations();
+  }, [locationPickerOpen]);
+
+  const handleResolveGmapsLink = async () => {
+    if (!manualLocGmapsUrl.trim()) {
+      toast.error('Please paste a Google Maps link first');
+      return;
+    }
+    setResolvingGmaps(true);
+    try {
+      const res = await fetch('/api/locations/resolve-gmaps', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: manualLocGmapsUrl.trim() })
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        setManualLocName(json.data.name || manualLocName);
+        setManualLocAddress(json.data.address || manualLocAddress);
+        setManualLocLat(String(json.data.latitude));
+        setManualLocLng(String(json.data.longitude));
+        toast.success('Location details resolved successfully!');
+      } else {
+        toast.error(json.error || 'Failed to resolve link');
+      }
+    } catch {
+      toast.error('Network error resolving location link');
+    } finally {
+      setResolvingGmaps(false);
+    }
+  };
+
+  const handleSendLocationCard = async () => {
+    if (!conversationId) return;
+    setSendingLocation(true);
+    try {
+      let body: any = { conversationId };
+      if (selectedLocId) {
+        body.locationId = selectedLocId;
+      } else {
+        if (!manualLocName.trim() || !manualLocAddress.trim() || !manualLocLat.trim() || !manualLocLng.trim()) {
+          toast.error('Please select a saved location or fill in all manual fields');
+          setSendingLocation(false);
+          return;
+        }
+        const latVal = parseFloat(manualLocLat);
+        const lngVal = parseFloat(manualLocLng);
+        if (isNaN(latVal) || latVal < -90 || latVal > 90) {
+          toast.error('Latitude must be between -90 and 90');
+          setSendingLocation(false);
+          return;
+        }
+        if (isNaN(lngVal) || lngVal < -180 || lngVal > 180) {
+          toast.error('Longitude must be between -180 and 180');
+          setSendingLocation(false);
+          return;
+        }
+        body.latitude = latVal;
+        body.longitude = lngVal;
+        body.name = manualLocName.trim();
+        body.address = manualLocAddress.trim();
+        if (manualLocGmapsUrl.trim()) {
+          body.googleMapsUrl = manualLocGmapsUrl.trim();
+        }
+      }
+
+      const res = await fetch('/api/chat/send-location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast.success('Location card sent!');
+        setLocationPickerOpen(false);
+        // Clear forms
+        setSelectedLocId('');
+        setManualLocName('');
+        setManualLocAddress('');
+        setManualLocLat('');
+        setManualLocLng('');
+        setManualLocGmapsUrl('');
+        setReloadTick(t => t + 1);
+      } else {
+        toast.error(json.error || 'Failed to send location card');
+      }
+    } catch {
+      toast.error('Network error sending location');
+    } finally {
+      setSendingLocation(false);
+    }
+  };
+
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const supabaseRef = useRef(createBrowserSupabaseClient());
@@ -1554,7 +1682,75 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                       {/* Outbound: toolbar floats LEFT of bubble */}
                       {!isInbound && msg.content !== '__DELETED__' && hoverToolbar}
 
-                      {msg.media_url && msg.content !== '__DELETED__' ? (
+                      {msg.message_type === 'location' && msg.content !== '__DELETED__' ? (
+                        /* ── Native Location Card Bubble ── */
+                        <div
+                          id={`msg-${msg.id}`}
+                          className={cn(
+                            'max-w-[65%] p-3.5 shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] transition-all duration-150 relative break-words min-w-[260px]',
+                            isInbound
+                              ? cn(
+                                  'bg-white dark:bg-[#202C33] text-[#111B21] dark:text-[#E9EDEF]',
+                                  isFirst ? 'rounded-lg rounded-tl-none' : 'rounded-lg'
+                                )
+                              : cn(
+                                  'bg-[#D9FDD3] dark:bg-[#005C4B] text-[#111B21] dark:text-[#E9EDEF]',
+                                  isOptimistic && 'opacity-70',
+                                  isFirst ? 'rounded-lg rounded-tr-none' : 'rounded-lg',
+                                  msg.status === 'failed' ? 'ring-1 ring-red-300 dark:ring-red-800 opacity-80' : ''
+                                )
+                          )}
+                        >
+                          {replyPreviewCard}
+                          <div className="flex flex-col gap-2.5">
+                            <div className="flex items-start gap-2.5">
+                              <div className="p-2 bg-emerald-500/10 dark:bg-emerald-500/20 rounded-lg text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0">
+                                <MapPin className="w-5 h-5" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-bold text-sm text-gray-900 dark:text-gray-100 truncate">
+                                  {(msg.metadata as any)?.location_name || msg.content?.split('\n')[0] || 'Shared Location'}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">
+                                  {(msg.metadata as any)?.location_address || msg.content?.split('\n').slice(1).join('\n') || 'Address details'}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            <a
+                              href={(msg.metadata as any)?.google_maps_url || msg.media_url || `https://www.google.com/maps/search/?api=1&query=${(msg.metadata as any)?.latitude},${(msg.metadata as any)?.longitude}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center justify-center gap-1.5 w-full mt-1 py-1.5 px-3 rounded-lg border border-gray-200 dark:border-gray-800 text-xs font-semibold text-emerald-600 dark:text-emerald-400 bg-gray-50 dark:bg-gray-900/50 hover:bg-gray-100 dark:hover:bg-gray-800/80 transition-colors"
+                            >
+                              <span>Open in Google Maps</span>
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                          
+                          {/* Timestamp + ticks */}
+                          <div className={cn('flex items-center gap-1 mt-2 justify-end')}>
+                            <span className="text-[10px] text-[#667781] dark:text-[#aebac1]">
+                              {formatTime(msg.created_at)}
+                            </span>
+                            {!isInbound && (
+                              <span className="text-[15px] leading-none select-none">
+                                {msg.status === 'read' ? (
+                                  <span className="text-[#53bdeb]">✓✓</span>
+                                ) : msg.status === 'delivered' ? (
+                                  <span className="text-[#8696a0]">✓✓</span>
+                                ) : msg.status === 'sent' ? (
+                                  <span className="text-[#8696a0]">✓</span>
+                                ) : msg.status === 'failed' ? (
+                                  <span className="text-red-500" title={msg.error_message || 'Failed'}>⚠️</span>
+                                ) : (
+                                  <span className="text-[#8696a0] animate-pulse">...</span>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ) : msg.media_url && msg.content !== '__DELETED__' ? (
                         /* ── Attachment bubble ── */
                         <div 
                           id={`msg-${msg.id}`}
@@ -2037,6 +2233,18 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             )}
           >
             <Sparkles className={cn("w-4 h-4", aiPanelOpen && "fill-current opacity-80")} />
+          </button>
+          <button
+            onClick={() => {
+              setLocationPickerOpen(true);
+              setEmojiOpen(false);
+              setAiPanelOpen(false);
+              setInteractiveComposerOpen(false);
+            }}
+            title="Send Location Card"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-emerald-500/70 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-all flex-shrink-0 mb-0.5"
+          >
+            <MapPin className="w-4 h-4" />
           </button>
           <textarea
             ref={textareaRef}
@@ -2747,6 +2955,188 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                 >
                   {sendingInteractive ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                   {sendingInteractive ? 'Sending…' : 'Send'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {locationPickerOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.15 }}
+              className="w-full max-w-md overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-xl flex flex-col max-h-[90vh]"
+            >
+              <div className="flex justify-between items-center px-5 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 shrink-0">
+                <div className="flex items-center gap-2">
+                  <MapPin className="w-5 h-5 text-emerald-500" />
+                  <h3 className="font-bold text-base">Send Location Card</h3>
+                </div>
+                <button
+                  onClick={() => setLocationPickerOpen(false)}
+                  className="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4 overflow-y-auto flex-1">
+                {/* 1. Select saved location */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                    Choose Saved Location
+                  </label>
+                  {loadingLocations ? (
+                    <div className="flex items-center gap-2 py-2 text-sm text-gray-400">
+                      <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
+                      Loading locations...
+                    </div>
+                  ) : savedLocationsList.length === 0 ? (
+                    <div className="text-xs text-amber-500 bg-amber-500/10 p-2.5 rounded-lg">
+                      No saved locations found. Create one in Settings &gt; Saved Locations first, or input manually below.
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedLocId}
+                      onChange={(e) => {
+                        setSelectedLocId(e.target.value);
+                        if (e.target.value) {
+                          // Clear manual form if saved location is selected
+                          setManualLocName('');
+                          setManualLocAddress('');
+                          setManualLocLat('');
+                          setManualLocLng('');
+                          setManualLocGmapsUrl('');
+                        }
+                      }}
+                      className="w-full px-3 py-2 text-sm border rounded-lg bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-700 focus:border-emerald-500 focus:outline-none"
+                    >
+                      <option value="">-- Select location --</option>
+                      {savedLocationsList.map((loc) => (
+                        <option key={loc.id} value={loc.id}>
+                          [{loc.category}] {loc.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <div className="relative flex py-2 items-center">
+                  <div className="flex-grow border-t border-gray-200 dark:border-gray-800"></div>
+                  <span className="flex-shrink mx-4 text-xs font-medium text-gray-400">OR INPUT MANUALLY</span>
+                  <div className="flex-grow border-t border-gray-200 dark:border-gray-800"></div>
+                </div>
+
+                {/* 2. Manual Inputs */}
+                <div className="space-y-3.5">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                      Google Maps URL (Auto-Resolve)
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Paste link here..."
+                        disabled={!!selectedLocId}
+                        value={manualLocGmapsUrl}
+                        onChange={(e) => setManualLocGmapsUrl(e.target.value)}
+                        className="flex-1 px-3 py-1.5 text-xs border rounded-lg bg-transparent border-gray-300 dark:border-gray-700 focus:border-emerald-500 focus:outline-none disabled:opacity-40"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleResolveGmapsLink}
+                        disabled={resolvingGmaps || !!selectedLocId || !manualLocGmapsUrl.trim()}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
+                      >
+                        {resolvingGmaps ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                        Resolve
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                      Location Name
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Reception Desk (Main lobby)"
+                      disabled={!!selectedLocId}
+                      value={manualLocName}
+                      onChange={(e) => setManualLocName(e.target.value)}
+                      className="w-full px-3 py-1.5 text-xs border rounded-lg bg-transparent border-gray-300 dark:border-gray-700 focus:border-emerald-500 focus:outline-none disabled:opacity-40"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                      Address
+                    </label>
+                    <textarea
+                      placeholder="Street, landmarks..."
+                      rows={2}
+                      disabled={!!selectedLocId}
+                      value={manualLocAddress}
+                      onChange={(e) => setManualLocAddress(e.target.value)}
+                      className="w-full px-3 py-1.5 text-xs border rounded-lg bg-transparent border-gray-300 dark:border-gray-700 focus:border-emerald-500 focus:outline-none resize-none disabled:opacity-40"
+                    />
+                  </div>
+
+                  <div className="grid gap-3 grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                        Latitude
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 26.9124"
+                        disabled={!!selectedLocId}
+                        value={manualLocLat}
+                        onChange={(e) => setManualLocLat(e.target.value)}
+                        className="w-full px-3 py-1.5 text-xs border rounded-lg bg-transparent border-gray-300 dark:border-gray-700 focus:border-emerald-500 focus:outline-none disabled:opacity-40"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                        Longitude
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 75.7872"
+                        disabled={!!selectedLocId}
+                        value={manualLocLng}
+                        onChange={(e) => setManualLocLng(e.target.value)}
+                        className="w-full px-3 py-1.5 text-xs border rounded-lg bg-transparent border-gray-300 dark:border-gray-700 focus:border-emerald-500 focus:outline-none disabled:opacity-40"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-5 py-4 border-t border-border bg-gray-50 dark:bg-gray-900/50 shrink-0 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLocationPickerOpen(false)}
+                  className="flex-1 h-9 rounded-lg border border-gray-250 dark:border-gray-850 hover:bg-gray-100 text-foreground text-xs font-semibold transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSendLocationCard}
+                  disabled={
+                    sendingLocation ||
+                    (!selectedLocId && (!manualLocName.trim() || !manualLocAddress.trim() || !manualLocLat.trim() || !manualLocLng.trim()))
+                  }
+                  className="flex-1 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+                >
+                  {sendingLocation ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  {sendingLocation ? 'Sending…' : 'Send Location'}
                 </button>
               </div>
             </motion.div>
