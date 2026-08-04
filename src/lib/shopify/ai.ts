@@ -124,24 +124,72 @@ export async function searchProducts(
   const limit = Math.min(Math.max(args.limit || 5, 1), 20);
   const storeUrl = await getStoreUrl(tenantId);
 
-  let builder = supabaseAdmin.from('shopify_products')
-    .select('id, shopify_id, handle, title, vendor, product_type, price_min, price_max, currency, image_url, total_inventory, tags, body_text')
-    .eq('tenant_id', tenantId)
-    .eq('status', 'active');
+  const base = () => {
+    let b = supabaseAdmin.from('shopify_products')
+      .select('id, shopify_id, handle, title, vendor, product_type, price_min, price_max, currency, image_url, total_inventory, tags, body_text')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'active');
+    if (args.vendor) b = b.ilike('vendor', args.vendor);
+    if (args.product_type) b = b.ilike('product_type', args.product_type);
+    if (args.tags_include?.length) b = b.contains('tags', args.tags_include);
+    if (args.only_in_stock) b = b.gt('total_inventory', 0);
+    return b;
+  };
 
-  // ilike over search_text; the GIN index handles it.
-  builder = builder.ilike('search_text', `%${q}%`);
-  if (args.vendor) builder = builder.ilike('vendor', args.vendor);
-  if (args.product_type) builder = builder.ilike('product_type', args.product_type);
-  if (args.tags_include?.length) builder = builder.contains('tags', args.tags_include);
-  if (args.only_in_stock) builder = builder.gt('total_inventory', 0);
+  // Token-AND match: a customer asking for "wealth bracelet" or "rudraksha
+  // mala" rarely types the words in the exact order/adjacency they appear in
+  // the title. The old single `%phrase%` ilike required a contiguous
+  // substring and silently missed those. Instead we AND each meaningful word
+  // token (every token must appear somewhere in search_text), which matches
+  // by-name lookups far more reliably while staying on the trigram index.
+  const tokens = tokenizeQuery(q);
+  if (tokens.length > 0) {
+    let builder = base();
+    for (const t of tokens) builder = builder.ilike('search_text', `%${t}%`);
+    const { data, error } = await builder.limit(limit);
+    if (error) {
+      console.error('[shopify:ai] searchProducts failed', error.message);
+      return [];
+    }
+    if (data && data.length > 0) return data.map(r => toSummary(r, storeUrl));
+  }
 
-  const { data, error } = await builder.limit(limit);
+  // Fallback: raw phrase substring (covers exact handles / single-word queries
+  // and the case where AND-ing tokens over-filtered to zero rows).
+  const { data, error } = await base().ilike('search_text', `%${q}%`).limit(limit);
   if (error) {
-    console.error('[shopify:ai] searchProducts failed', error.message);
+    console.error('[shopify:ai] searchProducts fallback failed', error.message);
     return [];
   }
   return (data || []).map(r => toSummary(r, storeUrl));
+}
+
+// Words that carry no product-name signal, plus price/number filler that
+// lives in the price columns rather than search_text (so ANDing them in
+// would wrongly zero out results).
+const SEARCH_STOPWORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'for', 'with', 'of', 'in', 'on', 'to', 'my',
+  'me', 'you', 'do', 'have', 'has', 'any', 'is', 'are', 'this', 'that', 'it',
+  'under', 'below', 'above', 'over', 'less', 'more', 'than', 'upto', 'up',
+  'rs', 'inr', 'rupees', 'price', 'cost', 'send', 'show', 'link', 'buy',
+  'want', 'need', 'looking', 'please', 'pls', 'kya', 'hai', 'ka', 'ki', 'ke',
+]);
+
+/** Split a query into meaningful word tokens for AND-matching. */
+function tokenizeQuery(q: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of q.split(/[^a-z0-9]+/i)) {
+    const t = raw.trim();
+    if (t.length < 2) continue;      // drop 1-char noise
+    if (/^\d+$/.test(t)) continue;   // pure numbers = price filters, not names
+    if (SEARCH_STOPWORDS.has(t)) continue;
+    if (seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+    if (out.length >= 6) break;      // cap AND clauses
+  }
+  return out;
 }
 
 // ─── Product detail (with live inventory) ───────────────────

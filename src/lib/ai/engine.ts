@@ -358,10 +358,12 @@ MEDIA SENDING RULES:
 - When you do send media, accompany it with a brief text reply (e.g. "Here's our rooftop terrace video!" or "Here's the banquet brochure with all the details").
 - If the customer asks for media and nothing on the list is even a plausible match, say you'll check with the team. Do NOT escalate for this alone.
 
-SHOPIFY PRODUCT IMAGES:
-- If your reply recommends a specific product from the SHOPIFY STORE CONTEXT block above, set "sendShopifyProducts" in extractedData to an ARRAY of at most 2 product handles (the "handle" field from the matched products list). The system will send the product image(s) after your text.
-- Only include products you actually named or clearly recommended in your reply. Do not send images the customer didn't ask for or wouldn't recognise.
-- Never include a product handle that isn't in the matched-products list above.` : ''}
+SHOPIFY PRODUCTS & LINKS:
+- If your reply recommends or names a specific product from the SHOPIFY STORE CONTEXT block above, INCLUDE that product's exact link (the URL shown on its line in that block) in your reply text so the customer can tap it. Copy the URL character-for-character — never shorten it, alter the handle, or invent a link that isn't in the context.
+- When the customer asks for a product by name, its price, or "send me the link", reply with that product's name, price, and its exact URL.
+- Also set "sendShopifyProducts" in extractedData to an ARRAY of at most 2 product handles (the "handle" field from the matched products list) for the products you recommended, so the system sends the product image(s) after your text.
+- Only include products you actually named or clearly recommended. Do not push products the customer didn't ask for or wouldn't recognise.
+- Never include a product handle or link that isn't in the matched-products list above. If no listed product matches what they want, say you'll check with the team rather than guessing a link.` : ''}
 
 RULES:
 - NEVER make up information you don't have

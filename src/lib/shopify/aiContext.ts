@@ -247,7 +247,7 @@ export function renderShopifyContextForPrompt(ctx: ShopifyAIContext): string {
       if (p.snippet) lines.push(`   ${p.snippet}`);
       if (p.url) lines.push(`   ${p.url}`);
     });
-    lines.push('Recommend the best matches by TITLE + price. If a suitable product is in-stock and the customer would benefit from seeing it, list its `handle` in extractedData.sendShopifyProducts so we can send the product image.');
+    lines.push('When you recommend a product, ALWAYS include its exact link (the URL shown on its line above) in your reply text so the customer can open it directly — copy the URL verbatim, never shorten, guess, or invent one. If the customer asks for a specific product or its link/price, give that product\'s URL. Also list the matching product `handle`(s) in extractedData.sendShopifyProducts (max 2) so we send the product image too.');
   }
 
   if (ctx.policies && ctx.policies.length > 0) {

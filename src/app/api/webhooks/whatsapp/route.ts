@@ -2191,37 +2191,61 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       for (const handle of productHandles) {
         if (sent >= MAX_PRODUCT_IMAGES) break;
         const p = byHandle.get(handle);
-        if (!p?.image_url) continue;
+        if (!p) continue;
+        const priceLabel = p.price_min != null
+          ? (p.price_max && p.price_max !== p.price_min ? `${p.currency || ''} ${p.price_min}–${p.price_max}` : `${p.currency || ''} ${p.price_min}`)
+          : '';
+        const caption = [p.title, priceLabel, p.url].filter(Boolean).join('\n');
         try {
-          const priceLabel = p.price_min != null
-            ? (p.price_max && p.price_max !== p.price_min ? `${p.currency || ''} ${p.price_min}–${p.price_max}` : `${p.currency || ''} ${p.price_min}`)
-            : '';
-          const caption = [p.title, priceLabel, p.url].filter(Boolean).join('\n');
-          const res = await sendMediaMessage(
-            decryptedAccessToken,
-            tenant.wa_phone_number_id as string,
-            cleanPhone,
-            'image',
-            p.image_url,
-            caption || undefined,
-          );
-          sent++;
-          void supabaseAdmin.from('messages').insert({
-            tenant_id: tenant.id,
-            conversation_id: conversation.id,
-            direction: 'outbound',
-            content: `[Shopify product] ${p.title}`,
-            message_type: 'image',
-            channel: 'whatsapp',
-            status: 'sent',
-            ai_generated: true,
-            media_url: p.image_url,
-            file_name: `${handle}.jpg`,
-            mime_type: 'image/jpeg',
-            wa_message_id: res.messageId,
-          });
+          if (p.image_url) {
+            // Rich card: product image with title + price + link caption.
+            const res = await sendMediaMessage(
+              decryptedAccessToken,
+              tenant.wa_phone_number_id as string,
+              cleanPhone,
+              'image',
+              p.image_url,
+              caption || undefined,
+            );
+            sent++;
+            void supabaseAdmin.from('messages').insert({
+              tenant_id: tenant.id,
+              conversation_id: conversation.id,
+              direction: 'outbound',
+              content: `[Shopify product] ${p.title}`,
+              message_type: 'image',
+              channel: 'whatsapp',
+              status: 'sent',
+              ai_generated: true,
+              media_url: p.image_url,
+              file_name: `${handle}.jpg`,
+              mime_type: 'image/jpeg',
+              wa_message_id: res.messageId,
+            });
+          } else if (p.url) {
+            // No image on this product — still deliver the link as text so the
+            // customer always gets a tappable product link when they asked.
+            const res = await sendTextMessage(
+              decryptedAccessToken,
+              tenant.wa_phone_number_id as string,
+              cleanPhone,
+              caption,
+            );
+            sent++;
+            void supabaseAdmin.from('messages').insert({
+              tenant_id: tenant.id,
+              conversation_id: conversation.id,
+              direction: 'outbound',
+              content: caption,
+              message_type: 'text',
+              channel: 'whatsapp',
+              status: 'sent',
+              ai_generated: true,
+              wa_message_id: res.messageId,
+            });
+          }
         } catch (err) {
-          console.error(`⚠️ Shopify product image send failed (${handle}):`, (err as Error).message);
+          console.error(`⚠️ Shopify product send failed (${handle}):`, (err as Error).message);
         }
       }
     }
