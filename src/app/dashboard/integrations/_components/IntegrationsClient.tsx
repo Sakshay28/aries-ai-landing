@@ -163,15 +163,21 @@ const INTEGRATIONS: IntegrationDef[] = [
   {
     id: 'shiprocket',
     name: 'Shiprocket',
-    description: 'Send automated shipping updates and order tracking links to customers.',
+    description: 'Ship Shopify orders, track deliveries, and send automated WhatsApp shipment updates.',
     icon: Truck,
     color: 'text-[#2D9CDB]',
     bgColor: 'bg-[#2D9CDB]/10',
     docsUrl: 'https://apidocs.shiprocket.in/',
-    eventBadges: ['Booking confirmed', 'Order updates'],
-    fields: [
-      { key: 'email', label: 'Email', type: 'text', placeholder: 'you@company.com', required: true },
-      { key: 'password', label: 'Password', type: 'password', placeholder: '••••••••', required: true, hint: 'Your Shiprocket login password' },
+    eventBadges: ['Shipment created', 'Tracking updates', 'Delivery updates'],
+    fields: [],
+    isRedirect: true,
+    redirectUrl: '/dashboard/integrations/shiprocket',
+    redirectLabel: 'Open Shiprocket integration',
+    redirectBullets: [
+      'Create shipments, assign couriers/AWB, schedule pickup, and generate labels from the Aries dashboard',
+      'Live tracking updates flow back in via webhook and update the order automatically',
+      'Automated WhatsApp shipment updates to the customer as status changes',
+      'AI answers "where is my order?" using live Shiprocket tracking data',
     ],
   },
 ];

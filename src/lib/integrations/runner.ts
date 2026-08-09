@@ -82,30 +82,6 @@ async function runZohoCRM(cfg: IntegrationConfig, event: IntegrationEvent) {
   }
 }
 
-// ── Shiprocket: get auth token then fetch tracking ───────────
-async function runShiprocket(cfg: IntegrationConfig, event: IntegrationEvent) {
-  // Shiprocket fires on booking events with order/AWB info
-  if (event.type !== 'booking_confirmed') return;
-  const email = cfg.email;
-  const password = decrypt(cfg.password);
-  if (!email || !password) return;
-
-  try {
-    const authRes = await fetch('https://apiv2.shiprocket.in/v1/external/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-    const { token } = await authRes.json();
-    if (!token) return;
-    console.log(`🚚 Shiprocket: authenticated for booking event`);
-    // Future: create shipment, get tracking URL, send via WhatsApp
-    // const trackingUrl = `https://shiprocket.co/tracking/${awb}`;
-  } catch (e) {
-    console.error('Shiprocket integration error:', (e as Error).message);
-  }
-}
-
 // ── Pabbly Connect: POST to Pabbly webhook URL ───────────────
 async function runPabbly(cfg: IntegrationConfig, event: IntegrationEvent) {
   const url = cfg.webhook_url;
@@ -176,7 +152,6 @@ async function runGoogleCalendar(cfg: IntegrationConfig, event: IntegrationEvent
 const HANDLERS: Record<string, (cfg: IntegrationConfig, event: IntegrationEvent) => Promise<string | void | undefined>> = {
   razorpay: runRazorpay,
   zohocrm: runZohoCRM,
-  shiprocket: runShiprocket,
   pabbly: runPabbly,
   webhooks: runCustomWebhooks,
   googlecalendar: runGoogleCalendar,

@@ -12,6 +12,7 @@ import { isDuplicateMessage, getRedisClient, acquireOffHoursLock, acquireOnceNot
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs, retrieveRelevantMedia } from '@/lib/ai/rag';
 import { getShopifyContext, renderShopifyContextForPrompt } from '@/lib/shopify/aiContext';
+import { getShiprocketContext, renderShiprocketContextForPrompt } from '@/lib/shiprocket/aiContext';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
 import { parseMetaWebhook, sendTextMessage, sendMediaMessage, sendMediaMessageById, uploadMediaToMeta, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
 import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus, resolveOrCreateConversation } from '@/lib/whatsapp/businessNotify';
@@ -1673,13 +1674,21 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   // Gemini embedding round-trips overlap instead of stacking latency.
   const hasMedia = (kbMediaFiles?.length ?? 0) > 0;
   const hasShopify = !!tenant.shopify_store_url;
-  const [ragDocs, mediaCandidates, shopifyContext] = await Promise.all([
+  // Shiprocket shipments only exist for Shopify orders in this MVP slice —
+  // no point checking a separate connection flag if Shopify isn't even connected.
+  const hasShiprocket = hasShopify;
+  const [ragDocs, mediaCandidates, shopifyContext, shiprocketContext] = await Promise.all([
     needsTextRag ? retrieveRelevantDocs(tenant.id, msg.text, 3).catch(() => []) : Promise.resolve([]),
     hasMedia ? retrieveRelevantMedia(tenant.id, msg.text, 8, 0.35).catch(() => []) : Promise.resolve([]),
     hasShopify ? getShopifyContext({
       tenantId: tenant.id,
       message: msg.text,
       lead: lead ? { phone: (lead as { phone?: string }).phone, email: (lead as { email?: string }).email, shopify_customer_id: (lead as { shopify_customer_id?: string }).shopify_customer_id } : null,
+    }).catch(() => null) : Promise.resolve(null),
+    hasShiprocket ? getShiprocketContext({
+      tenantId: tenant.id,
+      message: msg.text,
+      lead: lead ? { phone: (lead as { phone?: string }).phone, email: (lead as { email?: string }).email } : null,
     }).catch(() => null) : Promise.resolve(null),
   ]);
   if (ragDocs.length > 0) knowledgeRows = ragDocs;
@@ -1754,6 +1763,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     smartRules: (smartRulesRows || []) as Array<{ name: string; trigger_source: string; ai_summary: string }>,
     knowledgeDocs: knowledgeRows,
     shopifyContextText: shopifyContext ? renderShopifyContextForPrompt(shopifyContext) : null,
+    shiprocketContextText: shiprocketContext ? renderShiprocketContextForPrompt(shiprocketContext) : null,
     mediaCandidates: [
       ...mediaCandidates.map(m => ({
         filename:    m.filename,

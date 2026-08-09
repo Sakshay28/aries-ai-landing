@@ -386,6 +386,9 @@ RETURNING CUSTOMER: This guest has visited ${tenantConfig.visitCount} times befo
 ${tenantConfig.shopifyContextText ? `
 ${tenantConfig.shopifyContextText}
 ` : ''}
+${tenantConfig.shiprocketContextText ? `
+${tenantConfig.shiprocketContextText}
+` : ''}
 ${tenantConfig.existingBooking ? `
 CUSTOMER'S EXISTING BOOKING (use this for modify/cancel requests):
 - Reservation ID: ${tenantConfig.existingBooking.reservationId}
@@ -516,6 +519,10 @@ export interface TenantAIConfig {
   // Built by getShopifyContext() when the tenant is connected AND the
   // message has an ecom-shaped intent. Null otherwise.
   shopifyContextText?: string | null;
+  // Shiprocket context — live shipment status for the customer's order.
+  // Built by getShiprocketContext() when a shopify_orders-linked shipment
+  // exists AND the message has a tracking-shaped intent. Null otherwise.
+  shiprocketContextText?: string | null;
   // Product handles the AI decided to send images for. Populated by the AI
   // in extractedData.sendShopifyProducts; the webhook route reads it after
   // the text reply to attach the product image(s).
