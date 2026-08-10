@@ -286,3 +286,49 @@ export function renderShopifyContextForPrompt(ctx: ShopifyAIContext): string {
 
 /** Public helper used by getProduct callers who need a live-inventory refresh. */
 export { getProduct as getShopifyProductDetail };
+
+// ─── Product-link safety net ─────────────────────────────────
+// The prompt instructs the model to copy product URLs verbatim from
+// matched_products, but LLMs sometimes "improve" a link instead — e.g.
+// stitching variant/title words into the slug ("7-mukhi-nepali-rudraksha-
+// silver-coated-16-19mm" instead of the real handle "7-mukhi-rudraksha").
+// That ships a 404 straight to the customer. This is a deterministic
+// backstop, independent of the model: rewrite any product-page link in the
+// reply that doesn't exactly match a real matched-product URL, using
+// token-subset matching against the real handles; if we can't confidently
+// resolve it, drop the link rather than send a dead one.
+function tokenizeHandle(handle: string): string[] {
+  return handle.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+export function reconcileProductLinks(replyText: string, ctx: ShopifyAIContext | null): string {
+  if (!ctx?.matched_products?.length || !replyText) return replyText;
+  const products = ctx.matched_products.filter((p) => p.url);
+  if (!products.length) return replyText;
+
+  const validUrls = new Set(products.map((p) => p.url));
+  const host = ctx.store_url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const urlRe = new RegExp(`https?://${host}/products/[a-zA-Z0-9-]+(?:\\?[^\\s)\\]]*)?`, 'g');
+
+  const corrected = replyText.replace(urlRe, (match) => {
+    if (validUrls.has(match)) return match;
+
+    const slug = match.match(/\/products\/([a-zA-Z0-9-]+)/)?.[1] || '';
+    const slugTokens = new Set(tokenizeHandle(slug));
+    const candidates = products.filter((p) => {
+      const handleTokens = tokenizeHandle(p.handle);
+      return handleTokens.length > 0 && handleTokens.every((t) => slugTokens.has(t));
+    });
+
+    const winner = candidates.length === 1 ? candidates[0] : products.length === 1 ? products[0] : null;
+    if (winner?.url) {
+      console.warn('[shopify:ai] corrected hallucinated product link', { invented: match, corrected: winner.url });
+      return winner.url;
+    }
+    console.warn('[shopify:ai] dropped unresolvable product link', { invented: match });
+    return '';
+  });
+
+  // Tidy up any whitespace left behind by a dropped link.
+  return corrected.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}

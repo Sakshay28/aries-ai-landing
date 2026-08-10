@@ -11,7 +11,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { isDuplicateMessage, getRedisClient, acquireOffHoursLock, acquireOnceNotice } from '@/lib/redis/client';
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs, retrieveRelevantMedia } from '@/lib/ai/rag';
-import { getShopifyContext, renderShopifyContextForPrompt } from '@/lib/shopify/aiContext';
+import { getShopifyContext, renderShopifyContextForPrompt, reconcileProductLinks } from '@/lib/shopify/aiContext';
 import { getShiprocketContext, renderShiprocketContextForPrompt } from '@/lib/shiprocket/aiContext';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
 import { parseMetaWebhook, sendTextMessage, sendMediaMessage, sendMediaMessageById, uploadMediaToMeta, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
@@ -1781,6 +1781,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     } : {}),
     smartRules: (smartRulesRows || []) as Array<{ name: string; trigger_source: string; ai_summary: string }>,
     knowledgeDocs: knowledgeRows,
+    hasShopify,
     shopifyContextText: shopifyContext ? renderShopifyContextForPrompt(shopifyContext) : null,
     shiprocketContextText: shiprocketContext ? renderShiprocketContextForPrompt(shiprocketContext) : null,
     mediaCandidates: [
@@ -1866,6 +1867,13 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   if (!aiResponse?.reply) {
     console.warn(`⚠️ Meta: AI returned empty reply for tenant ${tenant.id}, conversation ${conversation.id}`);
     return;
+  }
+
+  // 13a2. Product-link safety net: rewrite/drop any Shopify product URL the
+  // model invented instead of copying verbatim from matched_products (e.g.
+  // stitching variant text into the slug) so we never ship a dead link.
+  if (shopifyContext) {
+    aiResponse.reply = reconcileProductLinks(aiResponse.reply, shopifyContext);
   }
 
   // 13b. Increment AI conversation counter. AWAITED — this counter feeds the
