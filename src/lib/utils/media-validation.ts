@@ -48,12 +48,17 @@ export interface DuplicateMatch {
 }
 
 // ── Soft duplicate check — warn, never block ──────────────────────────
+// Only a fully-processed ('ready') doc counts as a real duplicate. A row
+// stuck in pending/processing (a dead analysis job) or failed must not
+// block re-uploading the same file — otherwise a stuck job permanently
+// locks the user out of ever uploading that picture again.
 export async function findDuplicateByHash(tenantId: string, hash: string): Promise<DuplicateMatch | null> {
   const { data } = await supabaseAdmin
     .from('knowledge_docs')
     .select('id, filename')
     .eq('tenant_id', tenantId)
     .eq('file_hash', hash)
+    .eq('processing_status', 'ready')
     .limit(1)
     .maybeSingle();
 

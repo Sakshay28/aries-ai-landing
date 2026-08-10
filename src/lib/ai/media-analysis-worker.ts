@@ -20,16 +20,24 @@ const MIME_BY_EXT: Record<string, string> = {
 };
 
 export class MediaAnalysisWorkerService {
-  public static async processQueue(workerId: string, limit: number = 20): Promise<number> {
+  // tenantId is optional: the standalone worker/cron sweep across every
+  // tenant, but the dashboard's own knowledge-list GET can piggyback a
+  // scoped-down sweep of just the caller's rows so stuck jobs self-heal
+  // on page load even if the external cron-job.org reconcile entry was
+  // never set up or lapsed.
+  public static async processQueue(workerId: string, limit: number = 20, tenantId?: string): Promise<number> {
     const staleBefore = new Date(Date.now() - STALE_MINUTES * 60_000).toISOString();
 
-    const { data: stuck, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('knowledge_docs')
       .select('id, filename, file_type, file_url, content_text')
       .in('processing_status', ['pending', 'processing'])
       .in('file_type', MEDIA_FILE_TYPES)
       .lt('updated_at', staleBefore)
       .limit(limit);
+    if (tenantId) query = query.eq('tenant_id', tenantId);
+
+    const { data: stuck, error } = await query;
 
     if (error) {
       console.error(`❌ [media-analysis worker:${workerId}] failed to query stuck jobs:`, error.message);

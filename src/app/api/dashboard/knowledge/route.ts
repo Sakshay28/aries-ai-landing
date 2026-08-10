@@ -3,6 +3,7 @@ import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { enqueueEmbedding } from '@/lib/ai/embedding-queue';
 import { enqueueMediaAnalysis } from '@/lib/ai/media-queue';
+import { MediaAnalysisWorkerService } from '@/lib/ai/media-analysis-worker';
 import { checkRedisRateLimit } from '@/lib/redis/client';
 import { invalidateTenantAllCaches } from '@/lib/tenant/manager';
 import { computeSha256, validateFileSignature, findDuplicateByHash } from '@/lib/utils/media-validation';
@@ -29,6 +30,14 @@ export async function GET() {
     .order('created_at', { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Self-heal jobs a killed serverless invocation left stuck in
+  // 'pending'/'processing' — the dashboard's own page load/poll traffic
+  // is a more reliable trigger than relying solely on an external
+  // cron-job.org entry to hit /api/cron/media-analysis-reconcile. Scoped
+  // to this tenant and run after the response is sent so it never slows
+  // down the list.
+  after(() => MediaAnalysisWorkerService.processQueue(`kb-get:${tenantId}`, 5, tenantId));
 
   // Generate time-limited signed URLs (1 hour) for any doc stored as a path.
   // Docs uploaded after the switch store a storage path in file_url; older docs
