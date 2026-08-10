@@ -430,14 +430,15 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const managerPhone = normalizePhoneNumber(tenant.manager_phone);
   const isOwnStaffNumber = !!cleanPhone && (cleanPhone === staffPhone || cleanPhone === managerPhone);
 
-  // A staff/manager number is only routed into the static staff-portal reply when the
-  // message is plausibly an alert interaction:
-  //   (a) a staff control message — an ack / keepalive / "got it" button, OR
-  //   (b) a free-text reply within 12h of an alert actually sent to that number.
-  // Anything else (a staff member typing a real question, testing the booking flow,
-  // etc.) falls through to the normal customer AI conversation below, same as any
-  // other sender. This is deliberate: staff numbers must be able to chat with the AI
-  // like anyone else. Outbound alert delivery (businessNotify.ts) reads
+  // A staff/manager number on THIS tenant's own number is unambiguously this tenant's
+  // staff — there's no "which venue do they belong to" question to resolve, so the
+  // static staff-portal reply is reserved for genuine control interactions only (an
+  // ack / keepalive / "got it" button or text). Anything else (a staff member typing a
+  // real question, testing the booking flow, etc.) falls through to the normal
+  // customer AI conversation below, same as any other sender. Deliberately NOT gated
+  // on "recent alert sent to this number" here — an active venue's staff number gets
+  // real booking alerts constantly, so that heuristic would trap them in the static
+  // reply almost permanently. Outbound alert delivery (businessNotify.ts) reads
   // tenant.staff_phone/manager_phone directly and is completely independent of this
   // inbound routing decision, so alerts keep arriving either way.
   const isStaffControlMessage =
@@ -448,14 +449,13 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
   let isStaffMessage = false;
   if (isOwnStaffNumber) {
-    isStaffMessage = isStaffControlMessage || await hasRecentAlertTo(cleanPhone);
+    isStaffMessage = isStaffControlMessage;
   } else if (cleanPhone && isPlatformTenant(tenant) && await isKnownStaffNumber(cleanPhone)) {
     // Platform number: the Aries AI number blasts alerts to EVERY client's staff and
-    // receives their replies. Those senders are staff of OTHER tenants, so they don't
-    // match THIS tenant's own staff/manager numbers — without this check the customer
-    // AI would engage them ("how can I help you plan your event?"). Same rule as above:
-    // only intercept when it's plausibly an alert interaction, otherwise let them chat
-    // with this tenant's AI like any other number (e.g. Romeo Lane's shared number).
+    // receives their replies. Those senders are staff of OTHER tenants — ambiguous
+    // whether they're replying to an alert or starting a fresh chat with THIS tenant's
+    // AI (e.g. Romeo Lane's shared number), so the "recent alert" fallback is needed
+    // here to disambiguate, unlike the own-tenant case above.
     isStaffMessage = isStaffControlMessage || await hasRecentAlertTo(cleanPhone);
   }
 
