@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Aries AI — Corporate Profile & Product Ecosystem</title>
+<meta name="description" content="Aries AI Technologies — the operating system for modern hospitality & conversational AI. Home of Aries AI (WhatsApp SaaS) and Aries Tap (NFC Hospitality OS)." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..700&family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink:        #0a0a0d;
+    --ink-2:      #101014;
+    --panel:      rgba(255, 252, 247, 0.028);
+    --panel-2:    rgba(255, 252, 247, 0.05);
+    --line:       rgba(244, 239, 231, 0.10);
+    --line-2:     rgba(244, 239, 231, 0.18);
+    --ivory:      #f5f0e8;
+    --taupe:      #a49d8f;
+    --taupe-dim:  #6f6a5f;
+
+    --ember-1:    #ff6a3d;
+    --ember-2:    #ffb347;
+    --ember-3:    #ffce6a;
+    --signal:     #34e0c4;
+    --signal-2:   #14b8a6;
+
+    --grad-ember: linear-gradient(115deg, var(--ember-1), var(--ember-2) 55%, var(--ember-3));
+    --grad-signal:linear-gradient(115deg, var(--signal), #58c7ff);
+
+    --f-display: "Fraunces", Georgia, serif;
+    --f-body:    "Manrope", -apple-system, sans-serif;
+    --f-mono:    "JetBrains Mono", monospace;
+
+    --maxw: 1180px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--ink);
+    color: var(--ivory);
+    font-family: var(--f-body);
+    font-weight: 400;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  /* grain + atmosphere */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none; z-index: 1;
+    opacity: 0.5;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+    mix-blend-mode: screen;
+  }
+
+  ::selection { background: rgba(255,106,61,0.28); color: #fff; }
+
+  a { color: inherit; text-decoration: none; }
+  img { max-width: 100%; display: block; }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 32px; position: relative; z-index: 2; }
+
+  .mono { font-family: var(--f-mono); font-weight: 500; letter-spacing: 0.02em; }
+
+  /* eyebrow / section label */
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--taupe);
+    display: inline-flex; align-items: center; gap: 12px;
+  }
+  .eyebrow::before {
+    content: ""; width: 26px; height: 1px;
+    background: var(--grad-ember);
+  }
+
+  .ember-text {
+    background: var(--grad-ember);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .signal-text {
+    background: var(--grad-signal);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  /* ============ NAV ============ */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 32px;
+    backdrop-filter: blur(14px);
+    background: linear-gradient(to bottom, rgba(10,10,13,0.82), rgba(10,10,13,0));
+    transition: background .3s, border-color .3s;
+    border-bottom: 1px solid transparent;
+  }
+  nav.scrolled {
+    background: rgba(10,10,13,0.9);
+    border-bottom: 1px solid var(--line);
+  }
+  .logo { display: flex; align-items: center; gap: 12px; font-family: var(--f-display); font-weight: 600; font-size: 20px; letter-spacing: -0.01em; }
+  .logo-mark {
+    width: 30px; height: 30px; border-radius: 8px;
+    background: var(--grad-ember);
+    display: grid; place-items: center;
+    font-family: var(--f-display); font-weight: 700; color: #1a0d05; font-size: 17px;
+    box-shadow: 0 6px 20px -6px rgba(255,106,61,0.6);
+  }
+  .nav-links { display: flex; align-items: center; gap: 30px; }
+  .nav-links a { font-size: 13.5px; color: var(--taupe); font-weight: 500; transition: color .2s; }
+  .nav-links a:hover { color: var(--ivory); }
+  .nav-cta {
+    font-size: 13px; font-weight: 600; color: #1a0d05 !important;
+    padding: 9px 18px; border-radius: 100px; background: var(--grad-ember);
+    transition: transform .2s, box-shadow .2s;
+  }
+  .nav-cta:hover { transform: translateY(-1px); box-shadow: 0 10px 26px -10px rgba(255,106,61,0.7); }
+  @media (max-width: 860px) { .nav-links a:not(.nav-cta) { display: none; } }
+
+  /* ============ HERO ============ */
+  .hero { position: relative; padding: 190px 0 110px; overflow: hidden; }
+  .glow { position: absolute; border-radius: 50%; filter: blur(120px); pointer-events: none; z-index: 0; }
+  .glow-a { top: -120px; left: -80px; width: 560px; height: 560px; background: radial-gradient(circle, rgba(255,106,61,0.20), transparent 68%); }
+  .glow-b { bottom: -180px; right: -120px; width: 620px; height: 620px; background: radial-gradient(circle, rgba(52,224,196,0.14), transparent 68%); }
+  .hero-grid-lines {
+    position: absolute; inset: 0; z-index: 0; opacity: 0.4;
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, #000 20%, transparent 75%);
+  }
+
+  .hero-inner { position: relative; z-index: 2; }
+  .hero .eyebrow { margin-bottom: 30px; }
+  h1.hero-title {
+    font-family: var(--f-display);
+    font-weight: 400;
+    font-size: clamp(44px, 7.2vw, 92px);
+    line-height: 1.0;
+    letter-spacing: -0.025em;
+    max-width: 15ch;
+  }
+  h1.hero-title em { font-style: italic; font-weight: 300; }
+  .hero-sub {
+    margin-top: 30px; max-width: 56ch;
+    font-size: clamp(16px, 1.6vw, 19px);
+    color: var(--taupe); font-weight: 400; line-height: 1.65;
+  }
+  .hero-actions { margin-top: 42px; display: flex; gap: 16px; flex-wrap: wrap; }
+  .btn {
+    font-size: 14.5px; font-weight: 600; padding: 14px 26px; border-radius: 100px;
+    transition: transform .2s, box-shadow .2s, background .2s, border-color .2s;
+    display: inline-flex; align-items: center; gap: 9px; cursor: pointer;
+  }
+  .btn-primary { background: var(--grad-ember); color: #1a0d05; box-shadow: 0 12px 30px -12px rgba(255,106,61,0.65); }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 18px 40px -12px rgba(255,106,61,0.8); }
+  .btn-ghost { border: 1px solid var(--line-2); color: var(--ivory); }
+  .btn-ghost:hover { border-color: var(--ember-2); transform: translateY(-2px); }
+
+  /* dual venture badges */
+  .ventures-strip {
+    margin-top: 70px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
+  }
+  @media (max-width: 720px) { .ventures-strip { grid-template-columns: 1fr; } }
+  .v-card {
+    position: relative; border: 1px solid var(--line); border-radius: 20px;
+    padding: 26px 28px; background: var(--panel); overflow: hidden;
+    transition: transform .3s, border-color .3s, background .3s;
+  }
+  .v-card:hover { transform: translateY(-4px); border-color: var(--line-2); background: var(--panel-2); }
+  .v-card .tag { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--taupe-dim); }
+  .v-card h3 { font-family: var(--f-display); font-weight: 500; font-size: 26px; margin: 8px 0 6px; letter-spacing: -0.01em; }
+  .v-card p { font-size: 14px; color: var(--taupe); }
+  .v-card .accent-bar { position: absolute; top: 0; left: 0; width: 100%; height: 3px; }
+  .v-card.ember .accent-bar { background: var(--grad-ember); }
+  .v-card.signal .accent-bar { background: var(--grad-signal); }
+  .v-card.ember h3 { color: var(--ember-2); }
+  .v-card.signal h3 { color: var(--signal); }
+
+  /* ============ MARQUEE / clients ticker ============ */
+  .ticker { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 22px 0; margin-top: 90px; overflow: hidden; position: relative; z-index: 2; }
+  .ticker::before, .ticker::after { content: ""; position: absolute; top: 0; bottom: 0; width: 140px; z-index: 3; }
+  .ticker::before { left: 0; background: linear-gradient(to right, var(--ink), transparent); }
+  .ticker::after { right: 0; background: linear-gradient(to left, var(--ink), transparent); }
+  .ticker-track { display: flex; gap: 56px; width: max-content; animation: scroll 32s linear infinite; }
+  .ticker-track span { font-family: var(--f-display); font-size: 22px; font-weight: 400; color: var(--taupe-dim); white-space: nowrap; display: inline-flex; align-items: center; gap: 56px; }
+  .ticker-track span::after { content: "✦"; font-size: 12px; color: var(--ember-1); }
+  @keyframes scroll { to { transform: translateX(-50%); } }
+
+  /* ============ SECTION scaffolding ============ */
+  section { position: relative; padding: 100px 0; }
+  .sec-head { max-width: 720px; margin-bottom: 56px; }
+  .sec-head h2 {
+    font-family: var(--f-display); font-weight: 400;
+    font-size: clamp(30px, 4.4vw, 50px); line-height: 1.06; letter-spacing: -0.02em;
+    margin-top: 20px;
+  }
+  .sec-head h2 em { font-style: italic; font-weight: 300; }
+  .sec-head p { margin-top: 18px; color: var(--taupe); font-size: 16.5px; max-width: 60ch; }
+
+  /* reveal animation */
+  .reveal { opacity: 0; transform: translateY(28px); transition: opacity .8s cubic-bezier(.2,.7,.2,1), transform .8s cubic-bezier(.2,.7,.2,1); }
+  .reveal.in { opacity: 1; transform: none; }
+
+  /* ============ FACT SHEET ============ */
+  #facts { border-top: 1px solid var(--line); }
+  .fact-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+  @media (max-width: 820px) { .fact-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 520px) { .fact-grid { grid-template-columns: 1fr; } }
+  .fact { background: var(--ink-2); padding: 26px 24px; transition: background .3s; }
+  .fact:hover { background: #14141a; }
+  .fact .k { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--taupe-dim); }
+  .fact .v { margin-top: 10px; font-size: 16px; font-weight: 600; line-height: 1.4; }
+  .fact .v.big { font-family: var(--f-display); font-weight: 500; font-size: 26px; }
+
+  /* stat row */
+  .stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 24px; margin-top: 56px; }
+  @media (max-width: 720px) { .stats { grid-template-columns: repeat(2,1fr); } }
+  .stat { border-left: 2px solid rgba(255,106,61,0.5); padding-left: 18px; }
+  .stat .num { font-family: var(--f-display); font-weight: 500; font-size: clamp(34px,4vw,46px); line-height: 1; letter-spacing: -0.02em; }
+  .stat .lbl { margin-top: 10px; font-size: 13px; color: var(--taupe); }
+
+  /* ============ LEADERSHIP ============ */
+  .leaders { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 760px) { .leaders { grid-template-columns: 1fr; } }
+  .leader {
+    position: relative; border: 1px solid var(--line); border-radius: 22px; padding: 34px;
+    background: var(--panel); overflow: hidden; transition: border-color .3s, transform .3s;
+  }
+  .leader:hover { border-color: var(--line-2); transform: translateY(-4px); }
+  .leader::after {
+    content: ""; position: absolute; inset: 0; opacity: 0.5; pointer-events: none;
+    background: radial-gradient(600px circle at 100% 0%, rgba(255,106,61,0.08), transparent 40%);
+  }
+  .leader .avatar {
+    width: 62px; height: 62px; border-radius: 16px; display: grid; place-items: center;
+    font-family: var(--f-display); font-weight: 600; font-size: 24px; color: #1a0d05;
+    background: var(--grad-ember); margin-bottom: 22px;
+  }
+  .leader.ceo .avatar { background: var(--grad-signal); color: #052622; }
+  .leader h3 { font-family: var(--f-display); font-weight: 500; font-size: 25px; letter-spacing: -0.01em; }
+  .leader .role { font-family: var(--f-mono); font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ember-2); margin-top: 6px; }
+  .leader.ceo .role { color: var(--signal); }
+  .leader .bio { margin-top: 18px; font-size: 14.5px; color: var(--taupe); line-height: 1.65; }
+  .leader .meta { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--taupe-dim); }
+
+  /* ============ VENTURE DEEP SECTIONS ============ */
+  .venture-block { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 56px; align-items: start; }
+  @media (max-width: 900px) { .venture-block { grid-template-columns: 1fr; gap: 36px; } }
+  .venture-num { font-family: var(--f-display); font-size: 15px; color: var(--taupe-dim); }
+  .venture-block h2 { font-family: var(--f-display); font-weight: 400; font-size: clamp(32px,4.6vw,52px); line-height: 1.04; letter-spacing: -0.02em; margin: 14px 0 20px; }
+  .venture-block .lead { color: var(--taupe); font-size: 16.5px; line-height: 1.7; }
+  .feat-list { display: grid; gap: 14px; }
+  .feat {
+    border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; background: var(--panel);
+    transition: border-color .3s, transform .3s, background .3s;
+  }
+  .feat:hover { border-color: var(--line-2); background: var(--panel-2); transform: translateX(4px); }
+  .feat h4 { font-size: 15.5px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+  .feat h4 .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .ember .feat h4 .dot { background: var(--ember-1); box-shadow: 0 0 12px var(--ember-1); }
+  .signal .feat h4 .dot { background: var(--signal); box-shadow: 0 0 12px var(--signal); }
+  .feat p { margin-top: 8px; font-size: 13.5px; color: var(--taupe); line-height: 1.6; }
+
+  /* tap flow */
+  .flow { margin-top: 20px; display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
+  @media (max-width: 720px) { .flow { grid-template-columns: 1fr; } }
+  .flow-step { border: 1px solid var(--line); border-radius: 16px; padding: 22px; background: var(--panel); position: relative; }
+  .flow-step .n { font-family: var(--f-mono); font-size: 12px; color: var(--signal); }
+  .flow-step h5 { font-family: var(--f-display); font-weight: 500; font-size: 18px; margin: 10px 0 6px; }
+  .flow-step p { font-size: 13px; color: var(--taupe); }
+
+  /* ============ CLIENTS ============ */
+  .client-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 18px; }
+  @media (max-width: 720px) { .client-grid { grid-template-columns: 1fr; } }
+  .client {
+    border: 1px solid var(--line); border-radius: 18px; padding: 24px 26px; background: var(--panel);
+    display: flex; gap: 18px; align-items: flex-start; transition: border-color .3s, transform .3s, background .3s;
+  }
+  .client:hover { border-color: var(--line-2); transform: translateY(-3px); background: var(--panel-2); }
+  .client .ico { font-size: 26px; line-height: 1; margin-top: 2px; }
+  .client .name { font-family: var(--f-display); font-weight: 500; font-size: 19px; }
+  .client .seg { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ember-2); margin: 4px 0 8px; }
+  .client .desc { font-size: 13px; color: var(--taupe); line-height: 1.55; }
+
+  /* ============ ARCHITECTURE ============ */
+  #arch { background:
+      radial-gradient(900px circle at 80% 0%, rgba(52,224,196,0.06), transparent 55%),
+      radial-gradient(800px circle at 0% 100%, rgba(255,106,61,0.06), transparent 55%);
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .stack { display: grid; gap: 14px; }
+  .layer {
+    border: 1px solid var(--line-2); border-radius: 18px; padding: 24px 28px; background: rgba(16,16,20,0.6);
+    backdrop-filter: blur(4px); position: relative; overflow: hidden;
+  }
+  .layer .lname { font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--taupe-dim); }
+  .layer .ltitle { font-family: var(--f-display); font-weight: 500; font-size: 21px; margin: 6px 0 14px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 9px; }
+  .chip { font-family: var(--f-mono); font-size: 12px; padding: 6px 13px; border-radius: 100px; border: 1px solid var(--line-2); color: var(--taupe); background: rgba(255,255,255,0.02); }
+  .layer.hl { border-color: rgba(255,106,61,0.35); }
+  .layer.hl .ltitle { color: var(--ember-2); }
+  .layer.hl2 { border-color: rgba(52,224,196,0.35); }
+  .layer.hl2 .ltitle { color: var(--signal); }
+  .arch-arrow { text-align: center; color: var(--taupe-dim); font-size: 18px; }
+
+  /* ============ PRICING ============ */
+  .price-toggle { display: inline-flex; gap: 6px; border: 1px solid var(--line-2); border-radius: 100px; padding: 5px; margin-bottom: 44px; }
+  .price-toggle button {
+    font-family: var(--f-body); font-size: 13.5px; font-weight: 600; color: var(--taupe);
+    padding: 9px 22px; border-radius: 100px; border: none; background: transparent; cursor: pointer; transition: all .25s;
+  }
+  .price-toggle button.active { color: #1a0d05; background: var(--grad-ember); }
+  .price-toggle button.active[data-t="tap"] { background: var(--grad-signal); color: #052622; }
+  .tiers { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; }
+  @media (max-width: 940px) { .tiers { grid-template-columns: repeat(2,1fr); } }
+  @media (max-width: 520px) { .tiers { grid-template-columns: 1fr; } }
+  .tier {
+    border: 1px solid var(--line); border-radius: 20px; padding: 28px 24px; background: var(--panel);
+    display: flex; flex-direction: column; transition: border-color .3s, transform .3s;
+  }
+  .tier:hover { border-color: var(--line-2); transform: translateY(-4px); }
+  .tier.featured { border-color: rgba(255,106,61,0.45); background: rgba(255,106,61,0.04); }
+  .tier .tname { font-family: var(--f-display); font-weight: 500; font-size: 22px; }
+  .tier .tprice { font-family: var(--f-display); font-size: 32px; font-weight: 500; margin: 12px 0 4px; letter-spacing: -0.01em; }
+  .tier .tprice small { font-family: var(--f-body); font-size: 13px; color: var(--taupe-dim); font-weight: 500; }
+  .tier ul { list-style: none; margin-top: 18px; display: grid; gap: 10px; }
+  .tier li { font-size: 13px; color: var(--taupe); display: flex; gap: 9px; align-items: flex-start; }
+  .tier li::before { content: "→"; color: var(--ember-2); flex: none; }
+  .tier.signal-tier li::before { color: var(--signal); }
+  .tier .badge { align-self: flex-start; font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ember-2); border: 1px solid rgba(255,106,61,0.4); border-radius: 100px; padding: 4px 10px; margin-bottom: 14px; }
+  .price-note { margin-top: 24px; font-size: 13px; color: var(--taupe-dim); }
+  .pane { display: none; }
+  .pane.active { display: block; animation: fade .4s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  /* ============ CONTACT / CTA ============ */
+  #contact { text-align: center; }
+  .cta-box {
+    border: 1px solid var(--line-2); border-radius: 30px; padding: 72px 40px;
+    background:
+      radial-gradient(600px circle at 30% 0%, rgba(255,106,61,0.14), transparent 60%),
+      radial-gradient(600px circle at 80% 100%, rgba(52,224,196,0.10), transparent 60%),
+      var(--ink-2);
+    position: relative; overflow: hidden;
+  }
+  .cta-box h2 { font-family: var(--f-display); font-weight: 400; font-size: clamp(32px,5vw,58px); line-height: 1.05; letter-spacing: -0.02em; }
+  .cta-box h2 em { font-style: italic; font-weight: 300; }
+  .cta-box p { margin: 22px auto 0; max-width: 52ch; color: var(--taupe); font-size: 16.5px; }
+  .cta-actions { margin-top: 38px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .contact-rows { margin-top: 46px; display: grid; grid-template-columns: repeat(3,1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; max-width: 760px; margin-left: auto; margin-right: auto; }
+  @media (max-width: 640px) { .contact-rows { grid-template-columns: 1fr; } }
+  .crow { background: var(--ink-2); padding: 22px; }
+  .crow .k { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--taupe-dim); }
+  .crow .v { margin-top: 8px; font-size: 15px; font-weight: 600; }
+  .crow a:hover { color: var(--ember-2); }
+
+  /* ============ FOOTER ============ */
+  footer { border-top: 1px solid var(--line); padding: 46px 0 60px; }
+  .foot { display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; }
+  .foot .fl { display: flex; align-items: center; gap: 12px; font-family: var(--f-display); font-weight: 600; font-size: 18px; }
+  .foot .fr { font-size: 12.5px; color: var(--taupe-dim); text-align: right; line-height: 1.7; }
+  .foot .fr a:hover { color: var(--ember-2); }
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <a href="#top" class="logo"><span class="logo-mark">A</span> Aries<span style="color:var(--taupe)">AI</span></a>
+  <div class="nav-links">
+    <a href="#facts">Company</a>
+    <a href="#team">Leadership</a>
+    <a href="#aries-ai">Aries AI</a>
+    <a href="#aries-tap">Aries Tap</a>
+    <a href="#pricing">Pricing</a>
+    <a href="#contact" class="nav-cta">Book a Demo</a>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<header class="hero" id="top">
+  <div class="glow glow-a"></div>
+  <div class="glow glow-b"></div>
+  <div class="hero-grid-lines"></div>
+  <div class="wrap hero-inner">
+    <span class="eyebrow reveal">Corporate Profile · Product Ecosystem · 2026</span>
+    <h1 class="hero-title reveal">The operating system for <em>modern hospitality</em> &amp; conversational <span class="ember-text">AI</span>.</h1>
+    <p class="hero-sub reveal">Aries AI Technologies unifies disconnected hospitality tech — menus, POS, reviews, loyalty, WhatsApp, WiFi and payments — into one high-conversion digital ecosystem. Two flagship platforms, one intelligent backbone.</p>
+    <div class="hero-actions reveal">
+      <a href="#contact" class="btn btn-primary">Book a Demo →</a>
+      <a href="#aries-tap" class="btn btn-ghost">Explore the Ecosystem</a>
+    </div>
+
+    <div class="ventures-strip">
+      <div class="v-card ember reveal">
+        <div class="accent-bar"></div>
+        <div class="tag">Venture 01 · Conversational SaaS</div>
+        <h3>Aries AI</h3>
+        <p>Multi-tenant WhatsApp &amp; Instagram automation powered by Google Gemini 2.0 Flash and the official Meta Cloud API — 24/7 engagement, lead scoring &amp; broadcasts.</p>
+      </div>
+      <div class="v-card signal reveal">
+        <div class="accent-bar"></div>
+        <div class="tag">Venture 02 · NFC Hospitality OS</div>
+        <h3>Aries Tap</h3>
+        <p>An NFC + AI physical-space OS that turns every table into a contactless digital concierge — no app, no login, no friction. Just tap.</p>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============ CLIENT TICKER ============ -->
+<div class="ticker">
+  <div class="ticker-track">
+    <span>Tafetta Coffee House</span><span>LazyMojo Cafe</span><span>Chaat and Chutneys</span><span>The Magnolia Cafe</span><span>Mezo Jaipur</span><span>The Clock Tower</span>
+    <span>Tafetta Coffee House</span><span>LazyMojo Cafe</span><span>Chaat and Chutneys</span><span>The Magnolia Cafe</span><span>Mezo Jaipur</span><span>The Clock Tower</span>
+  </div>
+</div>
+
+<!-- ============ FACT SHEET ============ -->
+<section id="facts">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">Corporate Fact Sheet</span>
+      <h2>A production-grade venture, <em>built to ship.</em></h2>
+      <p>Bootstrapped, product-led and operating live across India's hospitality corridors — engineered from the ground up as a hardware-software ecosystem.</p>
+    </div>
+
+    <div class="fact-grid reveal">
+      <div class="fact"><div class="k">Company</div><div class="v big">Aries AI Technologies</div></div>
+      <div class="fact"><div class="k">Flagship Ventures</div><div class="v">Aries AI — Conversational SaaS<br>Aries Tap — NFC Hospitality OS</div></div>
+      <div class="fact"><div class="k">Company Status</div><div class="v">Bootstrapped, production-grade SaaS &amp; hardware ecosystem</div></div>
+      <div class="fact"><div class="k">Primary Industry</div><div class="v">Hospitality Tech · Conversational AI · NFC Hardware-SaaS</div></div>
+      <div class="fact"><div class="k">Academic Origin</div><div class="v">Manipal University Jaipur — B.Tech Engineering</div></div>
+      <div class="fact"><div class="k">Primary Market</div><div class="v">India — Cafés, Lounges, Hotels, E-Commerce &amp; Retail</div></div>
+      <div class="fact"><div class="k">Core Stack</div><div class="v">Next.js 16 · Gemini 2.0 Flash + RAG · Meta Cloud API · Supabase · NFC NTAG</div></div>
+      <div class="fact"><div class="k">General Inquiries</div><div class="v"><a href="mailto:info@ariesai.in">info@ariesai.in</a></div></div>
+      <div class="fact"><div class="k">Website</div><div class="v"><a href="https://ariesai.in">ariesai.in</a></div></div>
+    </div>
+
+    <div class="stats reveal">
+      <div class="stat"><div class="num ember-text">2</div><div class="lbl">Flagship platforms on one intelligent backbone</div></div>
+      <div class="stat"><div class="num">24/7</div><div class="lbl">Autonomous customer engagement &amp; concierge</div></div>
+      <div class="stat"><div class="num">0</div><div class="lbl">App downloads or logins for guests to tap in</div></div>
+      <div class="stat"><div class="num signal-text">2h</div><div class="lbl">Support SLA · Mon–Sat, 9 AM–7 PM IST</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ LEADERSHIP ============ -->
+<section id="team">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">Executive Leadership</span>
+      <h2>Two founders. <em>One blueprint.</em></h2>
+      <p>Engineering depth meets commercial execution — a founding team that has architected and shipped the full 0-to-100 system across both ventures.</p>
+    </div>
+
+    <div class="leaders">
+      <div class="leader reveal">
+        <div class="avatar">SA</div>
+        <h3>Sakshay Ajwani</h3>
+        <div class="role">Co-Founder &amp; Chief Technology Officer</div>
+        <p class="bio">Owns platform architecture, AI/NLU RAG engineering, and system &amp; hardware integration. Architected the end-to-end blueprint for both ventures — Gemini RAG vector search, NFC secure URL signing, multi-tenant Supabase RLS isolation, and distributed queue-worker engines.</p>
+        <div class="meta">3rd Year B.Tech (Engineering) · Manipal University Jaipur</div>
+      </div>
+      <div class="leader ceo reveal">
+        <div class="avatar">KM</div>
+        <h3>Kritika Mahendru</h3>
+        <div class="role">Co-Founder &amp; Chief Executive Officer</div>
+        <p class="bio">Drives corporate strategy, brand partnerships and growth. Leads commercial execution, venue acquisition across hospitality hubs, client-success operations, agency white-label partnerships, and corporate brand positioning.</p>
+        <div class="meta">3rd Year B.Tech (Engineering) · Manipal University Jaipur</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ VENTURE 1: ARIES AI ============ -->
+<section id="aries-ai" class="ember">
+  <div class="wrap">
+    <div class="venture-block">
+      <div class="reveal">
+        <div class="venture-num">Venture 01</div>
+        <h2 class="ember-text">Aries AI</h2>
+        <p class="lead">Turn every inbound message on WhatsApp and Instagram into an automated sales and support engine — comprehending Hinglish, Hindi and English out of the box, and escalating to a human the moment it matters.</p>
+        <div style="margin-top:28px" class="chips">
+          <span class="chip">Gemini 2.0 Flash</span>
+          <span class="chip">Meta Cloud API v21</span>
+          <span class="chip">Multi-tenant RLS</span>
+          <span class="chip">BullMQ Workers</span>
+        </div>
+      </div>
+      <div class="feat-list reveal">
+        <div class="feat"><h4><span class="dot"></span>Gemini 2.0 Flash NLU Engine</h4><p>Free-form conversational comprehension across mixed Hinglish, Hindi &amp; English slang — <em>“bhai kal 4 baje table milega?”</em> understood natively.</p></div>
+        <div class="feat"><h4><span class="dot"></span>Direct Meta Cloud API Integration</h4><p>Official Cloud API v21.0 — bypassing third-party BSP markup and latency for lower cost and faster delivery.</p></div>
+        <div class="feat"><h4><span class="dot"></span>Smart Lead Scoring &amp; CTWA Attribution</h4><p>Automatic Hot / Warm / Cold classification with native Meta Click-to-WhatsApp ad attribution baked in.</p></div>
+        <div class="feat"><h4><span class="dot"></span>Automated Drip &amp; Broadcasts</h4><p>Multi-touch sequences (30m · 3h · 24h · 7d) and Meta template campaigns driven by resilient worker queues.</p></div>
+        <div class="feat"><h4><span class="dot"></span>Shared Inbox &amp; Human Escalation</h4><p>Real-time team inbox with one-click bot pause/resume and automatic sentiment-driven handoff.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ VENTURE 2: ARIES TAP ============ -->
+<section id="aries-tap" class="signal" style="border-top:1px solid var(--line);">
+  <div class="wrap">
+    <div class="venture-block">
+      <div class="reveal">
+        <div class="venture-num">Venture 02</div>
+        <h2 class="signal-text">Aries Tap</h2>
+        <p class="lead">A revolutionary NFC + AI operating system that transforms every table into an intelligent, contactless digital concierge — an Apple-grade web experience that opens the instant a guest taps. Zero app. Zero login. Zero friction.</p>
+        <div class="flow reveal">
+          <div class="flow-step"><div class="n">01</div><h5>Physical Trigger</h5><p>Premium wooden or acrylic NFC tags installed on every venue table.</p></div>
+          <div class="flow-step"><div class="n">02</div><h5>Instant Tap</h5><p>Guests tap any iOS or Android phone on the tag — no download, no signup.</p></div>
+          <div class="flow-step"><div class="n">03</div><h5>Instant Experience</h5><p>A glassmorphic, sub-second web app opens to a personalized homepage.</p></div>
+        </div>
+      </div>
+      <div class="feat-list reveal">
+        <div class="feat"><h4><span class="dot"></span>Apple-Quality Digital &amp; Drinks Menu</h4><p>HD photography, fluid animations, dietary filters (Veg · Vegan · Gluten-Free), variants and chef recommendations.</p></div>
+        <div class="feat"><h4><span class="dot"></span>Aries AI Virtual Waiter (RAG)</h4><p>Trained on the venue's exact menu, allergens and pairings. <em>“Suggest a spicy pasta under ₹500.”</em> Zero-hallucination guardrails defer to staff when unsure.</p></div>
+        <div class="feat"><h4><span class="dot"></span>Table Ops &amp; Service Triggers</h4><p>Call Waiter, request bill, book a table, order pickup/takeaway — instant staff-dashboard &amp; WhatsApp alerts.</p></div>
+        <div class="feat"><h4><span class="dot"></span>Reputation &amp; Feedback Guard</h4><p>1-tap Google reviews for happy guests; a private feedback route intercepts negatives <em>before</em> they hit Google.</p></div>
+        <div class="feat"><h4><span class="dot"></span>Gamification &amp; Loyalty</h4><p>Digital stamp cards, spin-the-wheel, scratch cards and visit streaks that drive repeat footfall.</p></div>
+        <div class="feat"><h4><span class="dot"></span>1-Tap WiFi, Personalization &amp; CRM</h4><p>Passwordless WiFi, returning-guest homepages, NFC fleet management and a marketing engine on every tap.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CLIENTS ============ -->
+<section id="clients" style="border-top:1px solid var(--line);">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">Trusted Brand Portfolio</span>
+      <h2>Powering premier <em>cafés, lounges &amp; fine dining.</em></h2>
+      <p>Aries AI and Aries Tap run the physical and digital customer operations for standout hospitality venues.</p>
+    </div>
+    <div class="client-grid">
+      <div class="client reveal"><div class="ico">☕</div><div><div class="name">Tafetta Coffee House</div><div class="seg">Specialty Coffee &amp; Bistro</div><div class="desc">NFC table-tap experience, WhatsApp digital-menu sharing, and automated booking management.</div></div></div>
+      <div class="client reveal"><div class="ico">🍴</div><div><div class="name">LazyMojo Cafe</div><div class="seg">Casual Dining &amp; Cafe</div><div class="desc">AI-powered reservation engine, event/party booking automation, and instant feedback capture.</div></div></div>
+      <div class="client reveal"><div class="ico">🌶️</div><div><div class="name">Chaat and Chutneys</div><div class="seg">Quick Service Restaurant</div><div class="desc">Fast inquiry responses, multi-outlet routing, digital menu distribution and automated support.</div></div></div>
+      <div class="client reveal"><div class="ico">🌿</div><div><div class="name">The Magnolia Cafe</div><div class="seg">Boutique Cafe &amp; Bakery</div><div class="desc">Automated takeaway inquiries, custom cake &amp; order consultations, and drip follow-ups.</div></div></div>
+      <div class="client reveal"><div class="ico">🍸</div><div><div class="name">Mezo Jaipur</div><div class="seg">Luxury Fine Dining</div><div class="desc">Premium AI concierge, VIP reservations with advance commitment fees, and instant staff escalation.</div></div></div>
+      <div class="client reveal"><div class="ico">🏛️</div><div><div class="name">The Clock Tower</div><div class="seg">Iconic Dining &amp; Lounge Bar</div><div class="desc">Weekend table-slot management, NFC DJ/event engagement, and multi-channel lead tracking.</div></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ARCHITECTURE ============ -->
+<section id="arch">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">Unified Technical Blueprint</span>
+      <h2>One backbone. <em>Hardware to AI.</em></h2>
+      <p>Secure NFC hardware, an edge-cached frontend, a RAG-powered AI core, and deep ecosystem integrations — engineered for sub-second taps and tenant-isolated data.</p>
+    </div>
+    <div class="stack">
+      <div class="layer reveal">
+        <div class="lname">Layer 01 · Hardware</div>
+        <div class="ltitle">Aries Tap NFC Fleet</div>
+        <div class="chips"><span class="chip">NTAG213</span><span class="chip">NTAG215</span><span class="chip">NTAG216</span><span class="chip">Encrypted Tag IDs</span><span class="chip">Signed Dynamic URLs</span></div>
+      </div>
+      <div class="arch-arrow">↓</div>
+      <div class="layer hl2 reveal">
+        <div class="lname">Layer 02 · Frontend</div>
+        <div class="ltitle">Edge-Rendered Web Experience</div>
+        <div class="chips"><span class="chip">Next.js 16 App Router</span><span class="chip">React</span><span class="chip">TypeScript</span><span class="chip">Framer Motion</span><span class="chip">Tailwind · Glassmorphism</span><span class="chip">Cloudflare CDN</span></div>
+      </div>
+      <div class="arch-arrow">↓</div>
+      <div class="layer hl reveal">
+        <div class="lname">Layer 03 · Backend &amp; AI</div>
+        <div class="ltitle">RAG Intelligence Core</div>
+        <div class="chips"><span class="chip">Supabase Postgres · RLS</span><span class="chip">Realtime</span><span class="chip">Gemini 2.0 Flash</span><span class="chip">Pgvector RAG</span><span class="chip">Node BullMQ Workers</span><span class="chip">Upstash Redis</span></div>
+      </div>
+      <div class="arch-arrow">↓</div>
+      <div class="layer reveal">
+        <div class="lname">Layer 04 · Integrations</div>
+        <div class="ltitle">Ecosystem &amp; Outputs</div>
+        <div class="chips"><span class="chip">Meta WhatsApp Cloud API</span><span class="chip">Razorpay</span><span class="chip">PetPooja</span><span class="chip">UrbanPiper · DotPe</span><span class="chip">Shopify</span><span class="chip">Google APIs</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PRICING ============ -->
+<section id="pricing">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="eyebrow">Commercial Models</span>
+      <h2>Transparent tiers for <em>every venue.</em></h2>
+      <p>Start free, scale on demand. Aries AI ships as pure SaaS; Aries Tap pairs NFC hardware with a recurring hospitality-OS subscription.</p>
+    </div>
+
+    <div class="price-toggle reveal">
+      <button class="active" data-pane="ai">Aries AI · Messaging SaaS</button>
+      <button data-t="tap" data-pane="tap">Aries Tap · Hospitality OS</button>
+    </div>
+
+    <div class="pane active" id="pane-ai">
+      <div class="tiers reveal">
+        <div class="tier">
+          <div class="tname">Starter</div>
+          <div class="tprice">₹3,999<small>/mo</small></div>
+          <ul><li>1 agent seat</li><li>2,000 conversations / mo</li><li>Basic FAQ bot</li><li>Shared inbox</li></ul>
+        </div>
+        <div class="tier featured">
+          <div class="badge">Most Popular</div>
+          <div class="tname">Growth</div>
+          <div class="tprice">₹5,999<small>/mo</small></div>
+          <ul><li>3 seats</li><li>10,000 conversations / mo</li><li>Hinglish / Hindi AI</li><li>Automated drip follow-ups</li></ul>
+        </div>
+        <div class="tier">
+          <div class="tname">Pro</div>
+          <div class="tprice">₹7,999<small>/mo</small></div>
+          <ul><li>5 seats</li><li>25,000 conversations / mo</li><li>Visual flow builder</li><li>CRM &amp; API webhooks</li></ul>
+        </div>
+        <div class="tier">
+          <div class="tname">Ultra</div>
+          <div class="tprice">Custom</div>
+          <ul><li>Unlimited conversations</li><li>Dedicated AI model</li><li>Voice agent</li><li>SLA &amp; success manager</li></ul>
+        </div>
+      </div>
+      <p class="price-note">Includes a 14-day free trial + ₹100 trial credits. 10% discount on annual billing.</p>
+    </div>
+
+    <div class="pane" id="pane-tap">
+      <div class="tiers reveal">
+        <div class="tier signal-tier">
+          <div class="tname">Starter</div>
+          <div class="tprice">₹999<small>/mo + setup</small></div>
+          <ul><li>Core digital menu</li><li>NFC table tags</li><li>Basic analytics</li><li>Google review module</li></ul>
+        </div>
+        <div class="tier signal-tier">
+          <div class="tname">Growth</div>
+          <div class="tprice">Scaled</div>
+          <ul><li>Full AI Virtual Waiter</li><li>Call Waiter / Bill Request</li><li>1-tap WiFi</li><li>Basic loyalty engine</li></ul>
+        </div>
+        <div class="tier signal-tier" style="border-color:rgba(52,224,196,0.45);background:rgba(52,224,196,0.04);">
+          <div class="badge" style="color:var(--signal);border-color:rgba(52,224,196,0.4);">Recommended</div>
+          <div class="tname">Pro</div>
+          <div class="tprice">Scaled</div>
+          <ul><li>Hyper-personalization engine</li><li>CRM &amp; marketing (WhatsApp/SMS)</li><li>POS integrations</li><li>Gamification suite</li></ul>
+        </div>
+        <div class="tier signal-tier">
+          <div class="tname">Enterprise</div>
+          <div class="tprice">White-Label</div>
+          <ul><li>Custom branding</li><li>Agency white-label portals</li><li>Multi-branch governance</li><li>Dedicated account manager</li></ul>
+        </div>
+      </div>
+      <p class="price-note">Flexible model: one-time NFC hardware setup + recurring monthly hospitality-OS subscription.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CONTACT ============ -->
+<section id="contact">
+  <div class="wrap">
+    <div class="cta-box reveal">
+      <h2>Let's build your <em>digital venue.</em></h2>
+      <p>From WhatsApp automation to the tap of a table, Aries AI powers the full customer journey. Talk to our team about a pilot for your brand.</p>
+      <div class="cta-actions">
+        <a href="mailto:info@ariesai.in" class="btn btn-primary">info@ariesai.in →</a>
+        <a href="https://ariesai.in" class="btn btn-ghost">Visit ariesai.in</a>
+      </div>
+      <div class="contact-rows">
+        <div class="crow"><div class="k">General &amp; Enterprise</div><div class="v"><a href="mailto:info@ariesai.in">info@ariesai.in</a></div></div>
+        <div class="crow"><div class="k">Technical Support</div><div class="v"><a href="mailto:support@ariesai.in">support@ariesai.in</a></div></div>
+        <div class="crow"><div class="k">Support Hours</div><div class="v">Mon–Sat · 9 AM–7 PM IST</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <div class="fl"><span class="logo-mark">A</span> Aries AI Technologies</div>
+    <div class="fr">
+      Aries AI · Aries Tap — The operating system for modern hospitality.<br>
+      <a href="https://ariesai.in">ariesai.in</a> · <a href="mailto:info@ariesai.in">info@ariesai.in</a> · Manipal University Jaipur
+    </div>
+  </div>
+</footer>
+
+<script>
+  // nav bg on scroll
+  const nav = document.getElementById('nav');
+  const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 30);
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  // reveal on scroll (staggered within a container)
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+  document.querySelectorAll('.reveal').forEach((el, i) => {
+    el.style.transitionDelay = (Math.min(i % 6, 5) * 70) + 'ms';
+    io.observe(el);
+  });
+
+  // pricing toggle
+  document.querySelectorAll('.price-toggle button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.price-toggle button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
+      document.getElementById('pane-' + btn.dataset.pane).classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>

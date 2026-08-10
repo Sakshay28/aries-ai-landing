@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aries AI - Payment Receipt</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #ffffff;
+      color: #0f172a;
+      padding: 40px 20px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .no-print-bar {
+      max-width: 680px;
+      margin: 0 auto 24px auto;
+      background: #f8fafc;
+      padding: 12px 20px;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .print-btn {
+      background-color: #0f172a;
+      color: #ffffff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .receipt-box {
+      max-width: 680px;
+      margin: 0 auto;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      padding: 40px;
+      border-radius: 8px;
+    }
+
+    /* Header */
+    .header-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 28px;
+    }
+    .header-table td {
+      vertical-align: top;
+    }
+    .logo-img {
+      width: 36px;
+      height: 36px;
+      object-fit: contain;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    .brand-title {
+      font-size: 22px;
+      font-weight: 800;
+      color: #0f172a;
+      vertical-align: middle;
+      display: inline-block;
+    }
+    .company-address {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+    .paid-badge {
+      display: inline-block;
+      background-color: #ecfdf5;
+      color: #047857;
+      border: 1px solid #a7f3d0;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .meta-line {
+      font-size: 12px;
+      color: #64748b;
+      line-height: 1.5;
+    }
+    .meta-line strong {
+      color: #0f172a;
+    }
+
+    .divider {
+      height: 1px;
+      background-color: #f1f5f9;
+      margin: 24px 0;
+    }
+
+    /* Billed To */
+    .section-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .client-name {
+      font-size: 15px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 4px;
+    }
+    .client-address {
+      font-size: 12.5px;
+      color: #475569;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+
+    /* Table */
+    .item-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 28px;
+    }
+    .item-table th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      padding: 8px 0;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    .item-table td {
+      padding: 14px 0;
+      font-size: 13px;
+      color: #334155;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .amount-col {
+      font-family: monospace;
+      font-weight: 700;
+      color: #0f172a;
+      text-align: right;
+    }
+
+    /* Total Block */
+    .total-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+    }
+    .total-table td {
+      vertical-align: top;
+    }
+    .words-box {
+      font-size: 12px;
+      color: #64748b;
+      font-style: italic;
+      margin-top: 4px;
+    }
+    .total-paid-text {
+      font-size: 22px;
+      font-weight: 800;
+      color: #047857;
+      font-family: monospace;
+    }
+
+    @media print {
+      body {
+        background-color: #ffffff !important;
+        padding: 0 !important;
+      }
+      .no-print-bar {
+        display: none !important;
+      }
+      .receipt-box {
+        border: none !important;
+        padding: 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Non-Print Top Bar -->
+  <div class="no-print-bar">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <img src="favicon.png" alt="Aries AI" style="width: 20px; height: 20px; object-fit: contain;" />
+      <span style="font-weight: 600; font-size: 13px; color: #0f172a;">Aries AI Payment Receipt</span>
+    </div>
+    <button class="print-btn" onclick="window.print()">Print / Save PDF</button>
+  </div>
+
+  <!-- Reverted Clean White Page Receipt -->
+  <div class="receipt-box">
+    
+    <!-- Header -->
+    <table class="header-table">
+      <tr>
+        <td>
+          <div>
+            <img src="favicon.png" alt="Aries AI Logo" class="logo-img" />
+            <h1 class="brand-title">Aries AI</h1>
+          </div>
+          <p class="company-address">
+            Office Address: 3-CHHA, SECTOR-3 JAWAHAR NAGAR, JAIPUR
+          </p>
+        </td>
+        <td style="text-align: right;">
+          <div class="paid-badge">PAYMENT RECEIVED</div>
+          <p class="meta-line">Receipt #: <strong>ARI/2026-08/0142</strong></p>
+          <p class="meta-line">Date: <strong>05 August 2026</strong></p>
+        </td>
+      </tr>
+    </table>
+
+    <div class="divider"></div>
+
+    <!-- Billed To -->
+    <div class="section-label">Billed To (Client)</div>
+    <div class="client-name">GLOBESOME INDIA</div>
+    <div class="client-address">
+      Scalability Tower, IT-46A, Doon IT Park, Sahastradhara Rd, Govind Vihar,<br />
+      Dehradun, Uttarakhand 248013
+    </div>
+
+    <!-- Table -->
+    <table class="item-table">
+      <thead>
+        <tr>
+          <th style="width: 70%;">Description</th>
+          <th style="width: 15%; text-align: center;">Billing</th>
+          <th style="width: 15%; text-align: right;">Amount (₹)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <strong style="color: #0f172a;">Aries AI Platform Subscription</strong><br />
+            <span style="font-size: 12px; color: #64748b;">AI Automation & WhatsApp Services (August 2026)</span>
+          </td>
+          <td style="text-align: center; color: #64748b; font-size: 12px;">Monthly</td>
+          <td class="amount-col">₹6,000.00</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Total -->
+    <table class="total-table">
+      <tr>
+        <td style="width: 60%;">
+          <div class="section-label">Amount in Words</div>
+          <div class="words-box">Six Thousand Indian Rupees Only</div>
+        </td>
+        <td style="width: 40%; text-align: right;">
+          <div class="section-label">Total Paid</div>
+          <div class="total-paid-text">₹6,000.00</div>
+        </td>
+      </tr>
+    </table>
+
+  </div>
+
+</body>
+</html>

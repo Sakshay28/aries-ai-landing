@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aries AI & Aries Tap — Executive Corporate Deck</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #07090e;
+      --bg-card: rgba(18, 22, 34, 0.7);
+      --bg-card-hover: rgba(28, 34, 52, 0.85);
+      --border-glow: rgba(99, 102, 241, 0.25);
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --accent-primary: #6366f1;
+      --accent-secondary: #a855f7;
+      --accent-cyan: #06b6d4;
+      --accent-amber: #f59e0b;
+      --accent-emerald: #10b981;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --font-heading: 'Outfit', sans-serif;
+      --font-body: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: var(--font-body);
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    .deck-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .ambient-glow {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(140px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .glow-1 {
+      top: -10%;
+      left: 15%;
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(99, 102, 241, 0.18) 0%, rgba(0,0,0,0) 70%);
+    }
+    .glow-2 {
+      bottom: -15%;
+      right: 10%;
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(168, 85, 247, 0.15) 0%, rgba(0,0,0,0) 70%);
+    }
+
+    header {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 24px 48px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: rgba(7, 9, 14, 0.6);
+      backdrop-filter: blur(12px);
+    }
+
+    .brand-logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-family: var(--font-heading);
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+
+    .brand-badge {
+      background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .tag-pill {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      background: rgba(99, 102, 241, 0.12);
+      color: #818cf8;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+
+    .deck-controls {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .slide-indicator {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-muted);
+      font-family: var(--font-heading);
+    }
+
+    .btn-nav {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-main);
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 13px;
+      transition: all 0.2s ease;
+    }
+    .btn-nav:hover {
+      background: rgba(99, 102, 241, 0.2);
+      border-color: var(--accent-primary);
+    }
+
+    .slides-viewport {
+      position: relative;
+      flex: 1;
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 48px;
+    }
+
+    .slide {
+      position: absolute;
+      width: 100%;
+      max-width: 1320px;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      opacity: 0;
+      transform: translateY(20px) scale(0.98);
+      pointer-events: none;
+      transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .slide.active {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: all;
+    }
+
+    .slide-header {
+      margin-bottom: 28px;
+    }
+    .slide-category {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--accent-cyan);
+      margin-bottom: 8px;
+    }
+    .slide-title {
+      font-family: var(--font-heading);
+      font-size: 40px;
+      font-weight: 800;
+      line-height: 1.15;
+      background: linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .slide-subtitle {
+      font-size: 16px;
+      color: var(--text-muted);
+      margin-top: 8px;
+      max-width: 800px;
+      line-height: 1.5;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 24px;
+      backdrop-filter: blur(16px);
+      transition: all 0.3s ease;
+      display: flex;
+      flex-direction: column;
+    }
+    .card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-glow);
+      transform: translateY(-2px);
+    }
+
+    .card-title {
+      font-family: var(--font-heading);
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card-desc {
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .highlight-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      background: rgba(99, 102, 241, 0.15);
+      color: #a5b4fc;
+      margin-bottom: 12px;
+      width: fit-content;
+    }
+
+    .deck-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    .deck-table th {
+      text-align: left;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text-muted);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .deck-table td {
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      color: var(--text-main);
+    }
+
+    .cover-slide {
+      text-align: center;
+      align-items: center;
+    }
+    .cover-title {
+      font-family: var(--font-heading);
+      font-size: 64px;
+      font-weight: 800;
+      line-height: 1.05;
+      background: linear-gradient(135deg, #ffffff 0%, #a5b4fc 50%, #c084fc 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 16px;
+    }
+    .cover-tagline {
+      font-size: 22px;
+      color: #94a3b8;
+      margin-bottom: 36px;
+      font-weight: 400;
+    }
+
+    footer {
+      position: relative;
+      z-index: 10;
+      padding: 16px 48px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid var(--border-subtle);
+      background: rgba(7, 9, 14, 0.6);
+      backdrop-filter: blur(12px);
+    }
+
+    .progress-bar-track {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .progress-bar-fill {
+      height: 100%;
+      width: 9%;
+      background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary), var(--accent-cyan));
+      transition: width 0.3s ease;
+    }
+
+    .footer-text {
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .stat-number {
+      font-family: var(--font-heading);
+      font-size: 36px;
+      font-weight: 800;
+      color: var(--accent-cyan);
+      margin-bottom: 4px;
+    }
+
+    @media (max-width: 1024px) {
+      .grid-2, .grid-3, .grid-4 {
+        grid-template-columns: 1fr;
+      }
+      .slide-title {
+        font-size: 30px;
+      }
+      .cover-title {
+        font-size: 42px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="deck-container">
+    <div class="ambient-glow glow-1"></div>
+    <div class="ambient-glow glow-2"></div>
+
+    <header>
+      <div class="brand-logo">
+        ARIES <span class="brand-badge">TECHNOLOGIES</span>
+        <span class="tag-pill">Executive Deck 2026</span>
+      </div>
+      <div class="deck-controls">
+        <span class="slide-indicator" id="slideNum">Slide 1 / 11</span>
+        <button class="btn-nav" onclick="prevSlide()">← Prev</button>
+        <button class="btn-nav" onclick="nextSlide()">Next →</button>
+      </div>
+    </header>
+
+    <div class="slides-viewport">
+
+      <!-- SLIDE 1: COVER -->
+      <div class="slide cover-slide active" id="slide-1">
+        <div class="highlight-badge">OFFICIAL CORPORATE PROFILE</div>
+        <h1 class="cover-title">Aries AI & Aries Tap</h1>
+        <p class="cover-tagline">The Operating System for Modern Hospitality & Conversational AI</p>
+        
+        <div style="display: flex; gap: 32px; margin-top: 20px;">
+          <div class="card" style="padding: 16px 28px; border-color: rgba(99,102,241,0.3);">
+            <div style="font-size: 13px; color: var(--text-dim);">Co-Founder & CTO</div>
+            <div style="font-weight: 700; font-size: 16px; color: #fff;">Sakshay Ajwani</div>
+          </div>
+          <div class="card" style="padding: 16px 28px; border-color: rgba(168,85,247,0.3);">
+            <div style="font-size: 13px; color: var(--text-dim);">Co-Founder & CEO</div>
+            <div style="font-weight: 700; font-size: 16px; color: #fff;">Kritika Mahendru</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 2: EXECUTIVE SUMMARY -->
+      <div class="slide" id="slide-2">
+        <div class="slide-header">
+          <div class="slide-category">Executive Summary</div>
+          <h2 class="slide-title">Unified Technology Ecosystem for Hospitality</h2>
+          <p class="slide-subtitle">Aries AI Technologies converges digital conversational messaging with physical space tap experiences into a single enterprise SaaS platform.</p>
+        </div>
+        
+        <div class="grid-2">
+          <div class="card">
+            <div class="highlight-badge">VENTURE 01</div>
+            <h3 class="card-title">🤖 Aries AI — Conversational Messaging</h3>
+            <p class="card-desc">
+              Multi-tenant WhatsApp & Instagram AI engine powered by <strong>Google Gemini 2.0 Flash</strong> and direct <strong>Official Meta WhatsApp Cloud API</strong>. Handles 24/7 customer support, Hinglish NLU, lead scoring, and automated drip follow-ups.
+            </p>
+          </div>
+          <div class="card">
+            <div class="highlight-badge" style="background: rgba(6,182,212,0.15); color:#67e8f9;">VENTURE 02</div>
+            <h3 class="card-title">📲 Aries Tap — Physical Hospitality OS</h3>
+            <p class="card-desc">
+              Revolutionary <strong>NFC + AI</strong> table operating system. Tapping a phone on a physical table tag opens an Apple-quality digital experience with zero app downloads, zero logins, zero friction.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 3: PROBLEM VS SOLUTION -->
+      <div class="slide" id="slide-3">
+        <div class="slide-header">
+          <div class="slide-category">Market Opportunity</div>
+          <h2 class="slide-title">Eliminating Hospitality Tech Fragmentation</h2>
+          <p class="slide-subtitle">Modern venues pay for 8+ disconnected tools, creating poor customer experiences and lost revenue.</p>
+        </div>
+
+        <div class="grid-2">
+          <div class="card" style="border-color: rgba(239, 68, 68, 0.3);">
+            <h3 class="card-title" style="color: #f87171;">❌ The Fragmented Problem</h3>
+            <ul style="list-style: none; margin-top: 12px; color: var(--text-muted); line-height: 2;">
+              <li>• Disconnected Paper Menus, QR codes, and POS systems</li>
+              <li>• High monthly software bills across multiple vendors</li>
+              <li>• Zero returning guest recognition or CRM data capture</li>
+              <li>• Unhandled off-hours booking inquiries & negative Google reviews</li>
+            </ul>
+          </div>
+          <div class="card" style="border-color: rgba(16, 185, 129, 0.3);">
+            <h3 class="card-title" style="color: #34d399;">✓ The Unified Aries Solution</h3>
+            <ul style="list-style: none; margin-top: 12px; color: var(--text-muted); line-height: 2;">
+              <li>• <strong>Physical Space + AI + NFC:</strong> Single unified tap experience</li>
+              <li>• <strong>RAG AI Virtual Waiter:</strong> Instant menu recommendations & upsells</li>
+              <li>• <strong>Integrated CRM:</strong> Every tap & chat converted into captured leads</li>
+              <li>• <strong>Reputation Shield:</strong> Private feedback guard + 1-Tap Google Reviews</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 4: FOUNDERS & LEADERSHIP -->
+      <div class="slide" id="slide-4">
+        <div class="slide-header">
+          <div class="slide-category">Corporate Leadership</div>
+          <h2 class="slide-title">Founded by Engineers, Built for Scale</h2>
+          <p class="slide-subtitle">Born out of Manipal University Jaipur (MUJ), Aries AI combines deep systems engineering with market-driven execution.</p>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3 class="card-title">Sakshay Ajwani</h3>
+            <div style="color: var(--accent-cyan); font-weight: 600; font-size: 14px; margin-bottom: 12px;">Co-Founder & Chief Technology Officer</div>
+            <p class="card-desc">
+              Architected the 0-to-100 technical blueprint across Gemini 2.0 Flash NLU, direct Meta Cloud API integration, NFC secure URL encryption, Supabase RLS database isolation, and BullMQ queue workers.
+            </p>
+          </div>
+          <div class="card">
+            <h3 class="card-title">Kritika Mahendru</h3>
+            <div style="color: var(--accent-secondary); font-weight: 600; font-size: 14px; margin-bottom: 12px;">Co-Founder & Chief Executive Officer</div>
+            <p class="card-desc">
+              Spearheads corporate growth strategy, enterprise venue onboarding, client success frameworks, brand partnerships, agency white-label programs, and commercial expansion.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 5: CLIENT PORTFOLIO -->
+      <div class="slide" id="slide-5">
+        <div class="slide-header">
+          <div class="slide-category">Proven Market Trust</div>
+          <h2 class="slide-title">Featured Brand Client Partners</h2>
+          <p class="slide-subtitle">Trusted by prominent restaurants, specialty cafes, and luxury venues across India.</p>
+        </div>
+
+        <div class="grid-3">
+          <div class="card">
+            <div style="font-size: 24px; margin-bottom: 8px;">☕</div>
+            <h4 style="font-size: 18px; color: #fff; margin-bottom: 4px;">Tafetta Coffee House</h4>
+            <p class="card-desc">Specialty Coffee & Bistro. Implemented NFC table tap & automated WhatsApp menu reservations.</p>
+          </div>
+          <div class="card">
+            <div style="font-size: 24px; margin-bottom: 8px;">🍴</div>
+            <h4 style="font-size: 18px; color: #fff; margin-bottom: 4px;">LazyMojo Cafe</h4>
+            <p class="card-desc">Casual Dining & Bistro. Automated table reservations, party inquiries & feedback capture.</p>
+          </div>
+          <div class="card">
+            <div style="font-size: 24px; margin-bottom: 8px;">🌶️</div>
+            <h4 style="font-size: 18px; color: #fff; margin-bottom: 4px;">Chaat and Chutneys</h4>
+            <p class="card-desc">Quick Service Restaurant. Multi-outlet routing, instant menu delivery & customer support.</p>
+          </div>
+          <div class="card">
+            <div style="font-size: 24px; margin-bottom: 8px;">🌿</div>
+            <h4 style="font-size: 18px; color: #fff; margin-bottom: 4px;">The Magnolia Cafe</h4>
+            <p class="card-desc">Boutique Cafe & Bakery. Takeaway order inquiries & automated drip marketing sequences.</p>
+          </div>
+          <div class="card">
+            <div style="font-size: 24px; margin-bottom: 8px;">🍸</div>
+            <h4 style="font-size: 18px; color: #fff; margin-bottom: 4px;">Mezo Jaipur</h4>
+            <p class="card-desc">Luxury Hospitality & Fine Dining. Premium AI concierge tone & VIP booking fee collection.</p>
+          </div>
+          <div class="card">
+            <div style="font-size: 24px; margin-bottom: 8px;">🏛️</div>
+            <div style="font-size: 18px; color: #fff; margin-bottom: 4px; font-weight: 700;">The Clock Tower</div>
+            <p class="card-desc">Iconic Dining & Lounge Bar. Weekend table slot management & NFC DJ calendar hubs.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 6: ARIES AI DEEP DIVE -->
+      <div class="slide" id="slide-6">
+        <div class="slide-header">
+          <div class="slide-category">Platform Blueprint — 01</div>
+          <h2 class="slide-title">Aries AI: Conversational Intelligence Engine</h2>
+        </div>
+
+        <div class="grid-4">
+          <div class="card">
+            <div class="stat-number">Gemini</div>
+            <div style="font-weight: 700; font-size: 15px; color:#fff; margin-bottom: 6px;">2.0 Flash NLU</div>
+            <p class="card-desc">Understands Hinglish, Hindi, and English slang naturally without decision trees.</p>
+          </div>
+          <div class="card">
+            <div class="stat-number">Meta</div>
+            <div style="font-weight: 700; font-size: 15px; color:#fff; margin-bottom: 6px;">Cloud API v21.0</div>
+            <p class="card-desc">Direct Meta integration guaranteeing maximum deliverability & lowest latency.</p>
+          </div>
+          <div class="card">
+            <div class="stat-number">CTWA</div>
+            <div style="font-weight: 700; font-size: 15px; color:#fff; margin-bottom: 6px;">Ad Attribution</div>
+            <p class="card-desc">Tracks Meta Click-to-WhatsApp ads & injects campaign context to AI.</p>
+          </div>
+          <div class="card">
+            <div class="stat-number">BullMQ</div>
+            <div style="font-weight: 700; font-size: 15px; color:#fff; margin-bottom: 6px;">Auto Follow-ups</div>
+            <p class="card-desc">Automated drip campaigns (30m, 3h, 24h, 7d) driven by dedicated Node workers.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 7: ARIES TAP DEEP DIVE -->
+      <div class="slide" id="slide-7">
+        <div class="slide-header">
+          <div class="slide-category">Platform Blueprint — 02</div>
+          <h2 class="slide-title">Aries Tap: Physical Space Operating System</h2>
+        </div>
+
+        <div class="grid-3">
+          <div class="card">
+            <h3 class="card-title">📲 Just Tap (Zero Friction)</h3>
+            <p class="card-desc">Guest taps phone on wooden NFC tag. Instantly opens an Apple-quality web app. No app download, no registration.</p>
+          </div>
+          <div class="card">
+            <h3 class="card-title">🧠 AI Virtual Waiter</h3>
+            <p class="card-desc">RAG-powered assistant answers menu queries, dietary filters, wine pairings, and upsells dishes with zero hallucinations.</p>
+          </div>
+          <div class="card">
+            <h3 class="card-title">🔔 Table Operations</h3>
+            <p class="card-desc">1-Tap Call Waiter, Bill Request, Online Ordering, 1-Tap WiFi Connection, and Event/DJ Schedule Hubs.</p>
+          </div>
+          <div class="card">
+            <h3 class="card-title">⭐ Reputation Guard</h3>
+            <p class="card-desc">1-Tap Google Reviews for happy guests; private feedback form alerts management before negative reviews hit Google.</p>
+          </div>
+          <div class="card">
+            <h3 class="card-title">🎁 Loyalty & Gamification</h3>
+            <p class="card-desc">Digital stamp cards, spin wheels, scratch cards, and visit streak rewards to maximize repeat customer rate.</p>
+          </div>
+          <div class="card">
+            <h3 class="card-title">👤 Hyper-Personalization</h3>
+            <p class="card-desc">Recognizes returning guests, displaying favorite dishes, visit history, loyalty tier, and birthday discounts.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 8: DASHBOARD & CRM -->
+      <div class="slide" id="slide-8">
+        <div class="slide-header">
+          <div class="slide-category">Enterprise Operations</div>
+          <h2 class="slide-title">Merchant Intelligence Dashboard & CRM</h2>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3 class="card-title">📊 Analytics & NFC Management</h3>
+            <ul style="list-style: none; margin-top: 8px; color: var(--text-muted); line-height: 1.8;">
+              <li>• Real-time tap counts, unique visitors, and peak hour heatmaps</li>
+              <li>• Encrypted NFC URL signing preventing tag cloning & tampering</li>
+              <li>• Review conversion tracking & offer CTR performance metrics</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3 class="card-title">🔌 Multi-Branch & POS Integrations</h3>
+            <ul style="list-style: none; margin-top: 8px; color: var(--text-muted); line-height: 1.8;">
+              <li>• Centralized control for unlimited locations, staff, & menus</li>
+              <li>• Architected for PetPooja, UrbanPiper, DotPe, & Razorpay sync</li>
+              <li>• Full white-label agency portal capability</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 9: TECH ARCHITECTURE -->
+      <div class="slide" id="slide-9">
+        <div class="slide-header">
+          <div class="slide-category">Technical Blueprint</div>
+          <h2 class="slide-title">Production-Grade Microservices Architecture</h2>
+        </div>
+
+        <div class="card" style="padding: 32px;">
+          <table class="deck-table">
+            <thead>
+              <tr>
+                <th>Layer</th>
+                <th>Technology Stack</th>
+                <th>Enterprise Capability</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Frontend</strong></td>
+                <td>Next.js 16 (App Router), React, TypeScript, Framer Motion</td>
+                <td>Sub-second render, glassmorphism UI, edge CDN optimization</td>
+              </tr>
+              <tr>
+                <td><strong>Database & Auth</strong></td>
+                <td>Supabase (PostgreSQL), Supabase Auth</td>
+                <td>Strict Row-Level Security (RLS) multi-tenant data isolation</td>
+              </tr>
+              <tr>
+                <td><strong>AI / NLU Engine</strong></td>
+                <td>Google Gemini 2.0 Flash + RAG Vector Search</td>
+                <td>15s circuit-breaker fallbacks, token attribution, zero hallucination</td>
+              </tr>
+              <tr>
+                <td><strong>Background Queue</strong></td>
+                <td>Node.js Standalone Worker, BullMQ, Upstash Redis</td>
+                <td>Decoupled long-running follow-up & broadcast job processing</td>
+              </tr>
+              <tr>
+                <td><strong>Security Standard</strong></td>
+                <td>AES-256-GCM, HMAC-SHA256, Cloudflare Edge</td>
+                <td>Token encryption at rest, payload verification, GDPR Article 17</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- SLIDE 10: PRICING -->
+      <div class="slide" id="slide-10">
+        <div class="slide-header">
+          <div class="slide-category">Commercial Strategy</div>
+          <h2 class="slide-title">SaaS Pricing & Hardware Subscription Tiers</h2>
+        </div>
+
+        <div class="grid-4">
+          <div class="card">
+            <div class="highlight-badge">STARTER</div>
+            <div style="font-size: 28px; font-weight: 800; color: #fff; margin: 8px 0;">₹3,999<span style="font-size: 14px; font-weight: 400; color: var(--text-dim);">/mo</span></div>
+            <p class="card-desc">1 Seat, 2,000 WhatsApp convos/mo, Basic FAQ bot, Shared Inbox.</p>
+          </div>
+          <div class="card" style="border-color: var(--accent-primary);">
+            <div class="highlight-badge" style="background: var(--accent-primary); color: #fff;">GROWTH</div>
+            <div style="font-size: 28px; font-weight: 800; color: #fff; margin: 8px 0;">₹5,999<span style="font-size: 14px; font-weight: 400; color: var(--text-dim);">/mo</span></div>
+            <p class="card-desc">3 Seats, 10,000 convos/mo, Hinglish NLU, Auto Drip Follow-ups.</p>
+          </div>
+          <div class="card">
+            <div class="highlight-badge">PRO</div>
+            <div style="font-size: 28px; font-weight: 800; color: #fff; margin: 8px 0;">₹7,999<span style="font-size: 14px; font-weight: 400; color: var(--text-dim);">/mo</span></div>
+            <p class="card-desc">5 Seats, 25,000 convos/mo, Visual Flow Builder, Full Webhooks & API.</p>
+          </div>
+          <div class="card">
+            <div class="highlight-badge" style="background: rgba(6,182,212,0.2); color:#67e8f9;">ARIES TAP</div>
+            <div style="font-size: 28px; font-weight: 800; color: #fff; margin: 8px 0;">₹999<span style="font-size: 14px; font-weight: 400; color: var(--text-dim);">/mo</span></div>
+            <p class="card-desc">NFC Tags Setup Fee + Recurring SaaS per table venue.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 11: CONTACT -->
+      <div class="slide cover-slide" id="slide-11">
+        <div class="highlight-badge">STRATEGIC PARTNERSHIPS</div>
+        <h1 class="cover-title" style="font-size: 48px;">Build the Future of Hospitality With Us</h1>
+        <p class="cover-tagline">Transforming every physical table into an intelligent digital asset.</p>
+
+        <div style="display: flex; gap: 40px; margin-top: 10px;">
+          <div>
+            <div style="color: var(--text-dim); font-size: 13px;">Website</div>
+            <div style="font-size: 18px; font-weight: 700; color: var(--accent-cyan);">ariesai.in</div>
+          </div>
+          <div>
+            <div style="color: var(--text-dim); font-size: 13px;">Corporate Sales</div>
+            <div style="font-size: 18px; font-weight: 700; color: var(--text-main);">info@ariesai.in</div>
+          </div>
+          <div>
+            <div style="color: var(--text-dim); font-size: 13px;">Technical Support</div>
+            <div style="font-size: 18px; font-weight: 700; color: var(--text-main);">support@ariesai.in</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <footer>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progressFill"></div>
+      </div>
+      <div class="footer-text">Aries AI Technologies © 2026 | Confidential Presentation</div>
+      <div class="footer-text">Press <strong>←</strong> or <strong>→</strong> keys to navigate</div>
+    </footer>
+  </div>
+
+  <script>
+    let currentSlide = 1;
+    const totalSlides = 11;
+
+    function updateSlide() {
+      document.querySelectorAll('.slide').forEach((slide, idx) => {
+        if (idx + 1 === currentSlide) {
+          slide.classList.add('active');
+        } else {
+          slide.classList.remove('active');
+        }
+      });
+
+      document.getElementById('slideNum').innerText = `Slide ${currentSlide} / ${totalSlides}`;
+      document.getElementById('progressFill').style.width = `${(currentSlide / totalSlides) * 100}%`;
+    }
+
+    function nextSlide() {
+      if (currentSlide < totalSlides) {
+        currentSlide++;
+        updateSlide();
+      }
+    }
+
+    function prevSlide() {
+      if (currentSlide > 1) {
+        currentSlide--;
+        updateSlide();
+      }
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ') {
+        nextSlide();
+      } else if (e.key === 'ArrowLeft') {
+        prevSlide();
+      }
+    });
+  </script>
+</body>
+</html>

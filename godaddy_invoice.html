@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GoDaddy Tax Invoice - Rs. 599</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: #f3f4f6;
+      color: #111111;
+      line-height: 1.5;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* Interactive Toolbar */
+    .toolbar {
+      background: #111111;
+      color: #ffffff;
+      padding: 16px 24px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .toolbar-container {
+      max-width: 900px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .toolbar-title {
+      font-size: 16px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toolbar-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .form-group label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #9ca3af;
+      font-weight: 600;
+    }
+
+    .form-control {
+      background: #262626;
+      border: 1px solid #404040;
+      color: #ffffff;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+
+    .form-control:focus {
+      outline: none;
+      border-color: #00838c;
+    }
+
+    .btn-print {
+      background: #00838c;
+      color: #ffffff;
+      border: none;
+      padding: 8px 18px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: background-color 0.2s;
+    }
+
+    .btn-print:hover {
+      background: #006a71;
+    }
+
+    /* Invoice Container */
+    .invoice-wrapper {
+      max-width: 900px;
+      margin: 32px auto;
+      padding: 0 16px;
+    }
+
+    .invoice-card {
+      background: #ffffff;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+      padding: 48px;
+      position: relative;
+    }
+
+    /* Invoice Header */
+    .invoice-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding-bottom: 24px;
+      border-bottom: 2px solid #111111;
+      margin-bottom: 32px;
+    }
+
+    .godaddy-logo {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .godaddy-logo svg {
+      height: 38px;
+      width: auto;
+    }
+
+    .invoice-title-block {
+      text-align: right;
+    }
+
+    .invoice-title {
+      font-size: 24px;
+      font-weight: 800;
+      color: #111111;
+      letter-spacing: -0.5px;
+      text-transform: uppercase;
+    }
+
+    .invoice-badge {
+      display: inline-block;
+      background: #e6f4f4;
+      color: #00838c;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 20px;
+      margin-top: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Meta Grid */
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 20px;
+      margin-bottom: 32px;
+    }
+
+    .meta-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .meta-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+
+    .meta-value {
+      font-size: 14px;
+      font-weight: 600;
+      color: #111111;
+    }
+
+    .meta-sub {
+      font-size: 12px;
+      color: #4b5563;
+    }
+
+    /* Parties Section */
+    .parties-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
+      margin-bottom: 36px;
+    }
+
+    .party-box {
+      background: #ffffff;
+    }
+
+    .party-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #00838c;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .party-name {
+      font-size: 15px;
+      font-weight: 700;
+      color: #111111;
+      margin-bottom: 4px;
+    }
+
+    .party-details {
+      font-size: 13px;
+      color: #4b5563;
+      line-height: 1.6;
+    }
+
+    /* Items Table */
+    .table-container {
+      margin-bottom: 32px;
+    }
+
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    .items-table th {
+      background: #111111;
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 12px 16px;
+    }
+
+    .items-table th:first-child {
+      border-top-left-radius: 4px;
+    }
+    .items-table th:last-child {
+      border-top-right-radius: 4px;
+      text-align: right;
+    }
+
+    .items-table td {
+      padding: 16px;
+      border-bottom: 1px solid #e5e7eb;
+      font-size: 13px;
+      color: #1f2937;
+    }
+
+    .items-table td:last-child {
+      text-align: right;
+      font-weight: 600;
+    }
+
+    .item-title {
+      font-weight: 700;
+      font-size: 14px;
+      color: #111111;
+      margin-bottom: 2px;
+    }
+
+    .item-desc {
+      font-size: 12px;
+      color: #6b7280;
+    }
+
+    /* Calculation Grid */
+    .calc-section {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 36px;
+    }
+
+    .calc-box {
+      width: 340px;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 20px;
+    }
+
+    .calc-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      color: #4b5563;
+      padding: 6px 0;
+    }
+
+    .calc-row.total {
+      border-top: 2px solid #111111;
+      margin-top: 8px;
+      padding-top: 12px;
+      font-size: 16px;
+      font-weight: 800;
+      color: #111111;
+    }
+
+    .calc-row.total .total-amount {
+      color: #00838c;
+      font-size: 18px;
+    }
+
+    /* Payment Status Info */
+    .payment-info {
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: 6px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 36px;
+    }
+
+    .payment-status-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #166534;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .payment-status-details {
+      font-size: 12px;
+      color: #15803d;
+    }
+
+    /* Footer & Compliance */
+    .invoice-footer {
+      border-top: 1px solid #e5e7eb;
+      padding-top: 24px;
+      font-size: 11px;
+      color: #6b7280;
+      line-height: 1.6;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .footer-notes p {
+      margin-bottom: 4px;
+    }
+
+    .stamp-box {
+      text-align: center;
+      border: 2px dashed #00838c;
+      border-radius: 6px;
+      padding: 8px 16px;
+      color: #00838c;
+      font-weight: 700;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: rgba(0, 131, 140, 0.03);
+    }
+
+    .stamp-box .stamp-icon {
+      margin-top: 2px;
+      font-size: 12px;
+      color: #00838c;
+    }
+
+    /* Print Styles */
+    @media print {
+      body {
+        background: #ffffff;
+      }
+
+      .toolbar {
+        display: none !important;
+      }
+
+      .invoice-wrapper {
+        margin: 0;
+        padding: 0;
+        max-width: 100%;
+      }
+
+      .invoice-card {
+        box-shadow: none;
+        padding: 20px 0;
+        border-radius: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Interactive Control Panel (hidden on print) -->
+  <div class="toolbar">
+    <div class="toolbar-container">
+      <div class="toolbar-title">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+          <polyline points="10 9 9 9 8 9"></polyline>
+        </svg>
+        GoDaddy Tax Invoice Generator (Rs. 599)
+      </div>
+
+      <div class="toolbar-controls">
+        <div class="form-group">
+          <label>Customer Name</label>
+          <input type="text" id="inputCustomer" class="form-control" value="MEZO JAIPUR" oninput="updateInvoice()">
+        </div>
+        <div class="form-group">
+          <label>Domain Name</label>
+          <input type="text" id="inputDomain" class="form-control" value="mezojaipur.com" oninput="updateInvoice()">
+        </div>
+        <div class="form-group">
+          <label>Invoice Date</label>
+          <input type="date" id="inputDate" class="form-control" value="2026-08-07" onchange="updateInvoice()">
+        </div>
+        <div class="form-group">
+          <label>Total Amount (₹)</label>
+          <input type="number" id="inputAmount" class="form-control" value="599" style="width: 90px;" oninput="updateInvoice()">
+        </div>
+        
+        <button class="btn-print" onclick="window.print()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 6 2 18 2 18 9"></polyline>
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+            <rect x="6" y="14" width="12" height="8"></rect>
+          </svg>
+          Print / Save PDF
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Invoice Document -->
+  <div class="invoice-wrapper">
+    <div class="invoice-card">
+      
+      <!-- Header -->
+      <div class="invoice-header">
+        <div class="godaddy-logo">
+          <!-- GoDaddy Official Logo SVG -->
+          <svg viewBox="0 0 260 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M38.8 14.2C34.4 14.2 30.7 16.5 28.5 20C26.3 16.5 22.6 14.2 18.2 14.2C10.4 14.2 4 20.6 4 28.5C4 39.5 17.5 48.8 28.5 54C39.5 48.8 53 39.5 53 28.5C53 20.6 46.6 14.2 38.8 14.2ZM28.5 49.2C19.8 44.5 9.5 36.8 9.5 28.5C9.5 23.6 13.4 19.7 18.2 19.7C22.2 19.7 25.6 22.4 26.8 26.3C27.2 27.5 29.8 27.5 30.2 26.3C31.4 22.4 34.8 19.7 38.8 19.7C43.6 19.7 47.5 23.6 47.5 28.5C47.5 36.8 37.2 44.5 28.5 49.2Z" fill="#111111"/>
+            <path d="M38.8 24C36.3 24 34.3 26 34.3 28.5C34.3 31 36.3 33 38.8 33C41.3 33 43.3 31 43.3 28.5C43.3 26 41.3 24 38.8 24Z" fill="#111111"/>
+            <!-- Wordmark -->
+            <text x="62" y="38" font-family="'Inter', sans-serif" font-weight="800" font-size="30" fill="#111111" letter-spacing="-1">GoDaddy</text>
+            <text x="63" y="52" font-family="'Inter', sans-serif" font-weight="600" font-size="11" fill="#666666" letter-spacing="2">INDIA</text>
+          </svg>
+        </div>
+
+        <div class="invoice-title-block">
+          <div class="invoice-title">Tax Invoice</div>
+          <div class="invoice-badge">Paid Receipt</div>
+        </div>
+      </div>
+
+      <!-- Metadata Grid -->
+      <div class="meta-grid">
+        <div class="meta-item">
+          <span class="meta-label">Invoice Number</span>
+          <span class="meta-value" id="dispInvoiceNum">GD-IN-2026-3849102</span>
+          <span class="meta-sub">Ref: 2984910283</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Invoice Date</span>
+          <span class="meta-value" id="dispInvoiceDate">07 Aug, 2026</span>
+          <span class="meta-sub">Payment Term: Immediate</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Place of Supply</span>
+          <span class="meta-value">Rajasthan (08)</span>
+          <span class="meta-sub">Currency: INR (₹)</span>
+        </div>
+      </div>
+
+      <!-- Parties Grid -->
+      <div class="parties-grid">
+        <!-- Seller -->
+        <div class="party-box">
+          <div class="party-title">Seller Details</div>
+          <div class="party-name">GoDaddy India Domains and Hosting Services Pvt. Ltd.</div>
+          <div class="party-details">
+            Unit No. 101, 1st Floor, Building 4,<br>
+            Sector 49, Sohna Road, Gurugram,<br>
+            Haryana 122018, India<br>
+            <strong>GSTIN:</strong> 06AABCG3311R1ZU<br>
+            <strong>PAN:</strong> AABCG3311R | <strong>CIN:</strong> U72900HR2012PTC045396
+          </div>
+        </div>
+
+        <!-- Buyer -->
+        <div class="party-box">
+          <div class="party-title">Billed To (Customer)</div>
+          <div class="party-name" id="dispCustomerName">MEZO JAIPUR</div>
+          <div class="party-details">
+            Jaipur, Rajasthan, 302001, India<br>
+            <strong>Account Number:</strong> 94820158<br>
+            <strong>Billing Email:</strong> billing@mezojaipur.com<br>
+            <strong>Payment Method:</strong> UPI / NetBanking / Card<br>
+            <strong>Customer GSTIN:</strong> UR (Unregistered)
+          </div>
+        </div>
+      </div>
+
+      <!-- Items Table -->
+      <div class="table-container">
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th style="width: 50%;">Description</th>
+              <th style="width: 15%;">Duration</th>
+              <th style="width: 15%;">Rate</th>
+              <th style="width: 20%;">Amount (INR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <div class="item-title" id="dispDomainTitle">Domain Registration - mezojaipur.com</div>
+                <div class="item-desc">GoDaddy Domain Name Registration & Privacy Protection Service</div>
+              </td>
+              <td>1 Year</td>
+              <td id="dispRate">₹491.73</td>
+              <td id="dispItemSubtotal">₹491.73</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="item-title">ICANN Fee</div>
+                <div class="item-desc">Mandatory ICANN administration fee per domain year</div>
+              </td>
+              <td>1 Year</td>
+              <td>₹15.90</td>
+              <td>₹15.90</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Calculation Summary -->
+      <div class="calc-section">
+        <div class="calc-box">
+          <div class="calc-row">
+            <span>Subtotal (Net Amount)</span>
+            <span id="dispSubtotal">₹507.63</span>
+          </div>
+          <div class="calc-row">
+            <span>IGST (18.0%)</span>
+            <span id="dispTotalTax">₹91.37</span>
+          </div>
+          <div class="calc-row total">
+            <span>Total Paid (Incl. Taxes)</span>
+            <span class="total-amount" id="dispTotalAmount">₹599.00</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Payment Confirmation Box -->
+      <div class="payment-info">
+        <div>
+          <div class="payment-status-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+            Payment Received - Thank you!
+          </div>
+          <div class="payment-status-details">
+            Transaction ID: <strong>TXN_GD_599_84710294</strong> | Settled via Online Payment Gateway
+          </div>
+        </div>
+        <div style="font-size: 13px; font-weight: 700; color: #166534;">
+          STATUS: COMPLETED
+        </div>
+      </div>
+
+      <!-- Footer & Compliance -->
+      <div class="invoice-footer">
+        <div class="footer-notes">
+          <p><strong>GoDaddy Customer Support:</strong> +91 040 67607600 | www.godaddy.com/help</p>
+          <p>This is a computer-generated tax invoice issued under Rule 46 of CGST Rules, 2017.</p>
+          <p>GoDaddy India Domains and Hosting Services Pvt. Ltd. | Regd. Office Gurugram, India.</p>
+        </div>
+
+        <div class="stamp-box">
+          <div>GoDaddy India</div>
+          <div class="stamp-icon">✓ Digitally Signed</div>
+          <div style="font-size: 8px; color: #666; margin-top: 2px;">AUTHENTIC RECEIPT</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    function updateInvoice() {
+      const customer = document.getElementById('inputCustomer').value || 'MEZO JAIPUR';
+      const domain = document.getElementById('inputDomain').value || 'mezojaipur.com';
+      const rawDate = document.getElementById('inputDate').value;
+      const totalAmount = parseFloat(document.getElementById('inputAmount').value) || 599;
+
+      // Update Customer & Domain
+      document.getElementById('dispCustomerName').innerText = customer;
+      document.getElementById('dispDomainTitle').innerText = 'Domain Registration - ' + domain;
+
+      // Update Date
+      if (rawDate) {
+        const d = new Date(rawDate);
+        const options = { day: '2-digit', month: 'short', year: 'numeric' };
+        document.getElementById('dispInvoiceDate').innerText = d.toLocaleDateString('en-GB', options);
+      }
+
+      // Financial Calculation (18% GST reverse calculated)
+      // Total = Base + 0.18 * Base = 1.18 * Base
+      const subtotal = totalAmount / 1.18;
+      const totalTax = totalAmount - subtotal;
+      const icann = 15.90;
+      const domainRate = Math.max(0, subtotal - icann);
+
+      // Formatting function
+      const fmt = (num) => '₹' + num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+      document.getElementById('dispRate').innerText = fmt(domainRate);
+      document.getElementById('dispItemSubtotal').innerText = fmt(domainRate);
+      document.getElementById('dispSubtotal').innerText = fmt(subtotal);
+      document.getElementById('dispTotalTax').innerText = fmt(totalTax);
+      document.getElementById('dispTotalAmount').innerText = fmt(totalAmount);
+    }
+
+    // Initialize on page load
+    window.onload = updateInvoice;
+  </script>
+
+</body>
+</html>
