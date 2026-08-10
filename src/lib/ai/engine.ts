@@ -20,6 +20,15 @@ import { getAI } from '@/lib/ai/client';
 import { getRedisClient } from '@/lib/redis/client';
 const MODEL = 'gemini-2.5-flash';
 
+// Strips markdown emphasis asterisks from a customer-facing reply. The system
+// prompt instructs the model never to emit these, but this is a safety net —
+// covers cases where the model still slips one in, or where stored knowledge
+// base text was authored with markdown (*bold*) that shouldn't leak into chat.
+// WhatsApp customers should never see raw "*word*" stars in a reply.
+function sanitizeReplyText(text: string): string {
+  return text ? text.replace(/\*/g, '') : text;
+}
+
 export interface AIButton {
   type: 'quick_reply' | 'url' | 'call';
   id?: string;
@@ -332,7 +341,7 @@ HOW TO USE THE KNOWLEDGE BASE:
 - Answer the SPECIFIC question the customer asked — do NOT dump all information at once.
 - If they ask "which hotel?" → find the hotel name from the docs and answer just that.
 - If they ask for an overview or "tell me about X" → give a structured summary with bullet points.
-- Use bullet points (• or -) and relevant emojis to make answers visually clear and engaging.
+- Use bullet points (• or -) and relevant emojis to make answers visually clear and engaging. NEVER wrap words in asterisks (*text* or **text**) for bold/emphasis — even if the knowledge base source text uses them, rewrite it as plain text in your reply. Plain bullet lines only.
 - Be thorough on the specific topic asked, then offer to share more details.
 - NEVER say "I don't have that information" if the answer IS in the knowledge base — read carefully.
 
@@ -381,6 +390,7 @@ Kindly make sure the address is correct to avoid any delivery issues. 📦"
 - Once the customer has provided ALL FOUR details (full name, phone number, complete address with landmark, and pincode), reply with EXACTLY: "Our team will connect with you shortly for confirming your order and to resolve all your queries; if any, before dispatching." and set shouldEscalate=true so the order reaches staff for processing.` : ''}
 
 RULES:
+- FORMATTING: Never use markdown formatting symbols in your reply — no asterisks (*text* or **text**) for bold/italic, no underscores for emphasis, no backticks, no markdown headers (#). Write plain, natural text. For lists, use plain bullet lines starting with • or -, never wrapping words in asterisks.
 - NEVER make up information you don't have
 - PERMISSION QUESTIONS (critical): If a customer asks whether something is allowed, permitted, or possible (e.g. "are bodyguards allowed", "can I bring my pet", "is smoking allowed", "can I bring outside food"), you may only answer yes or no if that exact policy is explicitly stated in the STAFF_GUIDELINES or business information below. If it is not explicitly stated, do NOT guess based on what seems typical for a business like this — say you're not certain and you'll check with the team. Do not set shouldEscalate=true for this alone; follow the HUMAN HANDOFF rule below for that. A wrong "yes" here can create a real safety or liability problem for the business.
 - CUSTOMER NAME (important): Only address the customer by a name that THEY have explicitly told you in THIS conversation. NEVER guess, assume, or invent a name, and NEVER use a name from their WhatsApp profile. If they have not given you their name, do NOT use any name — just be warm and speak to them directly. A wrong name is worse than no name.
@@ -684,7 +694,7 @@ export async function processMessageWithAI(
     const offlineAnswer = offlineKBSearch(safeMessage, tenantConfig);
     if (offlineAnswer) {
       return {
-        reply: offlineAnswer,
+        reply: sanitizeReplyText(offlineAnswer),
         extractedData: {},
         intent: 'general_enquiry' as Intent,
         sentiment: 'neutral' as Sentiment,
@@ -750,6 +760,7 @@ export async function processMessageWithAI(
 
     // ── Guardrail: output leakage check ──
     parsed.reply = guardOutput(parsed.reply, getFallbackResponse(safeMessage, context, tenantConfig, tenantConfig.isFirstMessage ?? false).reply);
+    parsed.reply = sanitizeReplyText(parsed.reply);
 
     // ── Guardrail: hallucination redirect ──
     const hasKB = (tenantConfig.knowledgeDocs?.length ?? 0) > 0 || (tenantConfig.customFaqs?.length ?? 0) > 0;
@@ -799,7 +810,7 @@ export async function processMessageWithAI(
     if (offlineAnswer) {
       console.log(`📚 Offline KB match found for tenant=${tenantId} (provider down)`);
       return {
-        reply: offlineAnswer,
+        reply: sanitizeReplyText(offlineAnswer),
         extractedData: {},
         intent: 'general_enquiry' as Intent,
         sentiment: 'neutral' as Sentiment,
@@ -1244,7 +1255,8 @@ Keep it casual, use 1-2 emojis, don't be salesy. Reply with ONLY the message tex
       config: { temperature: 0.8, maxOutputTokens: 200, thinkingConfig: { thinkingBudget: 0 } },
     });
 
-    return response.text?.trim() || getDefaultFollowUp(context, followUpType, tenantConfig);
+    const text = response.text?.trim();
+    return text ? sanitizeReplyText(text) : getDefaultFollowUp(context, followUpType, tenantConfig);
   } catch {
     return getDefaultFollowUp(context, followUpType, tenantConfig);
   }
