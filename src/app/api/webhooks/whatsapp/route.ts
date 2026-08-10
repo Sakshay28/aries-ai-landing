@@ -428,26 +428,34 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const cleanPhone = normalizePhoneNumber(msg.fromPhone);
   const staffPhone = normalizePhoneNumber(tenant.staff_phone);
   const managerPhone = normalizePhoneNumber(tenant.manager_phone);
-  let isStaffMessage = !!cleanPhone && (cleanPhone === staffPhone || cleanPhone === managerPhone);
+  const isOwnStaffNumber = !!cleanPhone && (cleanPhone === staffPhone || cleanPhone === managerPhone);
 
-  // Platform number: the Aries AI number blasts alerts to EVERY client's staff and
-  // receives their replies. Those senders are staff of OTHER tenants, so they don't
-  // match THIS tenant's own staff/manager numbers — without this, the customer AI
-  // engages them ("how can I help you plan your event?").
-  //
-  // BUT the platform number is ALSO the customer-facing bot for the tenant that owns
-  // it (e.g. Romeo Lane). A number that happens to be another venue's staff should
-  // still be able to chat with THIS tenant's AI. So we only intercept a cross-tenant
-  // staff number when the message is plausibly an alert interaction:
+  // A staff/manager number is only routed into the static staff-portal reply when the
+  // message is plausibly an alert interaction:
   //   (a) a staff control message — an ack / keepalive / "got it" button, OR
   //   (b) a free-text reply within 12h of an alert actually sent to that number.
-  // Otherwise it's a fresh conversation → fall through to the customer AI.
+  // Anything else (a staff member typing a real question, testing the booking flow,
+  // etc.) falls through to the normal customer AI conversation below, same as any
+  // other sender. This is deliberate: staff numbers must be able to chat with the AI
+  // like anyone else. Outbound alert delivery (businessNotify.ts) reads
+  // tenant.staff_phone/manager_phone directly and is completely independent of this
+  // inbound routing decision, so alerts keep arriving either way.
   const isStaffControlMessage =
     (msg.buttonId?.startsWith('ack_notification:') ?? false) ||
     msg.buttonId === 'staff_keepalive_confirm' ||
     msg.buttonId === 'got_it' ||
     msg.text?.toLowerCase() === 'got it';
-  if (!isStaffMessage && cleanPhone && isPlatformTenant(tenant) && await isKnownStaffNumber(cleanPhone)) {
+
+  let isStaffMessage = false;
+  if (isOwnStaffNumber) {
+    isStaffMessage = isStaffControlMessage || await hasRecentAlertTo(cleanPhone);
+  } else if (cleanPhone && isPlatformTenant(tenant) && await isKnownStaffNumber(cleanPhone)) {
+    // Platform number: the Aries AI number blasts alerts to EVERY client's staff and
+    // receives their replies. Those senders are staff of OTHER tenants, so they don't
+    // match THIS tenant's own staff/manager numbers — without this check the customer
+    // AI would engage them ("how can I help you plan your event?"). Same rule as above:
+    // only intercept when it's plausibly an alert interaction, otherwise let them chat
+    // with this tenant's AI like any other number (e.g. Romeo Lane's shared number).
     isStaffMessage = isStaffControlMessage || await hasRecentAlertTo(cleanPhone);
   }
 
@@ -592,6 +600,17 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       await supabaseAdmin.from('conversations').update({ is_active: true }).eq('id', canonicalConv.id);
       canonicalConv.is_active = true;
       console.log(`⏰ Reactivated canonical conversation ${canonicalConv.id} for ${cleanPhone}${sessionExpired ? ' (session was expired)' : ''}`);
+    }
+
+    // A staff/manager number reaching here means the message fell through the alert
+    // intercept above (real chat, not a control reply). If this thread was previously
+    // tagged by resolveOrCreateConversation as portal-only, clear the placeholder so
+    // the inbox shows it like any other conversation (falls back to phone number,
+    // same as a brand-new thread) instead of permanently reading "Staff (Portal)".
+    if (canonicalConv.sender_name === 'Staff (Portal)' || canonicalConv.sender_name === 'Manager (Portal)') {
+      canonicalConv.sender_name = null;
+      supabaseAdmin.from('conversations').update({ sender_name: null }).eq('id', canonicalConv.id)
+        .then(() => {}, () => {});
     }
   }
   // Always use the canonical conversation — NEVER null it out.
