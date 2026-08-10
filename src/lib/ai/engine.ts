@@ -212,7 +212,7 @@ function buildSystemPrompt(tenantConfig: TenantAIConfig): string {
     ? ' A human agent was just handling this conversation and has now handed it back to you. The chat history includes messages from the human agent (marked as "assistant"). Pick up EXACTLY where the human agent left off — read the recent messages carefully, understand what was already discussed, and continue naturally. Do NOT restart the conversation, re-introduce yourself, or ask questions that were already answered.'
     : '';
   const conversationState = isFirst
-    ? `This is the FIRST message from this customer. Greet them warmly.${tenantConfig.welcomeMessage ? ` Use this as your opening: "${tenantConfig.welcomeMessage}"` : ''}`
+    ? `This is the FIRST message from this customer. If their message is ONLY a greeting (e.g. "hi", "hello", "namaste") with no other content, greet them warmly${tenantConfig.welcomeMessage ? ` — you can use this as your opening: "${tenantConfig.welcomeMessage}"` : ''}. If their message already contains a question, request, or anything beyond a bare greeting, do NOT just greet them — answer what they actually asked, directly.`
     : `This is an ONGOING conversation. The customer has already been greeted. DO NOT say Hi/Hello/Welcome again — respond directly to what they just said.${handoffResume}`;
 
   const isHospitality = isHospitalityBusiness(tenantConfig.businessType);
@@ -357,13 +357,28 @@ MEDIA SENDING RULES:
 - NEVER say "I'll share a link" or "click here" for media — set mediaToSend and the file(s) arrive directly.
 - When you do send media, accompany it with a brief text reply (e.g. "Here's our rooftop terrace video!" or "Here's the banquet brochure with all the details").
 - If the customer asks for media and nothing on the list is even a plausible match, say you'll check with the team. Do NOT escalate for this alone.
-
-SHOPIFY PRODUCTS & LINKS:
+` : ''}
+${tenantConfig.hasShopify ? `SHOPIFY PRODUCTS & LINKS:
 - If your reply recommends or names a specific product from the SHOPIFY STORE CONTEXT block above, INCLUDE that product's exact link (the URL shown on its line in that block) in your reply text so the customer can tap it. Copy the URL character-for-character — never shorten it, alter the handle, or invent a link that isn't in the context.
 - When the customer asks for a product by name, its price, or "send me the link", reply with that product's name, price, and its exact URL.
 - Also set "sendShopifyProducts" in extractedData to an ARRAY of at most 2 product handles (the "handle" field from the matched products list) for the products you recommended, so the system sends the product image(s) after your text.
 - Only include products you actually named or clearly recommended. Do not push products the customer didn't ask for or wouldn't recognise.
-- Never include a product handle or link that isn't in the matched-products list above. If no listed product matches what they want, say you'll check with the team rather than guessing a link.` : ''}
+- Never include a product handle or link that isn't in the matched-products list above. If no listed product matches what they want, say you'll check with the team rather than guessing a link.
+
+ORDER COLLECTION (only once the customer has clearly confirmed they are ready to complete a purchase — e.g. they say "yes place order", "I want to buy this", "let's order this one", or tap a "place order" style button. Do NOT trigger this while they are still browsing, asking the price, asking how to purchase, or comparing products — answer those questions normally first, e.g. by offering to share the link or connect them to the team, and only move to this step once they explicitly confirm):
+- Reply with EXACTLY this message, unchanged:
+"Thank you for choosing ${tenantConfig.businessName} ✨
+
+To dispatch your order, please share the following details:
+
+•⁠  ⁠Full Name
+•⁠  ⁠Phone Number
+•⁠  ⁠Complete Address with Landmark
+•⁠  ⁠Pincode
+
+Kindly make sure the address is correct to avoid any delivery issues. 📦"
+- If the customer then replies with only SOME of the four details, ask only for the ones still missing — do not repeat the full list.
+- Once the customer has provided ALL FOUR details (full name, phone number, complete address with landmark, and pincode), reply with EXACTLY: "Our team will connect with you shortly for confirming your order and to resolve all your queries; if any, before dispatching." and set shouldEscalate=true so the order reaches staff for processing.` : ''}
 
 RULES:
 - NEVER make up information you don't have
@@ -515,6 +530,12 @@ export interface TenantAIConfig {
     status: string;
     customerName: string;
   } | null;
+  // Whether the tenant has a Shopify store connected at all (persistent —
+  // independent of whether THIS message happens to have ecom-shaped intent).
+  // Gates the SHOPIFY PRODUCTS & LINKS / ORDER COLLECTION prompt rules so
+  // they're always present on Shopify tenants, not just on turns where
+  // shopifyContextText below happens to be populated.
+  hasShopify?: boolean;
   // Shopify context — matched products / order / policies / discounts.
   // Built by getShopifyContext() when the tenant is connected AND the
   // message has an ecom-shaped intent. Null otherwise.
@@ -544,6 +565,47 @@ export interface TenantAIConfig {
 }
 
 // ═══════════════════════════════════════
+// GREETING DETECTION
+// ═══════════════════════════════════════
+// A "bare greeting" is a message that is ONLY a pleasantry — "hi", "hello",
+// "hey there", "hi Mezo" — with nothing else in it. It is NOT a message that
+// merely opens with a greeting word, like "hi I'd like to book a table" or
+// "hello, do you have the 7 mukhi rudraksh in stock?". Those carry a real
+// question/request and must be answered directly, not short-circuited to a
+// canned welcome/greeting reply.
+const GREETING_WORDS = ['hi', 'hello', 'hey', 'hii', 'helo', 'namaste', 'yo', 'sup', 'howdy', 'good morning', 'good evening', 'good afternoon', 'good night'];
+// Words after a greeting that are still just pleasantry, not real content
+// (e.g. "hi there", "hey again", "hello guys"). Space-joined on purpose —
+// see tests/no-placeholder-name-regression.test.ts for why a bare quoted
+// "there" literal is banned elsewhere in src/ (unrelated past bug: a
+// customer's missing name silently rendering as the literal word "there").
+const GREETING_FILLER_WORDS = new Set("there again guys friend friends bro team everyone ji sir maam all".split(' '));
+
+function isBareGreeting(text: string, businessName?: string): boolean {
+  const lower = text
+    .toLowerCase()
+    .trim()
+    .replace(/[!.?]+$/g, '')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '') // strip emoji
+    .trim();
+  if (!lower) return true;
+
+  const matched = GREETING_WORDS.find((w) => lower === w || lower.startsWith(w + ' ') || lower.startsWith(w + ','));
+  if (!matched) return false;
+
+  const rest = lower.slice(matched.length).replace(/^[,\s]+/, '').trim();
+  if (!rest) return true;
+
+  const bizWords = new Set((businessName || '').toLowerCase().split(/\s+/).filter(Boolean));
+  const leftover = rest
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((w) => !GREETING_FILLER_WORDS.has(w) && !bizWords.has(w));
+
+  return leftover.length === 0;
+}
+
+// ═══════════════════════════════════════
 // PROCESS MESSAGE — Main Entry Point
 // ═══════════════════════════════════════
 export async function processMessageWithAI(
@@ -570,11 +632,14 @@ export async function processMessageWithAI(
   }
   const safeMessage = guard.safeResponse; // may be truncated
 
-  // ── First-message short-circuit: always bypass AI on first contact ──
-  // Gemini paraphrases or ignores the welcome_message system instruction.
-  // Return the owner-set text directly; fall back to a business-name greeting
-  // so the AI never generates a generic "Hello! How may I assist you today?".
-  if (tenantConfig.isFirstMessage) {
+  // ── First-message short-circuit: only for a BARE greeting ──
+  // Gemini paraphrases or ignores the welcome_message system instruction, so
+  // when the customer's first message is just "hi"/"hello"/etc we return the
+  // owner-set welcome text directly rather than risk the AI mangling it.
+  // A first message that carries real content ("7 mukhi rudraksh link",
+  // "book a table") is NOT a greeting — it must go to the AI below so it gets
+  // answered, not welcomed.
+  if (tenantConfig.isFirstMessage && isBareGreeting(safeMessage, tenantConfig.businessName)) {
     const welcomeReply =
       tenantConfig.welcomeMessage?.trim() ||
       `Hi! 👋 Welcome to ${tenantConfig.businessName}. How can I help you today?`;
@@ -593,11 +658,11 @@ export async function processMessageWithAI(
   // When a returning customer sends a bare greeting ("hi", "hello", etc.),
   // Gemini ignores the ONGOING system-prompt instruction and generates a
   // fresh "Hello! How can I assist you today?" — identical to the first-contact
-  // reply. Short-circuit these here just like the first-message case.
-  const lowerSafe = safeMessage.toLowerCase().trim();
-  const SIMPLE_GREETINGS = ['hi', 'hello', 'hey', 'hii', 'helo', 'namaste', 'yo', 'sup', 'howdy', 'good morning', 'good evening', 'good afternoon', 'good night'];
-  const isSimpleGreeting = SIMPLE_GREETINGS.some(w => lowerSafe === w || lowerSafe === w + '!' || lowerSafe === w + '.' || lowerSafe === w + ' 🙏' || lowerSafe.startsWith(w + ' '));
-  if (!tenantConfig.isFirstMessage && isSimpleGreeting) {
+  // reply. Short-circuit these here just like the first-message case. A
+  // message that only OPENS with a greeting word but goes on to ask something
+  // ("hi, I'd like to book a table") is deliberately excluded — isBareGreeting
+  // requires nothing but the greeting (plus filler/business-name) to match.
+  if (!tenantConfig.isFirstMessage && isBareGreeting(safeMessage, tenantConfig.businessName)) {
     const prevUserMsgs = conversationHistory.filter(m => m.role === 'user').map(m => m.content).join(' ').toLowerCase();
     const isHinglish = /(kaise|kya|hai|bhai|yaar|batao|chahiye|mujhe|aap|hum|theek|accha|bilkul|zaroor|bol|kar|karo)/.test(prevUserMsgs);
     return {
@@ -1092,9 +1157,11 @@ function getFallbackResponse(
     };
   }
 
-  // Detect greetings — these should never return "Sorry I missed that"
-  const greetingWords = ['hi', 'hello', 'hey', 'hii', 'helo', 'namaste', 'good morning', 'good evening', 'good afternoon', 'sup', 'howdy'];
-  if (greetingWords.some(w => lower === w || lower.startsWith(w + ' '))) {
+  // Detect greetings — these should never return "Sorry I missed that".
+  // Only a BARE greeting counts here; "hi, do you have X in stock" carries a
+  // real question and must fall through to the default branch below instead
+  // of being welcomed.
+  if (isBareGreeting(message, config.businessName)) {
     if (isFirstMessage) {
       return {
         reply: config.welcomeMessage || (hinglish ? `Hey! 👋 ${config.businessName} mein aapka swagat hai. Kaise help karun?` : `Hi! 👋 Welcome to ${config.businessName}. How can I help you today?`),
@@ -1117,8 +1184,11 @@ function getFallbackResponse(
     };
   }
 
-  // Default: welcome only on first message; for ongoing conversations use a helpful prompt
-  if (isFirstMessage) {
+  // Welcome only on a bare-greeting first message; a first message that
+  // already asks something (no known intent matched above) is unanswerable
+  // without the real AI/KB, so give a helpful prompt instead of a welcome
+  // that ignores what they just asked.
+  if (isFirstMessage && isBareGreeting(message, config.businessName)) {
     return {
       reply: config.welcomeMessage || (hinglish ? `Hey! 👋 ${config.businessName} mein aapka swagat hai. Kaise help karun?` : `Hi! 👋 Welcome to ${config.businessName}. How can I help you today?`),
       extractedData: {},
@@ -1235,3 +1305,5 @@ export function isHumanHandoffRequest(message?: string): boolean {
 
 // ── Exported for testing ──
 export { offlineKBSearch as _offlineKBSearch_forTesting };
+export { isBareGreeting as _isBareGreeting_forTesting };
+export { getFallbackResponse as _getFallbackResponse_forTesting };
