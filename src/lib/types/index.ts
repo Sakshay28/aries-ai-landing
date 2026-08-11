@@ -79,6 +79,10 @@ export interface Tenant {
   escalation_enabled: boolean;
   escalation_keywords: string[];
   escalation_reply: string | null;
+  // When true, overrides the platform default and tells the AI to escalate
+  // (shouldEscalate=true) even for plain "I don't know" answers, not just
+  // explicit human-handoff requests. Off by default for all tenants.
+  escalate_on_unanswered?: boolean | null;
 
   // Follow-up Config
   followup_30min: boolean;

@@ -474,6 +474,7 @@ export function getTenantConfig(tenant: Tenant) {
     escalationEnabled: tenant.escalation_enabled ?? true,
     escalationKeywords: tenant.escalation_keywords || [],
     escalationReply: tenant.escalation_reply || '',
+    escalateOnUnknownAnswer: tenant.escalate_on_unanswered ?? false,
     workingHours: tenant.working_hours,
     hotKeywords: tenant.hot_keywords,
     warmKeywords: tenant.warm_keywords,
