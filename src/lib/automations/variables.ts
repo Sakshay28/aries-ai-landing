@@ -16,7 +16,7 @@ export interface VariableEntry {
   description: string;
   required: boolean;
   defaultFallback: string | null;
-  category: 'customer' | 'booking' | 'restaurant' | 'lead';
+  category: 'customer' | 'booking' | 'restaurant' | 'lead' | 'order';
 }
 
 export const VARIABLE_REGISTRY: VariableEntry[] = [
@@ -49,6 +49,11 @@ export const VARIABLE_REGISTRY: VariableEntry[] = [
   // ── Lead ──
   { name: 'lead_source',  label: 'Lead Source',  description: 'How the lead was acquired',   required: false, defaultFallback: 'whatsapp', category: 'lead' },
   { name: 'lead_status',  label: 'Lead Status',  description: 'Current lead status',         required: false, defaultFallback: 'new',      category: 'lead' },
+
+  // ── Order (Shopify) ──
+  { name: 'product_name',   label: 'Product Name',   description: 'First line item title (+ "& N more" if multiple)', required: false, defaultFallback: null, category: 'order' },
+  { name: 'payment_method', label: 'Payment Method',  description: 'Derived COD / Prepaid label',                       required: false, defaultFallback: null, category: 'order' },
+  { name: 'shipping_state', label: 'Shipping State',  description: 'Shipping address state/province',                   required: false, defaultFallback: null, category: 'order' },
 ];
 
 // Fast lookup by variable name
@@ -79,6 +84,9 @@ export const SAMPLE_VARIABLES: Record<string, string> = {
   google_review_url: 'https://g.page/r/neo-lounge',
   lead_source:      'whatsapp',
   lead_status:      'new',
+  product_name:     'Rudraksha Mala',
+  payment_method:   'COD',
+  shipping_state:   'Uttarakhand',
 };
 
 // ═══════════════════════════════════════

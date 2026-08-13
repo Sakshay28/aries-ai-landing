@@ -15,6 +15,7 @@ interface StatusSummary {
   last_full_sync_at: string | null;
   sync_status: "idle" | "syncing" | "error" | null;
   sync_error: string | null;
+  order_confirmation_enabled: boolean;
   counts: {
     products: number; variants: number; collections: number; customers: number;
     orders: number; pages: number; articles: number; policies: number; discounts: number;
@@ -38,7 +39,7 @@ const RESOURCE_ROWS: Array<{ key: keyof StatusSummary["counts"]; label: string; 
 export function ShopifyDashboard() {
   const [status, setStatus] = useState<StatusSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<null | "connect" | "sync" | "disconnect" | "webhooks" | "templates">(null);
+  const [busy, setBusy] = useState<null | "connect" | "sync" | "disconnect" | "webhooks" | "templates" | "order_confirmation">(null);
   const [form, setForm] = useState({ store_url: "", access_token: "", shared_secret: "", api_version: "" });
 
   const load = useCallback(async () => {
@@ -155,6 +156,25 @@ export function ShopifyDashboard() {
     }
   };
 
+  const toggleOrderConfirmation = async (enabled: boolean) => {
+    setBusy("order_confirmation");
+    try {
+      const res = await fetch("/api/integrations/shopify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_order_confirmation_settings", enabled }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.ok === false) throw new Error(data.error || "Update failed");
+      toast.success(enabled ? "Order confirmation requests enabled" : "Order confirmation requests disabled");
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const disconnect = async () => {
     if (!confirm("Disconnect Shopify? Synced data will be preserved but no further updates will flow in.")) return;
     setBusy("disconnect");
@@ -192,6 +212,7 @@ export function ShopifyDashboard() {
           onDisconnect={disconnect}
           onWebhooks={registerWebhooks}
           onTemplates={provisionTemplates}
+          onToggleOrderConfirmation={toggleOrderConfirmation}
         />
       ) : (
         <ConnectForm form={form} setForm={setForm} onConnect={connect} busy={busy === "connect"} />
@@ -285,13 +306,14 @@ function ConnectForm({ form, setForm, onConnect, busy }: {
 }
 
 // ─── Connected view ─────────────────────────────────────────
-function ConnectedView({ status, busy, onSync, onWebhooks, onTemplates, onDisconnect }: {
+function ConnectedView({ status, busy, onSync, onWebhooks, onTemplates, onDisconnect, onToggleOrderConfirmation }: {
   status: StatusSummary;
-  busy: null | "connect" | "sync" | "disconnect" | "webhooks" | "templates";
+  busy: null | "connect" | "sync" | "disconnect" | "webhooks" | "templates" | "order_confirmation";
   onSync: () => void;
   onWebhooks: () => void;
   onTemplates: () => void;
   onDisconnect: () => void;
+  onToggleOrderConfirmation: (enabled: boolean) => void;
 }) {
   const badge = status.sync_status === "syncing"
     ? { text: "Syncing…", cls: "bg-blue-50 text-blue-700 border-blue-200" }
@@ -353,7 +375,7 @@ function ConnectedView({ status, busy, onSync, onWebhooks, onTemplates, onDiscon
               onClick={onTemplates}
               disabled={busy !== null}
               className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-60"
-              title="Submit the 5 canned WhatsApp templates (order confirmation, shipping, cancellation, cart recovery, review request) to Meta for approval."
+              title="Submit the canned WhatsApp templates (order confirmation, shipping, cancellation, cart recovery, review request, order-confirmation-request, out for delivery, delivered, RTO) to Meta for approval."
             >
               {busy === "templates" ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               Provision templates
@@ -367,6 +389,34 @@ function ConnectedView({ status, busy, onSync, onWebhooks, onTemplates, onDiscon
               Disconnect
             </button>
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-lg border bg-white p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="font-medium text-sm">Order confirmation requests</h3>
+            <p className="mt-1 text-xs text-muted-foreground max-w-xl">
+              The instant a customer places an order, send them a WhatsApp message with order details and
+              Confirm / Cancel / Change Details buttons. Tapping a button alerts your staff/manager number —
+              no automatic changes are made to the Shopify order. Requires the WhatsApp template to be approved
+              by Meta first — click <b>Provision templates</b> above, then enable this once it shows as approved
+              in your WhatsApp Business Manager.
+            </p>
+          </div>
+          <label className="inline-flex shrink-0 items-center gap-2 cursor-pointer select-none">
+            {busy === "order_confirmation" && <Loader2 className="w-4 h-4 animate-spin" />}
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={status.order_confirmation_enabled}
+              disabled={busy !== null}
+              onChange={(e) => onToggleOrderConfirmation(e.target.checked)}
+            />
+            <span className="relative h-6 w-11 rounded-full bg-gray-200 transition-colors peer-checked:bg-emerald-500 peer-disabled:opacity-60">
+              <span className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
+            </span>
+          </label>
         </div>
       </section>
 

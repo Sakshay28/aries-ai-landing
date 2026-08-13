@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
-  Truck, CheckCircle2, AlertCircle, Loader2, Trash2, Copy, Package, RefreshCw,
+  Truck, CheckCircle2, AlertCircle, Loader2, Trash2, Copy, Package, RefreshCw, ExternalLink, Key, Info,
 } from "lucide-react";
 
 interface StatusSummary {
@@ -239,6 +239,8 @@ function ConnectForm({ form, setForm, onConnect, busy, status }: {
   busy: boolean;
   status: StatusSummary | null;
 }) {
+  const [showGoogleHelp, setShowGoogleHelp] = useState(false);
+
   return (
     <div className="space-y-6">
       {status?.status === "error" && status.last_auth_error && (
@@ -247,31 +249,74 @@ function ConnectForm({ form, setForm, onConnect, busy, status }: {
           <div>
             <div className="font-medium">Last connection attempt failed</div>
             <div className="text-xs mt-0.5">{status.last_auth_error}</div>
+            <div className="text-xs mt-1.5 text-rose-800">
+              💡 <strong>Signed up via Google SSO?</strong> Standard Google passwords will not work. Please follow the instructions below to create an <strong>API User</strong> in Shiprocket.
+            </div>
           </div>
         </div>
       )}
+
       <section className="rounded-lg border bg-white p-5 space-y-4">
-        <h2 className="font-medium text-sm">Connect your Shiprocket account</h2>
-        <p className="text-sm text-muted-foreground">
-          Use the same email and password you use to log in at{" "}
-          <a href="https://app.shiprocket.in" target="_blank" rel="noreferrer" className="underline">app.shiprocket.in</a>.
-        </p>
-        <div className="grid gap-3 max-w-sm">
+        <div className="flex items-start justify-between flex-wrap gap-2">
+          <div>
+            <h2 className="font-medium text-sm text-gray-900">Connect your Shiprocket Account</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Enter your Shiprocket account credentials or dedicated API User credentials.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowGoogleHelp(!showGoogleHelp)}
+            className="inline-flex items-center gap-1.5 text-xs text-sky-600 hover:text-sky-700 font-medium bg-sky-50 px-2.5 py-1 rounded-md border border-sky-100"
+          >
+            <Info className="w-3.5 h-3.5" />
+            Signed up with Google?
+          </button>
+        </div>
+
+        {/* Google SSO / API User guide box */}
+        <div className="rounded-lg border border-blue-100 bg-gradient-to-r from-blue-50/70 to-sky-50/70 p-4 text-xs text-blue-950 space-y-2.5">
+          <div className="flex items-center gap-1.5 font-semibold text-blue-900">
+            <Key className="w-4 h-4 text-sky-600" />
+            How to connect if you signed up with Google SSO:
+          </div>
+          <p className="text-blue-800/90 leading-relaxed">
+            Shiprocket API requires dedicated API credentials for third-party integrations. If you use Google Login or don't have a direct Shiprocket password, create a free API user in 30 seconds:
+          </p>
+          <ol className="list-decimal list-inside space-y-1.5 font-medium text-blue-900/90 pl-1">
+            <li>
+              Log in to your{" "}
+              <a
+                href="https://app.shiprocket.in/seller/settings/additional-settings/api-users"
+                target="_blank"
+                rel="noreferrer"
+                className="underline text-sky-700 hover:text-sky-800 font-semibold inline-flex items-center gap-0.5"
+              >
+                Shiprocket API Users Page <ExternalLink className="w-3 h-3 inline" />
+              </a>
+            </li>
+            <li>Click <strong>+ Add New API User</strong> (under <i>Settings → Additional Settings → API Users</i>).</li>
+            <li>Set any unique email (e.g. <code className="bg-white/80 px-1 py-0.5 rounded border border-blue-200">api@yourdomain.com</code>) & password.</li>
+            <li>Paste those generated API User credentials below and click Connect.</li>
+          </ol>
+        </div>
+
+        <div className="grid gap-3 max-w-sm pt-1">
           <label className="text-sm">
-            <span className="text-muted-foreground">Email</span>
+            <span className="text-muted-foreground font-medium text-xs">Email / API User Email</span>
             <input
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
-              placeholder="you@company.com"
+              className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
+              placeholder="you@company.com or api@company.com"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               autoComplete="off"
             />
           </label>
           <label className="text-sm">
-            <span className="text-muted-foreground">Password</span>
+            <span className="text-muted-foreground font-medium text-xs">Password / API Password</span>
             <input
               type="password"
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
               placeholder="••••••••"
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
@@ -279,17 +324,19 @@ function ConnectForm({ form, setForm, onConnect, busy, status }: {
             />
           </label>
         </div>
+
         <button
           type="button"
           onClick={onConnect}
           disabled={busy}
-          className="inline-flex items-center gap-2 rounded-md bg-sky-600 px-4 py-2 text-sm text-white hover:bg-sky-700 disabled:opacity-60"
+          className="inline-flex items-center gap-2 rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-60 transition-colors"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-          Connect
+          Connect Account
         </button>
+
         <p className="text-xs text-muted-foreground">
-          Your password is encrypted at rest with our versioned key manager and is never returned to the browser after saving.
+          🔒 Your credentials are encrypted at rest with our versioned key manager and auto-renew authentication tokens seamlessly in the background.
         </p>
       </section>
     </div>

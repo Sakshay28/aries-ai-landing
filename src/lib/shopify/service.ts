@@ -40,6 +40,7 @@ export interface StatusSummary {
   last_full_sync_at: string | null;
   sync_status: 'idle' | 'syncing' | 'error' | null;
   sync_error: string | null;
+  order_confirmation_enabled: boolean;
   counts: {
     products: number;
     variants: number;
@@ -126,6 +127,16 @@ export async function connectTenant(input: ConnectInput): Promise<{ ok: true; sh
 /** Re-provision Shopify WhatsApp templates on demand. */
 export async function reprovisionTemplates(tenantId: string): ReturnType<typeof provisionShopifyTemplates> {
   return provisionShopifyTemplates(tenantId);
+}
+
+/** Toggle the order-confirmation-request flow (Confirm/Cancel/Change Details). */
+export async function updateOrderConfirmationSettings(tenantId: string, input: { enabled: boolean }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { error } = await supabaseAdmin
+    .from('tenants')
+    .update({ shopify_order_confirmation_enabled: input.enabled })
+    .eq('id', tenantId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
 }
 
 // ─── Webhooks registration ──────────────────────────────────
@@ -231,7 +242,7 @@ export async function triggerFullSync(tenantId: string, opts: { lookbackDays?: n
 // ─── Status summary ─────────────────────────────────────────
 export async function getStatus(tenantId: string): Promise<StatusSummary> {
   const [{ data: tenant }, ...countRows] = await Promise.all([
-    supabaseAdmin.from('tenants').select('shopify_store_url, shopify_api_version, shopify_connected_at, shopify_last_full_sync_at, shopify_sync_status, shopify_sync_error').eq('id', tenantId).single(),
+    supabaseAdmin.from('tenants').select('shopify_store_url, shopify_api_version, shopify_connected_at, shopify_last_full_sync_at, shopify_sync_status, shopify_sync_error, shopify_order_confirmation_enabled').eq('id', tenantId).single(),
     countTable('shopify_products', tenantId),
     countTable('shopify_variants', tenantId),
     countTable('shopify_collections', tenantId),
@@ -253,6 +264,7 @@ export async function getStatus(tenantId: string): Promise<StatusSummary> {
     last_full_sync_at: tenant?.shopify_last_full_sync_at || null,
     sync_status: (tenant?.shopify_sync_status as StatusSummary['sync_status']) || null,
     sync_error: tenant?.shopify_sync_error || null,
+    order_confirmation_enabled: !!tenant?.shopify_order_confirmation_enabled,
     counts: { products, variants, collections, customers, orders, pages, articles, policies, discounts },
     pending_jobs: pending,
     failed_jobs: failed,

@@ -9,6 +9,7 @@ import { upsertCustomer, deleteCustomer } from './sync/customers';
 import { upsertOrder, deleteOrder } from './sync/orders';
 import { triggerAutomations, TriggerEvent } from '@/lib/automations/engine';
 import { resolveShopifyOrderVariables, resolveShopifyCheckoutVariables, extractCustomerIdentifiers } from './automationVariables';
+import { sendOrderConfirmationRequest } from './notify';
 
 export interface DispatchInput {
   tenantId: string;
@@ -68,6 +69,13 @@ export async function dispatchShopifyWebhook(input: DispatchInput): Promise<{ ha
       await upsertOrder(tenantId, payload as never);
       await emitShopifyEvent(tenantId, topic, payload);
       await fireOrderAutomation(tenantId, topic, payload);
+      if (topic === 'orders/create') {
+        // Fire-and-forget, own error boundary — must never fail this dispatch
+        // or trigger a job retry. See src/lib/shopify/notify.ts.
+        sendOrderConfirmationRequest(tenantId, payload as never).catch(err => {
+          console.error('[shopify:order-confirmation] send failed', (err as Error).message);
+        });
+      }
       return { handled: true };
 
     // ── Fulfillments ─────────────────────────────────────

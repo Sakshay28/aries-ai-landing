@@ -59,6 +59,34 @@ describe('resolveShopifyOrderVariables', () => {
     const v = resolveShopifyOrderVariables(many as never, null);
     expect(v.order_items).toMatch(/\+ 2 more$/);
   });
+
+  // ── product_name / payment_method / shipping_state (order-confirmation flow) ──
+  it('derives product_name as first item title, "& N more" appended for multi-item orders', () => {
+    expect(resolveShopifyOrderVariables(order as never, null).product_name).toBe('Silver Ring & 1 more');
+    expect(resolveShopifyOrderVariables({ line_items: [{ title: 'Solo Item' }] } as never, null).product_name).toBe('Solo Item');
+    expect(resolveShopifyOrderVariables({} as never, null).product_name).toBe('');
+  });
+
+  it('derives payment_method: COD gateway name wins regardless of financial_status', () => {
+    const v = resolveShopifyOrderVariables({ financial_status: 'paid', payment_gateway_names: ['Cash on Delivery (COD)'] } as never, null);
+    expect(v.payment_method).toBe('COD');
+  });
+
+  it('derives payment_method: Prepaid when financial_status is paid and no COD gateway', () => {
+    const v = resolveShopifyOrderVariables({ financial_status: 'paid', payment_gateway_names: ['Razorpay'] } as never, null);
+    expect(v.payment_method).toBe('Prepaid');
+  });
+
+  it('derives payment_method: defaults to COD when financial_status/gateway are absent or pending', () => {
+    expect(resolveShopifyOrderVariables({} as never, null).payment_method).toBe('COD');
+    expect(resolveShopifyOrderVariables({ financial_status: 'pending' } as never, null).payment_method).toBe('COD');
+  });
+
+  it('surfaces shipping_address.province as shipping_state', () => {
+    const v = resolveShopifyOrderVariables({ shipping_address: { city: 'Dehradun', province: 'Uttarakhand' } } as never, null);
+    expect(v.shipping_state).toBe('Uttarakhand');
+    expect(resolveShopifyOrderVariables({} as never, null).shipping_state).toBe('');
+  });
 });
 
 describe('resolveShopifyCheckoutVariables', () => {

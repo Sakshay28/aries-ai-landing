@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import {
-  connectTenant, disconnectTenant, getStatus, triggerFullSync, validateCredentials, registerWebhooks, reprovisionTemplates,
+  connectTenant, disconnectTenant, getStatus, triggerFullSync, validateCredentials, registerWebhooks, reprovisionTemplates, updateOrderConfirmationSettings,
 } from '@/lib/shopify/service';
 import { ShopifyClient, DEFAULT_API_VERSION } from '@/lib/shopify/client';
 import { decryptTokenV2 } from '@/lib/security/keyManager';
@@ -63,6 +63,14 @@ export async function POST(req: NextRequest) {
   if (action === 'provision_templates') {
     const result = await reprovisionTemplates(tenantId);
     return NextResponse.json({ ok: true, result });
+  }
+
+  if (action === 'update_order_confirmation_settings') {
+    if (typeof body.enabled !== 'boolean') {
+      return NextResponse.json({ error: 'enabled (boolean) required' }, { status: 400 });
+    }
+    const result = await updateOrderConfirmationSettings(tenantId, { enabled: body.enabled });
+    return NextResponse.json(result, { status: result.ok ? 200 : 400 });
   }
 
   if (action === 'register_webhooks') {

@@ -13,6 +13,8 @@ import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs, retrieveRelevantMedia } from '@/lib/ai/rag';
 import { getShopifyContext, renderShopifyContextForPrompt, reconcileProductLinks } from '@/lib/shopify/aiContext';
 import { getShiprocketContext, renderShiprocketContextForPrompt } from '@/lib/shiprocket/aiContext';
+import { ORDER_CONFIRMATION_PAYLOAD_PREFIX, ORDER_CONFIRMATION_BUTTON_LABELS } from '@/lib/shopify/templates';
+import { isDailyReportRequest, generateDailyReport, formatDailyReportMessage } from '@/lib/reports/dailyReport';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
 import { parseMetaWebhook, sendTextMessage, sendMediaMessage, sendMediaMessageById, uploadMediaToMeta, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
 import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus, resolveOrCreateConversation } from '@/lib/whatsapp/businessNotify';
@@ -535,6 +537,81 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       }
     }
     return;
+  }
+
+  // ── Order-confirmation button tap (customer) ────────────────────────────
+  // Recovers the Shopify order id directly from the button payload (see
+  // src/lib/shopify/notify.ts — order_confirm:/order_cancel:/order_change:
+  // payloads are attached per-send, not baked into the template). Deliberately
+  // outside the staff-message block above: the tapper here is the customer.
+  if (msg.buttonId) {
+    const buttonId = msg.buttonId;
+    const orderActionEntry = (Object.entries(ORDER_CONFIRMATION_PAYLOAD_PREFIX) as Array<[keyof typeof ORDER_CONFIRMATION_PAYLOAD_PREFIX, string]>)
+      .find(([, prefix]) => buttonId.startsWith(prefix));
+
+    if (orderActionEntry) {
+      const [action, prefix] = orderActionEntry;
+      const shopifyOrderId = Number(buttonId.slice(prefix.length));
+
+      if (!Number.isFinite(shopifyOrderId)) {
+        console.warn(`[webhook] malformed order-confirmation button payload: ${buttonId}`);
+        return;
+      }
+
+      const { data: order } = await supabaseAdmin
+        .from('shopify_orders')
+        .select('id, order_number, phone, total_price, currency, lead_id, confirmation_status')
+        .eq('tenant_id', tenant.id)
+        .eq('shopify_id', shopifyOrderId)
+        .maybeSingle();
+
+      // Shopify order ids are sequential/guessable (unlike ack_notification:<uuid>) —
+      // verify the tapper is actually this order's customer before acting on it.
+      if (!order || normalizePhoneNumber(order.phone || '') !== cleanPhone) {
+        console.warn(`[webhook] order-confirmation tap: phone mismatch or order not found (tenant=${tenant.id}, shopify_order=${shopifyOrderId})`);
+        return;
+      }
+
+      const orderLabel = order.order_number || `#${shopifyOrderId}`;
+      const ackTextByAction: Record<string, string> = {
+        confirm: `✅ Thank you! Your order ${orderLabel} has been confirmed and is being processed. 🙏`,
+        cancel: `We've received your cancellation request for order ${orderLabel}. Our team will follow up shortly.`,
+        change: `No problem! Please reply here with the corrected details and our team will update order ${orderLabel} for you.`,
+      };
+      const buttonLabelByAction: Record<string, string> = {
+        confirm: ORDER_CONFIRMATION_BUTTON_LABELS.confirm,
+        cancel: ORDER_CONFIRMATION_BUTTON_LABELS.cancel,
+        change: ORDER_CONFIRMATION_BUTTON_LABELS.change,
+      };
+
+      // Only act (status transition + staff alert) once — a repeat tap on an
+      // already-answered order is a no-op beyond re-sending the ack text.
+      if (order.confirmation_status === 'pending') {
+        const newStatus = action === 'confirm' ? 'confirmed' : action === 'cancel' ? 'cancel_requested' : 'change_requested';
+        await supabaseAdmin.from('shopify_orders')
+          .update({ confirmation_status: newStatus, confirmation_responded_at: new Date().toISOString() })
+          .eq('id', order.id);
+
+        sendBusinessEvent({
+          tenantId: tenant.id,
+          eventType: 'order_update',
+          title: `${buttonLabelByAction[action]} — ${orderLabel}`,
+          body: `Customer ${cleanPhone} tapped "${buttonLabelByAction[action]}" on order ${orderLabel} (${order.currency || ''} ${order.total_price || ''}).`,
+          variables: { customer_phone: cleanPhone, order_number: String(orderLabel) },
+          leadId: order.lead_id || null,
+          idempotencyKey: `order-${action}:${shopifyOrderId}`,
+        }).catch(e => console.error('[webhook] order-confirmation staff alert failed:', (e as Error).message));
+      }
+
+      if (decryptedAccessToken && tenant.wa_phone_number_id) {
+        try {
+          await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id, cleanPhone, ackTextByAction[action]);
+        } catch (e) {
+          console.error('[webhook] order-confirmation ack send failed:', (e as Error).message);
+        }
+      }
+      return;
+    }
   }
 
   let lead: Record<string, any> | null = null;
@@ -1285,6 +1362,33 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
     }
   } catch (offHoursErr) {
     console.warn('⚠️ Business hours check failed (non-fatal):', offHoursErr);
+  }
+
+  // ── Daily report early check ────────────────────────────────────────────────
+  // Owner/manager-only, deterministic (no Gemini call) — see src/lib/reports/dailyReport.ts
+  // for why this bypasses the AI reply pipeline entirely. Runs before scripted
+  // replies so a tenant's own "report"-adjacent scripted keyword never shadows it.
+  if (isOwnStaffNumber && tenant.shopify_store_url && msg.text && isDailyReportRequest(msg.text)) {
+    console.log(`📊 Daily report requested by staff/manager for tenant ${tenant.id}`);
+    try {
+      const reportData = await generateDailyReport(tenant.id);
+      const reportText = formatDailyReportMessage(reportData, tenant.business_name || 'Your Store');
+      if (decryptedAccessToken && tenant.wa_phone_number_id) {
+        const result = await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, reportText)
+          .catch((e: Error) => { console.error('❌ Daily report send failed:', e.message); return null; });
+        await supabaseAdmin.from('messages').insert({
+          tenant_id: tenant.id, conversation_id: conversation.id,
+          direction: 'outbound',
+          content: reportText,
+          message_type: 'text',
+          channel: 'whatsapp', status: result ? 'sent' : 'failed',
+          ai_generated: false, wa_message_id: result?.messageId ?? null,
+        }).then(({ error: e }) => { if (e) console.error('❌ Daily report message DB insert failed:', e.message); });
+      }
+    } catch (reportErr) {
+      console.error('❌ Daily report generation failed:', (reportErr as Error).message);
+    }
+    return;
   }
 
   // ── Scripted Replies early check ────────────────────────────────────────────

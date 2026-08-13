@@ -34,6 +34,37 @@ export interface TemplateSpec {
   >;
 }
 
+// ── Order-confirmation-request flow (Confirm/Cancel/Change Details) ────────
+// Body placeholder order is FIXED regardless of wording: {{1}}=customer_name,
+// {{2}}=order_id, {{3}}=product_name, {{4}}=order_amount, {{5}}=payment_method,
+// {{6}}=city, {{7}}=state. src/lib/shopify/notify.ts builds send-time params
+// in this exact order, and provisionShopifyTemplates() validates any tenant
+// override body uses all 7 (see below) before submitting it to Meta.
+export const ORDER_CONFIRMATION_TEMPLATE_NAME = 'shopify_order_confirmation_action';
+export const ORDER_CONFIRMATION_PLACEHOLDER_COUNT = 7;
+export const ORDER_CONFIRMATION_BUTTON_LABELS = {
+  confirm: '✅ Confirm Order',
+  cancel: '❌ Cancel Order',
+  change: '✏️ Change Details',
+} as const;
+// Payload PREFIXES sent per-message (see notify.ts); the button text above is
+// what Meta requires at template-definition time and is platform-fixed —
+// only the body wording is tenant-overridable (tenants.shopify_order_confirmation_message).
+export const ORDER_CONFIRMATION_PAYLOAD_PREFIX = {
+  confirm: 'order_confirm:',
+  cancel: 'order_cancel:',
+  change: 'order_change:',
+} as const;
+
+const DEFAULT_ORDER_CONFIRMATION_BODY =
+  'Hi {{1}}! 🛍️ Thanks for your order {{2}}.\n' +
+  'Item: {{3}}\n' +
+  'Amount: {{4}} ({{5}})\n' +
+  'Delivery to: {{6}}, {{7}}\n\n' +
+  'Please confirm your order below.';
+
+const ORDER_CONFIRMATION_BODY_EXAMPLE = ['Aarav', '#1042', 'Rudraksha Mala', 'INR 2499', 'COD', 'Dehradun', 'Uttarakhand'];
+
 /**
  * The four canned Shopify templates. Body text is Meta-flavoured with
  * numeric placeholders. When automations render them, we substitute in
@@ -92,6 +123,42 @@ export function shopifyTemplateSpecs(): TemplateSpec[] {
         { type: 'URL', text: 'Leave a review', url: '{{1}}', example: ['https://acme.com/reviews'] },
       ],
     },
+    {
+      name: ORDER_CONFIRMATION_TEMPLATE_NAME,
+      category: 'UTILITY',
+      language: 'en',
+      body: DEFAULT_ORDER_CONFIRMATION_BODY,
+      bodyExample: ORDER_CONFIRMATION_BODY_EXAMPLE,
+      buttons: [
+        { type: 'QUICK_REPLY', text: ORDER_CONFIRMATION_BUTTON_LABELS.confirm },
+        { type: 'QUICK_REPLY', text: ORDER_CONFIRMATION_BUTTON_LABELS.cancel },
+        { type: 'QUICK_REPLY', text: ORDER_CONFIRMATION_BUTTON_LABELS.change },
+      ],
+    },
+    {
+      name: 'shopify_out_for_delivery',
+      category: 'UTILITY',
+      language: 'en',
+      body: 'Hi {{1}}! 🚚 Your order {{2}} is out for delivery today. Please keep your phone handy.',
+      bodyExample: ['Aarav', '#1042'],
+    },
+    {
+      name: 'shopify_delivered',
+      category: 'UTILITY',
+      language: 'en',
+      body: 'Hi {{1}}! ✅ Your order {{2}} has been delivered. Thank you for shopping with us — we hope you love it! 🙏',
+      bodyExample: ['Aarav', '#1042'],
+    },
+    {
+      name: 'shopify_rto',
+      category: 'UTILITY',
+      language: 'en',
+      body: 'Hi {{1}}, your order {{2}} is being returned to us. If this wasn\'t expected, just reply here and our team will help.',
+      bodyExample: ['Aarav', '#1042'],
+      buttons: [
+        { type: 'QUICK_REPLY', text: 'Contact support' },
+      ],
+    },
   ];
 }
 
@@ -106,6 +173,20 @@ interface MetaTemplateComponent {
   text?: string;
   example?: { body_text?: string[][]; header_text?: string[]; header_handle?: string[] };
   buttons?: Array<Record<string, unknown>>;
+}
+
+/**
+ * Validate a tenant-supplied override body for the order-confirmation template:
+ * it must contain each of {{1}}..{{ORDER_CONFIRMATION_PLACEHOLDER_COUNT}} at
+ * least once, and no placeholder beyond that count (send-time params are built
+ * in that fixed order — see src/lib/shopify/notify.ts).
+ */
+export function isValidOrderConfirmationOverride(body: string): boolean {
+  const found = new Set([...body.matchAll(/\{\{(\d+)\}\}/g)].map(m => Number(m[1])));
+  for (let i = 1; i <= ORDER_CONFIRMATION_PLACEHOLDER_COUNT; i++) {
+    if (!found.has(i)) return false;
+  }
+  return [...found].every(n => n >= 1 && n <= ORDER_CONFIRMATION_PLACEHOLDER_COUNT);
 }
 
 function componentsFor(spec: TemplateSpec): MetaTemplateComponent[] {
@@ -142,7 +223,7 @@ export async function provisionShopifyTemplates(tenantId: string): Promise<Provi
 
   const { data: tenant } = await supabaseAdmin
     .from('tenants')
-    .select('wa_access_token, wa_business_account_id')
+    .select('wa_access_token, wa_business_account_id, shopify_order_confirmation_message')
     .eq('id', tenantId)
     .single();
 
@@ -162,13 +243,23 @@ export async function provisionShopifyTemplates(tenantId: string): Promise<Provi
   }
   const wabaId = tenant.wa_business_account_id as string;
 
+  const override = tenant.shopify_order_confirmation_message as string | null;
+
   for (const spec of shopifyTemplateSpecs()) {
     try {
+      let submitSpec = spec;
+      if (spec.name === ORDER_CONFIRMATION_TEMPLATE_NAME && override) {
+        if (isValidOrderConfirmationOverride(override)) {
+          submitSpec = { ...spec, body: override };
+        } else {
+          console.error(`[shopify:templates] tenant ${tenantId} order-confirmation override is missing required {{1}}..{{${ORDER_CONFIRMATION_PLACEHOLDER_COUNT}}} placeholders — using platform default instead`);
+        }
+      }
       const body = {
-        name: spec.name,
-        category: spec.category,
-        language: spec.language,
-        components: componentsFor(spec),
+        name: submitSpec.name,
+        category: submitSpec.category,
+        language: submitSpec.language,
+        components: componentsFor(submitSpec),
       };
       const res = await fetch(`https://graph.facebook.com/v21.0/${wabaId}/message_templates`, {
         method: 'POST',

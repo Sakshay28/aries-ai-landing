@@ -13,7 +13,7 @@ interface Money { amount?: string | number; currency_code?: string }
 interface Address { first_name?: string; last_name?: string; address1?: string; address2?: string; city?: string; province?: string; country?: string; zip?: string; phone?: string }
 interface Fulfillment { tracking_number?: string; tracking_url?: string; tracking_company?: string; shipment_status?: string; status?: string }
 
-interface OrderLike {
+export interface OrderLike {
   id?: number;
   name?: string;
   order_number?: number | string;
@@ -35,6 +35,7 @@ interface OrderLike {
   billing_address?: Address;
   fulfillments?: Fulfillment[];
   current_total_price_set?: { shop_money?: Money };
+  payment_gateway_names?: string[];
 }
 
 interface CheckoutLike {
@@ -69,6 +70,24 @@ function firstTracking(order: OrderLike): Fulfillment | null {
   return f || (order.fulfillments?.[0] ?? null);
 }
 
+/** First line item's title, "& N more" appended when the order has multiple items. */
+function firstProductName(items?: Array<{ title?: string }>): string {
+  if (!items || items.length === 0) return '';
+  const first = items[0]?.title || 'Item';
+  return items.length > 1 ? `${first} & ${items.length - 1} more` : first;
+}
+
+// Shopify has no first-class "payment method" field — this is a best-effort
+// derivation from `payment_gateway_names` (unverified exact wording against a
+// live payload; COD-style gateways are typically named "Cash on Delivery
+// (COD)") falling back to `financial_status` when gateway names are absent.
+function derivePaymentMethod(order: OrderLike): string {
+  const gateways = (order.payment_gateway_names || []).join(' ').toLowerCase();
+  if (/cash on delivery|\bcod\b/.test(gateways)) return 'COD';
+  if (order.financial_status === 'paid' || order.financial_status === 'partially_paid' || order.financial_status === 'authorized') return 'Prepaid';
+  return 'COD';
+}
+
 /** Resolve variables for order-shaped topics (created, paid, fulfilled, cancelled). */
 export function resolveShopifyOrderVariables(order: OrderLike, storeUrl: string | null): Record<string, string> {
   const customerName = fullName(order.customer?.first_name, order.customer?.last_name);
@@ -82,6 +101,7 @@ export function resolveShopifyOrderVariables(order: OrderLike, storeUrl: string 
   const shippingCity = order.shipping_address?.city || '';
   const shippingZip = order.shipping_address?.zip || '';
   const shippingCountry = order.shipping_address?.country || '';
+  const shippingState = order.shipping_address?.province || '';
   const orderUrl = order.id && storeUrl ? `https://${storeUrl}/admin/orders/${order.id}` : '';
 
   return {
@@ -104,6 +124,8 @@ export function resolveShopifyOrderVariables(order: OrderLike, storeUrl: string 
     cancel_reason:      order.cancel_reason || '',
     ordered_at:         order.processed_at || order.created_at || '',
     cancelled_at:       order.cancelled_at || '',
+    product_name:       firstProductName(order.line_items),
+    payment_method:     derivePaymentMethod(order),
 
     // Shipping
     tracking_number:    tracking?.tracking_number || '',
@@ -113,6 +135,7 @@ export function resolveShopifyOrderVariables(order: OrderLike, storeUrl: string 
     shipping_city:      shippingCity,
     shipping_zip:       shippingZip,
     shipping_country:   shippingCountry,
+    shipping_state:     shippingState,
 
     // Store
     store_url:          storeUrl ? `https://${storeUrl}` : '',
