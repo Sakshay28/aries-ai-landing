@@ -14,6 +14,7 @@ import { retrieveRelevantDocs, retrieveRelevantMedia } from '@/lib/ai/rag';
 import { getShopifyContext, renderShopifyContextForPrompt, reconcileProductLinks } from '@/lib/shopify/aiContext';
 import { getShiprocketContext, renderShiprocketContextForPrompt } from '@/lib/shiprocket/aiContext';
 import { ORDER_CONFIRMATION_PAYLOAD_PREFIX, ORDER_CONFIRMATION_BUTTON_LABELS } from '@/lib/shopify/templates';
+import { renderOrderConfirmationCopy, type OrderConfirmationCopyKey } from '@/lib/shopify/orderConfirmationCopy';
 import { isDailyReportRequest, generateDailyReport, formatDailyReportMessage } from '@/lib/reports/dailyReport';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
 import { parseMetaWebhook, sendTextMessage, sendMediaMessage, sendMediaMessageById, uploadMediaToMeta, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
@@ -573,10 +574,19 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       }
 
       const orderLabel = order.order_number || `#${shopifyOrderId}`;
+      const customerName = order.lead_id
+        ? (await supabaseAdmin.from('leads').select('name').eq('id', order.lead_id).maybeSingle()).data?.name
+        : null;
+      const copyVars = { customer_name: greetingName(customerName || null), order_id: String(orderLabel) };
+      const copyKeyByAction: Record<string, OrderConfirmationCopyKey> = {
+        confirm: 'confirm',
+        cancel: 'cancel',
+        change: 'change_request',
+      };
       const ackTextByAction: Record<string, string> = {
-        confirm: `✅ Thank you! Your order ${orderLabel} has been confirmed and is being processed. 🙏`,
-        cancel: `We've received your cancellation request for order ${orderLabel}. Our team will follow up shortly.`,
-        change: `No problem! Please reply here with the corrected details and our team will update order ${orderLabel} for you.`,
+        confirm: renderOrderConfirmationCopy(tenant, copyKeyByAction.confirm, copyVars),
+        cancel: renderOrderConfirmationCopy(tenant, copyKeyByAction.cancel, copyVars),
+        change: renderOrderConfirmationCopy(tenant, copyKeyByAction.change, copyVars),
       };
       const buttonLabelByAction: Record<string, string> = {
         confirm: ORDER_CONFIRMATION_BUTTON_LABELS.confirm,
@@ -1110,6 +1120,63 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
       });
     }
     return;
+  }
+
+  // ── Order-confirmation "Change Details" reply (customer) ────────────────
+  // If this customer has a Shopify order awaiting corrected details (they
+  // tapped "Change Details" earlier above), treat this message as that reply
+  // rather than a normal chat turn — notify staff with the raw text, ack the
+  // customer, and close out the pending state (which also stops the 1h
+  // reminder cron — src/app/api/cron/shopify-order-confirmation-reminders —
+  // from matching it, since it only targets 'change_requested').
+  if (tenant.shopify_order_confirmation_enabled && !msg.buttonId) {
+    const { data: pendingOrder } = await supabaseAdmin
+      .from('shopify_orders')
+      .select('id, shopify_id, order_number, lead_id')
+      .eq('tenant_id', tenant.id)
+      .eq('phone', cleanPhone)
+      .eq('confirmation_status', 'change_requested')
+      .order('confirmation_responded_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (pendingOrder) {
+      await supabaseAdmin.from('shopify_orders')
+        .update({ confirmation_status: 'details_received', change_details_reply: content })
+        .eq('id', pendingOrder.id);
+
+      const orderLabel = pendingOrder.order_number || `#${pendingOrder.shopify_id}`;
+      const ackText = renderOrderConfirmationCopy(tenant, 'change_received', {
+        customer_name: greetingName(lead?.name || null),
+        order_id: String(orderLabel),
+      });
+
+      if (decryptedAccessToken && tenant.wa_phone_number_id) {
+        try {
+          const sendResult = await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id, cleanPhone, ackText);
+          await supabaseAdmin.from('messages').insert({
+            tenant_id: tenant.id, conversation_id: conversation.id,
+            direction: 'outbound', content: ackText,
+            message_type: 'text', channel: 'whatsapp',
+            status: sendResult.messageId ? 'sent' : 'failed',
+            ai_generated: false, wa_message_id: sendResult.messageId || null,
+          });
+        } catch (e) {
+          console.error('[webhook] order-confirmation details-received ack failed:', (e as Error).message);
+        }
+      }
+
+      sendBusinessEvent({
+        tenantId: tenant.id,
+        eventType: 'order_update',
+        title: `Updated details received — ${orderLabel}`,
+        body: `Customer ${cleanPhone} sent updated details for order ${orderLabel}:\n\n${content}`,
+        variables: { customer_phone: cleanPhone, order_number: String(orderLabel) },
+        leadId: pendingOrder.lead_id || lead?.id || null,
+      }).catch(e => console.error('[webhook] order-confirmation details-received staff alert failed:', (e as Error).message));
+
+      return;
+    }
   }
 
   // 9. Fire Outbound Integration Webhook

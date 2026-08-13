@@ -46,6 +46,14 @@ export interface Tenant {
   shopify_store_url: string | null;
   shopify_access_token: string | null;
   shopify_webhook_secret: string | null;
+  // Order-confirmation-request flow (Confirm/Cancel/Change Details buttons).
+  // Off by default per tenant. See src/lib/shopify/notify.ts.
+  shopify_order_confirmation_enabled?: boolean;
+  // Per-tenant override text for the 5 free-form confirm/cancel/change-details
+  // replies. Keys: confirm, cancel, change_request, change_received,
+  // change_reminder. Falls back to platform defaults when unset.
+  // See src/lib/shopify/orderConfirmationCopy.ts.
+  shopify_order_confirmation_copy?: Record<string, string> | null;
 
   // Billing
   plan: Plan;

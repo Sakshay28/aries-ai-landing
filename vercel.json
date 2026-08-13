@@ -83,6 +83,10 @@
     {
       "path": "/api/cron/shiprocket-sync",
       "schedule": "0 17 * * *"
+    },
+    {
+      "path": "/api/cron/shopify-order-confirmation-reminders",
+      "schedule": "*/15 * * * *"
     }
   ]
 }
