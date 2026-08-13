@@ -1,11 +1,18 @@
 // ═══════════════════════════════════════════════════════════
 // ⏰ Order-Confirmation "Change Details" Reminder
-// Runs every 15 min. Finds Shopify orders where the customer tapped
-// "Change Details" over 1h ago and never sent their corrected info —
-// nudges them once. See src/lib/shopify/orderConfirmationCopy.ts and
-// the inbound-reply intercept in src/app/api/webhooks/whatsapp/route.ts
-// (the reminder window reopened by their own button tap, so this is a
-// plain session message, not a Meta template).
+// Finds Shopify orders where the customer tapped "Change Details" over 1h
+// ago and never sent their corrected info — nudges them once. See
+// src/lib/shopify/orderConfirmationCopy.ts and the inbound-reply intercept
+// in src/app/api/webhooks/whatsapp/route.ts (the reminder window reopened
+// by their own button tap, so this is a plain session message, not a Meta
+// template).
+//
+// NOT in vercel.json — this needs ~15min granularity and Vercel Hobby
+// rejects any cron more frequent than daily (deploy-time hard error, learned
+// the hard way earlier in this session). Triggered by Supabase pg_cron
+// instead, the same workaround already used for automation_queue draining
+// (see the commented block at the end of
+// supabase/migrations/20260813b_order_confirmation_copy_and_reminders.sql).
 // ═══════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';

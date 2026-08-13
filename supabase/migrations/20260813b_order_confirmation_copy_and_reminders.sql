@@ -44,3 +44,31 @@ COMMIT;
 -- ALTER TABLE shopify_orders DROP COLUMN IF EXISTS change_details_reply, DROP COLUMN IF EXISTS change_reminder_sent_at;
 -- ALTER TABLE tenants DROP COLUMN IF EXISTS shopify_order_confirmation_copy;
 -- COMMIT;
+
+-- ════════════════════════════════════════════════════════════
+-- pg_cron: drain the "Change Details" reminder every 15 min
+-- ────────────────────────────────────────────────────────────
+-- Vercel Hobby rejects any vercel.json cron more frequent than daily (hard
+-- deploy-time error) — same constraint already worked around for the
+-- automation_queue drain cron (20260622_automations_v2.sql). pg_cron +
+-- pg_net are already enabled on this project for that job, so this just
+-- adds one more schedule. cron.schedule() cannot run inside the
+-- transactional block above — run this separately in the Supabase SQL
+-- editor. Replace <YOUR_VERCEL_URL> and <YOUR_CRON_SECRET> before running.
+-- ════════════════════════════════════════════════════════════
+
+-- SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname = 'shopify-order-confirmation-reminders';
+--
+-- SELECT cron.schedule(
+--   'shopify-order-confirmation-reminders',
+--   '*/15 * * * *',
+--   $$
+--   SELECT net.http_post(
+--     url     := 'https://<YOUR_VERCEL_URL>/api/cron/shopify-order-confirmation-reminders',
+--     headers := jsonb_build_object(
+--       'Content-Type',  'application/json',
+--       'Authorization', 'Bearer <YOUR_CRON_SECRET>'
+--     )
+--   );
+--   $$
+-- );
