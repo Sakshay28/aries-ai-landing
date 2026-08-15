@@ -7,6 +7,7 @@ import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import { BroadcastExecutionTimeline } from '../../_components/BroadcastExecutionTimeline';
 import { BroadcastAuditLog } from '../../_components/BroadcastAuditLog';
 import { CampaignRecipientsTable } from '../../_components/CampaignRecipientsTable';
+import { CampaignInsights } from '../../_components/CampaignInsights';
 import toast from 'react-hot-toast';
 
 interface CampaignStats {
@@ -263,8 +264,16 @@ export default function CampaignStatsPage() {
               </div>
             </div>
 
-            {/* Retarget prompt for completed campaigns */}
-            {stats.status === 'completed' && (
+            {/* Failure breakdown — surfaces the actual Meta rejection reason instead of
+                leaving "Failed" as an unexplained number. */}
+            {stats.failed > 0 && (
+              <CampaignInsights campaignId={campaignId} />
+            )}
+
+            {/* Retarget prompt for completed campaigns — only when nothing failed.
+                If messages are failing (e.g. a Meta billing/eligibility rejection),
+                retargeting will just fail identically; that needs fixing first. */}
+            {stats.status === 'completed' && stats.failed === 0 && (
               <div className="p-5 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-start gap-4">
                 <BarChart3 className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" />
                 <div>
