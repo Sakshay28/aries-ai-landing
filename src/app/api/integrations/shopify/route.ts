@@ -14,6 +14,13 @@ import { decryptTokenV2 } from '@/lib/security/keyManager';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
+// provision_templates submits up to 9 templates to Meta sequentially — with no
+// override this route falls back to Vercel's 10s default, which the 9-template
+// loop can exceed (each fetch previously had no per-call timeout either — see
+// the AbortSignal added in templates.ts). The function gets killed mid-request
+// with no response ever reaching the browser: button spins forever, no toast,
+// nothing in reach of a client-side try/catch. Hobby plan allows up to 60s.
+export const maxDuration = 60;
 
 export async function GET() {
   const tenantId = await getTenantId();

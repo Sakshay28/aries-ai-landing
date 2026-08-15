@@ -268,6 +268,7 @@ export async function provisionShopifyTemplates(tenantId: string): Promise<Provi
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(10000),
       });
 
       if (res.status === 200 || res.status === 201) {
