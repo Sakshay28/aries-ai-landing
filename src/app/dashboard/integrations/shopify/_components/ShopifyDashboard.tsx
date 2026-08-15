@@ -7,6 +7,12 @@ import {
   Package, Layers, Users, Receipt, FileText, Percent, BookOpen, Shield,
 } from "lucide-react";
 
+interface TemplateProvisionResult {
+  created: string[];
+  skipped_existing: string[];
+  failed: Array<{ name: string; error: string }>;
+}
+
 interface StatusSummary {
   connected: boolean;
   store_url: string | null;
@@ -41,6 +47,10 @@ export function ShopifyDashboard() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<null | "connect" | "sync" | "disconnect" | "webhooks" | "templates" | "order_confirmation">(null);
   const [form, setForm] = useState({ store_url: "", access_token: "", shared_secret: "", api_version: "" });
+  // Persisted alongside the toast, not instead of it — a toast alone is easy to
+  // miss (auto-dismisses in a few seconds), so this stays on screen until the
+  // next "Provision templates" click.
+  const [templateResult, setTemplateResult] = useState<TemplateProvisionResult | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -131,6 +141,7 @@ export function ShopifyDashboard() {
 
   const provisionTemplates = async () => {
     setBusy("templates");
+    setTemplateResult(null);
     try {
       const res = await fetch("/api/integrations/shopify", {
         method: "POST",
@@ -140,6 +151,7 @@ export function ShopifyDashboard() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Template provisioning failed");
       const { created, skipped_existing, failed } = data.result;
+      setTemplateResult(data.result);
       const parts = [
         created.length ? `${created.length} submitted for approval` : "",
         skipped_existing.length ? `${skipped_existing.length} already exist` : "",
@@ -150,6 +162,10 @@ export function ShopifyDashboard() {
         console.warn("[shopify] template provision failures:", failed);
       }
     } catch (err) {
+      // Also request-level failures (network error, timeout, 401, etc.) — not
+      // just per-template ones — land in the persistent panel, not just a
+      // toast that can auto-dismiss before it's read.
+      setTemplateResult({ created: [], skipped_existing: [], failed: [{ name: '(request)', error: (err as Error).message }] });
       toast.error((err as Error).message);
     } finally {
       setBusy(null);
@@ -213,6 +229,7 @@ export function ShopifyDashboard() {
           onWebhooks={registerWebhooks}
           onTemplates={provisionTemplates}
           onToggleOrderConfirmation={toggleOrderConfirmation}
+          templateResult={templateResult}
         />
       ) : (
         <ConnectForm form={form} setForm={setForm} onConnect={connect} busy={busy === "connect"} />
@@ -306,7 +323,7 @@ function ConnectForm({ form, setForm, onConnect, busy }: {
 }
 
 // ─── Connected view ─────────────────────────────────────────
-function ConnectedView({ status, busy, onSync, onWebhooks, onTemplates, onDisconnect, onToggleOrderConfirmation }: {
+function ConnectedView({ status, busy, onSync, onWebhooks, onTemplates, onDisconnect, onToggleOrderConfirmation, templateResult }: {
   status: StatusSummary;
   busy: null | "connect" | "sync" | "disconnect" | "webhooks" | "templates" | "order_confirmation";
   onSync: () => void;
@@ -314,6 +331,7 @@ function ConnectedView({ status, busy, onSync, onWebhooks, onTemplates, onDiscon
   onTemplates: () => void;
   onDisconnect: () => void;
   onToggleOrderConfirmation: (enabled: boolean) => void;
+  templateResult: TemplateProvisionResult | null;
 }) {
   const badge = status.sync_status === "syncing"
     ? { text: "Syncing…", cls: "bg-blue-50 text-blue-700 border-blue-200" }
@@ -391,6 +409,30 @@ function ConnectedView({ status, busy, onSync, onWebhooks, onTemplates, onDiscon
           </div>
         </div>
       </section>
+
+      {templateResult && (
+        <section className={`rounded-lg border p-4 text-sm ${templateResult.failed.length ? "border-rose-200 bg-rose-50" : "border-emerald-200 bg-emerald-50"}`}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className={`font-medium ${templateResult.failed.length ? "text-rose-700" : "text-emerald-700"}`}>
+                Provision templates result
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {templateResult.created.length > 0 && <div>✓ Submitted for approval: {templateResult.created.join(", ")}</div>}
+                {templateResult.skipped_existing.length > 0 && <div>· Already existed: {templateResult.skipped_existing.join(", ")}</div>}
+                {templateResult.failed.length > 0 && (
+                  <div className="mt-1 text-rose-700">
+                    {templateResult.failed.map(f => <div key={f.name}>✗ {f.name}: {f.error}</div>)}
+                  </div>
+                )}
+                {templateResult.created.length === 0 && templateResult.skipped_existing.length === 0 && templateResult.failed.length === 0 && (
+                  <div>No changes.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="rounded-lg border bg-white p-5">
         <div className="flex items-start justify-between gap-4">
