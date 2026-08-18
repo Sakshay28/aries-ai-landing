@@ -35,7 +35,7 @@ describe('shopifyTemplateSpecs', () => {
 
   it('shopify_order_confirmation_action has 3 quick-reply buttons with the fixed labels', () => {
     const spec = specs.find(s => s.name === 'shopify_order_confirmation_action')!;
-    expect(spec.buttons?.map(b => b.text)).toEqual(['✅ Confirm Order', '❌ Cancel Order', '✏️ Change Details']);
+    expect(spec.buttons?.map(b => b.text)).toEqual(['Confirm Order', 'Cancel Order', 'Change Details']);
     expect(spec.buttons?.every(b => b.type === 'QUICK_REPLY')).toBe(true);
   });
 

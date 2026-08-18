@@ -42,10 +42,13 @@ export interface TemplateSpec {
 // override body uses all 7 (see below) before submitting it to Meta.
 export const ORDER_CONFIRMATION_TEMPLATE_NAME = 'shopify_order_confirmation_action';
 export const ORDER_CONFIRMATION_PLACEHOLDER_COUNT = 7;
+// Meta rejects QUICK_REPLY button text containing emojis, newlines, variables,
+// or other formatting characters (error_subcode 2388060, "Button format is
+// incorrect") — plain text only, unlike the body which allows emoji freely.
 export const ORDER_CONFIRMATION_BUTTON_LABELS = {
-  confirm: '✅ Confirm Order',
-  cancel: '❌ Cancel Order',
-  change: '✏️ Change Details',
+  confirm: 'Confirm Order',
+  cancel: 'Cancel Order',
+  change: 'Change Details',
 } as const;
 // Payload PREFIXES sent per-message (see notify.ts); the button text above is
 // what Meta requires at template-definition time and is platform-fixed —
@@ -277,12 +280,19 @@ export async function provisionShopifyTemplates(tenantId: string): Promise<Provi
       }
 
       const errBody = await res.json().catch(() => ({}));
-      const code = errBody?.error?.code;
       const subcode = errBody?.error?.error_subcode;
       const msg = errBody?.error?.message || `HTTP ${res.status}`;
 
-      // 100 / 2388023 → template with that name already exists. Idempotent skip.
-      if (code === 100 || subcode === 2388023 || /already exists|duplicate/i.test(msg)) {
+      // subcode 2388023 → template with that name already exists. Idempotent
+      // skip. NOTE: top-level `code` is always 100 (OAuthException) for nearly
+      // every Graph API template-validation error, not just duplicates — e.g.
+      // a bad button URL or an emoji in a QUICK_REPLY label also come back as
+      // code 100 with a DIFFERENT subcode. Matching on bare code===100 (as
+      // this used to) silently misreports those as "skipped_existing" instead
+      // of a real failure, which is exactly how the order-confirmation-action
+      // template's emoji-button bug went unnoticed. Match the specific
+      // duplicate subcode or the message text only.
+      if (subcode === 2388023 || /already exists|duplicate/i.test(msg)) {
         result.skipped_existing.push(spec.name);
         continue;
       }
