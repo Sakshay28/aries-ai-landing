@@ -15,7 +15,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Each endpoint is independent, so a failure must not stop the ones after
+      # it — hence continue-on-error. The gate step at the end re-fails the job,
+      # otherwise a run where every call 401s still reports green.
       - name: Staff session keepalive
+        id: keepalive
         continue-on-error: true
         run: |
           code=$(curl -s -o /tmp/ka.json -w "%{http_code}" -X POST \
@@ -27,6 +31,7 @@ jobs:
           [ "$code" = "200" ] || exit 1
 
       - name: Retry failed business notifications
+        id: retry
         continue-on-error: true
         run: |
           code=$(curl -s -o /tmp/nr.json -w "%{http_code}" -X POST \
@@ -36,3 +41,18 @@ jobs:
           echo "cron/notification-retry -> $code"
           cat /tmp/nr.json || true
           [ "$code" = "200" ] || exit 1
+
+      - name: Fail if any endpoint failed
+        env:
+          KEEPALIVE: ${{ steps.keepalive.outcome }}
+          RETRY: ${{ steps.retry.outcome }}
+        run: |
+          failed=""
+          if [ "$KEEPALIVE" = "failure" ]; then failed="$failed cron/session-keepalive"; fi
+          if [ "$RETRY" = "failure" ]; then failed="$failed cron/notification-retry"; fi
+          if [ -n "$failed" ]; then
+            echo "Failed endpoints:$failed"
+            echo "A 401 on every endpoint means the Vercel CRON_SECRET no longer matches the CRON_SECRET GitHub Actions secret."
+            exit 1
+          fi
+          echo "All endpoints returned 200"

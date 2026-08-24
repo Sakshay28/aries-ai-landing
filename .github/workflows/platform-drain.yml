@@ -10,7 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # Each endpoint is independent, so a failure must not stop the ones after
+      # it — hence continue-on-error. The gate step at the end re-fails the job,
+      # otherwise a run where every call 401s still reports green.
       - name: Drain broadcast queue
+        id: drain
         continue-on-error: true
         run: |
           code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
@@ -21,6 +25,7 @@ jobs:
           [ "$code" = "200" ] || exit 1
 
       - name: Tick scheduled flows
+        id: flows
         continue-on-error: true
         run: |
           code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
@@ -31,6 +36,7 @@ jobs:
           [ "$code" = "200" ] || exit 1
 
       - name: Expire stale unpaid bookings
+        id: bookings
         continue-on-error: true
         run: |
           code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
@@ -39,3 +45,20 @@ jobs:
             https://ariesai.in/api/cron/expire-bookings)
           echo "cron/expire-bookings -> $code"
           [ "$code" = "200" ] || exit 1
+
+      - name: Fail if any endpoint failed
+        env:
+          DRAIN: ${{ steps.drain.outcome }}
+          FLOWS: ${{ steps.flows.outcome }}
+          BOOKINGS: ${{ steps.bookings.outcome }}
+        run: |
+          failed=""
+          if [ "$DRAIN" = "failure" ]; then failed="$failed broadcast/process-queue"; fi
+          if [ "$FLOWS" = "failure" ]; then failed="$failed cron/scheduled-flows"; fi
+          if [ "$BOOKINGS" = "failure" ]; then failed="$failed cron/expire-bookings"; fi
+          if [ -n "$failed" ]; then
+            echo "Failed endpoints:$failed"
+            echo "A 401 on every endpoint means the Vercel CRON_SECRET no longer matches the CRON_SECRET GitHub Actions secret."
+            exit 1
+          fi
+          echo "All endpoints returned 200"
