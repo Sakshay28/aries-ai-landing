@@ -167,6 +167,8 @@ export function shopifyTemplateSpecs(): TemplateSpec[] {
 
 export interface ProvisionResult {
   created: string[];
+  /** Templates whose body was EDITED in place to match a tenant override. */
+  updated: string[];
   skipped_existing: string[];
   failed: Array<{ name: string; error: string }>;
 }
@@ -217,12 +219,64 @@ function componentsFor(spec: TemplateSpec): MetaTemplateComponent[] {
 }
 
 /**
+ * Look up one template by exact name on a WABA. Returns null when absent.
+ *
+ * Needed because Meta's create endpoint gives no way to reach an existing
+ * template: a same-name POST is rejected as a duplicate, and the rejection
+ * carries no template id. Editing therefore requires resolving the id first.
+ */
+async function findTemplateByName(
+  accessToken: string,
+  wabaId: string,
+  name: string,
+): Promise<{ id: string; status: string } | null> {
+  const url = `https://graph.facebook.com/v21.0/${wabaId}/message_templates?name=${encodeURIComponent(name)}&fields=id,name,status`;
+  const res = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) return null;
+  const json = await res.json().catch(() => ({})) as { data?: Array<{ id: string; name: string; status: string }> };
+  // The name filter is a prefix-ish match on Meta's side — require an exact hit.
+  const exact = (json.data || []).find(t => t.name === name);
+  return exact ? { id: exact.id, status: exact.status } : null;
+}
+
+/**
+ * Edit an EXISTING template's components in place, by template id.
+ *
+ * This is the only way to change an already-approved template's body: Meta
+ * treats a same-name create as a duplicate, so `provisionShopifyTemplates`
+ * alone can never apply a tenant's override to a template it created earlier
+ * with the platform default. An accepted edit puts the template back into
+ * review (status → PENDING); the previously approved version keeps sending in
+ * the meantime, so this is safe to call against a live template.
+ */
+async function updateTemplateComponents(
+  accessToken: string,
+  templateId: string,
+  components: MetaTemplateComponent[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetch(`https://graph.facebook.com/v21.0/${templateId}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ components }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (res.status === 200 || res.status === 201) return { ok: true };
+  const errBody = await res.json().catch(() => ({}));
+  return { ok: false, error: errBody?.error?.error_user_msg || errBody?.error?.message || `HTTP ${res.status}` };
+}
+
+/**
  * Provision all canned Shopify templates for a tenant. Safe to re-run —
  * templates already registered under the same name are skipped rather
- * than erroring.
+ * than erroring, EXCEPT the order-confirmation template, whose body is
+ * edited in place when the tenant has a valid override that differs from
+ * what's already live (see updateTemplateComponents).
  */
 export async function provisionShopifyTemplates(tenantId: string): Promise<ProvisionResult> {
-  const result: ProvisionResult = { created: [], skipped_existing: [], failed: [] };
+  const result: ProvisionResult = { created: [], updated: [], skipped_existing: [], failed: [] };
 
   const { data: tenant } = await supabaseAdmin
     .from('tenants')
@@ -293,6 +347,23 @@ export async function provisionShopifyTemplates(tenantId: string): Promise<Provi
       // template's emoji-button bug went unnoticed. Match the specific
       // duplicate subcode or the message text only.
       if (subcode === 2388023 || /already exists|duplicate/i.test(msg)) {
+        // A plain skip is wrong for the order-confirmation template when the
+        // tenant has an override: the template already on Meta was created
+        // earlier with the platform default, and a same-name create can never
+        // replace it. Resolve its id and edit the body in place instead, so
+        // re-running provisioning actually applies the tenant's wording rather
+        // than silently reverting to the default.
+        if (submitSpec.body !== spec.body) {
+          const existing = await findTemplateByName(accessToken, wabaId, spec.name);
+          if (!existing) {
+            result.failed.push({ name: spec.name, error: 'reported as duplicate but not found by name — cannot apply override' });
+            continue;
+          }
+          const edit = await updateTemplateComponents(accessToken, existing.id, componentsFor(submitSpec));
+          if (edit.ok) result.updated.push(spec.name);
+          else result.failed.push({ name: spec.name, error: `override edit failed: ${edit.error}` });
+          continue;
+        }
         result.skipped_existing.push(spec.name);
         continue;
       }

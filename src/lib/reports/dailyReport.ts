@@ -237,34 +237,39 @@ function fmtMoney(n: number | null): string {
   return n == null ? 'N/A' : `₹${fmtCurrency(n)}`;
 }
 
+// Section headers are wrapped in *asterisks* — WhatsApp's own bold syntax, and
+// exactly what the client's supplied template asks for. Safe here even though
+// engine.ts strips asterisks from AI replies: sanitizeReplyText is private to
+// the AI pipeline, and this report is sent via sendTextMessage directly from
+// the webhook route, so it never passes through that stripper.
 export function formatDailyReportMessage(data: DailyReportData, businessName: string): string {
   const lines = [
-    `📊 ${businessName.toUpperCase()} | DAILY REPORT`,
+    `📊 *${businessName.toUpperCase()} | DAILY REPORT*`,
     `📅 ${data.dateLabel}`,
     '',
-    '💰 SALES',
+    '💰 *SALES*',
     `Revenue: ${fmtMoney(data.revenue)} | Orders: ${fmtNumber(data.orders)}`,
     `AOV: ${fmtMoney(data.aov)} | Profit: ${fmtMoney(data.profit)}`,
     '',
-    '📢 ADS',
+    '📢 *ADS*',
     `Spend: ${fmtMoney(data.adSpend)} | ROAS: ${fmtRatio(data.roas)} | CPA: ${fmtMoney(data.cpa)}`,
     '',
-    '📦 DELIVERY',
+    '📦 *DELIVERY*',
     `Delivered: ${fmtNumber(data.delivered)} | Transit: ${fmtNumber(data.transit)}`,
     `NDR: ${fmtNumber(data.ndrTotal)} | RTO Initiated: ${fmtNumber(data.rtoInitiated)}`,
     `RTO: ${fmtNumber(data.rtoCount)} (${fmtPercent(data.rtoPercent)})`,
     '',
-    '⚠️ NDR BREAKDOWN',
+    '⚠️ *NDR BREAKDOWN*',
     `1st Attempt: ${fmtNumber(data.ndr1)}`,
     `2nd Attempt: ${fmtNumber(data.ndr2)}`,
     `3rd Attempt: ${fmtNumber(data.ndr3)}`,
     '',
-    '🛍️ PRODUCTS',
+    '🛍️ *PRODUCTS*',
     `🔥 Top Seller: ${fmtText(data.topSellerTitle)}`,
     `💰 Top Profit: ${fmtText(data.topProfitTitle)}`,
     `⚠️ Highest RTO: ${fmtText(data.highestRtoTitle)}`,
     '',
-    '💳 PAYMENT',
+    '💳 *PAYMENT*',
     `Prepaid: ${fmtPercent(data.prepaidPercent)} | COD: ${fmtPercent(data.codPercent)}`,
   ];
   return lines.join('\n');

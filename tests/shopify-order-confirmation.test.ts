@@ -29,6 +29,49 @@ describe('isValidOrderConfirmationOverride', () => {
   });
 });
 
+describe('Meta button-label constraints', () => {
+  // Meta rejects QUICK_REPLY button text containing emojis, newlines, variables
+  // or formatting characters (error_subcode 2388060). This shipped as a real
+  // outage: the order-confirmation template silently never registered, so the
+  // whole flow was dead. Emoji in the BODY is fine — only buttons are affected.
+  it('button labels contain no emoji, newlines, or placeholders', () => {
+    for (const label of Object.values(ORDER_CONFIRMATION_BUTTON_LABELS)) {
+      expect(label).not.toMatch(/\p{Extended_Pictographic}/u);
+      expect(label).not.toMatch(/[\r\n]/);
+      expect(label).not.toMatch(/\{\{\d+\}\}/);
+      expect(label.length).toBeLessThanOrEqual(25); // Meta's quick-reply cap
+    }
+  });
+});
+
+describe("Devprayagjal's live override body", () => {
+  // The exact wording the client supplied, stored in
+  // tenants.shopify_order_confirmation_message. Guards the two collisions
+  // found when mapping it onto the fixed 7-placeholder contract.
+  const clientBody = `🔱 Har Har Mahadev! 🙏
+
+{{1}} Ji,
+Thank you for choosing Devprayagjal. May this sacred connection bring peace, positivity & divine blessings. 🕉️
+
+📦 Order: #{{2}}
+🔱 Product: {{3}}
+💰 Amount: {{4}} | {{5}}
+
+📍 Address: {{6}}, {{7}}
+
+🙏 Please confirm your order below.`;
+
+  it('passes override validation', () => {
+    expect(isValidOrderConfirmationOverride(clientBody)).toBe(true);
+  });
+
+  it('does not prefix ₹ before the amount placeholder', () => {
+    // notify.ts formatAmount() already returns "₹2499" for INR — a ₹ in the
+    // template body too would render "₹₹2499".
+    expect(clientBody).not.toMatch(/₹\s*\{\{4\}\}/);
+  });
+});
+
 describe('order-confirmation button payload prefixes', () => {
   it('are distinct and non-empty', () => {
     const values = Object.values(ORDER_CONFIRMATION_PAYLOAD_PREFIX);

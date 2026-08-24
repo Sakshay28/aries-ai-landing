@@ -9,6 +9,7 @@ import {
 
 interface TemplateProvisionResult {
   created: string[];
+  updated: string[];
   skipped_existing: string[];
   failed: Array<{ name: string; error: string }>;
 }
@@ -150,10 +151,11 @@ export function ShopifyDashboard() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Template provisioning failed");
-      const { created, skipped_existing, failed } = data.result;
+      const { created, updated, skipped_existing, failed } = data.result;
       setTemplateResult(data.result);
       const parts = [
         created.length ? `${created.length} submitted for approval` : "",
+        updated?.length ? `${updated.length} updated (re-review)` : "",
         skipped_existing.length ? `${skipped_existing.length} already exist` : "",
         failed.length ? `${failed.length} failed` : "",
       ].filter(Boolean).join(" · ");
@@ -165,7 +167,7 @@ export function ShopifyDashboard() {
       // Also request-level failures (network error, timeout, 401, etc.) — not
       // just per-template ones — land in the persistent panel, not just a
       // toast that can auto-dismiss before it's read.
-      setTemplateResult({ created: [], skipped_existing: [], failed: [{ name: '(request)', error: (err as Error).message }] });
+      setTemplateResult({ created: [], updated: [], skipped_existing: [], failed: [{ name: '(request)', error: (err as Error).message }] });
       toast.error((err as Error).message);
     } finally {
       setBusy(null);
@@ -419,13 +421,14 @@ function ConnectedView({ status, busy, onSync, onWebhooks, onTemplates, onDiscon
               </div>
               <div className="mt-1 text-xs text-muted-foreground">
                 {templateResult.created.length > 0 && <div>✓ Submitted for approval: {templateResult.created.join(", ")}</div>}
+                {(templateResult.updated?.length ?? 0) > 0 && <div>✎ Updated to your custom wording — back in Meta review: {templateResult.updated.join(", ")}</div>}
                 {templateResult.skipped_existing.length > 0 && <div>· Already existed: {templateResult.skipped_existing.join(", ")}</div>}
                 {templateResult.failed.length > 0 && (
                   <div className="mt-1 text-rose-700">
                     {templateResult.failed.map(f => <div key={f.name}>✗ {f.name}: {f.error}</div>)}
                   </div>
                 )}
-                {templateResult.created.length === 0 && templateResult.skipped_existing.length === 0 && templateResult.failed.length === 0 && (
+                {templateResult.created.length === 0 && (templateResult.updated?.length ?? 0) === 0 && templateResult.skipped_existing.length === 0 && templateResult.failed.length === 0 && (
                   <div>No changes.</div>
                 )}
               </div>

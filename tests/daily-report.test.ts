@@ -162,13 +162,22 @@ describe('formatDailyReportMessage', () => {
 
   it('renders every template section with real values where available', () => {
     const text = formatDailyReportMessage(base, 'Devprayagjal');
-    expect(text).toContain('📊 DEVPRAYAGJAL | DAILY REPORT');
+    expect(text).toContain('📊 *DEVPRAYAGJAL | DAILY REPORT*');
     expect(text).toContain('📅 12 Aug 2026');
     expect(text).toContain('Revenue: ₹25,000 | Orders: 12');
     expect(text).toContain('Delivered: 5 | Transit: 3');
     expect(text).toContain('RTO: 1 (11.1%)');
     expect(text).toContain('🔥 Top Seller: Rudraksha Mala');
     expect(text).toContain('Prepaid: 20% | COD: 80%');
+  });
+
+  it('bolds every section header with WhatsApp asterisk syntax, per the client template', () => {
+    const text = formatDailyReportMessage(base, 'Devprayagjal');
+    for (const header of ['*SALES*', '*ADS*', '*DELIVERY*', '*NDR BREAKDOWN*', '*PRODUCTS*', '*PAYMENT*']) {
+      expect(text).toContain(header);
+    }
+    // Asterisks must be balanced, or WhatsApp renders stray literal stars.
+    expect((text.match(/\*/g) || []).length % 2).toBe(0);
   });
 
   it('substitutes N/A for every unavailable field instead of 0, blank, or a dropped line', () => {
