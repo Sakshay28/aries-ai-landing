@@ -276,18 +276,43 @@ export async function getTenantByIgPageId(igPageId: string): Promise<Tenant | nu
 // ═══════════════════════════════════════
 // LOOKUP: By Shopify Store URL
 // ═══════════════════════════════════════
+// Shopify's webhook `X-Shopify-Shop-Domain` header always carries the store's
+// canonical `<handle>.myshopify.com`, even for stores whose public site runs
+// on a custom domain (e.g. devprayagjal.com). A tenant connected via a
+// custom domain therefore stores `shopify_store_url = 'devprayagjal.com'`,
+// but every webhook arrives asking for `822e2f-b7.myshopify.com` — a plain
+// `.eq('shopify_store_url', ...)` lookup misses it, the route returns 200
+// as "unknown_tenant", Shopify stops retrying, and every order silently
+// drops. That silent 14-day loss is exactly what this fallback prevents.
+//
+// The connect flow already persists the full `/shop.json` payload into
+// `shopify_shop_meta`, which includes `myshopify_domain` — so this second
+// lookup path works for any tenant onboarded through connectTenant(). For
+// tenants attached to Shopify by other means (direct DB writes, older
+// flows), the myshopify_domain needs to be backfilled into shop_meta once.
 export async function getTenantByShopifyUrl(storeUrl: string): Promise<Tenant | null> {
   const cached = await getCached(`shopify:${storeUrl}`);
   if (cached) return cached;
 
-  const { data, error } = await supabaseAdmin
+  const primary = await supabaseAdmin
     .from('tenants')
     .select('*')
     .eq('shopify_store_url', storeUrl)
     .eq('is_active', true)
-    .single();
+    .maybeSingle();
 
-  if (error || !data) return null;
+  let data = primary.data;
+  if (!data) {
+    const fallback = await supabaseAdmin
+      .from('tenants')
+      .select('*')
+      .eq('shopify_shop_meta->>myshopify_domain', storeUrl)
+      .eq('is_active', true)
+      .maybeSingle();
+    data = fallback.data;
+  }
+
+  if (!data) return null;
 
   const tenant = data as Tenant;
   await setCache(`shopify:${storeUrl}`, tenant);
