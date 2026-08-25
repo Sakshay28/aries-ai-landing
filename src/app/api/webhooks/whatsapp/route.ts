@@ -24,7 +24,7 @@ import { sanitizeName } from '@/lib/utils/name';
 import { greetingName } from '@/lib/utils/contact-name';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 import { processMessageWithAI, isHumanHandoffRequest } from '@/lib/ai/engine';
-import { kwWordMatch, pickScriptedReply, allowStatusUpdate, hasActiveFlow } from '@/lib/webhook/decisions';
+import { kwWordMatch, pickScriptedReply, allowStatusUpdate, hasActiveFlow, shouldAutoResumeBotPause } from '@/lib/webhook/decisions';
 import { checkSenderRateLimit } from '@/lib/abuse/prevention';
 import { checkAICostLimit, checkDailyAICostLimit, AI_FALLBACK_MESSAGE } from '@/lib/billing/costProtection';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
@@ -273,49 +273,6 @@ async function isKnownStaffNumber(phone: string): Promise<boolean> {
   return _knownStaffCache.set.has(phone);
 }
 
-// Only genuine, customer-driven staff alerts count as "the sender might be replying
-// to an alert". System pings — keepalives (staff_keepalive) and the periodic "alert
-// portal check-in" templates — go to the same staff numbers constantly, so counting
-// them would permanently keep every staff number in intercept mode and block them
-// from ever chatting with the platform-tenant's AI. Allow-list the real alert types
-// rather than block-listing system ones, so any future system message type is
-// excluded by default.
-const REAL_ALERT_EVENT_TYPES = [
-  'booking_confirmation',
-  'human_assistance',
-  'payment_confirmation',
-  'reservation_update',
-];
-
-// True if `phone` received a genuine booking/handoff/payment alert within the last
-// `windowHours` hours, on ANY tenant. Used to decide whether a cross-tenant staff
-// number reaching the shared platform number is *replying to an alert* (→ handle as
-// staff) or just starting a fresh conversation (→ let the customer AI engage).
-// business_notifications.recipients is a JSONB array of { phone, role, ... }; phones
-// may be stored in mixed formats, so we normalize both sides before comparing.
-async function hasRecentAlertTo(phone: string, windowHours = 12): Promise<boolean> {
-  const since = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
-  const { data, error } = await supabaseAdmin
-    .from('business_notifications')
-    .select('recipients')
-    .in('event_type', REAL_ALERT_EVENT_TYPES)
-    .gte('created_at', since)
-    .order('created_at', { ascending: false })
-    .limit(500);
-  if (error) {
-    // Fail safe: if we can't check, keep the staff-reply protection (treat as staff).
-    console.error('[webhook] hasRecentAlertTo query failed:', error.message);
-    return true;
-  }
-  for (const n of data ?? []) {
-    const recips = (n.recipients as Array<{ phone?: string }> | null) ?? [];
-    for (const r of recips) {
-      if (r?.phone && normalizePhoneNumber(r.phone) === phone) return true;
-    }
-  }
-  return false;
-}
-
 // ── Inbound Message Processing ──
 async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMetaWebhook>>) {
   if (!msg.messageId || !msg.fromPhone || !msg.appPhoneId) {
@@ -433,17 +390,13 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   const managerPhone = normalizePhoneNumber(tenant.manager_phone);
   const isOwnStaffNumber = !!cleanPhone && (cleanPhone === staffPhone || cleanPhone === managerPhone);
 
-  // A staff/manager number on THIS tenant's own number is unambiguously this tenant's
-  // staff — there's no "which venue do they belong to" question to resolve, so the
-  // static staff-portal reply is reserved for genuine control interactions only (an
-  // ack / keepalive / "got it" button or text). Anything else (a staff member typing a
-  // real question, testing the booking flow, etc.) falls through to the normal
-  // customer AI conversation below, same as any other sender. Deliberately NOT gated
-  // on "recent alert sent to this number" here — an active venue's staff number gets
-  // real booking alerts constantly, so that heuristic would trap them in the static
-  // reply almost permanently. Outbound alert delivery (businessNotify.ts) reads
-  // tenant.staff_phone/manager_phone directly and is completely independent of this
-  // inbound routing decision, so alerts keep arriving either way.
+  // Static staff-portal reply is reserved for genuine control interactions only
+  // (an ack / keepalive / "got it" button or text). Anything else — a staff member
+  // typing a real question, running a demo, testing the booking flow — falls through
+  // to the normal customer AI conversation below, same as any other sender. Outbound
+  // alert delivery (businessNotify.ts) reads tenant.staff_phone/manager_phone directly
+  // and is completely independent of this inbound routing decision, so alerts keep
+  // arriving either way.
   const isStaffControlMessage =
     (msg.buttonId?.startsWith('ack_notification:') ?? false) ||
     msg.buttonId === 'staff_keepalive_confirm' ||
@@ -454,12 +407,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
   if (isOwnStaffNumber) {
     isStaffMessage = isStaffControlMessage;
   } else if (cleanPhone && isPlatformTenant(tenant) && await isKnownStaffNumber(cleanPhone)) {
-    // Platform number: the Aries AI number blasts alerts to EVERY client's staff and
-    // receives their replies. Those senders are staff of OTHER tenants — ambiguous
-    // whether they're replying to an alert or starting a fresh chat with THIS tenant's
-    // AI (e.g. Romeo Lane's shared number), so the "recent alert" fallback is needed
-    // here to disambiguate, unlike the own-tenant case above.
-    isStaffMessage = isStaffControlMessage || await hasRecentAlertTo(cleanPhone);
+    isStaffMessage = isStaffControlMessage;
   }
 
   // Early Intercept for Staff Alert Acknowledgements & Keepalives
@@ -1319,10 +1267,32 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
 
 
-  // bot_paused = hard stop (human agent has taken over — never override)
+  // bot_paused = hard stop (human agent has taken over — never override),
+  // except when the tenant has opted into auto-resume via
+  // tenants.bot_paused_auto_resume_hours (migration 20260824). See
+  // shouldAutoResumeBotPause() for the activity-signal rationale.
   if (conversation.bot_paused) {
-    console.log(`🔇 Meta: bot paused (human takeover) for conversation ${conversation.id}, skipping AI`);
-    return;
+    if (shouldAutoResumeBotPause({
+      autoResumeHours: (tenant as any).bot_paused_auto_resume_hours as number | null | undefined,
+      lastOutboundAt: conversation.last_outbound_at as string | null | undefined,
+      createdAt: conversation.created_at as string | null | undefined,
+    })) {
+      const lastOutRef = (conversation.last_outbound_at ?? conversation.created_at) as string | null;
+      const ageHours = lastOutRef
+        ? Math.round((Date.now() - new Date(lastOutRef).getTime()) / 3_600_000)
+        : null;
+      console.log(`🔄 Meta: auto-resuming bot_paused conversation ${conversation.id} (last outbound ${ageHours ?? '?'}h ago ≥ ${(tenant as any).bot_paused_auto_resume_hours}h threshold)`);
+      await supabaseAdmin
+        .from('conversations')
+        .update({ bot_paused: false, escalated: false, escalation_reason: null, escalated_at: null })
+        .eq('id', conversation.id);
+      conversation.bot_paused = false;
+      conversation.escalated = false;
+      // Fall through to normal AI processing.
+    } else {
+      console.log(`🔇 Meta: bot paused (human takeover) for conversation ${conversation.id}, skipping AI`);
+      return;
+    }
   }
 
   // escalated = soft state — resolve via booking completion OR timeout, else pause bot
