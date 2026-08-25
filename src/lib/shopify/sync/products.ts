@@ -54,8 +54,12 @@ export interface SyncResult {
   nextCursor: string | null;
 }
 
-/** Upsert one product + its variants. Used by both full-sync page and webhook handlers. */
-export async function upsertProduct(tenantId: string, p: ShopifyProduct, shopCurrency: string | null): Promise<void> {
+/** Upsert one product + its variants. Used by both full-sync page and webhook
+ *  handlers. `client` is optional — when omitted, per-variant cost enrichment
+ *  is skipped (webhook payloads don't carry cost, and looking it up requires a
+ *  live Shopify Admin call, which the webhook path doesn't always have a
+ *  client for). Passing a client turns on cost sync in the same pass. */
+export async function upsertProduct(tenantId: string, p: ShopifyProduct, shopCurrency: string | null, client?: ShopifyClient): Promise<void> {
   const body_text = htmlToText(p.body_html);
   const variants = p.variants || [];
   const prices = variants.map(v => toNum(v.price)).filter((n): n is number => n != null);
@@ -137,6 +141,53 @@ export async function upsertProduct(tenantId: string, p: ShopifyProduct, shopCur
       .upsert(batch, { onConflict: 'tenant_id,shopify_id' });
     if (verr) throw new Error(`upsert variants for product ${p.id}: ${verr.message}`);
   }
+
+  // Fetch per-item cost from Shopify InventoryItem and write it back onto the
+  // variant rows. Kept in a separate UPDATE (not the main upsert) so it can
+  // fail closed without dropping the whole product sync — this matters because
+  // (a) not every migration environment has 20260825_shopify_variant_cost.sql
+  // applied yet and (b) inventory_items.json is a separate paginated endpoint
+  // whose 429s shouldn't block product data landing. NULL cost → N/A Profit
+  // in the report, not zero, which keeps the report honest until the sync
+  // catches up.
+  if (client) {
+    await enrichVariantsWithCost(client, tenantId, variants).catch(err => {
+      console.warn(`[shopify:sync:products] cost enrichment failed for product ${p.id} (non-fatal):`, (err as Error).message);
+    });
+  }
+}
+
+async function enrichVariantsWithCost(client: ShopifyClient, tenantId: string, variants: ShopifyVariant[]): Promise<void> {
+  const inventoryItemIds = variants.map(v => v.inventory_item_id).filter((n): n is number => typeof n === 'number');
+  if (inventoryItemIds.length === 0) return;
+
+  // Shopify's inventory_items.json endpoint accepts a comma-separated ids= list
+  // (max 100 per call, same 250-limit cap as most REST endpoints — we chunk
+  // conservatively so a small variant burst doesn't 429 on us).
+  const costByInventoryItemId = new Map<number, number>();
+  for (const idBatch of chunk(inventoryItemIds, 50)) {
+    const res = await client.rest<{ inventory_items: Array<{ id: number; cost?: string | null }> }>(
+      'GET',
+      'inventory_items.json',
+      { query: { ids: idBatch.join(','), limit: 250 } },
+    );
+    for (const item of res.body.inventory_items || []) {
+      const cost = toNum(item.cost);
+      if (cost != null) costByInventoryItemId.set(item.id, cost);
+    }
+  }
+
+  // One UPDATE per variant — pgrest/Supabase-js has no way to UPDATE many rows
+  // with different values in one call. Small n (usually 1–5 variants/product),
+  // so serial writes are fine. Errors are swallowed here since the ambient
+  // .catch() in the caller already logs — a missing `cost` column (42703 in
+  // pre-migration prod) shouldn't kill the sync.
+  for (const v of variants) {
+    if (!v.inventory_item_id) continue;
+    const cost = costByInventoryItemId.get(v.inventory_item_id);
+    if (cost == null) continue;
+    await supabaseAdmin.from('shopify_variants').update({ cost }).eq('tenant_id', tenantId).eq('shopify_id', v.id);
+  }
 }
 
 /** Delete a product (used by products/delete webhook). Cascade drops variants via FK. */
@@ -165,7 +216,7 @@ export async function syncProductsPage(
   let errors = 0;
   for (const p of products) {
     try {
-      await upsertProduct(tenantId, p, shopCurrency);
+      await upsertProduct(tenantId, p, shopCurrency, client);
       upserted++;
     } catch (e) {
       errors++;

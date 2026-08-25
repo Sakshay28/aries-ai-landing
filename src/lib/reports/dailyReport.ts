@@ -11,12 +11,12 @@
 // result as a plain text message with no model in the loop.
 //
 // Data coverage today: Revenue/Orders/AOV, top seller (units sold),
-// delivery status counts + RTO%, and Prepaid/COD split are computed
-// from real synced data. Profit, Ads (until Meta Ads is connected),
-// the NDR attempt breakdown, and RTO-by-product have no data source
-// anywhere in the schema yet — those fields are always null here and
-// render as "N/A" rather than a guessed number. See the plan doc for
-// what each gap would take to close.
+// delivery status counts + RTO%, Prepaid/COD split, Profit + Top Profit
+// (when shopify_variants.cost has been synced — see 20260825 migration),
+// and Highest RTO product are all computed from real synced data. Ads
+// (until Meta Ads is connected) and the NDR attempt breakdown have no
+// data source anywhere in the schema yet — those fields are always null
+// here and render as "N/A" rather than a guessed number.
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
@@ -78,6 +78,8 @@ export interface DailyReportData {
 interface ShopifyOrderLineItem {
   title?: string;
   quantity?: number;
+  price?: number | string;
+  variant_id?: number;
   product_id?: number;
 }
 
@@ -99,26 +101,86 @@ export async function generateDailyReport(tenantId: string): Promise<DailyReport
   const revenue = orderRows.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0);
   const aov = orderCount > 0 ? revenue / orderCount : null;
 
-  // Top seller by units sold across today's orders.
-  const unitsByProduct = new Map<string, { title: string; units: number }>();
+  // Product aggregates from today's line items — used for Top Seller (units),
+  // Top Profit (when cost data is present), and Highest RTO (joined against
+  // shiprocket status below).
+  interface ProductAgg { title: string; units: number; revenue: number; cost: number; costKnown: boolean; }
+  const byProduct = new Map<string, ProductAgg>();
+  const variantIdsSeen = new Set<number>();
   for (const order of orderRows) {
     const items = (order.line_items || []) as ShopifyOrderLineItem[];
     for (const item of items) {
       const key = String(item.product_id ?? item.title ?? 'unknown');
       const title = item.title || 'Unknown item';
       const qty = Number(item.quantity) || 0;
-      const existing = unitsByProduct.get(key);
-      unitsByProduct.set(key, { title, units: (existing?.units || 0) + qty });
+      const lineRevenue = qty * (Number(item.price) || 0);
+      const existing = byProduct.get(key);
+      byProduct.set(key, {
+        title,
+        units: (existing?.units || 0) + qty,
+        revenue: (existing?.revenue || 0) + lineRevenue,
+        cost: existing?.cost || 0,
+        costKnown: existing?.costKnown ?? false,
+      });
+      if (typeof item.variant_id === 'number') variantIdsSeen.add(item.variant_id);
     }
   }
+
+  // Enrich with variant cost. Best-effort: 42703 "column cost does not exist"
+  // (pre-migration environments) or any other query error → costs stay
+  // unknown, Profit + Top Profit render as N/A. Never crashes the report.
+  const costByVariant = new Map<number, number>();
+  let costDataAvailable = false;
+  if (variantIdsSeen.size > 0) {
+    const { data: variants, error: varErr } = await supabaseAdmin
+      .from('shopify_variants')
+      .select('shopify_id, cost, shopify_product_id')
+      .eq('tenant_id', tenantId)
+      .in('shopify_id', Array.from(variantIdsSeen));
+    if (!varErr && variants) {
+      costDataAvailable = true;
+      for (const v of variants) {
+        const c = Number((v as { cost?: number | string | null }).cost);
+        if (Number.isFinite(c)) costByVariant.set(Number((v as { shopify_id: number }).shopify_id), c);
+      }
+    }
+  }
+  if (costDataAvailable) {
+    for (const order of orderRows) {
+      const items = (order.line_items || []) as ShopifyOrderLineItem[];
+      for (const item of items) {
+        if (typeof item.variant_id !== 'number') continue;
+        const c = costByVariant.get(item.variant_id);
+        if (c == null) continue;
+        const key = String(item.product_id ?? item.title ?? 'unknown');
+        const agg = byProduct.get(key);
+        if (!agg) continue;
+        agg.cost += (Number(item.quantity) || 0) * c;
+        agg.costKnown = true;
+      }
+    }
+  }
+
   let topSellerTitle: string | null = null;
   let topUnits = 0;
-  for (const entry of unitsByProduct.values()) {
-    if (entry.units > topUnits) {
-      topUnits = entry.units;
-      topSellerTitle = entry.title;
+  let topProfitTitle: string | null = null;
+  let topProfit = -Infinity;
+  let totalCost = 0;
+  let costPartial = false; // some line items missing cost — mark Profit as N/A
+  for (const entry of byProduct.values()) {
+    if (entry.units > topUnits) { topUnits = entry.units; topSellerTitle = entry.title; }
+    if (entry.costKnown) {
+      totalCost += entry.cost;
+      const p = entry.revenue - entry.cost;
+      if (p > topProfit) { topProfit = p; topProfitTitle = entry.title; }
+    } else if (entry.units > 0) {
+      costPartial = true;
     }
   }
+  // Any missing per-line cost → total cost is not trustworthy, so surface N/A
+  // rather than a low-side underestimate the client would spot immediately.
+  const profit = (!costDataAvailable || costPartial || byProduct.size === 0) ? null : revenue - totalCost;
+  if (topProfit === -Infinity) topProfitTitle = null;
 
   // Delivery/RTO/payment split — shipments tied to today's orders.
   const orderIds = orderRows.map((o) => o.id);
@@ -128,11 +190,12 @@ export async function generateDailyReport(tenantId: string): Promise<DailyReport
   let rtoPercent: number | null = null;
   let prepaidPercent: number | null = null;
   let codPercent: number | null = null;
+  let highestRtoTitle: string | null = null;
 
   if (orderIds.length > 0) {
     const { data: shipments } = await supabaseAdmin
       .from('shiprocket_shipments')
-      .select('status, payment_method')
+      .select('status, payment_method, shopify_order_id')
       .eq('tenant_id', tenantId)
       .in('shopify_order_id', orderIds);
 
@@ -149,6 +212,27 @@ export async function generateDailyReport(tenantId: string): Promise<DailyReport
         const prepaidCount = withPaymentMethod.filter((s) => s.payment_method === 'Prepaid').length;
         prepaidPercent = Math.round((prepaidCount / withPaymentMethod.length) * 1000) / 10;
         codPercent = Math.round(((withPaymentMethod.length - prepaidCount) / withPaymentMethod.length) * 1000) / 10;
+      }
+
+      // Highest-RTO product: for every RTO'd shipment, credit each of its
+      // order's line-item products with the RTO. Pick the product with the
+      // most RTO'd units today.
+      const rtoOrderIds = new Set(shipmentRows.filter(s => s.status === 'rto').map(s => s.shopify_order_id));
+      if (rtoOrderIds.size > 0) {
+        const rtoUnitsByProduct = new Map<string, { title: string; units: number }>();
+        for (const order of orderRows) {
+          if (!rtoOrderIds.has(order.id)) continue;
+          for (const item of (order.line_items || []) as ShopifyOrderLineItem[]) {
+            const key = String(item.product_id ?? item.title ?? 'unknown');
+            const title = item.title || 'Unknown item';
+            const existing = rtoUnitsByProduct.get(key);
+            rtoUnitsByProduct.set(key, { title, units: (existing?.units || 0) + (Number(item.quantity) || 0) });
+          }
+        }
+        let topRtoUnits = 0;
+        for (const entry of rtoUnitsByProduct.values()) {
+          if (entry.units > topRtoUnits) { topRtoUnits = entry.units; highestRtoTitle = entry.title; }
+        }
       }
     }
   }
@@ -186,7 +270,7 @@ export async function generateDailyReport(tenantId: string): Promise<DailyReport
     revenue: orderCount > 0 ? revenue : null,
     orders: orderCount,
     aov,
-    profit: null,
+    profit,
     adSpend,
     roas,
     cpa,
@@ -200,8 +284,8 @@ export async function generateDailyReport(tenantId: string): Promise<DailyReport
     ndr2: null,
     ndr3: null,
     topSellerTitle,
-    topProfitTitle: null,
-    highestRtoTitle: null,
+    topProfitTitle,
+    highestRtoTitle,
     prepaidPercent,
     codPercent,
   };
