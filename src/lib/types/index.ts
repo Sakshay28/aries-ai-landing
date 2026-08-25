@@ -98,6 +98,10 @@ export interface Tenant {
   followup_24hr: boolean;
   followup_7day: boolean;
   escalation_timeout_mins: number;
+  // Hours after last outbound before an inactive bot_paused conversation
+  // auto-resumes on the next inbound. null = never (default).
+  // Migration: 20260824_bot_paused_auto_resume.sql
+  bot_paused_auto_resume_hours?: number | null;
 
   // Lead Scoring
   hot_keywords: string[];

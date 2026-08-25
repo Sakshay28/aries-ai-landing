@@ -31,7 +31,7 @@ export async function GET() {
       outbound_webhook_url, system_prompt`;
   // Optional columns added by later migrations. Select them when present;
   // fall back to BASE_COLS if the migration hasn't run yet.
-  const OPT_COLS = `wa_mode, coexistence_auto_pause, coexistence_connected_at, welcome_image_url, bot_language_mode, response_length, prohibited_topics, always_mention_rules, competitors, competitor_deflection_reply, booking_alert_template, default_lead_assignee_id, lead_assigned_email_template, media_rules, service_disabled, service_disabled_message`;
+  const OPT_COLS = `wa_mode, coexistence_auto_pause, coexistence_connected_at, welcome_image_url, bot_language_mode, response_length, prohibited_topics, always_mention_rules, competitors, competitor_deflection_reply, booking_alert_template, default_lead_assignee_id, lead_assigned_email_template, media_rules, service_disabled, service_disabled_message, bot_paused_auto_resume_hours`;
 
   let { data, error } = await supabaseAdmin
     .from('tenants')
@@ -140,6 +140,23 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
+  // bot_paused_auto_resume_hours: null clears the opt-in; otherwise require a
+  // non-negative finite integer under a sane ceiling (~1 year) so a fat-finger
+  // "72000" doesn't silently disable the feature by pushing the threshold past
+  // any realistic conversation age.
+  if (body.bot_paused_auto_resume_hours !== undefined && body.bot_paused_auto_resume_hours !== null) {
+    const n = Number(body.bot_paused_auto_resume_hours);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0 || n > 8760) {
+      return NextResponse.json(
+        { success: false, error: 'bot_paused_auto_resume_hours must be an integer between 0 and 8760 (or null).' },
+        { status: 400 }
+      );
+    }
+    // 0 is stored as-is; the webhook decision helper treats 0 the same as null
+    // (never auto-resume), so keeping the literal write is fine.
+    body.bot_paused_auto_resume_hours = n;
+  }
+
   // SSRF guard: reject an unsafe outbound_webhook_url before persisting it.
   if (
     body.outbound_webhook_url !== undefined &&
@@ -161,7 +178,8 @@ export async function PATCH(req: NextRequest) {
     'staff_phone', 'staff_name', 'manager_phone', 'staff_email', 'escalation_alert_template', 'booking_alert_template',
     'escalation_enabled', 'escalation_keywords', 'escalation_reply',
     'followup_30min', 'followup_3hr', 'followup_24hr', 'followup_7day',
-    'escalation_timeout_mins', 'hot_keywords', 'warm_keywords',
+    'escalation_timeout_mins', 'bot_paused_auto_resume_hours',
+    'hot_keywords', 'warm_keywords',
     'custom_faqs', 'off_hours_enabled', 'off_hours_message', 'off_hours_capture_lead',
     'google_review_url', 'review_automation_enabled',
     'wa_phone_number_id', 'wa_business_account_id', 'wa_verify_token',

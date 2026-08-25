@@ -131,3 +131,40 @@ export function allowStatusUpdate(currentStatus: string, newStatus: string): boo
   if (currentStatus === 'failed') return newStatus === 'delivered' || newStatus === 'read';
   return true;
 }
+
+/** Decide whether a bot_paused conversation should auto-resume on the next
+ *  inbound. The webhook uses this to unstick threads whose human handoff was
+ *  never followed up — see supabase/migrations/20260824_bot_paused_auto_resume.sql
+ *  for the full rationale.
+ *
+ *  Signal: any outbound after bot_paused=true is necessarily human (bot replies
+ *  stop the moment the flag flips on), so a stale last_outbound_at means the
+ *  agent has abandoned the thread. An agent who is actively replying keeps the
+ *  pause in place naturally — their reply updates last_outbound_at (DB trigger
+ *  20260701_guaranteed_business_delivery.sql:43), which resets the clock.
+ *
+ *  Returns false when auto-resume is disabled (autoResumeHours null/0/negative),
+ *  so callers can just `if (shouldAutoResumeBotPause(...)) resume()` without a
+ *  separate opt-in check. `now` is injected so tests don't need fake timers. */
+export function shouldAutoResumeBotPause(args: {
+  autoResumeHours: number | null | undefined;
+  lastOutboundAt: string | Date | null | undefined;
+  createdAt: string | Date | null | undefined;
+  now?: Date;
+}): boolean {
+  const { autoResumeHours, lastOutboundAt, createdAt } = args;
+  if (!autoResumeHours || autoResumeHours <= 0) return false;
+
+  const nowMs = (args.now ?? new Date()).getTime();
+  // Prefer last_outbound_at; fall back to created_at for conversations that
+  // never had an outbound (e.g. paused-at-birth by a flow handoff on the
+  // welcome message).
+  const anchor = lastOutboundAt ?? createdAt;
+  if (!anchor) return false;
+
+  const anchorMs = anchor instanceof Date ? anchor.getTime() : new Date(anchor).getTime();
+  if (!Number.isFinite(anchorMs)) return false;
+
+  const ageHours = (nowMs - anchorMs) / 3_600_000;
+  return ageHours >= autoResumeHours;
+}
