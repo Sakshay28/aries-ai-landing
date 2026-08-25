@@ -24,7 +24,11 @@ import { renderOrderConfirmationCopy } from '@/lib/shopify/orderConfirmationCopy
 
 export const maxDuration = 60;
 
-const REMINDER_DELAY_MS = 60 * 60 * 1000; // 1 hour
+// 30 minutes — earlier of the two options Devprayagjal proposed ("30 min or
+// 1 hr"). Catches customers before they lose context on the tap and reduces
+// abandonment. If a tenant wants a different delay later, promote this to a
+// tenant column rather than adding branches here.
+const REMINDER_DELAY_MS = 30 * 60 * 1000;
 
 function isAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
