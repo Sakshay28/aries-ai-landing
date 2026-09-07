@@ -571,6 +571,11 @@ const FOLLOW_UP_TYPES = [
   { key: '7day',  label: '7-day re-engagement',    description: 'Long-term nurture for cold leads',              settingKey: 'followup_7day'  as const },
 ];
 
+// Ceiling on a single save. Without it a slow or throttled database leaves the
+// button spinning indefinitely and `dirty` set, with nothing telling the user
+// whether the write landed.
+const SAVE_TIMEOUT_MS = 45000;
+
 // The settings API drops any column whose migration hasn't been applied yet
 // rather than failing the whole request, and reports which ones. Surface that —
 // a silently-missing field is how a pending migration stays invisible for weeks.
@@ -725,6 +730,7 @@ export default function SettingsPage() {
       const res = await fetch('/api/dashboard/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(SAVE_TIMEOUT_MS),
         body: JSON.stringify({
           ...settings,
           default_lead_assignee_id: settings.default_lead_assignee_id || null,
@@ -743,6 +749,7 @@ export default function SettingsPage() {
           const tplRes = await fetch('/api/dashboard/follow-up-templates', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(SAVE_TIMEOUT_MS),
             body: JSON.stringify({
               follow_up_type: key,
               message:    templates[key]?.message   || null,
@@ -772,7 +779,13 @@ export default function SettingsPage() {
       toast.success('Settings saved successfully');
       setDirty(false);
     } catch (err) {
-      toast.error(`Save error: ${(err as Error).message}`);
+      // A hung request used to leave the button spinning forever with no way to
+      // tell "still working" from "the database is not answering".
+      if ((err as Error).name === 'TimeoutError' || (err as Error).name === 'AbortError') {
+        toast.error('Save timed out — the database did not respond. Your changes are still here; try again.');
+      } else {
+        toast.error(`Save error: ${(err as Error).message}`);
+      }
     } finally {
       setSaving(false);
     }
