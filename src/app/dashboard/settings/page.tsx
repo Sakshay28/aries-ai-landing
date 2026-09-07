@@ -571,6 +571,17 @@ const FOLLOW_UP_TYPES = [
   { key: '7day',  label: '7-day re-engagement',    description: 'Long-term nurture for cold leads',              settingKey: 'followup_7day'  as const },
 ];
 
+// The settings API drops any column whose migration hasn't been applied yet
+// rather than failing the whole request, and reports which ones. Surface that —
+// a silently-missing field is how a pending migration stays invisible for weeks.
+function warnPendingMigration(fields: unknown) {
+  if (!Array.isArray(fields) || fields.length === 0) return;
+  toast.warning(
+    `Not saved (database migration pending): ${fields.join(', ')}. Everything else was saved.`,
+    { duration: 10000 }
+  );
+}
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
@@ -643,6 +654,7 @@ export default function SettingsPage() {
         if (settingsRes.data) setSettings({ ...DEFAULT_SETTINGS, ...settingsRes.data });
         if (tplRes.data)      setTemplates(tplRes.data);
         if (teamRes.success && teamRes.users) setUsers(teamRes.users);
+        warnPendingMigration(settingsRes.pendingMigrationFields);
       })
       .catch(() => toast.error('Failed to load settings'))
       .finally(() => setLoading(false));
@@ -707,22 +719,28 @@ export default function SettingsPage() {
   const save = async () => {
     setSaving(true);
     try {
-      // Save main settings
+      // Save main settings. `default_lead_assignee_id` is a nullable uuid column
+      // and "" is not a valid uuid — send null so an unset dropdown can't abort
+      // the whole update.
       const res = await fetch('/api/dashboard/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings),
+        body: JSON.stringify({
+          ...settings,
+          default_lead_assignee_id: settings.default_lead_assignee_id || null,
+        }),
       });
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !data.success) {
         toast.error(`Save failed (${res.status}): ${data.error || 'unknown error'}`);
-        return;
+        return; // leave `dirty` set so the user can retry
       }
 
-      // Save follow-up templates (all 4 types)
-      await Promise.all(
-        FOLLOW_UP_TYPES.map(({ key }) =>
-          fetch('/api/dashboard/follow-up-templates', {
+      // Save follow-up templates (all 4 types). These are part of the same save,
+      // so a failure here must not be reported as success.
+      const tplResults = await Promise.all(
+        FOLLOW_UP_TYPES.map(async ({ key, label }) => {
+          const tplRes = await fetch('/api/dashboard/follow-up-templates', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -731,9 +749,25 @@ export default function SettingsPage() {
               media_url:  templates[key]?.media_url || null,
               media_type: templates[key]?.media_type || 'image',
             }),
-          })
-        )
+          });
+          const tplBody = await tplRes.json().catch(() => ({}));
+          return { label, ok: tplRes.ok && tplBody.success !== false, error: tplBody.error };
+        })
       );
+      const failedTpl = tplResults.filter(r => !r.ok);
+      if (failedTpl.length > 0) {
+        toast.error(
+          `Settings saved, but these follow-ups failed: ${failedTpl.map(f => f.label).join(', ')}` +
+          (failedTpl[0].error ? ` — ${failedTpl[0].error}` : '')
+        );
+        return; // leave `dirty` set so the user can retry
+      }
+
+      // Re-seed from the row the database actually returned, so the form shows
+      // what was persisted rather than what was typed. Anything the server
+      // coerced, trimmed or rejected is visible immediately — no refresh needed.
+      if (data.data) setSettings(s => ({ ...s, ...data.data }));
+      warnPendingMigration(data.pendingMigrationFields);
 
       toast.success('Settings saved successfully');
       setDirty(false);
