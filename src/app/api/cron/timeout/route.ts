@@ -24,6 +24,15 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // Soft budget under the 10s maxDuration (Vercel Hobby ceiling). Each step below
+  // makes real network calls (Meta, Supabase, sometimes Gemini); without a budget
+  // the platform hard-kills the function mid-request, which can leave a WhatsApp
+  // message delivered but its DB row still 'pending' — causing a resend next run.
+  // Stopping ourselves early and returning 200 with partial counts is safer than
+  // that, and gives the next run (30 min later) the rest of the queue.
+  const deadline = Date.now() + 8500;
+  const skipped: string[] = [];
+
   // 1. Timeout stale conversations (no activity for 24h)
   await processStaleConversations();
 
@@ -31,14 +40,24 @@ async function handler(req: NextRequest) {
   const deEscalated = await processTimedOutEscalations();
 
   // 3. Fire any pending follow-ups that are due
-  const followUpsSent = await processPendingFollowUps();
+  const followUpsSent = await processPendingFollowUps(deadline);
 
   // 4. Fire inactivity_trigger flows for conversations with no reply
-  const inactivityFired = await runInactivityFlows();
+  let inactivityFired = 0;
+  if (Date.now() < deadline) {
+    inactivityFired = await runInactivityFlows();
+  } else {
+    skipped.push('inactivityFlows');
+  }
 
   // 5. Process due automation queue items
-  const automationsSent = await processPendingAutomations();
+  let automationsSent = 0;
+  if (Date.now() < deadline) {
+    automationsSent = await processPendingAutomations();
+  } else {
+    skipped.push('automations');
+  }
 
-  console.log(`[cron/timeout] followUpsSent=${followUpsSent} inactivityFired=${inactivityFired} deEscalated=${deEscalated} automationsSent=${automationsSent}`);
-  return NextResponse.json({ success: true, followUpsSent, inactivityFired, deEscalated, automationsSent });
+  console.log(`[cron/timeout] followUpsSent=${followUpsSent} inactivityFired=${inactivityFired} deEscalated=${deEscalated} automationsSent=${automationsSent}${skipped.length ? ` skipped=${skipped.join(',')}` : ''}`);
+  return NextResponse.json({ success: true, followUpsSent, inactivityFired, deEscalated, automationsSent, skipped });
 }

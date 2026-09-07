@@ -262,7 +262,7 @@ async function processConversationTimeout(data: TimeoutJobData): Promise<void> {
 // FALLBACK: Process pending follow-ups via DB polling
 // ═══════════════════════════════════════
 
-export async function processPendingFollowUps(): Promise<number> {
+export async function processPendingFollowUps(deadline?: number): Promise<number> {
   const now = new Date().toISOString();
 
   const { data: followUps, error } = await supabaseAdmin
@@ -282,6 +282,12 @@ export async function processPendingFollowUps(): Promise<number> {
   let sent = 0;
 
   for (const followUp of followUps) {
+    // Each iteration makes a WhatsApp (and sometimes AI) API call, so a slow
+    // upstream can blow a serverless time budget. Stop claiming new work
+    // before the deadline instead of letting the platform kill us mid-send —
+    // a hard kill after Meta delivers but before we write status='sent'
+    // would cause the next run to resend the same message.
+    if (deadline && Date.now() > deadline) break;
     try {
       const lead = followUp.leads as unknown as {
         name: string;
