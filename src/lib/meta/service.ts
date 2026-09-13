@@ -904,168 +904,191 @@ export interface ParsedMetaMessage {
   };
 }
 
-export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage | null {
+function parseOneMetaMessage(msg: any, value: any, appPhoneId: string): ParsedMetaMessage {
+  const fromPhone = msg.from || '';
+  const messageId = msg.id || '';
+  const timestamp = parseInt(msg.timestamp) * 1000 || Date.now();
+  const msgType = msg.type || 'text';
+  const contactName: string | undefined =
+    value.contacts?.find((c: any) => c.wa_id === fromPhone)?.profile?.name ||
+    value.contacts?.[0]?.profile?.name ||
+    undefined;
+
+  let text = '';
+  let mediaId: string | undefined;
+  let mediaMimeType: string | undefined;
+  let mediaFilename: string | undefined;
+  let mediaCaption: string | undefined;
+  let buttonId: string | undefined;
+  let errorCode: number | undefined;
+  let errorReason: string | undefined;
+
+  // Meta attaches an `errors` array whenever it can't deliver a message's
+  // contents (most commonly alongside type:"unsupported"). Capture it so we
+  // can see the real reason instead of a blank marker.
+  const firstError = Array.isArray(msg.errors) ? msg.errors[0] : undefined;
+  if (firstError) {
+    errorCode = typeof firstError.code === 'number' ? firstError.code : undefined;
+    errorReason = firstError.title || firstError.error_data?.details || firstError.message || undefined;
+  }
+
+  if (msgType === 'text') {
+    text = msg.text?.body || '';
+  } else if (msgType === 'interactive') {
+    const interactiveType = msg.interactive?.type;
+    if (interactiveType === 'list_reply') {
+      const listReply = msg.interactive?.list_reply;
+      text = listReply?.title || listReply?.id || '';
+      buttonId = listReply?.id || undefined;
+    } else if (interactiveType === 'button_reply') {
+      const buttonReply = msg.interactive?.button_reply;
+      text = buttonReply?.title || buttonReply?.id || '';
+      buttonId = buttonReply?.id || undefined;
+    } else {
+      text = '[Interactive Option Selected]';
+    }
+  } else if (msgType === 'button') {
+    // Quick replies
+    text = msg.button?.text || msg.button?.payload || '';
+    buttonId = msg.button?.payload || msg.button?.text || undefined;
+  } else if (['image', 'video', 'audio', 'document', 'voice'].includes(msgType)) {
+    const mediaObj = msg[msgType];
+    mediaId = mediaObj?.id;
+    text = mediaObj?.caption || `[${msgType}]`;
+    mediaMimeType = mediaObj?.mime_type;
+    mediaFilename = mediaObj?.filename;
+    mediaCaption = mediaObj?.caption;
+  } else if (msgType === 'sticker') {
+    const stickerObj = msg.sticker;
+    mediaId = stickerObj?.id;
+    mediaMimeType = stickerObj?.mime_type || 'image/webp';
+    text = '[sticker]';
+  } else if (msgType === 'location') {
+    const loc = msg.location;
+    text = loc ? `📍 Location: ${loc.latitude}, ${loc.longitude}` : '📍 Location shared';
+  } else if (msgType === 'contacts') {
+    const contact = msg.contacts?.[0];
+    text = contact ? `👤 ${contact.name?.formatted_name || 'Contact shared'}` : '👤 Contact shared';
+  } else if (msgType === 'unsupported') {
+    // Meta sometimes embeds text even in unsupported messages (e.g. system OTPs).
+    text = msg.text?.body || '[unsupported]';
+    console.warn('⚠️ Meta unsupported msg raw:', JSON.stringify(msg));
+  } else if (msgType === 'reaction') {
+    const reactionObj = msg.reaction;
+    return {
+      messageId,
+      fromPhone,
+      appPhoneId,
+      type: 'reaction',
+      text: '',
+      timestamp,
+      isStatusUpdate: false,
+      isReaction: true,
+      reactionEmoji: reactionObj?.emoji || '',
+      reactedToMessageId: reactionObj?.message_id || '',
+    };
+  } else {
+    // Unknown message type — try to extract text body before falling back.
+    text = msg.text?.body || `[${msgType}]`;
+    console.warn('⚠️ Meta unknown msg type raw:', JSON.stringify(msg));
+  }
+
+  // Extract Meta Ad (CTWA) referrals if present
+  let referral: ParsedMetaMessage['referral'] | undefined;
+  if (msg.referral) {
+    referral = {
+      source_type: msg.referral.source_type,
+      source_id: msg.referral.source_id,
+      headline: msg.referral.headline,
+      body: msg.referral.body,
+      ctwa_clid: msg.referral.ctwa_clid,
+      source_url: msg.referral.source_url,
+    };
+  }
+
+  return {
+    messageId,
+    fromPhone,
+    appPhoneId,
+    type: msgType,
+    text,
+    timestamp,
+    isStatusUpdate: false,
+    mediaId,
+    mediaMimeType,
+    mediaFilename,
+    mediaCaption,
+    errorCode,
+    errorReason,
+    referral,
+    buttonId,
+    contextMessageId: msg.context?.id || undefined,
+    rawWebhook: msg as Record<string, unknown>,
+    contactName,
+  };
+}
+
+// Parses EVERY message/status update in a webhook payload, not just the first.
+// Meta's `value.messages[]` / `value.statuses[]` arrays can (and do) carry more
+// than one entry in a single delivery — e.g. a customer sending two messages
+// moments apart on a flaky connection arrives as one webhook call with both
+// in `messages[]`. Reading only index [0] (the previous behavior) silently
+// drops every message after the first: no DB row, no reply, no error anywhere
+// — it just looks like the bot "didn't understand" and went silent.
+export function parseAllMetaMessages(body: Record<string, any>): ParsedMetaMessage[] {
   try {
     const entry = body.entry?.[0];
     const change = entry?.changes?.[0];
     const value = change?.value;
     const metadata = value?.metadata;
 
-    if (!value) return null;
+    if (!value) return [];
 
     const appPhoneId = metadata?.phone_number_id || '';
+    const results: ParsedMetaMessage[] = [];
 
     // Case 1: Status updates
-    if (value.statuses && value.statuses.length > 0) {
-      const statusObj = value.statuses[0];
-      // Meta attaches an `errors` array on a failed status with the real reason
-      // (e.g. 131047 re-engagement / 131026 undeliverable). Capture it so a
-      // failed staff-alert delivery shows WHY, not a blank "failed".
-      const statusErr = Array.isArray(statusObj.errors) ? statusObj.errors[0] : undefined;
-      return {
-        messageId: statusObj.id || '',
-        fromPhone: statusObj.recipient_id || '',
-        appPhoneId,
-        type: 'status_update',
-        text: '',
-        timestamp: parseInt(statusObj.timestamp) * 1000 || Date.now(),
-        isStatusUpdate: true,
-        status: statusObj.status || '',
-        errorCode: typeof statusErr?.code === 'number' ? statusErr.code : undefined,
-        errorReason: statusErr?.title || statusErr?.error_data?.details || statusErr?.message || undefined,
-      };
-    }
-
-    // Case 2: Incoming Messages
-    if (value.messages && value.messages.length > 0) {
-      const msg = value.messages[0];
-      const fromPhone = msg.from || '';
-      const messageId = msg.id || '';
-      const timestamp = parseInt(msg.timestamp) * 1000 || Date.now();
-      const msgType = msg.type || 'text';
-      const contactName: string | undefined =
-        value.contacts?.find((c: any) => c.wa_id === fromPhone)?.profile?.name ||
-        value.contacts?.[0]?.profile?.name ||
-        undefined;
-
-      let text = '';
-      let mediaId: string | undefined;
-      let mediaMimeType: string | undefined;
-      let mediaFilename: string | undefined;
-      let mediaCaption: string | undefined;
-      let buttonId: string | undefined;
-      let errorCode: number | undefined;
-      let errorReason: string | undefined;
-
-      // Meta attaches an `errors` array whenever it can't deliver a message's
-      // contents (most commonly alongside type:"unsupported"). Capture it so we
-      // can see the real reason instead of a blank marker.
-      const firstError = Array.isArray(msg.errors) ? msg.errors[0] : undefined;
-      if (firstError) {
-        errorCode = typeof firstError.code === 'number' ? firstError.code : undefined;
-        errorReason = firstError.title || firstError.error_data?.details || firstError.message || undefined;
-      }
-
-      if (msgType === 'text') {
-        text = msg.text?.body || '';
-      } else if (msgType === 'interactive') {
-        const interactiveType = msg.interactive?.type;
-        if (interactiveType === 'list_reply') {
-          const listReply = msg.interactive?.list_reply;
-          text = listReply?.title || listReply?.id || '';
-          buttonId = listReply?.id || undefined;
-        } else if (interactiveType === 'button_reply') {
-          const buttonReply = msg.interactive?.button_reply;
-          text = buttonReply?.title || buttonReply?.id || '';
-          buttonId = buttonReply?.id || undefined;
-        } else {
-          text = '[Interactive Option Selected]';
-        }
-      } else if (msgType === 'button') {
-        // Quick replies
-        text = msg.button?.text || msg.button?.payload || '';
-        buttonId = msg.button?.payload || msg.button?.text || undefined;
-      } else if (['image', 'video', 'audio', 'document', 'voice'].includes(msgType)) {
-        const mediaObj = msg[msgType];
-        mediaId = mediaObj?.id;
-        text = mediaObj?.caption || `[${msgType}]`;
-        mediaMimeType = mediaObj?.mime_type;
-        mediaFilename = mediaObj?.filename;
-        mediaCaption = mediaObj?.caption;
-      } else if (msgType === 'sticker') {
-        const stickerObj = msg.sticker;
-        mediaId = stickerObj?.id;
-        mediaMimeType = stickerObj?.mime_type || 'image/webp';
-        text = '[sticker]';
-      } else if (msgType === 'location') {
-        const loc = msg.location;
-        text = loc ? `📍 Location: ${loc.latitude}, ${loc.longitude}` : '📍 Location shared';
-      } else if (msgType === 'contacts') {
-        const contact = msg.contacts?.[0];
-        text = contact ? `👤 ${contact.name?.formatted_name || 'Contact shared'}` : '👤 Contact shared';
-      } else if (msgType === 'unsupported') {
-        // Meta sometimes embeds text even in unsupported messages (e.g. system OTPs).
-        text = msg.text?.body || '[unsupported]';
-        console.warn('⚠️ Meta unsupported msg raw:', JSON.stringify(msg));
-      } else if (msgType === 'reaction') {
-        const reactionObj = msg.reaction;
-        return {
-          messageId,
-          fromPhone,
+    if (Array.isArray(value.statuses)) {
+      for (const statusObj of value.statuses) {
+        // Meta attaches an `errors` array on a failed status with the real reason
+        // (e.g. 131047 re-engagement / 131026 undeliverable). Capture it so a
+        // failed staff-alert delivery shows WHY, not a blank "failed".
+        const statusErr = Array.isArray(statusObj.errors) ? statusObj.errors[0] : undefined;
+        results.push({
+          messageId: statusObj.id || '',
+          fromPhone: statusObj.recipient_id || '',
           appPhoneId,
-          type: 'reaction',
+          type: 'status_update',
           text: '',
-          timestamp,
-          isStatusUpdate: false,
-          isReaction: true,
-          reactionEmoji: reactionObj?.emoji || '',
-          reactedToMessageId: reactionObj?.message_id || '',
-        };
-      } else {
-        // Unknown message type — try to extract text body before falling back.
-        text = msg.text?.body || `[${msgType}]`;
-        console.warn('⚠️ Meta unknown msg type raw:', JSON.stringify(msg));
+          timestamp: parseInt(statusObj.timestamp) * 1000 || Date.now(),
+          isStatusUpdate: true,
+          status: statusObj.status || '',
+          errorCode: typeof statusErr?.code === 'number' ? statusErr.code : undefined,
+          errorReason: statusErr?.title || statusErr?.error_data?.details || statusErr?.message || undefined,
+        });
       }
-
-      // Extract Meta Ad (CTWA) referrals if present
-      let referral: ParsedMetaMessage['referral'] | undefined;
-      if (msg.referral) {
-        referral = {
-          source_type: msg.referral.source_type,
-          source_id: msg.referral.source_id,
-          headline: msg.referral.headline,
-          body: msg.referral.body,
-          ctwa_clid: msg.referral.ctwa_clid,
-          source_url: msg.referral.source_url,
-        };
-      }
-
-      return {
-        messageId,
-        fromPhone,
-        appPhoneId,
-        type: msgType,
-        text,
-        timestamp,
-        isStatusUpdate: false,
-        mediaId,
-        mediaMimeType,
-        mediaFilename,
-        mediaCaption,
-        errorCode,
-        errorReason,
-        referral,
-        buttonId,
-        contextMessageId: msg.context?.id || undefined,
-        rawWebhook: msg as Record<string, unknown>,
-        contactName,
-      };
     }
+
+    // Case 2: Incoming messages
+    if (Array.isArray(value.messages)) {
+      for (const msg of value.messages) {
+        results.push(parseOneMetaMessage(msg, value, appPhoneId));
+      }
+    }
+
+    return results;
   } catch (err) {
     console.error('❌ Meta parseMetaWebhook error:', err);
+    return [];
   }
+}
 
-  return null;
+// Back-compat single-message accessor. Existing callers/tests that only ever
+// expected one item per webhook keep working unchanged — the real webhook
+// route uses parseAllMetaMessages() above instead so batched deliveries don't
+// lose anything past the first item.
+export function parseMetaWebhook(body: Record<string, any>): ParsedMetaMessage | null {
+  return parseAllMetaMessages(body)[0] ?? null;
 }
 
 // ═══════════════════════════════════════

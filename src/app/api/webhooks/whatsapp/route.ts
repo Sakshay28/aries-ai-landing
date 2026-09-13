@@ -17,7 +17,7 @@ import { ORDER_CONFIRMATION_PAYLOAD_PREFIX, ORDER_CONFIRMATION_BUTTON_LABELS } f
 import { renderOrderConfirmationCopy, type OrderConfirmationCopyKey } from '@/lib/shopify/orderConfirmationCopy';
 import { isDailyReportRequest, generateDailyReport, formatDailyReportMessage } from '@/lib/reports/dailyReport';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
-import { parseMetaWebhook, sendTextMessage, sendMediaMessage, sendMediaMessageById, uploadMediaToMeta, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator } from '@/lib/meta/service';
+import { parseAllMetaMessages, sendTextMessage, sendMediaMessage, sendMediaMessageById, uploadMediaToMeta, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator, type ParsedMetaMessage } from '@/lib/meta/service';
 import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus, resolveOrCreateConversation } from '@/lib/whatsapp/businessNotify';
 import { normalizePhoneNumber, isSamePhoneNumber } from '@/lib/whatsapp/phone';
 import { sanitizeName } from '@/lib/utils/name';
@@ -190,9 +190,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // Parse Meta Payload
-  const parsed = parseMetaWebhook(body);
-  if (!parsed) {
+  // Parse Meta Payload — a single webhook call can carry more than one message
+  // or status update (e.g. two messages sent moments apart on a flaky
+  // connection), so this returns everything in the payload, not just the first.
+  const parsedList = parseAllMetaMessages(body);
+  if (parsedList.length === 0) {
     return NextResponse.json({ ok: true });
   }
 
@@ -201,20 +203,32 @@ export async function POST(req: NextRequest) {
   // Redis key has expired, a replayed signed message from days/months ago is rejected
   // here before any DB writes or AI invocations are triggered.
   // Status updates don't carry a user-level timestamp — skip the check for those.
-  if (!parsed.isStatusUpdate && parsed.timestamp) {
-    const ageMs = Math.abs(Date.now() - parsed.timestamp);
-    if (ageMs > 5 * 60 * 1000) {
-      console.warn(`⏱️ Meta Webhook: stale message rejected (age=${Math.round(ageMs / 1000)}s), phone_number_id=${parsed.appPhoneId}`);
-      return NextResponse.json({ ok: true }); // return 200 so Meta doesn't retry
+  // A stale item only drops itself — siblings in the same batch still get processed.
+  const freshList = parsedList.filter((parsed) => {
+    if (!parsed.isStatusUpdate && parsed.timestamp) {
+      const ageMs = Math.abs(Date.now() - parsed.timestamp);
+      if (ageMs > 5 * 60 * 1000) {
+        console.warn(`⏱️ Meta Webhook: stale message rejected (age=${Math.round(ageMs / 1000)}s), phone_number_id=${parsed.appPhoneId}`);
+        return false; // return 200 so Meta doesn't retry
+      }
     }
+    return true;
+  });
+
+  if (freshList.length === 0) {
+    return NextResponse.json({ ok: true });
   }
 
   // Defer heavy execution using Next.js after() to return 200 quickly
   after(async () => {
-    try {
-      await processWebhookAsync(parsed);
-    } catch (err) {
-      console.error('❌ Meta Webhook processing error:', err);
+    // Sequential, and each item's failure is isolated — one bad message must
+    // not block the rest of the batch from being processed.
+    for (const parsed of freshList) {
+      try {
+        await processWebhookAsync(parsed);
+      } catch (err) {
+        console.error('❌ Meta Webhook processing error:', err);
+      }
     }
     // Drain the sync queues for any jobs enqueued by the DB triggers above.
     // These MUST be awaited: after() freezes/kills the serverless instance once
@@ -234,7 +248,7 @@ export async function POST(req: NextRequest) {
 }
 
 // ── Async Process Webhook Payload ──
-async function processWebhookAsync(parsed: NonNullable<ReturnType<typeof parseMetaWebhook>>) {
+async function processWebhookAsync(parsed: ParsedMetaMessage) {
   if (parsed.isStatusUpdate) {
     await handleStatusUpdate(parsed);
     return;
@@ -274,7 +288,7 @@ async function isKnownStaffNumber(phone: string): Promise<boolean> {
 }
 
 // ── Inbound Message Processing ──
-async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMetaWebhook>>) {
+async function handleIncomingMessage(msg: ParsedMetaMessage) {
   if (!msg.messageId || !msg.fromPhone || !msg.appPhoneId) {
     console.warn('⚠️ Meta Webhook: skipping message with missing identifiers');
     return;
@@ -3317,7 +3331,7 @@ async function handleIncomingMessage(msg: NonNullable<ReturnType<typeof parseMet
 
 
 // ── Message Status Update Parser ──
-async function handleStatusUpdate(msg: NonNullable<ReturnType<typeof parseMetaWebhook>>) {
+async function handleStatusUpdate(msg: ParsedMetaMessage) {
   console.log('📬 Meta Webhook STATUS RAW:', JSON.stringify(msg).slice(0, 800));
 
   if (!msg.messageId || !msg.status) return;
@@ -3475,7 +3489,7 @@ async function handleStatusUpdate(msg: NonNullable<ReturnType<typeof parseMetaWe
 }
 
 // ── Inbound Reaction Processing ──
-async function handleIncomingReaction(msg: NonNullable<ReturnType<typeof parseMetaWebhook>>) {
+async function handleIncomingReaction(msg: ParsedMetaMessage) {
   if (!msg.reactedToMessageId || !msg.appPhoneId) {
     console.warn('⚠️ Meta Webhook: skipping reaction with missing identifiers');
     return;
