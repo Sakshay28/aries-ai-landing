@@ -12,12 +12,51 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { Message, InteractiveButtonMeta, InteractiveListMeta, TemplateMeta, InteractiveMetadata } from "@/lib/types";
+import type { Message, InteractiveButtonMeta, InteractiveListMeta, TemplateMeta, InteractiveMetadata, ChatMediaMeta } from "@/lib/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { SharedConversationMeta } from "./page";
 import AIAssistPanel from "./AIAssistPanel";
 import AttachmentBubble, { PendingAttachment } from "./AttachmentBubble";
 import { useContactsStore } from "@/lib/store/contactsStore";
+import {
+  AttachmentError, REUPLOAD_CODES, prepareAttachment, requestUploadTarget,
+  retryAttachmentMessage, sendUploadedAttachment, uploadToSignedUrl,
+} from "@/lib/media/client-upload";
+import { STALE_PENDING_MS, describeMediaFailure, mediaLabel, normalizeMimeType, planOutboundMedia } from "@/lib/media/outbound-media";
+import { renderableMediaSrc } from "@/lib/media/media-src";
+
+// ── Attachment sends ───────────────────────────────────────────────────
+// An operator attachment that has no server row yet (uploading, or failed
+// before one was created). Keeps the File so a retry needs no re-pick.
+interface LocalUpload {
+  conversationId: string;
+  file: File;
+  caption: string;
+  replyToMessageId: string | null;
+  sendAs: string;
+  previewUrl: string;
+  stage: 'uploading' | 'sending' | 'failed';
+  progress: number;
+  error: string | null;
+  storagePath: string | null;
+}
+
+function chatMediaMeta(msg: Pick<Message, 'metadata'>): ChatMediaMeta | null {
+  const media = (msg.metadata as { media?: ChatMediaMeta } | null | undefined)?.media;
+  return media?.storage_path ? media : null;
+}
+
+const STATUS_RANK: Record<string, number> = { pending: 0, sent: 1, delivered: 2, read: 3 };
+
+// Merge a server copy of a message without letting a slower response roll a
+// delivery tick backwards (e.g. 'sent' arriving after Realtime already said 'delivered').
+function mergeServerMessage(current: Message, incoming: Message): Message {
+  const merged = { ...current, ...incoming };
+  const a = STATUS_RANK[current.status];
+  const b = STATUS_RANK[incoming.status];
+  if (a !== undefined && b !== undefined && a > b) merged.status = current.status;
+  return merged;
+}
 
 // ── helpers ────────────────────────────────────────────────────────────
 // Consistent with ChatSidebar: same palette, same seed strategy
@@ -207,8 +246,11 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  // Attachment picked but not yet sent — already validated/converted for WhatsApp.
   const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [pendingFileNote, setPendingFileNote] = useState<string | null>(null);
+  const [preparingFile, setPreparingFile] = useState(false);
+  const [localUploads, setLocalUploads] = useState<Record<string, LocalUpload>>({});
   const [replyToMsg, setReplyToMsg] = useState<Message | null>(null);
   const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null);
   const [messageMenuRect, setMessageMenuRect] = useState<DOMRect | null>(null);
@@ -442,6 +484,23 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const optimisticIdRef = useRef(0);
+  const uploadJobsRef = useRef<Record<string, LocalUpload>>({});
+  const retryingMediaRef = useRef(new Set<string>());
+  const conversationIdRef = useRef(conversationId);
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+    // Failed attachments from the conversation just left have no bubble any more —
+    // release their File + preview URL. (In-flight ones finish and clean up themselves.)
+    const jobs = uploadJobsRef.current;
+    const stale = Object.keys(jobs).filter(id => jobs[id].stage === 'failed' && jobs[id].conversationId !== conversationId);
+    if (stale.length === 0) return;
+    const next = { ...jobs };
+    for (const id of stale) {
+      URL.revokeObjectURL(next[id].previewUrl);
+      delete next[id];
+    }
+    uploadJobsRef.current = next;
+  }, [conversationId]);
 
   const scrollToBottom = useCallback((smooth = true) => {
     messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' });
@@ -490,42 +549,145 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
 
 
-  // ── File attach: store as pending (DO NOT convert to text) ───────────────
-  const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ── Attachments ───────────────────────────────────────────────────────────
+  // pick → validate/convert for WhatsApp → preview + caption → send → upload
+  // straight to storage → server verifies + delivers → the persisted row (sent,
+  // or failed with a reason) replaces the optimistic bubble.
+  const handleFileAttach = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-
-    const MAX_SIZE = 50 * 1024 * 1024; // 50 MB
-    if (file.size > MAX_SIZE) {
-      toast.error('File too large', { description: 'Maximum file size is 50 MB.' });
-      e.target.value = '';
-      return;
-    }
-
-    console.log('[attachment] File selected:', file.name, file.type, file.size);
-    setPendingFile(file);
     e.target.value = '';
+    if (!file) return;
+    setPreparingFile(true);
+    try {
+      const prepared = await prepareAttachment(file);
+      setPendingFile(prepared.file);
+      setPendingFileNote(prepared.note);
+    } catch (err) {
+      toast.error('Can’t attach this file', { description: err instanceof Error ? err.message : undefined });
+    } finally {
+      setPreparingFile(false);
+    }
   };
 
-  // ── Send attachment: real upload pipeline ─────────────────────────────────
-  const handleSendAttachment = useCallback(async () => {
-    if (!pendingFile || !conversationId || uploading) return;
-
-    const file = pendingFile;
-    const replyCtx = replyToMsg;  // capture before clearing
+  const clearPendingFile = () => {
     setPendingFile(null);
-    setReplyToMsg(null);           // clear immediately — strip gone on send
-    setUploading(true);
+    setPendingFileNote(null);
+  };
 
-    // Optimistic message bubble
-    const optimisticId = `__optimistic__${++optimisticIdRef.current}`;
+  const patchUpload = useCallback((id: string, patch: Partial<LocalUpload> | null) => {
+    const current = uploadJobsRef.current;
+    if (!current[id]) return;
+    const next = { ...current };
+    if (patch === null) delete next[id];
+    else next[id] = { ...next[id], ...patch };
+    uploadJobsRef.current = next;
+    setLocalUploads(next);
+  }, []);
+
+  // Swap an optimistic bubble for the server row, or refresh the row if Realtime
+  // already delivered it. Rows for a conversation the operator left are ignored.
+  const applyServerMessage = useCallback((serverMsg: Message, optimisticId?: string) => {
+    if (serverMsg.conversation_id !== conversationIdRef.current) return;
+    setMessages(prev => {
+      const withoutOpt = optimisticId ? prev.filter(m => m.id !== optimisticId) : prev;
+      return withoutOpt.some(m => m.id === serverMsg.id)
+        ? withoutOpt.map(m => (m.id === serverMsg.id ? mergeServerMessage(m, serverMsg) : m))
+        : [...withoutOpt, serverMsg];
+    });
+  }, []);
+
+  // Is optimistic bubble `m` the placeholder for server row `incoming`? Attachment
+  // placeholders match only on their storage object — never on caption text.
+  const isPlaceholderFor = useCallback((m: Message, incoming: Message) => {
+    if (!m.id.startsWith('__optimistic__') || m.direction !== incoming.direction) return false;
+    const job = uploadJobsRef.current[m.id];
+    if (job) return !!job.storagePath && job.storagePath === chatMediaMeta(incoming)?.storage_path;
+    return m.content === incoming.content;
+  }, []);
+
+  const runUpload = useCallback(async (localId: string) => {
+    const job = uploadJobsRef.current[localId];
+    if (!job) return;
+    const label = mediaLabel(job.sendAs);
+    const fail = (message: string, code?: string) => {
+      patchUpload(localId, {
+        stage: 'failed',
+        error: message,
+        // The stored object is gone/unusable — the retry must upload again.
+        ...(code && REUPLOAD_CODES.has(code) ? { storagePath: null } : {}),
+      });
+      toast.error(`${label} couldn’t be sent`, { description: message });
+    };
+
+    patchUpload(localId, { stage: 'uploading', progress: 0, error: null });
+    try {
+      let storagePath = job.storagePath;
+      if (!storagePath) {
+        const target = await requestUploadTarget({ conversationId: job.conversationId, file: job.file });
+        let lastReported = 0;
+        await uploadToSignedUrl(target, job.file, (progress) => {
+          // Throttle re-renders of this (large) component during the upload.
+          if (progress - lastReported >= 5 || progress === 100) {
+            lastReported = progress;
+            patchUpload(localId, { progress });
+          }
+        });
+        storagePath = target.storagePath;
+      }
+      patchUpload(localId, { stage: 'sending', progress: 100, storagePath });
+
+      const result = await sendUploadedAttachment({
+        conversationId: job.conversationId,
+        storagePath,
+        fileName: job.file.name,
+        caption: job.caption,
+        replyToMessageId: job.replyToMessageId,
+      });
+      if (result.message) {
+        // A row exists — it is now the source of truth (including a failure).
+        applyServerMessage(result.message, localId);
+        patchUpload(localId, null);
+        URL.revokeObjectURL(job.previewUrl);
+        if (!result.ok) {
+          toast.error(`${label} couldn’t be sent`, {
+            description: describeMediaFailure(job.sendAs, result.message.error_message || result.error),
+          });
+        }
+        return;
+      }
+      fail(result.error || 'Please try again.', result.code);
+    } catch (err) {
+      fail(
+        err instanceof Error ? err.message : 'Upload failed. Please retry.',
+        err instanceof AttachmentError ? err.code : undefined
+      );
+    }
+  }, [applyServerMessage, patchUpload]);
+
+  const handleSendAttachment = useCallback(() => {
+    if (!pendingFile || !conversationId) return;
+    const file = pendingFile;
+    const caption = inputMsg.trim();
+    const replyCtx = replyToMsg;
+    const mimeType = normalizeMimeType(file.type, file.name);
+    const plan = planOutboundMedia(mimeType, file.size);
+    const sendAs = plan.ok ? plan.sendAs : 'document';
+
+    setPendingFile(null);
+    setPendingFileNote(null);
+    setReplyToMsg(null);
+    setInputMsg('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+
+    const localId = `__optimistic__${++optimisticIdRef.current}`;
+    const previewUrl = URL.createObjectURL(file);
     const optimisticMsg: Message = {
-      id: optimisticId,
+      id: localId,
       conversation_id: conversationId,
       tenant_id: '',
-      content: file.name,
+      content: caption || file.name,
       direction: 'outbound',
-      message_type: file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'document',
+      message_type: sendAs,
       channel: 'whatsapp',
       sender_id: null,
       wa_message_id: null,
@@ -534,62 +696,64 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       ai_generated: false,
       ai_latency_ms: null,
       created_at: new Date().toISOString(),
-      media_url: URL.createObjectURL(file), // local preview while uploading
+      media_url: previewUrl,
       file_name: file.name,
       file_size: file.size,
-      mime_type: file.type,
-      media_caption: inputMsg.trim() || null,
+      mime_type: mimeType,
+      media_caption: caption || null,
       reply_to_message_id: replyCtx?.id || null,
     };
+
+    const jobs = {
+      ...uploadJobsRef.current,
+      [localId]: {
+        conversationId, file, caption, replyToMessageId: replyCtx?.id || null, sendAs, previewUrl,
+        stage: 'uploading' as const, progress: 0, error: null, storagePath: null,
+      },
+    };
+    uploadJobsRef.current = jobs;
+    setLocalUploads(jobs);
     setMessages(prev => [...prev, optimisticMsg]);
     setTimeout(() => scrollToBottom(true), 30);
+    void runUpload(localId);
+  }, [pendingFile, conversationId, inputMsg, replyToMsg, runUpload, scrollToBottom]);
 
+  const handleDiscardUpload = useCallback((localId: string) => {
+    const job = uploadJobsRef.current[localId];
+    if (!job || job.stage !== 'failed') return;
+    setMessages(prev => prev.filter(m => m.id !== localId));
+    patchUpload(localId, null);
+    URL.revokeObjectURL(job.previewUrl);
+  }, [patchUpload]);
+
+  // Retry a persisted attachment row from the file already in storage.
+  const handleRetryMedia = useCallback(async (msg: Message) => {
+    if (retryingMediaRef.current.has(msg.id)) return;
+    retryingMediaRef.current.add(msg.id);
+    const before = { status: msg.status, error_message: msg.error_message };
+    const label = mediaLabel(chatMediaMeta(msg)?.send_as ?? msg.message_type);
+    // Restart the attempt clock locally too, or the retrying bubble would read as "stuck".
+    setMessages(prev => prev.map(m => {
+      const media = chatMediaMeta(m);
+      if (m.id !== msg.id || !media) return m;
+      return {
+        ...m, status: 'pending', error_message: null,
+        metadata: { ...(m.metadata as object), media: { ...media, attempt_started_at: new Date().toISOString() } } as InteractiveMetadata,
+      };
+    }));
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('conversationId', conversationId);
-      if (inputMsg.trim()) formData.append('caption', inputMsg.trim());
-      if (replyCtx) formData.append('replyToMessageId', replyCtx.id);
-
-      console.log('[attachment] Uploading:', file.name, file.type, file.size);
-
-      const res = await fetch('/api/chat/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await res.json();
-      console.log('[attachment] Upload response:', data);
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Upload failed');
+      const result = await retryAttachmentMessage(msg.id);
+      if (result.message) applyServerMessage(result.message);
+      else if (!result.ok) setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, ...before } : m)));
+      if (!result.ok && result.code !== 'ALREADY_RETRYING' && result.code !== 'NOT_RETRYABLE') {
+        toast.error(`${label} couldn’t be sent`, {
+          description: describeMediaFailure(msg.message_type, result.message?.error_message || result.error),
+        });
       }
-
-      // Replace optimistic with real message
-      const realMsg: Message = data.message;
-      setMessages(prev => {
-        const withoutOpt = prev.filter(m => m.id !== optimisticId);
-        const exists = withoutOpt.some(m => m.id === realMsg.id);
-        if (exists) return withoutOpt;
-        return [...withoutOpt, realMsg];
-      });
-
-      // Clear caption after successful send (reply already cleared above)
-      setInputMsg('');
-      if (textareaRef.current) textareaRef.current.style.height = 'auto';
-
-      console.log('[attachment] ✅ Sent successfully:', realMsg.id);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Upload failed';
-      console.error('[attachment] ❌ Upload error:', err);
-      toast.error('Attachment failed', { description: msg });
-      setMessages(prev => prev.map(m =>
-        m.id === optimisticId ? { ...m, status: 'failed' as Message['status'] } : m
-      ));
     } finally {
-      setUploading(false);
+      retryingMediaRef.current.delete(msg.id);
     }
-  }, [pendingFile, conversationId, uploading, inputMsg, replyToMsg, scrollToBottom]);
+  }, [applyServerMessage]);
 
   const handleScroll = useCallback(() => {
     const el = scrollAreaRef.current;
@@ -660,9 +824,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           if (incoming.conversation_id !== conversationId) return;
           setMessages(prev => {
             // Remove any optimistic placeholder that matches this content + direction
-            const withoutOptimistic = prev.filter(m =>
-              !(m.id.startsWith('__optimistic__') && m.content === incoming.content && m.direction === incoming.direction)
-            );
+            const withoutOptimistic = prev.filter(m => !isPlaceholderFor(m, incoming));
             const exists = withoutOptimistic.some(m => m.id === incoming.id);
             if (exists) return withoutOptimistic;
             return [...withoutOptimistic, incoming];
@@ -708,12 +870,17 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         const res = await fetch(`/api/dashboard/chat/statuses?conversationId=${conversationId}`);
         const data = await res.json();
         if (!data.success) return;
-        const map: Record<string, string> = {};
-        for (const s of data.statuses as { id: string; status: string }[]) map[s.id] = s.status;
+        const map: Record<string, { status: string; error_message?: string | null }> = {};
+        for (const s of data.statuses as { id: string; status: string; error_message?: string | null }[]) map[s.id] = s;
         // Apply status updates to all messages that have a DB id (not optimistic)
         setMessages(prev => prev.map(m => {
-          if (m.id.startsWith('__optimistic__')) return m;
-          return map[m.id] ? { ...m, status: map[m.id] as Message['status'] } : m;
+          if (m.id.startsWith('__optimistic__') || !map[m.id]) return m;
+          const next = map[m.id];
+          return {
+            ...m,
+            status: next.status as Message['status'],
+            ...(next.error_message !== undefined ? { error_message: next.error_message } : {}),
+          };
         }));
       } catch { /* ignore */ }
     };
@@ -762,21 +929,14 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           // Merge reply_to_message_id from the optimistic into the polled message
           // in case the polled version arrives before the DB field propagates.
           const mergedIncoming = incoming.map(n => {
-            const matchedOptimistic = prev.find(
-              m => m.id.startsWith('__optimistic__')
-                && m.content === n.content
-                && m.direction === n.direction
-            );
+            const matchedOptimistic = prev.find(m => isPlaceholderFor(m, n));
             if (matchedOptimistic?.reply_to_message_id && !n.reply_to_message_id) {
               return { ...n, reply_to_message_id: matchedOptimistic.reply_to_message_id };
             }
             return n;
           });
 
-          const cleaned = prev.filter(m => {
-            if (!m.id.startsWith('__optimistic__')) return true;
-            return !mergedIncoming.some(n => n.content === m.content && n.direction === m.direction);
-          });
+          const cleaned = prev.filter(m => !mergedIncoming.some(n => isPlaceholderFor(m, n)));
 
           return [...cleaned, ...mergedIncoming];
         });
@@ -801,7 +961,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const handleSend = async () => {
     // If there's a pending file, send it as attachment
     if (pendingFile) {
-      await handleSendAttachment();
+      handleSendAttachment();
       return;
     }
     if (!inputMsg.trim() || !conversationId || sending) return;
@@ -990,6 +1150,21 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
   const handleResend = async (msg: Message) => {
     if (!conversationId) return;
+    // Attachments must never fall through to the text path below — it would
+    // send the customer the file NAME as a text message.
+    const localJob = uploadJobsRef.current[msg.id];
+    if (localJob) {
+      if (localJob.stage === 'failed') void runUpload(msg.id);
+      return;
+    }
+    if (chatMediaMeta(msg)) {
+      await handleRetryMedia(msg);
+      return;
+    }
+    if (msg.media_url) {
+      toast.error('This attachment can’t be re-sent automatically', { description: 'Attach the file again to resend it.' });
+      return;
+    }
     setMessages(prev => prev.filter(m => m.id !== msg.id));
     try {
       const res = await fetch('/api/chat/send', {
@@ -1066,9 +1241,21 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       : enrichedMessages
   );
 
-  const copyMessage = (msgId: string, text: string) => {
-    // If it is an image URL, try to copy it as an actual image blob
-    if (text.startsWith('http') && (text.includes('.png') || text.includes('.jpg') || text.includes('.jpeg') || text.includes('.webp') || text.includes('.svg'))) {
+  // What "Copy" takes for a message: [clipboard text, same-origin image source].
+  // Stored media is private — its raw media_url opens for nobody — so copy the
+  // authenticated stream link, and fetch image bytes through that same route.
+  const copyTarget = (msg: Message): [string, string?] => {
+    const src = msg.media_url && msg.message_type !== 'location' && !msg.id.startsWith('__optimistic__')
+      ? renderableMediaSrc(msg)
+      : null;
+    if (!src) return [msg.media_url || msg.content || ''];
+    const isImage = (msg.mime_type || '').startsWith('image/') || msg.message_type === 'image';
+    return [`${window.location.origin}${src}`, isImage ? src : undefined];
+  };
+
+  const copyMessage = (msgId: string, text: string, imageSrc?: string) => {
+    // If it is an image, try to copy it as an actual image blob
+    if (imageSrc || (text.startsWith('http') && (text.includes('.png') || text.includes('.jpg') || text.includes('.jpeg') || text.includes('.webp') || text.includes('.svg')))) {
       const toastId = toast.loading('Copying image...');
       
       const fallbackCopyUrlWithToast = () => {
@@ -1082,7 +1269,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       try {
         // Create the promise to fetch and process the image dynamically
         const imagePromise = (async () => {
-          const proxyUrl = `/api/chat/copy-proxy?url=${encodeURIComponent(text)}`;
+          const proxyUrl = imageSrc ?? `/api/chat/copy-proxy?url=${encodeURIComponent(text)}`;
           const res = await fetch(proxyUrl);
           if (!res.ok) throw new Error('Proxy fetch failed');
           const blob = await res.blob();
@@ -1455,6 +1642,22 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                   const isFirst = mi === 0;
                   const isLast = mi === group.messages.length - 1;
                   const isOptimistic = msg.id.startsWith('__optimistic__');
+                  const localUpload = isOptimistic ? localUploads[msg.id] : undefined;
+                  const mediaMeta = chatMediaMeta(msg);
+                  const mediaStale = !!mediaMeta && msg.status === 'pending' && !msg.wa_message_id
+                    && Date.now() - Date.parse(mediaMeta.attempt_started_at) > STALE_PENDING_MS;
+                  const mediaNotice: { text: string; canRetry: boolean; canDiscard: boolean } | null =
+                    isInbound || !msg.media_url ? null
+                    : localUpload?.stage === 'failed'
+                      ? { text: describeMediaFailure(localUpload.sendAs, localUpload.error), canRetry: true, canDiscard: true }
+                    : !isOptimistic && msg.status === 'failed'
+                      ? { text: describeMediaFailure(mediaMeta?.send_as ?? msg.message_type, msg.error_message), canRetry: !!mediaMeta, canDiscard: false }
+                    : mediaStale
+                      ? { text: `${mediaLabel(mediaMeta?.send_as)} hasn’t been confirmed by WhatsApp yet.`, canRetry: true, canDiscard: false }
+                      : null;
+                  const mediaUploadStage: 'uploading' | 'sending' | null =
+                    localUpload ? (localUpload.stage === 'failed' ? null : localUpload.stage)
+                    : mediaMeta && msg.status === 'pending' && !mediaStale ? 'sending' : null;
 
                   const hoverToolbar = (
                     <div className={cn(
@@ -1464,7 +1667,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                       activeMessageMenuId === msg.id ? "opacity-100 z-50" : "opacity-0 group-hover:opacity-100"
                     )}>
                       <button 
-                        onClick={() => copyMessage(msg.id, msg.media_url || msg.content || '')} 
+                        onClick={() => copyMessage(msg.id, ...copyTarget(msg))} 
                         title="Copy" 
                         className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
                       >
@@ -1568,7 +1771,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
                                   <button
                                     onClick={() => {
-                                      copyMessage(msg.id, msg.media_url || msg.content || '');
+                                      copyMessage(msg.id, ...copyTarget(msg));
                                       setActiveMessageMenuId(null);
                                     }}
                                     className="group flex items-center gap-3 px-3 py-2 rounded-xl text-left w-full hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors cursor-pointer text-foreground/90 font-semibold text-[13px]"
@@ -1618,6 +1821,12 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                   // Tick icon: WhatsApp-style
                   // pending → clock, sent → single grey tick, delivered → double grey tick, read → double BLUE tick, failed → red alert
                   const tickIcon = (() => {
+                    if (localUpload?.stage === 'failed')
+                      return (
+                        <button onClick={() => handleResend(msg)} title="Retry" className="flex items-center cursor-pointer hover:opacity-70 transition-opacity">
+                          <AlertCircle className="w-3.5 h-3.5 text-red-500" />
+                        </button>
+                      );
                     if (msg.status === 'read')
                       return <CheckCheck className="w-3.5 h-3.5 text-[#53BDEB]" />;
                     if (msg.status === 'delivered')
@@ -1772,7 +1981,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                           {replyPreviewCard}
                           <AttachmentBubble
                             messageId={msg.id}
-                            mediaUrl={msg.media_url}
+                            mediaUrl={renderableMediaSrc(msg) ?? msg.media_url}
                             fileName={msg.file_name || msg.content || 'file'}
                             fileSize={msg.file_size}
                             durationSecs={msg.duration_secs}
@@ -1787,7 +1996,9 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                             }
                             caption={msg.media_caption}
                             isOutbound={!isInbound}
-                            isOptimistic={isOptimistic}
+                            isOptimistic={isOptimistic && localUpload?.stage !== 'failed'}
+                            uploadStage={mediaUploadStage}
+                            uploadProgress={localUpload?.progress}
                           />
                           {/* Timestamp + ticks */}
                           <div className={cn('flex items-center gap-1 mt-1 px-1 pb-0.5', isInbound ? 'justify-start' : 'justify-end')}>
@@ -1796,6 +2007,30 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                             </span>
                             {!isInbound && tickIcon}
                           </div>
+                          {mediaNotice && (
+                            <div role="alert" className="flex items-start gap-1.5 w-[280px] max-w-full px-1 pb-1 text-[11.5px] leading-snug text-red-600 dark:text-red-400">
+                              <AlertCircle className="w-3.5 h-3.5 mt-px flex-shrink-0" />
+                              <span className="flex-1 min-w-0">
+                                {mediaNotice.text}
+                                {mediaNotice.canRetry && (
+                                  <>
+                                    {' '}
+                                    <button onClick={() => handleResend(msg)} className="font-semibold underline underline-offset-2 hover:opacity-80">
+                                      Retry
+                                    </button>
+                                  </>
+                                )}
+                                {mediaNotice.canDiscard && (
+                                  <>
+                                    {' · '}
+                                    <button onClick={() => handleDiscardUpload(msg.id)} className="font-semibold hover:opacity-80">
+                                      Discard
+                                    </button>
+                                  </>
+                                )}
+                              </span>
+                            </div>
+                          )}
 
                           {/* Reaction badge */}
                           {msg.reaction && (
@@ -2146,7 +2381,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*,video/*,.pdf,.doc,.docx"
+          accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
           className="hidden"
           onChange={handleFileAttach}
         />
@@ -2186,7 +2421,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
         {/* Pending attachment preview strip */}
         <AnimatePresence>
-          {pendingFile && (
+          {(pendingFile || preparingFile) && (
             <motion.div
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
@@ -2194,10 +2429,19 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
               transition={{ duration: 0.15 }}
               className="mb-2"
             >
-              <PendingAttachment
-                file={pendingFile}
-                onRemove={() => setPendingFile(null)}
-              />
+              {pendingFile ? (
+                <PendingAttachment
+                  key={`${pendingFile.name}-${pendingFile.size}-${pendingFile.lastModified}`}
+                  file={pendingFile}
+                  note={pendingFileNote}
+                  onRemove={clearPendingFile}
+                />
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2.5 bg-white dark:bg-[#1C2333] rounded-xl shadow-sm ring-1 ring-black/[0.06] dark:ring-white/[0.06] max-w-[280px] text-[12px] text-muted-foreground">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Preparing attachment…
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -2205,8 +2449,9 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         <div className="flex items-end gap-1 bg-white dark:bg-[#1C2333] rounded-2xl px-2 py-2 shadow-[0_2px_16px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.04] dark:ring-white/[0.04]">
           <button
             onClick={() => fileInputRef.current?.click()}
-            title="Attach file"
-            className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/50 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors flex-shrink-0 mb-0.5"
+            disabled={preparingFile}
+            title="Attach photo, video or file"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/50 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors flex-shrink-0 mb-0.5 disabled:opacity-40"
           >
             <Paperclip className="w-4 h-4" />
           </button>
@@ -2259,7 +2504,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
             placeholder={pendingFile ? 'Add a caption… (optional)' : 'Type a message…'}
             rows={1}
-            disabled={sending || uploading}
+            disabled={sending}
             className="flex-1 bg-transparent border-0 resize-none outline-none text-[13.5px] text-foreground placeholder:text-muted-foreground/50 py-1.5 px-1 min-h-[36px] max-h-32"
           />
 
@@ -2325,16 +2570,16 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
           {/* Send button — active when text typed OR file pending */}
           <button
-            disabled={(!inputMsg.trim() && !pendingFile) || sending || uploading}
+            disabled={(!inputMsg.trim() && !pendingFile) || sending || preparingFile}
             onClick={() => handleSend()}
             className={cn(
               "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mb-0.5 transition-all duration-150",
-              (inputMsg.trim() || pendingFile) && !sending && !uploading
+              (inputMsg.trim() || pendingFile) && !sending && !preparingFile
                 ? "bg-[#00A884] text-white hover:bg-[#009874]"
                 : "text-muted-foreground/30 cursor-not-allowed"
             )}
           >
-            {(sending || uploading) ? (
+            {(sending || preparingFile) ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
               <Send className="w-3.5 h-3.5" />

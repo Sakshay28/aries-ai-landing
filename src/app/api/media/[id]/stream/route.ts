@@ -1,63 +1,54 @@
 // ═══════════════════════════════════════════════════════════════════
 // GET /api/media/[id]/stream
 // ═══════════════════════════════════════════════════════════════════
-// Authenticated media streaming proxy for WhatsApp voice notes and
-// all other media attachments. Provides:
-//   • Tenant isolation  — a tenant cannot access another tenant's media
+// The ONLY way the dashboard loads a stored message's media. The media
+// buckets are private, so messages.media_url is a reference, not a URL a
+// browser can open. This route:
 //   • Auth gate         — unauthenticated requests get 401
-//   • Signed URL        — Supabase public CDN URL is never leaked raw
-//   • Range Requests    — proxied with 206 support so audio seeking works
-//   • CORS              — explicit headers for browser audio elements
-//
-// The browser's <audio> element will follow the 302 redirect automatically.
-// fetch() in Web Audio API waveform generation also follows redirects.
+//   • Tenant isolation  — the message must belong to the caller's tenant AND
+//                         the referenced object must live under that tenant's
+//                         prefix (media_url can come from tenant-configured
+//                         scripted replies/flows, so it is not trusted)
+//   • Images / video / documents → 302 to a short-lived signed URL. Bytes go
+//     browser ↔ Storage directly (a Vercel function can't return > 4.5 MB or
+//     run past 10 s on Hobby); <video> seeking re-issues Range requests to the
+//     signed URL itself.
+//   • Audio / voice notes → proxied with Range + CORS, which the waveform
+//     player (VoiceMessageBubble) relies on.
 // ═══════════════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
+import { canTenantReadObject, parseStorageUrl } from '@/lib/media/storage-ref';
+import { isUuid } from '@/lib/media/outbound-media';
 
-// How long the signed URL is valid — the browser follows the redirect
-// immediately so 3600s is more than enough.
+// Signed URL lifetime. The redirect itself may be cached by the browser for
+// slightly less, so a cached redirect never points at an expired URL.
 const SIGNED_URL_TTL_SECS = 3600;
+const REDIRECT_CACHE_SECS = 3000;
 
-// Extract bucket name and storage path from a Supabase Storage public URL.
-// Handles both public and already-signed URLs.
-function parseSupabaseStorageUrl(url: string): { bucket: string; path: string } | null {
-  // Already a signed URL — no need to re-sign, but we still need bucket/path
-  const signedMatch = url.match(/\/storage\/v1\/object\/sign\/([^/]+)\/(.+?)(\?|$)/);
-  if (signedMatch) {
-    return { bucket: signedMatch[1], path: decodeURIComponent(signedMatch[2]) };
-  }
-  // Public URL: /storage/v1/object/public/{bucket}/{path}
-  const publicMatch = url.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+?)(\?|$)/);
-  if (publicMatch) {
-    return { bucket: publicMatch[1], path: decodeURIComponent(publicMatch[2]) };
-  }
-  return null;
+function notFound() {
+  return NextResponse.json({ error: 'Not found' }, { status: 404 });
 }
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Resolve dynamic params (Next.js 15 async params)
   const { id: messageId } = await params;
-
-  if (!messageId) {
-    return NextResponse.json({ error: 'Message ID required' }, { status: 400 });
-  }
 
   // ── Auth: verify session and resolve tenant ──────────────────────────────
   const tenantId = await getTenantId();
   if (!tenantId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+  if (!isUuid(messageId)) return notFound();
 
   // ── Lookup message — enforce tenant isolation ────────────────────────────
   const { data: message, error: msgErr } = await supabaseAdmin
     .from('messages')
-    .select('id, media_url, mime_type, file_name, tenant_id')
+    .select('id, media_url, mime_type, message_type, file_name, tenant_id')
     .eq('id', messageId)
     .eq('tenant_id', tenantId) // critical: can't access another tenant's message
     .maybeSingle();
@@ -66,54 +57,54 @@ export async function GET(
     console.error('[media/stream] DB error:', msgErr.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
+  if (!message?.media_url) return notFound();
 
-  if (!message) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  const mediaUrl = message.media_url as string;
+  const ref = parseStorageUrl(mediaUrl);
+
+  if (!ref) {
+    // Not one of our Storage objects (an external https link, e.g. a Shopify
+    // product image). Let the browser fetch it — never fetch arbitrary URLs
+    // server-side (SSRF). Anything that isn't plain http(s) is refused.
+    return /^https?:\/\//i.test(mediaUrl) ? NextResponse.redirect(mediaUrl, 302) : notFound();
   }
 
-  const mediaUrl = message.media_url as string | null;
-  if (!mediaUrl) {
-    return NextResponse.json({ error: 'No media attached to this message' }, { status: 404 });
+  if (!canTenantReadObject(tenantId, ref)) {
+    console.warn(`[media/stream] message ${message.id} references a ${ref.bucket} object outside tenant ${tenantId}`);
+    return notFound();
   }
 
-  // ── Generate a fresh signed URL ──────────────────────────────────────────
-  // Even though the whatsapp-media bucket is public, we create signed URLs for:
-  //  1. Security (hides bucket path structure from the browser)
-  //  2. Future compatibility if we switch to a private bucket
-  //  3. Proper TTL management
-  const parsed = parseSupabaseStorageUrl(mediaUrl);
-
-  let resolvedUrl: string;
-
-  if (parsed) {
-    const { data: signedData, error: signErr } = await supabaseAdmin.storage
-      .from(parsed.bucket)
-      .createSignedUrl(parsed.path, SIGNED_URL_TTL_SECS);
-
-    if (signErr || !signedData?.signedUrl) {
-      console.error('[media/stream] Signed URL creation failed:', signErr?.message);
-      // Fall back to original URL — better than 500 for a public bucket
-      resolvedUrl = mediaUrl;
-    } else {
-      resolvedUrl = signedData.signedUrl;
-    }
-  } else {
-    // URL is not a Supabase storage URL (e.g. temp Meta URL stored as fallback).
-    // Redirect to it directly — callers should not rely on this path.
-    resolvedUrl = mediaUrl;
+  const { data: signed, error: signErr } = await supabaseAdmin.storage
+    .from(ref.bucket)
+    .createSignedUrl(ref.path, SIGNED_URL_TTL_SECS);
+  if (signErr || !signed?.signedUrl) {
+    console.error('[media/stream] signed URL creation failed:', signErr?.message);
+    return /not.?found/i.test(signErr?.message || '')
+      ? notFound()
+      : NextResponse.json({ error: 'Media temporarily unavailable' }, { status: 502 });
   }
 
-  // ── Range Request proxy ──────────────────────────────────────────────────
+  const mimeType = (message.mime_type as string | null) || '';
+  const isAudio = mimeType.startsWith('audio/') || message.message_type === 'audio' || message.message_type === 'voice';
+
+  if (!isAudio) {
+    const redirect = NextResponse.redirect(signed.signedUrl, 302);
+    redirect.headers.set('Cache-Control', `private, max-age=${REDIRECT_CACHE_SECS}`);
+    return redirect;
+  }
+
+  // ── Audio: Range Request proxy ───────────────────────────────────────────
   // When the browser sends a Range header (for seeking), proxy the request
-  // through so Supabase handles 206 Partial Content responses. This makes
+  // through so Storage handles 206 Partial Content responses. This makes
   // audio seeking instant instead of re-downloading from the start.
   const rangeHeader = req.headers.get('range');
 
-  const upstreamResp = await fetch(resolvedUrl, {
+  const upstreamResp = await fetch(signed.signedUrl, {
     headers: {
       ...(rangeHeader ? { 'Range': rangeHeader } : {}),
-      'Accept': message.mime_type || 'audio/*',
+      'Accept': mimeType || 'audio/*',
     },
+    redirect: 'error',
     signal: AbortSignal.timeout(30_000),
   }).catch((err) => {
     console.error('[media/stream] upstream fetch error:', err.message);
@@ -139,16 +130,14 @@ export async function GET(
   }
 
   // Ensure the correct MIME type is always set (some OGG files store without codec)
-  const mimeType = message.mime_type as string | null;
   if (mimeType && !headers.has('content-type')) {
     headers.set('content-type', mimeType);
   }
 
   // Inline disposition — let the browser play rather than download
-  const fileName = (message.file_name as string | null) || 'voice-note';
+  const fileName = ((message.file_name as string | null) || 'voice-note').replace(/["\r\n]/g, '');
   headers.set('content-disposition', `inline; filename="${fileName}"`);
 
-  // Cache at CDN layer — signed URLs already have auth embedded
   headers.set('cache-control', 'private, max-age=3600');
 
   return new Response(upstreamResp.body, {

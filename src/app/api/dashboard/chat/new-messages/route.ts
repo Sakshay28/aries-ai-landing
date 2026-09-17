@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     // sent_via / is_historical only exist after migration 20260616. Try with
     // them; if the migration hasn't run yet, retry with the base columns so the
     // inbox keeps polling during the deploy → migration window.
-    const BASE_COLS = 'id, tenant_id, conversation_id, direction, content, message_type, channel, status, error_message, created_at, ai_generated, ai_latency_ms, sender_id, wa_message_id, reply_to_message_id, media_url, media_caption, file_name, file_size, mime_type, reaction';
+    const BASE_COLS = 'id, tenant_id, conversation_id, direction, content, message_type, channel, status, error_message, created_at, ai_generated, ai_latency_ms, sender_id, wa_message_id, reply_to_message_id, media_url, media_caption, file_name, file_size, mime_type, reaction, metadata';
     const COEX_COLS = 'sent_via, is_historical';
 
     const runQuery = (cols: string) => {

@@ -75,6 +75,9 @@ const csp = [
   "connect-src 'self' https://api.razorpay.com https://*.supabase.co wss://*.supabase.co https://graph.facebook.com https://www.facebook.com",
   "frame-src 'self' https://js.stripe.com https://checkout.razorpay.com https://www.facebook.com",
   "img-src 'self' data: https: blob:",
+  // Without media-src, <video>/<audio> fell back to default-src 'self' and every
+  // chat video (Supabase Storage) and local upload preview (blob:) was blocked.
+  "media-src 'self' blob: https://*.supabase.co",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
 ].join('; ') + ';';

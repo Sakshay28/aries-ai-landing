@@ -41,7 +41,7 @@ import { processCtwaLead, getCampaignContextForAI } from '@/lib/meta-ads/attribu
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { sendBookingAlertEmail } from '@/lib/alerts/bookingEmail';
 import { isCoexistenceChange, handleCoexistenceWebhook } from '@/lib/webhook/coexistence';
-import { toSignedMediaUrl } from '@/lib/utils/storage';
+import { storageRefUrl, toSignedMediaUrl } from '@/lib/utils/storage';
 import { triggerAutomations, cancelLeadAutomations } from '@/lib/automations/engine';
 import { resolveBookingVariables } from '@/lib/automations/variables';
 import { zonedDateTimeToUtc } from '@/lib/utils/datetime';
@@ -364,13 +364,11 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
               });
 
             if (!uploadErr && uploadData) {
-              // Step 4: Get permanent public URL
-              const { data: urlData } = supabaseAdmin.storage
-                .from('whatsapp-media')
-                .getPublicUrl(storagePath);
-              resolvedMediaUrl = urlData.publicUrl;
+              // Step 4: Persist a durable reference. whatsapp-media is PRIVATE —
+              // the dashboard renders it via /api/media/{id}/stream.
+              resolvedMediaUrl = storageRefUrl('whatsapp-media', storagePath);
               content = msg.mediaCaption || msg.text || `[${msg.type}]`;
-              console.log(`📸 Media stored permanently: ${resolvedMediaUrl}`);
+              console.log(`📸 Media stored permanently: whatsapp-media ${storagePath}`);
             } else {
               // Upload failed — fallback to temp URL (will expire but better than blank)
               resolvedMediaUrl = tempUrl;
@@ -1494,9 +1492,12 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
 
             for (const url of mediaUrls) {
               const mType = mediaTypeFromUrl(url);
-              const signedUrl = await toSignedMediaUrl(url);
-              const mediaResult = await sendMediaMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, mType, signedUrl)
-                .catch((e: Error) => { console.error(`❌ Scripted reply sequential ${mType} send failed:`, e.message); return null; });
+              const signedUrl = await toSignedMediaUrl(url, tenant.id);
+              if (!signedUrl) console.error(`❌ Scripted reply ${mType} media is not readable by this tenant — not sent`);
+              const mediaResult = signedUrl
+                ? await sendMediaMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, mType, signedUrl)
+                    .catch((e: Error) => { console.error(`❌ Scripted reply sequential ${mType} send failed:`, e.message); return null; })
+                : null;
 
               await supabaseAdmin.from('messages').insert({
                 tenant_id: tenant.id, conversation_id: conversation.id,
@@ -1510,7 +1511,7 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
             }
           } else {
             const srMediaType = mediaUrls[0] ? mediaTypeFromUrl(mediaUrls[0]) : null;
-            const srMediaUrl = mediaUrls[0] ? await toSignedMediaUrl(mediaUrls[0]) : null;
+            const srMediaUrl = mediaUrls[0] ? await toSignedMediaUrl(mediaUrls[0], tenant.id) : null;
             const sendResult = srMediaUrl
               ? await sendMediaMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, srMediaType!, srMediaUrl, matchedEarly.reply || undefined)
                   .catch((e: Error) => { console.error(`❌ Scripted reply ${srMediaType} send failed:`, e.message); return null; })
@@ -2110,19 +2111,23 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
       // Supports images, videos, and documents stored in welcome_image_url.
       if (isFirstMessageForAI && tenantConfig.welcomeImageUrl) {
         const welcomeMediaType = mediaTypeFromUrl(tenantConfig.welcomeImageUrl);
-        const welcomeSignedUrl = await toSignedMediaUrl(tenantConfig.welcomeImageUrl);
+        const welcomeSignedUrl = await toSignedMediaUrl(tenantConfig.welcomeImageUrl, tenant.id);
         let welcomeMediaResult: { messageId: string; status: string } | null = null;
-        await sendMediaMessage(
-          decryptedAccessToken,
-          tenant.wa_phone_number_id,
-          cleanPhone,
-          welcomeMediaType,
-          welcomeSignedUrl,
-          // Videos/documents don't support captions on WhatsApp — send text separately
-          welcomeMediaType === 'image' ? aiResponse.reply : undefined
-        ).then((r) => { welcomeMediaResult = r; }).catch(mediaErr => {
-          console.error(`⚠️ Meta: welcome ${welcomeMediaType} send failed, falling back to text only:`, (mediaErr as Error).message);
-        });
+        if (!welcomeSignedUrl) {
+          console.error(`⚠️ Meta: welcome ${welcomeMediaType} is not readable by this tenant, falling back to text only`);
+        } else {
+          await sendMediaMessage(
+            decryptedAccessToken,
+            tenant.wa_phone_number_id,
+            cleanPhone,
+            welcomeMediaType,
+            welcomeSignedUrl,
+            // Videos/documents don't support captions on WhatsApp — send text separately
+            welcomeMediaType === 'image' ? aiResponse.reply : undefined
+          ).then((r) => { welcomeMediaResult = r; }).catch(mediaErr => {
+            console.error(`⚠️ Meta: welcome ${welcomeMediaType} send failed, falling back to text only:`, (mediaErr as Error).message);
+          });
+        }
         // For images: caption is delivered atomically with the media.
         // Save the image row now with the REAL wamid so:
         //   (a) it shows as an image in the dashboard, and
@@ -2286,7 +2291,6 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
           const mType = mediaTypeFromUrl(matchedMedia.filename);
           const mimeType = mType === 'video' ? 'video/mp4' : mType === 'document' ? 'application/pdf' : 'image/jpeg';
           let mediaResult: { messageId: string; status: string } | null = null;
-          let deliveredUrl: string | null = null;
 
           // Try the cached Meta media ID first — avoids re-uploading the same
           // knowledge-base asset to Meta on every send.
@@ -2307,9 +2311,8 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
           }
 
           if (!mediaResult) {
-            const signedUrl = await toSignedMediaUrl(matchedMedia.file_url);
+            const signedUrl = await toSignedMediaUrl(matchedMedia.file_url, tenant.id);
             if (!signedUrl) continue;
-            deliveredUrl = signedUrl;
 
             mediaResult = await sendMediaMessage(
               accessToken,
@@ -2350,7 +2353,10 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
             channel: 'whatsapp',
             status: 'sent',
             ai_generated: true,
-            media_url: deliveredUrl,
+            // Durable reference — NOT the 10-minute signed link used for delivery
+            // (that expired and left "Image unavailable" in the inbox), and also
+            // set when the send went by cached Meta media ID.
+            media_url: storageRefUrl('knowledge-docs', matchedMedia.file_url),
             file_name: matchedMedia.filename,
             mime_type: mimeType,
             wa_message_id: mediaResult.messageId,

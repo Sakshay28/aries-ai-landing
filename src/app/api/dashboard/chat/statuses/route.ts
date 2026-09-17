@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
 
-// Lightweight endpoint: returns only { id, status } for outbound messages in a conversation.
+// Lightweight endpoint: returns only { id, status, error_message } for outbound messages in a conversation.
 // Used for polling when real-time subscription is unavailable.
 export async function GET(req: NextRequest) {
   const conversationId = req.nextUrl.searchParams.get('conversationId');
@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
 
   const { data } = await supabaseAdmin
     .from('messages')
-    .select('id, status')
+    .select('id, status, error_message')
     .eq('conversation_id', conversationId)
     .eq('tenant_id', tenantId)
     .eq('direction', 'outbound')

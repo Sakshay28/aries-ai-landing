@@ -106,7 +106,10 @@ export async function POST(req: NextRequest) {
     let messageId: string | null = null;
 
     if (src.media_url) {
-      const signedUrl = await toSignedMediaUrl(src.media_url);
+      const signedUrl = await toSignedMediaUrl(src.media_url, tenantId);
+      if (!signedUrl) {
+        return NextResponse.json({ error: 'This media file is missing or not accessible to your account.' }, { status: 400 });
+      }
       const mediaType = (src.media_type || 'image') as 'image' | 'video' | 'document';
       const result = await sendMediaMessage(token, phoneNumberId, toPhone, mediaType, signedUrl, rendered);
       messageId = result?.messageId ?? null;

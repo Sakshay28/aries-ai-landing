@@ -575,11 +575,13 @@ async function sendAutomationMessage(
 
   try {
     if (automation.media_url) {
-      const signedUrl = await toSignedMediaUrl(automation.media_url);
+      const signedUrl = await toSignedMediaUrl(automation.media_url, tenant.id);
+      if (!signedUrl) throw new Error('Automation media is missing or not accessible to this account');
       const mediaType = (automation.media_type || 'image') as 'image' | 'video' | 'document';
       const result = await sendMediaMessage(token, phoneNumberId, lead.phone, mediaType, signedUrl, rendered);
       metaMsgId = result?.messageId ?? null;
-      sentMediaUrl = signedUrl;
+      // Persist the durable reference, not the 10-minute signed link (it expires).
+      sentMediaUrl = automation.media_url;
       sentMimeType = mediaType === 'image' ? 'image/jpeg' : mediaType === 'video' ? 'video/mp4' : 'application/octet-stream';
       sentMessageType = mediaType;
     } else {

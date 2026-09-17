@@ -101,6 +101,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_unique_active_contact
 
 
 -- ── STEP 4: Create whatsapp-media storage bucket ─────────────────────────────
+-- ⚠️ SUPERSEDED by 20260917b_private_media_buckets.sql: whatsapp-media is now
+-- PRIVATE and the "WhatsApp media public read" policy below is dropped (it let
+-- the public anon key list/download customer media). Do NOT re-run STEPS 4-5 —
+-- they would make customer media public again.
 
 INSERT INTO storage.buckets (id, name, public, file_size_limit)
 VALUES ('whatsapp-media', 'whatsapp-media', true, 52428800)

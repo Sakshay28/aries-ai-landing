@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   FileText, FileArchive, File, Music, Video, Download,
   ExternalLink, Maximize2, X, ImageOff,
@@ -84,6 +84,28 @@ interface AttachmentBubbleProps {
   durationSecs?: number | null;
   isOutbound: boolean;
   isOptimistic?: boolean;
+  /** Operator send in progress: bytes going to storage, or waiting on WhatsApp. */
+  uploadStage?: 'uploading' | 'sending' | null;
+  uploadProgress?: number;
+}
+
+function stageLabel(stage: 'uploading' | 'sending', progress?: number): string {
+  if (stage === 'sending') return 'Sending…';
+  return typeof progress === 'number' && progress > 0 ? `Uploading ${progress}%` : 'Uploading…';
+}
+
+function MediaProgressOverlay({ stage, progress }: { stage: 'uploading' | 'sending'; progress?: number }) {
+  return (
+    <div className="absolute inset-0 rounded-md bg-black/45 flex flex-col items-center justify-center gap-2" aria-live="polite">
+      <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+      <span className="text-[11px] font-medium text-white">{stageLabel(stage, progress)}</span>
+      {stage === 'uploading' && typeof progress === 'number' && (
+        <div className="w-24 h-1 rounded-full bg-white/25 overflow-hidden">
+          <div className="h-full bg-white transition-[width] duration-200" style={{ width: `${progress}%` }} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function AttachmentBubble({
@@ -96,7 +118,10 @@ export default function AttachmentBubble({
   durationSecs,
   isOutbound,
   isOptimistic,
+  uploadStage,
+  uploadProgress,
 }: AttachmentBubbleProps) {
+  const busyStage = uploadStage ?? (isOptimistic ? 'uploading' : null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
@@ -164,11 +189,7 @@ export default function AttachmentBubble({
               </>
             )}
 
-            {isOptimistic && !imgError && (
-              <div className="absolute inset-0 rounded-md bg-black/30 flex items-center justify-center">
-                <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-              </div>
-            )}
+            {busyStage && !imgError && <MediaProgressOverlay stage={busyStage} progress={uploadProgress} />}
           </div>
           {caption && (
             <p className="text-[13px] leading-relaxed mt-1.5 px-1 [word-break:normal] break-words">
@@ -192,11 +213,7 @@ export default function AttachmentBubble({
             className="w-full max-h-[240px] rounded-md object-cover"
             style={{ background: '#000' }}
           />
-          {isOptimistic && (
-            <div className="absolute inset-0 rounded-md bg-black/50 flex items-center justify-center">
-              <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-            </div>
-          )}
+          {busyStage && <MediaProgressOverlay stage={busyStage} progress={uploadProgress} />}
         </div>
         {caption && (
           <p className="text-[13px] leading-relaxed mt-1.5 px-1 [word-break:normal] break-words">
@@ -241,11 +258,11 @@ export default function AttachmentBubble({
       "flex items-center gap-3 min-w-[180px] max-w-[240px] rounded-md px-2 py-2",
       // Subtle inset panel like WhatsApp's document card
       isOutbound ? "bg-black/[0.04] dark:bg-black/[0.12]" : "bg-black/[0.03] dark:bg-white/[0.04]",
-      isOptimistic && "opacity-60"
+      busyStage && "opacity-70"
     )}>
       {/* Icon */}
       <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-white dark:bg-white/[0.08]">
-        {isOptimistic
+        {busyStage
           ? <div className="w-4 h-4 border-2 border-current/40 border-t-current rounded-full animate-spin opacity-60" />
           : <DocIcon className={cn("w-5 h-5", iconColor)} />
         }
@@ -256,15 +273,15 @@ export default function AttachmentBubble({
         <p className="text-[12.5px] font-medium leading-tight truncate text-[#111B21] dark:text-[#E9EDEF]">
           {fileName}
         </p>
-        {fileSize && (
+        {(fileSize || busyStage) && (
           <p className="text-[11px] mt-0.5 text-[#667781] dark:text-[#8696A0]">
-            {formatBytes(fileSize)}
+            {busyStage ? stageLabel(busyStage, uploadProgress) : formatBytes(fileSize!)}
           </p>
         )}
       </div>
 
       {/* Download / Open */}
-      {!isOptimistic && (
+      {!isOptimistic && !busyStage && (
         <a
           href={mediaUrl}
           target="_blank"
@@ -287,15 +304,24 @@ export default function AttachmentBubble({
 // ─── Pending attachment preview (before send) ─────────────────────────────────
 interface PendingAttachmentProps {
   file: File;
+  /** e.g. "Converted to JPG for WhatsApp" — how the customer will receive it. */
+  note?: string | null;
   onRemove: () => void;
 }
 
-export function PendingAttachment({ file, onRemove }: PendingAttachmentProps) {
+export function PendingAttachment({ file, note, onRemove }: PendingAttachmentProps) {
   const mimeType = file.type || 'application/octet-stream';
   const category = getMediaCategory(mimeType);
-  const [previewUrl] = useState(() =>
-    category === 'image' || category === 'video' ? URL.createObjectURL(file) : null
-  );
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // Own the object URL inside the effect so it is revoked when the file changes
+  // or the strip closes (and re-created correctly under StrictMode's double mount).
+  useEffect(() => {
+    if (category !== 'image' && category !== 'video') return;
+    const url = URL.createObjectURL(file);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- external resource created per file
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file, category]);
 
   const DocIcon = docIcon(mimeType);
 
@@ -309,6 +335,8 @@ export function PendingAttachment({ file, onRemove }: PendingAttachmentProps) {
           alt={file.name}
           className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
         />
+      ) : category === 'video' && previewUrl ? (
+        <video src={previewUrl} muted playsInline preload="metadata" className="w-12 h-12 rounded-lg object-cover flex-shrink-0 bg-black" />
       ) : (
         <div className="w-10 h-10 rounded-xl bg-black/[0.04] dark:bg-white/[0.06] flex items-center justify-center flex-shrink-0">
           <DocIcon className={cn("w-5 h-5", docColor(mimeType))} />
@@ -319,6 +347,7 @@ export function PendingAttachment({ file, onRemove }: PendingAttachmentProps) {
       <div className="flex-1 min-w-0">
         <p className="text-[12.5px] font-medium text-foreground leading-tight truncate">{file.name}</p>
         <p className="text-[11px] text-muted-foreground/60 mt-0.5">{formatBytes(file.size)}</p>
+        {note && <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5 leading-snug">{note}</p>}
       </div>
 
       {/* Remove */}

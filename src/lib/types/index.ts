@@ -320,12 +320,33 @@ export interface InboundReplyMeta {
   reply_to_wa_message_id?: string;
 }
 
+// Operator attachments sent from the inbox (src/lib/media/outbound-media.server.ts).
+// storage_path is the durable reference every send/retry works from.
+export interface ChatMediaMeta {
+  bucket: string;
+  storage_path: string;
+  send_as: 'image' | 'video' | 'audio' | 'document';
+  attempts: number;
+  stage: 'provider_upload' | 'sending' | 'sent' | 'failed';
+  attempt_started_at: string;
+  delivery_mode?: 'media_id' | 'link';
+  provider_media_id?: string | null;
+  provider_media_id_at?: string | null;
+  last_error?: { code: string; stage: string; at: string } | null;
+}
+
+export interface MediaMessageMeta {
+  interactive_type?: undefined;
+  media: ChatMediaMeta;
+}
+
 export type InteractiveMetadata =
   | InteractiveButtonMeta
   | InteractiveListMeta
   | TemplateMeta
   | FlowMeta
-  | InboundReplyMeta;
+  | InboundReplyMeta
+  | MediaMessageMeta;
 
 // Mirrors what the webhook actually stores: msg.type passes through for all media
 // types, including 'voice' (WhatsApp voice notes) and 'sticker'.

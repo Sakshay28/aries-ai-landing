@@ -140,12 +140,16 @@ async function metaErrorFromResponse(res: Response, kind: string): Promise<MetaA
 // ── Retry helper: up to 3 attempts, exponential backoff ──
 // Retries on: network errors, 5xx, 429, and Meta throttle codes (honoring
 // Retry-After). Fails fast on genuine 4xx (bad token / payload / template).
-async function withMetaRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+async function withMetaRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  isRetryable: (err: unknown) => boolean = isRetryableMetaError
+): Promise<T> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      const retryable = isRetryableMetaError(err);
+      const retryable = isRetryable(err);
       if (!retryable || attempt === maxRetries) throw err;
 
       // Honor Meta's Retry-After when it gives one; otherwise exponential backoff
@@ -753,6 +757,76 @@ export async function sendMediaMessageById(
 }
 
 // ═══════════════════════════════════════
+// SEND: Operator media message (inbox composer)
+// ═══════════════════════════════════════
+// One entry point for media referenced either by an uploaded Meta media ID or a
+// link. Differs from sendMediaMessage/sendMediaMessageById in two deliberate ways:
+//   • captions go out on video too (Meta accepts captions on image/video/document),
+//     and a document's filename is the real file name, not the caption;
+//   • it retries ONLY responses Meta explicitly throttled. A network error or
+//     timeout is ambiguous — Meta may already have accepted the message — so
+//     re-POSTing could deliver the same photo twice. The caller records the
+//     failure and the operator decides whether to retry.
+export interface WhatsAppMediaRef {
+  sendAs: MetaMediaType;
+  mediaId?: string;
+  link?: string;
+  caption?: string;
+  filename?: string;
+  contextMessageId?: string;
+}
+
+export async function sendWhatsAppMedia(
+  accessToken: string,
+  phoneNumberId: string,
+  destination: string,
+  media: WhatsAppMediaRef
+): Promise<MetaSendResult> {
+  if (!accessToken || !phoneNumberId || !destination || (!media.mediaId && !media.link)) {
+    throw new Error('Meta sendWhatsAppMedia: missing required parameters');
+  }
+
+  const object: Record<string, string> = media.mediaId ? { id: media.mediaId } : { link: media.link! };
+  if (media.caption && media.sendAs !== 'audio') object.caption = media.caption.slice(0, 1024);
+  if (media.sendAs === 'document' && media.filename) object.filename = media.filename;
+
+  const payload: Record<string, unknown> = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: cleanPhone(destination),
+    type: media.sendAs,
+    [media.sendAs]: object,
+  };
+  if (media.contextMessageId) payload.context = { message_id: media.contextMessageId };
+
+  const throttledOnly = (err: unknown) =>
+    err instanceof MetaApiError && (err.status === 429 || err.isRateLimited) && !err.isTierLimited;
+
+  return withMetaRetry(async () => {
+    let res: Response;
+    try {
+      res = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
+        method: 'POST',
+        headers: headers(accessToken),
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch (err) {
+      throw new Error(`Meta network error: ${(err as Error).message}`);
+    }
+
+    if (!res.ok) {
+      throw await metaErrorFromResponse(res, 'media');
+    }
+
+    // A 2xx means Meta accepted the message; never turn that into a failure
+    // (it would invite a duplicate retry), even if the body lacks an id.
+    const data = await res.json().catch(() => ({}));
+    return { messageId: data.messages?.[0]?.id || '', status: 'sent' };
+  }, 2, throttledOnly);
+}
+
+// ═══════════════════════════════════════
 // UPLOAD: Media to Meta (returns a reusable media ID)
 // ═══════════════════════════════════════
 // Uploads a knowledge-base asset to Meta once so subsequent sends can
@@ -770,6 +844,8 @@ export async function uploadMediaToMeta(
 
   const form = new FormData();
   form.append('messaging_product', 'whatsapp');
+  // `type` is a required parameter of POST /{phone-number-id}/media.
+  form.append('type', mimeType);
   form.append('file', new Blob([new Uint8Array(buffer)], { type: mimeType }), filename);
 
   return withMetaRetry(async () => {
