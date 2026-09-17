@@ -69,7 +69,13 @@ describe('ConfidenceScoreService — Dynamic Validation Intelligence Scorer', ()
     expect(res.band).not.toBe('High Confidence');
   });
 
-  it('applies penalties when quiet hours timezone guards are disabled', () => {
+  // Updated 2026-09-17. This test used to expect a -10 penalty for quiet hours
+  // being off. Commit 038e556 (2026-07-30, "default quiet hours OFF") made OFF
+  // the sanctioned default — a single operator controls send timing, and the
+  // overnight hold made "send now" campaigns look stuck — and deliberately
+  // removed the penalty from ConfidenceScoreService and the preflight
+  // validator. The test was never updated, so it asserted the retired rule.
+  it('does not penalise quiet hours being off (sanctioned default since 038e556)', () => {
     const campaignVal = {
       name: 'Overnight Alert',
       template_name: 'overnight_info',
@@ -84,9 +90,15 @@ describe('ConfidenceScoreService — Dynamic Validation Intelligence Scorer', ()
     };
 
     const res = ConfidenceScoreService.calculate(campaignVal, [], 100, 0, 0);
-    
-    // Expected quiet hours penalty: -10 points
-    expect(res.score).toBeLessThan(100);
+    const withQuietHours = ConfidenceScoreService.calculate(
+      { ...campaignVal, delivery: { ...campaignVal.delivery, quietHoursEnabled: true } }, [], 100, 0, 0
+    );
+
+    expect(res.score).toBe(100);
+    expect(res.score).toBe(withQuietHours.score);
+    const item = res.checklist.find(c => c.id === 'quiet_hours');
+    expect(item?.passed).toBe(true);
+    expect(item?.impact).toBe('Operator-controlled send timing (+10)');
   });
 });
 

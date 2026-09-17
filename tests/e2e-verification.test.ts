@@ -195,7 +195,14 @@ describe('Google Sheets Live CRM - E2E Production Acceptance Verification', () =
     const rowValues = appendCall!.body.values[0];
     expect(rowValues[0]).toBe('New WhatsApp Guest'); // Customer Name
     expect(rowValues[1]).toBe(CUSTOMER_PHONE);        // WhatsApp Number
-    expect(rowValues[2]).toBe('whatsapp');            // Lead Source
+    // Updated 2026-09-17: was 'whatsapp' (the raw lead.channel). Commit 8800c63
+    // (2026-07-02) deliberately routed Lead Source through resolveSourceLabel()
+    // — prefer lead.source_detail (e.g. meta_ctwa → "Meta Ad"), else the
+    // channel — mapped via SOURCE_LABELS, the same human-readable labels the
+    // bulk "Sync Now" path already wrote. Live and bulk sync now agree, so one
+    // sheet no longer mixes "whatsapp" and "WhatsApp". Nothing reads this
+    // column back into the CRM, so the casing change is display-only.
+    expect(rowValues[2]).toBe('WhatsApp');            // Lead Source
     expect(rowValues[3]).toBe('new');                 // Lead Status
   });
 
