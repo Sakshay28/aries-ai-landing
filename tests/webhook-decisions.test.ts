@@ -6,8 +6,11 @@ import {
   isScriptedReplyRelevant,
   allowStatusUpdate,
   hasActiveFlow,
+  resolveWebhookFailure,
 } from '@/lib/webhook/decisions';
 import { isHumanHandoffRequest } from '@/lib/ai/engine';
+import { SESSION_EXPIRED } from '@/lib/media/outbound-media';
+import type { ChatMediaMeta } from '@/lib/types';
 
 // ─── Scripted reply keyword matching ─────────────────────────────────────────
 // Encodes two real production bugs as permanent regressions:
@@ -264,5 +267,87 @@ describe('hasActiveFlow', () => {
     // fire while the date-selection flow node is waiting for this exact reply.
     const context = { pending_flow_node: 'date_selection', last_message: '23 Jul - 29 Jul' };
     expect(hasActiveFlow(context)).toBe(true);
+  });
+});
+
+// ─── resolveWebhookFailure — async media-send failure reporting ─────────────
+// REGRESSION (2026-09-21): an inbox photo was accepted by Meta synchronously
+// (our 'sent' write cached a provider_media_id), then Meta's status webhook
+// reported it failed asynchronously. The webhook handler wrote Meta's raw
+// error title ("Media upload error") straight into error_message and never
+// touched metadata.media — so the cached provider_media_id survived. Retry
+// kept resending that exact (Meta-rejected) media ID and kept failing the
+// exact same way: prod messages 9bee977e.../b5c54117... sat on status=
+// 'failed' with metadata.media.stage still 'sent' after 3 retries.
+
+describe('resolveWebhookFailure', () => {
+  const sentMediaMeta: ChatMediaMeta = {
+    bucket: 'chat-attachments',
+    storage_path: 't/c/obj.png',
+    send_as: 'image',
+    attempts: 1,
+    stage: 'sent',
+    attempt_started_at: '2026-09-21T03:50:04.895Z',
+    delivery_mode: 'media_id',
+    provider_media_id: '1451199000206974',
+    provider_media_id_at: '2026-09-21T03:50:11.344Z',
+    last_error: null,
+  };
+  const now = new Date('2026-09-21T04:00:00.000Z');
+
+  it('REGRESSION: clears the cached provider_media_id on an async media failure, so Retry re-uploads', () => {
+    const result = resolveWebhookFailure({ errorCode: 131052, mediaMeta: sentMediaMeta, now });
+    expect(result.mediaMeta?.provider_media_id).toBeNull();
+    expect(result.mediaMeta?.provider_media_id_at).toBeNull();
+    expect(result.mediaMeta?.stage).toBe('failed');
+    expect(result.mediaMeta?.last_error).toEqual({ code: '131052', stage: 'webhook', at: now.toISOString() });
+  });
+
+  it('REGRESSION: never surfaces Meta’s raw error title ("Media upload error") to the operator', () => {
+    const result = resolveWebhookFailure({
+      errorCode: 131052,
+      errorReason: 'Media upload error', // Meta's own raw title — must not pass through untranslated
+      mediaMeta: sentMediaMeta,
+      now,
+    });
+    expect(result.errorMessage).not.toBe('Media upload error');
+    expect(result.errorMessage).toBe('WhatsApp couldn’t process this file. Use a JPG/PNG photo or an MP4 (H.264) video.');
+  });
+
+  it('preserves the rest of the media metadata (storage_path, bucket) untouched', () => {
+    const result = resolveWebhookFailure({ errorCode: 131052, mediaMeta: sentMediaMeta, now });
+    expect(result.mediaMeta?.storage_path).toBe(sentMediaMeta.storage_path);
+    expect(result.mediaMeta?.bucket).toBe(sentMediaMeta.bucket);
+  });
+
+  it('maps a 24h-window closure to SESSION_EXPIRED even for a media message', () => {
+    const result = resolveWebhookFailure({ errorCode: 131047, mediaMeta: sentMediaMeta, now });
+    expect(result.errorMessage).toBe(SESSION_EXPIRED);
+    // Still clears the stale ID — retry should re-upload fresh either way.
+    expect(result.mediaMeta?.provider_media_id).toBeNull();
+  });
+
+  it('records a failure_reason breadcrumb for media messages, matching the sync-path "stage:code" convention', () => {
+    const result = resolveWebhookFailure({ errorCode: 131052, mediaMeta: sentMediaMeta, now });
+    expect(result.failureReason).toBe('webhook:131052');
+  });
+
+  it('leaves plain text/template messages (no metadata.media) on the original raw-Meta-text behavior', () => {
+    const withReason = resolveWebhookFailure({ errorCode: 131026, errorReason: 'Recipient opted out', now });
+    expect(withReason.errorMessage).toBe('Recipient opted out');
+    expect(withReason.mediaMeta).toBeUndefined();
+    expect(withReason.failureReason).toBeUndefined();
+
+    const withoutReason = resolveWebhookFailure({ errorCode: 131026, now });
+    expect(withoutReason.errorMessage).toBe('Meta error 131026');
+
+    const withNeither = resolveWebhookFailure({ now });
+    expect(withNeither.errorMessage).toBe('Delivery failed');
+  });
+
+  it('maps SESSION_EXPIRED for a plain text message too (unchanged prior behavior)', () => {
+    const result = resolveWebhookFailure({ errorCode: 131047, now });
+    expect(result.errorMessage).toBe(SESSION_EXPIRED);
+    expect(result.mediaMeta).toBeUndefined();
   });
 });

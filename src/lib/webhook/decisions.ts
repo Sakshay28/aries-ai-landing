@@ -10,6 +10,9 @@
 // Tests: tests/webhook-decisions.test.ts
 // ─────────────────────────────────────────────────────────────────────────────
 
+import type { ChatMediaMeta } from '@/lib/types';
+import { SESSION_EXPIRED, friendlyProviderReason } from '@/lib/media/outbound-media';
+
 /** Word-boundary keyword match — used for tenant escalation keywords and
  *  AI-agent routing keywords. `[^a-z0-9]` boundaries instead of `\b` so it
  *  behaves sanely next to emoji/Devanagari. */
@@ -167,4 +170,59 @@ export function shouldAutoResumeBotPause(args: {
 
   const ageHours = (nowMs - anchorMs) / 3_600_000;
   return ageHours >= autoResumeHours;
+}
+
+/** Meta's status webhook is the only source for why an accepted send later
+ *  failed (e.g. 131047 = 24h re-engagement window closed). For an inbox
+ *  attachment (metadata.media present — a photo/video/doc sent from
+ *  ChatArea) that needs more than just recording Meta's reason:
+ *
+ *  1. Friendly text. The synchronous send path already translates Meta's
+ *     error codes into operator-actionable text (friendlyProviderReason).
+ *     Meta's raw webhook error title is developer jargon by comparison —
+ *     e.g. "Media upload error" tells an operator nothing to act on.
+ *
+ *  2. A cleared provider_media_id. Meta accepting the send synchronously
+ *     (our 'sent' write, which caches provider_media_id) and THEN failing it
+ *     asynchronously means the cached ID is one Meta has already rejected.
+ *     retryChatMedia() reuses a cached ID for up to 25 days
+ *     (outbound-media.server.ts) — left untouched, every Retry resends the
+ *     exact same rejected ID and fails the exact same way forever. Observed
+ *     in prod 2026-09-21: a photo stuck on retry_count=3, status never
+ *     leaving 'failed', metadata still showing the stale "sent" media ID.
+ *     Clearing it forces the next retry to re-upload the file to Meta fresh
+ *     — the only way the send can actually succeed.
+ *
+ *  A plain text/template/interactive message (no metadata.media) keeps the
+ *  original raw-Meta-text behavior — friendlyProviderReason's wording
+ *  ("...JPG/PNG photo or an MP4 video") is media-specific and would be
+ *  nonsensical there. */
+export function resolveWebhookFailure(args: {
+  errorCode?: number;
+  errorReason?: string;
+  mediaMeta?: ChatMediaMeta | null;
+  now?: Date;
+}): { errorMessage: string; failureReason?: string; mediaMeta?: ChatMediaMeta } {
+  const { errorCode, errorReason, mediaMeta, now = new Date() } = args;
+  const sessionExpired = errorCode === 131047;
+
+  if (!mediaMeta) {
+    return {
+      errorMessage: sessionExpired
+        ? SESSION_EXPIRED
+        : (errorReason || (errorCode ? `Meta error ${errorCode}` : 'Delivery failed')),
+    };
+  }
+
+  return {
+    errorMessage: sessionExpired ? SESSION_EXPIRED : friendlyProviderReason(errorCode),
+    failureReason: `webhook:${errorCode ?? 'unknown'}`.slice(0, 200),
+    mediaMeta: {
+      ...mediaMeta,
+      stage: 'failed',
+      provider_media_id: null,
+      provider_media_id_at: null,
+      last_error: { code: String(errorCode ?? 'async'), stage: 'webhook', at: now.toISOString() },
+    },
+  };
 }

@@ -17,14 +17,15 @@ import { ORDER_CONFIRMATION_PAYLOAD_PREFIX, ORDER_CONFIRMATION_BUTTON_LABELS } f
 import { renderOrderConfirmationCopy, type OrderConfirmationCopyKey } from '@/lib/shopify/orderConfirmationCopy';
 import { isDailyReportRequest, generateDailyReport, formatDailyReportMessage } from '@/lib/reports/dailyReport';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
-import { parseAllMetaMessages, sendTextMessage, sendMediaMessage, sendMediaMessageById, uploadMediaToMeta, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator, type ParsedMetaMessage } from '@/lib/meta/service';
+import { parseAllMetaMessages, sendTextMessage, sendMediaMessage, sendMediaMessageById, uploadMediaToMeta, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator, isCtwaReferral, type ParsedMetaMessage } from '@/lib/meta/service';
 import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus, resolveOrCreateConversation } from '@/lib/whatsapp/businessNotify';
 import { normalizePhoneNumber, isSamePhoneNumber } from '@/lib/whatsapp/phone';
 import { sanitizeName } from '@/lib/utils/name';
 import { greetingName } from '@/lib/utils/contact-name';
 import { isSafeWebhookUrl } from '@/lib/utils/ssrf';
 import { processMessageWithAI, isHumanHandoffRequest } from '@/lib/ai/engine';
-import { kwWordMatch, pickScriptedReply, allowStatusUpdate, hasActiveFlow, shouldAutoResumeBotPause } from '@/lib/webhook/decisions';
+import { kwWordMatch, pickScriptedReply, allowStatusUpdate, hasActiveFlow, shouldAutoResumeBotPause, resolveWebhookFailure } from '@/lib/webhook/decisions';
+import type { ChatMediaMeta } from '@/lib/types';
 import { checkSenderRateLimit } from '@/lib/abuse/prevention';
 import { checkAICostLimit, checkDailyAICostLimit, AI_FALLBACK_MESSAGE } from '@/lib/billing/costProtection';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
@@ -586,7 +587,7 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
 
   let lead: Record<string, any> | null = null;
 
-  const isFromAd = !!msg.referral && msg.referral.source_type === 'ad';
+  const isFromAd = isCtwaReferral(msg.referral);
   const leadSource = isFromAd ? 'meta_ctwa' : 'whatsapp';
 
   // Leads are stored with a "+" prefix in the DB (e.g. "+918233451667") but Meta
@@ -3364,7 +3365,7 @@ async function handleStatusUpdate(msg: ParsedMetaMessage) {
 
   const { data: currentMsg, error: fetchErr } = await supabaseAdmin
     .from('messages')
-    .select('status')
+    .select('status, metadata')
     .eq('wa_message_id', msg.messageId)
     .maybeSingle();
 
@@ -3387,21 +3388,23 @@ async function handleStatusUpdate(msg: ParsedMetaMessage) {
       return;
     }
 
-    // Meta's status webhook is the ONLY source for why an accepted send later
-    // failed (e.g. 131047 = 24h re-engagement window closed). The synchronous
-    // send path already maps that code to 'SESSION_EXPIRED' so the chat UI's
-    // "send template" banner (ChatArea.tsx) can trigger — mirror that here so
-    // async webhook-reported failures show the same banner instead of a bare
-    // red ⚠️ with no explanation.
-    const failureErrorMessage = mappedStatus === 'failed'
-      ? (msg.errorCode === 131047
-          ? 'SESSION_EXPIRED'
-          : (msg.errorReason || (msg.errorCode ? `Meta error ${msg.errorCode}` : 'Delivery failed')))
+    // resolveWebhookFailure (unit-tested) picks operator-friendly text over
+    // Meta's raw error title for an inbox attachment, and clears its cached
+    // provider_media_id so Retry re-uploads fresh instead of resending the
+    // exact media ID Meta just rejected — see its doc comment.
+    const mediaMeta = (currentMsg.metadata as { media?: ChatMediaMeta } | null)?.media;
+    const failure = mappedStatus === 'failed'
+      ? resolveWebhookFailure({ errorCode: msg.errorCode, errorReason: msg.errorReason, mediaMeta })
       : undefined;
 
     let updateQuery = supabaseAdmin
       .from('messages')
-      .update({ status: mappedStatus, ...(failureErrorMessage ? { error_message: failureErrorMessage } : {}) })
+      .update({
+        status: mappedStatus,
+        ...(failure ? { error_message: failure.errorMessage } : {}),
+        ...(failure?.failureReason ? { failure_reason: failure.failureReason } : {}),
+        ...(failure?.mediaMeta ? { metadata: { ...(currentMsg.metadata as object), media: failure.mediaMeta } } : {}),
+      })
       .eq('wa_message_id', msg.messageId);
     if (tenantIdForStatus) updateQuery = updateQuery.eq('tenant_id', tenantIdForStatus);
     const { data: updated, error } = await updateQuery.select('id');
