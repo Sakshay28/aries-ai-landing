@@ -26,7 +26,8 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getRedisClient } from '@/lib/redis/client';
-import { sendTextMessage, sendMediaMessage, sendInteractiveButtonsMessage, sendInteractiveListMessage, isCtwaReferral, MetaMediaType } from '@/lib/meta/service';
+import { sendTextMessage, sendMediaMessage, sendInteractiveButtonsMessage, sendInteractiveListMessage, isCtwaReferral, explainMetaError, MetaMediaType } from '@/lib/meta/service';
+import { noteSendFailure } from '@/lib/whatsapp/credentialHealth.server';
 import { greetingName } from '@/lib/utils/contact-name';
 import { decryptToken } from '@/lib/utils/crypto';
 import { processMessageWithAI, TenantAIConfig } from '@/lib/ai/engine';
@@ -99,6 +100,70 @@ interface ExecContext {
   dryRun?:  boolean;       // if true: skip all side-effects (no WhatsApp sends, no DB writes)
   trace?:   TraceStep[];   // populated during dry-run to describe what would happen
   flowId?:  string;        // active flow ID for analytics
+}
+
+// ── Send + record, as one unit ────────────────────────────────
+// Every flow send used to be written as `await sendX(...)` followed by an
+// unconditional `insert({ status: 'sent' })`, which had two consequences:
+//
+//   1. The returned message ID was thrown away, so the row carried no
+//      wa_message_id and Meta's delivery/read webhooks could never correlate
+//      back to it — flow messages could only ever show as "sent".
+//   2. When the send THREW, the catch block routed to the flow's error edge
+//      and inserted nothing at all. No failed row, no reason, no red tick.
+//
+// Together those made a total outbound outage invisible for any tenant whose
+// traffic runs through flows: the inbox showed a clean transcript of messages
+// that never actually left. (That is how Globesome's 25-day outage stayed
+// hidden; Adventure Island runs almost entirely on flows and would have hidden
+// it just as well.)
+//
+// This records what really happened either way, and rethrows so each caller's
+// existing catch still routes to its error edge — control flow is unchanged.
+async function sendAndRecord(
+  ctx: ExecContext,
+  send: () => Promise<{ messageId?: string } | void>,
+  row: { content: string; messageType: string; extra?: Record<string, unknown> },
+): Promise<void> {
+  try {
+    const result = await send();
+    await supabaseAdmin.from('messages').insert({
+      tenant_id: ctx.tenantId,
+      conversation_id: ctx.conversationId,
+      direction: 'outbound',
+      content: row.content,
+      message_type: row.messageType,
+      channel: 'whatsapp',
+      status: 'sent',
+      ai_generated: false,
+      wa_message_id: (result as { messageId?: string } | undefined)?.messageId ?? null,
+      ...(row.extra ?? {}),
+    });
+  } catch (err) {
+    const fault = await noteSendFailure({
+      tenantId: ctx.tenantId,
+      phoneNumberId: ctx.phoneNumberId,
+      error: err,
+    }).catch(() => null);
+
+    await supabaseAdmin.from('messages').insert({
+      tenant_id: ctx.tenantId,
+      conversation_id: ctx.conversationId,
+      direction: 'outbound',
+      content: row.content,
+      message_type: row.messageType,
+      channel: 'whatsapp',
+      status: 'failed',
+      ai_generated: false,
+      wa_message_id: null,
+      error_message: (fault?.title ?? explainMetaError(err)).slice(0, 500),
+      ...(row.extra ?? {}),
+    }).then(({ error: e }) => {
+      if (e) console.error('Flow engine: failed-message insert failed:', e.message);
+    });
+
+    throw err;
+  }
 }
 
 // ── Fuzzy keyword match: word-boundary aware ─────────────────
@@ -716,24 +781,11 @@ async function executeNode(
     const metaMediaType = mediaType === 'file' ? 'document' : (mediaType as MetaMediaType);
 
     try {
-      await sendMediaMessage(
-        ctx.accessToken,
-        ctx.phoneNumberId,
-        ctx.phone,
-        metaMediaType,
-        mediaUrl,
-        caption || undefined
+      await sendAndRecord(
+        ctx,
+        () => sendMediaMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, metaMediaType, mediaUrl, caption || undefined),
+        { content: caption || `[${mediaType}]`, messageType: mediaType },
       );
-      await supabaseAdmin.from('messages').insert({
-        tenant_id: ctx.tenantId,
-        conversation_id: ctx.conversationId,
-        direction: 'outbound',
-        content: caption || `[${mediaType}]`,
-        message_type: mediaType,
-        channel: 'whatsapp',
-        status: 'sent',
-        ai_generated: false,
-      });
       return { nextId: getNextNode(node.id, null, edges), sent: true };
     } catch (e) {
       console.error(`Flow engine: sendMediaMessage failed for node ${node.id}:`, (e as Error).message);
@@ -773,19 +825,15 @@ async function executeNode(
         : 'image' as MetaMediaType;
 
       try {
-        await sendMediaMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, metaType, mediaUrl, caption || undefined);
-        await supabaseAdmin.from('messages').insert({
-          tenant_id: ctx.tenantId,
-          conversation_id: ctx.conversationId,
-          direction: 'outbound',
-          content: caption || `[${item.type}]`,
-          message_type: item.type || 'image',
-          channel: 'whatsapp',
-          status: 'sent',
-          ai_generated: false,
-          media_url: mediaUrl,
-          media_caption: caption || null,
-        });
+        await sendAndRecord(
+          ctx,
+          () => sendMediaMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, metaType, mediaUrl, caption || undefined),
+          {
+            content: caption || `[${item.type}]`,
+            messageType: item.type || 'image',
+            extra: { media_url: mediaUrl, media_caption: caption || null },
+          },
+        );
         sentCount++;
       } catch (e) {
         console.error(`Flow engine: gallery item ${i + 1}/${items.length} failed:`, (e as Error).message);
@@ -847,28 +895,27 @@ async function executeNode(
 
     try {
       console.log(`🔘 Flow send_buttons node: ${mappedButtons.length} buttons, raw=${JSON.stringify(buttons.slice(0, 3))}`);
-      if (mappedButtons.length > 0) {
-        await sendInteractiveButtonsMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content, mappedButtons, headerText, footerText);
-      } else {
+      if (mappedButtons.length === 0) {
         console.warn(`⚠️ Flow send_buttons: no valid buttons — falling back to text`);
-        await sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content);
       }
-      await supabaseAdmin.from('messages').insert({
-        tenant_id: ctx.tenantId,
-        conversation_id: ctx.conversationId,
-        direction: 'outbound',
-        content,
-        message_type: mappedButtons.length > 0 ? 'interactive' : 'text',
-        channel: 'whatsapp',
-        status: 'sent',
-        ai_generated: false,
-        metadata: mappedButtons.length > 0 ? {
-          interactive_type: 'button' as const,
-          buttons: mappedButtons,
-          ...(headerText ? { header: headerText } : {}),
-          ...(footerText ? { footer: footerText } : {}),
-        } : null,
-      });
+      await sendAndRecord(
+        ctx,
+        () => mappedButtons.length > 0
+          ? sendInteractiveButtonsMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content, mappedButtons, headerText, footerText)
+          : sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content),
+        {
+          content,
+          messageType: mappedButtons.length > 0 ? 'interactive' : 'text',
+          extra: {
+            metadata: mappedButtons.length > 0 ? {
+              interactive_type: 'button' as const,
+              buttons: mappedButtons,
+              ...(headerText ? { header: headerText } : {}),
+              ...(footerText ? { footer: footerText } : {}),
+            } : null,
+          },
+        },
+      );
 
       // Auto-pause after sending so the flow waits for the customer's reply
       // before continuing. Stores THIS node's own id (not a precomputed next
@@ -931,28 +978,25 @@ async function executeNode(
     }
 
     try {
-      if (rows.length > 0) {
-        await sendInteractiveListMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content, buttonLabel, [{ rows }], headerText, footerText);
-      } else {
-        await sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content);
-      }
-      await supabaseAdmin.from('messages').insert({
-        tenant_id: ctx.tenantId,
-        conversation_id: ctx.conversationId,
-        direction: 'outbound',
-        content,
-        message_type: rows.length > 0 ? 'interactive' : 'text',
-        channel: 'whatsapp',
-        status: 'sent',
-        ai_generated: false,
-        metadata: rows.length > 0 ? {
-          interactive_type: 'list' as const,
-          list_button: buttonLabel,
-          sections: [{ rows }],
-          ...(headerText ? { header: headerText } : {}),
-          ...(footerText ? { footer: footerText } : {}),
-        } : null,
-      });
+      await sendAndRecord(
+        ctx,
+        () => rows.length > 0
+          ? sendInteractiveListMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content, buttonLabel, [{ rows }], headerText, footerText)
+          : sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content),
+        {
+          content,
+          messageType: rows.length > 0 ? 'interactive' : 'text',
+          extra: {
+            metadata: rows.length > 0 ? {
+              interactive_type: 'list' as const,
+              list_button: buttonLabel,
+              sections: [{ rows }],
+              ...(headerText ? { header: headerText } : {}),
+              ...(footerText ? { footer: footerText } : {}),
+            } : null,
+          },
+        },
+      );
 
       await supabaseAdmin
         .from('conversations')
@@ -1052,17 +1096,11 @@ async function executeNode(
         return { nextId: getNextNode(node.id, null, edges), sent: true };
       }
       try {
-        await sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content);
-        await supabaseAdmin.from('messages').insert({
-          tenant_id: ctx.tenantId,
-          conversation_id: ctx.conversationId,
-          direction: 'outbound',
-          content,
-          message_type: 'text',
-          channel: 'whatsapp',
-          status: 'sent',
-          ai_generated: false,
-        });
+        await sendAndRecord(
+          ctx,
+          () => sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, content),
+          { content, messageType: 'text' },
+        );
 
         // ask_question / collect_input: pause flow and wait for customer reply
         // before continuing — without this, sequential questions all fire at once
@@ -1556,17 +1594,11 @@ async function executeNode(
           ctx.tenantId
         );
         if (aiResp?.reply) {
-          await sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, aiResp.reply);
-          await supabaseAdmin.from('messages').insert({
-            tenant_id: ctx.tenantId,
-            conversation_id: ctx.conversationId,
-            direction: 'outbound',
-            content: aiResp.reply,
-            message_type: 'text',
-            channel: 'whatsapp',
-            status: 'sent',
-            ai_generated: true,
-          });
+          await sendAndRecord(
+            ctx,
+            () => sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, aiResp.reply),
+            { content: aiResp.reply, messageType: 'text', extra: { ai_generated: true } },
+          );
           return { nextId: getNextNode(node.id, null, edges), sent: true };
         }
       }
@@ -1673,17 +1705,11 @@ async function executeNode(
       }
 
       try {
-        await sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, prompt);
-        await supabaseAdmin.from('messages').insert({
-          tenant_id: ctx.tenantId,
-          conversation_id: ctx.conversationId,
-          direction: 'outbound',
-          content: prompt,
-          message_type: 'text',
-          channel: 'whatsapp',
-          status: 'sent',
-          ai_generated: false,
-        });
+        await sendAndRecord(
+          ctx,
+          () => sendTextMessage(ctx.accessToken, ctx.phoneNumberId, ctx.phone, prompt),
+          { content: prompt, messageType: 'text' },
+        );
         // Save pending flow node to conversation context
         await supabaseAdmin
           .from('conversations')

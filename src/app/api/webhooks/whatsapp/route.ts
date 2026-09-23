@@ -40,6 +40,7 @@ import { randomUUID } from 'crypto';
 import { triggerCapiEvent } from '@/lib/integrations/capi-trigger';
 import { processCtwaLead, getCampaignContextForAI } from '@/lib/meta-ads/attribution';
 import { notifyAdmin } from '@/lib/alerts/admin';
+import { noteSendFailure, noteSendSuccess } from '@/lib/whatsapp/credentialHealth.server';
 import { sendBookingAlertEmail } from '@/lib/alerts/bookingEmail';
 import { isCoexistenceChange, handleCoexistenceWebhook } from '@/lib/webhook/coexistence';
 import { storageRefUrl, toSignedMediaUrl } from '@/lib/utils/storage';
@@ -2094,6 +2095,12 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
   // 15. Send reply via Meta
   let metaMsgId: string | null = null;
   let sendFailureMsg: string | null = null;
+  // The thrown error itself, kept alongside its message: MetaApiError carries
+  // error.code and error_subcode, and the (code, subcode) PAIR is what tells a
+  // tenant-wide credential outage apart from a one-off rejected message.
+  // Flattening it to a string first is what made the Globesome outage
+  // unclassifiable for 25 days.
+  let sendFailureErr: unknown = null;
   // welcomeImageSentToMeta: image+caption reached Meta (regardless of DB outcome).
   //   Used to prevent a duplicate text send when the image DB insert fails.
   // welcomeImageSavedToDB: image row is in DB — step 16 text insert must be skipped.
@@ -2254,6 +2261,7 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
       }
     } catch (sendErr) {
       sendFailureMsg = (sendErr as Error).message;
+      sendFailureErr = sendErr;
       console.error('❌ Meta: failed to send AI reply:', sendFailureMsg);
       Sentry.captureException(sendErr);
     }
@@ -2451,6 +2459,19 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
 
   }
   if (sendFailureMsg) {
+    // Is this tenant OFFLINE, or did this one message just fail? A credential
+    // fault (expired token, no permission on the phone number, billing block)
+    // means every future send dies too, so it is recorded durably and alerted
+    // on separately — the per-send alert below is throttled and was never
+    // enough on its own. Not awaited: the webhook must still return 200 to
+    // Meta inside its timeout.
+    void noteSendFailure({
+      tenantId: tenant.id,
+      businessName: tenant.business_name,
+      phoneNumberId: tenant.wa_phone_number_id as string | null,
+      error: sendFailureErr ?? sendFailureMsg,
+    }).catch((e) => console.error('noteSendFailure failed:', (e as Error).message));
+
     // Out-of-band: kick off the admin alert. Don't await — webhook must still
     // return 200 to Meta within timeout. The notifyAdmin path debounces.
     notifyAdmin({
@@ -2468,6 +2489,15 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
         replyPreview: aiResponse.reply.slice(0, 200),
       },
     }).catch((e) => console.error('notifyAdmin failed:', (e as Error).message));
+  } else if (metaMsgId) {
+    // A send that actually reached Meta is the only trustworthy proof the
+    // credentials work — clear a recorded outage and announce the recovery.
+    // No-ops (one indexed read) when the tenant is already healthy.
+    void noteSendSuccess({
+      tenantId: tenant.id,
+      businessName: tenant.business_name,
+      phoneNumberId: tenant.wa_phone_number_id as string | null,
+    }).catch((e) => console.error('noteSendSuccess failed:', (e as Error).message));
   }
   perf('send_done');
 

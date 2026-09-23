@@ -18,6 +18,12 @@ const META_BASE = 'https://graph.facebook.com/v21.0';
 export class MetaApiError extends Error {
   status: number;
   code?: number;
+  // Meta's error_subcode. Kept SEPARATE from `code` because the pair is what
+  // identifies a fault: code 100 alone is "invalid parameter", but 100/33 is
+  // specifically "this token cannot see that object" — the signature of a
+  // credential that has lost (or never had) access to the phone number it is
+  // sending from. Collapsing the two into one field made that undiagnosable.
+  subcode?: number;
   retryAfterMs?: number;
   // Meta's own support-correlation ID (error.fbtrace_id). Was being parsed out
   // of the response and then discarded — without it, escalating a delivery
@@ -37,11 +43,12 @@ export class MetaApiError extends Error {
   // "SENDING" with 0/0/0 for two hours and the owner had no idea why.
   isPermanent: boolean;
 
-  constructor(message: string, status: number, opts: { code?: number; retryAfterMs?: number; fbtraceId?: string } = {}) {
+  constructor(message: string, status: number, opts: { code?: number; subcode?: number; retryAfterMs?: number; fbtraceId?: string } = {}) {
     super(message);
     this.name = 'MetaApiError';
     this.status = status;
     this.code = opts.code;
+    this.subcode = opts.subcode;
     this.retryAfterMs = opts.retryAfterMs;
     this.fbtraceId = opts.fbtraceId;
     // Meta throttle/rate-limit error codes (transient):
@@ -116,10 +123,12 @@ export function explainMetaError(err: unknown): string {
 async function metaErrorFromResponse(res: Response, kind: string): Promise<MetaApiError> {
   const bodyText = await res.text().catch(() => res.statusText);
   let code: number | undefined;
+  let subcode: number | undefined;
   let fbtraceId: string | undefined;
   try {
     const parsed = JSON.parse(bodyText);
     code = parsed?.error?.code ?? parsed?.error?.error_subcode;
+    subcode = parsed?.error?.error_subcode;
     fbtraceId = parsed?.error?.fbtrace_id;
   } catch { /* non-JSON body */ }
 
@@ -133,7 +142,7 @@ async function metaErrorFromResponse(res: Response, kind: string): Promise<MetaA
   return new MetaApiError(
     `Meta Cloud API ${kind} error ${res.status}: ${bodyText.slice(0, 300)}${fbtraceId ? ` [fbtrace_id=${fbtraceId}]` : ''}`,
     res.status,
-    { code, retryAfterMs, fbtraceId }
+    { code, subcode, retryAfterMs, fbtraceId }
   );
 }
 

@@ -23,6 +23,7 @@ import {
   retryAttachmentMessage, sendUploadedAttachment, uploadToSignedUrl,
 } from "@/lib/media/client-upload";
 import { STALE_PENDING_MS, describeMediaFailure, mediaLabel, normalizeMimeType, planOutboundMedia } from "@/lib/media/outbound-media";
+import { describeSendFailure } from "@/lib/whatsapp/credentialHealth";
 import { renderableMediaSrc } from "@/lib/media/media-src";
 
 // ── Attachment sends ───────────────────────────────────────────────────
@@ -1022,6 +1023,34 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       setInputMsg(text);
     } finally { setSending(false); }
   };
+
+  // ── Channel-level health ──
+  // Distinct from a per-message failure: this is "the tenant cannot send AT
+  // ALL". Fetched once on mount and re-checked only when an outbound message
+  // actually fails, so it adds no steady-state polling (the inbox already has
+  // enough of that).
+  const [waHealth, setWaHealth] = useState<{
+    status: string;
+    fault_title?: string | null;
+    fault_action?: string | null;
+    first_failed_at?: string | null;
+  } | null>(null);
+
+  const failedOutboundCount = useMemo(
+    () => messages.filter(m => m.direction === 'outbound' && m.status === 'failed').length,
+    [messages],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/dashboard/whatsapp/health')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (!cancelled && d) setWaHealth(d); })
+      .catch(() => { /* banner stays hidden — never break the inbox over this */ });
+    return () => { cancelled = true; };
+  }, [failedOutboundCount]);
+
+  const waOffline = waHealth?.status === 'broken';
 
   // True when the most recent outbound failure was a 24h-window error
   const sessionExpired = useMemo(() => {
@@ -2294,6 +2323,22 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                             {!isInbound && tickIcon}
                           </div>
 
+                          {/* ── Why this message failed ──
+                              A failed text bubble used to render a red "!" and nothing else, so
+                              an operator watching the inbox could see that replies weren't
+                              landing but had no way to find out why — which is how a 25-day
+                              outbound outage went unreported. Media bubbles already explain
+                              themselves via mediaNotice above; this covers everything else. */}
+                          {!isInbound && !isOptimistic && msg.status === 'failed' && !msg.media_url && (
+                            <div
+                              role="alert"
+                              className="flex items-start gap-1.5 mt-1 pt-1.5 border-t border-red-500/20 text-[11.5px] leading-snug text-red-600 dark:text-red-400"
+                            >
+                              <AlertCircle className="w-3.5 h-3.5 mt-px flex-shrink-0" />
+                              <span className="flex-1 min-w-0">{describeSendFailure(msg.error_message)}</span>
+                            </div>
+                          )}
+
                           {/* Reaction badge */}
                           {msg.reaction && (
                             <motion.button
@@ -2342,6 +2387,38 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           >
             <ArrowDown className="w-3.5 h-3.5 text-foreground" />
           </motion.button>
+        )}
+      </AnimatePresence>
+
+      {/* ── WhatsApp channel offline banner ──
+          The loudest thing in the inbox, on purpose. When credentials break,
+          EVERY reply fails while inbound keeps arriving, so the transcript
+          still looks busy and healthy. Globesome ran in exactly that state for
+          25 days. This says so in plain words, and says what to do. */}
+      <AnimatePresence>
+        {waOffline && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6 }}
+            transition={{ duration: 0.15 }}
+            role="alert"
+            className="flex-shrink-0 flex items-start gap-3 px-4 py-3 bg-red-50 dark:bg-red-950/30 border-t border-red-200/70 dark:border-red-800/50"
+          >
+            <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0 leading-tight">
+              <p className="text-[12.5px] font-semibold text-red-800 dark:text-red-300">
+                WhatsApp is offline — no messages are being delivered
+                {waHealth?.first_failed_at && ` since ${new Date(waHealth.first_failed_at).toLocaleString()}`}.
+              </p>
+              {waHealth?.fault_title && (
+                <p className="text-[12px] text-red-700/90 dark:text-red-300/80 mt-0.5">{waHealth.fault_title}.</p>
+              )}
+              {waHealth?.fault_action && (
+                <p className="text-[12px] text-red-700/80 dark:text-red-300/70 mt-0.5">{waHealth.fault_action}</p>
+              )}
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 

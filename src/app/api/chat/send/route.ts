@@ -2,7 +2,8 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantId } from '@/lib/auth/getTenantId';
-import { sendTextMessage, MetaApiError } from '@/lib/meta/service';
+import { sendTextMessage, MetaApiError, explainMetaError } from '@/lib/meta/service';
+import { noteSendFailure } from '@/lib/whatsapp/credentialHealth.server';
 import { sendInstagramMessage } from '@/lib/instagram/service';
 import { decryptToken } from '@/lib/utils/crypto';
 
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
         .single(),
       supabaseAdmin
         .from('tenants')
-        .select('wa_access_token, wa_phone_number_id')
+        .select('wa_access_token, wa_phone_number_id, business_name')
         .eq('id', tenantId)
         .single(),
     ]);
@@ -124,14 +125,29 @@ export async function POST(req: NextRequest) {
       } catch (apiErr) {
         console.error('Async Meta send failed:', apiErr);
         const is24hWindow = apiErr instanceof MetaApiError && apiErr.code === 131047;
+
+        // A credential fault means the whole tenant is offline, not just this
+        // message — record it and alert, so it can't sit unnoticed the way
+        // Globesome's did for 25 days.
+        const fault = await noteSendFailure({
+          tenantId,
+          businessName: tenant.business_name,
+          phoneNumberId: tenant.wa_phone_number_id,
+          error: apiErr,
+        }).catch(() => null);
+
+        // ALWAYS store a reason. This branch used to persist error_message only
+        // for the 24h window, so every other failure surfaced in the inbox as a
+        // bare red "!" with nothing behind it — undiagnosable without DB access.
+        const errorMessage = is24hWindow
+          ? 'SESSION_EXPIRED'
+          : (fault?.title ?? explainMetaError(apiErr)).slice(0, 500);
+
         // Realtime pushes this UPDATE to the client — tick flips to ❌
         // SESSION_EXPIRED signals the UI to show a "send template" banner.
         await supabaseAdmin
           .from('messages')
-          .update({
-            status: 'failed',
-            ...(is24hWindow ? { error_message: 'SESSION_EXPIRED' } : {}),
-          })
+          .update({ status: 'failed', error_message: errorMessage })
           .eq('id', insertedMsg.id);
       }
 
