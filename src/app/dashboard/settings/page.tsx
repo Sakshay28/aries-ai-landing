@@ -1070,11 +1070,39 @@ export default function SettingsPage() {
                   <div>
                     <div className="font-semibold">{testResult.success ? 'Success! Connection is working.' : 'Connection Failed'}</div>
                     {testResult.success && testResult.details && (
-                      <div className="text-xs mt-1.5 space-y-1 font-mono text-emerald-600/90 dark:text-emerald-400/90">
-                        <div>Verified Name: {testResult.details.verified_name || 'N/A'}</div>
-                        <div>Display Phone: {testResult.details.display_phone_number || 'N/A'}</div>
-                        <div>Quality Rating: {testResult.details.quality_rating || 'N/A'}</div>
-                      </div>
+                      <>
+                        <div className="text-xs mt-1.5 space-y-1 font-mono text-emerald-600/90 dark:text-emerald-400/90">
+                          <div>Verified Name: {testResult.details.verified_name || 'N/A'}</div>
+                          <div>Display Phone: {testResult.details.display_phone_number || 'N/A'}</div>
+                          <div>Quality Rating: {testResult.details.quality_rating || 'N/A'}</div>
+                          <div>Display Name Status: {testResult.details.name_status || 'N/A'}</div>
+                          <div>Platform: {testResult.details.platform_type || 'N/A'}</div>
+                        </div>
+                        {/* The number Meta answers on is the only number that can be used
+                            for click-to-WhatsApp ads. Say so plainly next to it — reading
+                            it off the website or a business card is how the wrong number
+                            ends up in an ad campaign. */}
+                        <p className="text-xs mt-2 leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+                          Display Phone is the number this workspace actually receives and
+                          replies on. Use exactly this number when setting up click-to-WhatsApp ads.
+                        </p>
+                        {testResult.details.name_status &&
+                          testResult.details.name_status !== 'APPROVED' && (
+                            <div
+                              className="text-xs mt-2 p-2.5 rounded-lg leading-relaxed"
+                              style={{
+                                background: 'rgba(245,158,11,0.08)',
+                                border: '1px solid rgba(245,158,11,0.25)',
+                                color: '#B45309',
+                              }}
+                            >
+                              <strong>Display name not approved ({testResult.details.name_status}).</strong>{' '}
+                              Messaging still works, but customers see the raw phone number instead
+                              of your business name. Submit a display name for review in WhatsApp
+                              Manager &rarr; Phone numbers.
+                            </div>
+                          )}
+                      </>
                     )}
                     {!testResult.success && testResult.error && (
                       <p className="text-xs mt-1 leading-relaxed">{testResult.error}</p>

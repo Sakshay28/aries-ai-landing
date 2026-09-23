@@ -914,7 +914,25 @@ export async function testConnection(
   }
 
   try {
-    const res = await fetch(`${META_BASE}/${phoneNumberId}`, {
+    // Ask Graph for the fields explicitly. The default field set for a phone-number
+    // node omits `name_status` and `status`, so a number whose display name Meta has
+    // DECLINED — or one that is no longer CONNECTED — used to read back to the owner
+    // as a plain "connection is working". Those two are exactly what a business needs
+    // to know before it spends money pointing ads at the number.
+    const fields = [
+      'id',
+      'display_phone_number',
+      'verified_name',
+      'name_status',
+      'code_verification_status',
+      'quality_rating',
+      'platform_type',
+      'status',
+      'account_mode',
+      'throughput',
+    ].join(',');
+
+    const res = await fetch(`${META_BASE}/${phoneNumberId}?fields=${fields}`, {
       method: 'GET',
       headers: headers(accessToken),
       signal: AbortSignal.timeout(8000),
@@ -978,6 +996,38 @@ export interface ParsedMetaMessage {
     ctwa_clid?: string;
     source_url?: string;
   };
+}
+
+// ═══════════════════════════════════════
+// Click-to-WhatsApp (CTWA) entry detection
+// ═══════════════════════════════════════
+// Meta attaches `referral` to an inbound message only when the thread was opened
+// from a click-to-WhatsApp entry point, and stamps it with a `source_type` of
+// either "ad" (a paid ad) or "post" (the WhatsApp CTA on an organic Facebook or
+// Instagram post). Both are CTWA leads and both carry `ctwa_clid`.
+//
+// The webhook and the flow engine each used to test `source_type === 'ad'` on their
+// own, which silently downgraded every organic-post lead to a plain WhatsApp
+// message: no `meta_ctwa` source, no ctwa_clid stored for conversions, and any flow
+// behind a "Meta Ad Click" trigger never fired. Since the presence of the object is
+// itself Meta's signal, key off that rather than off a list of source types we would
+// have to keep in sync — losing a paid lead's attribution is far more expensive than
+// labelling an unfamiliar referral as CTWA. The two callers share this one definition
+// so they can never disagree again.
+export function isCtwaReferral(
+  referral?: {
+    source_type?: string;
+    source_id?: string;
+    ctwa_clid?: string;
+    source_url?: string;
+  } | null
+): boolean {
+  if (!referral) return false;
+  // Guard against an empty object from a malformed payload — a real referral always
+  // identifies the click somehow.
+  return Boolean(
+    referral.source_type || referral.source_id || referral.ctwa_clid || referral.source_url
+  );
 }
 
 function parseOneMetaMessage(msg: any, value: any, appPhoneId: string): ParsedMetaMessage {

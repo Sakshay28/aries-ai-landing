@@ -26,7 +26,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getRedisClient } from '@/lib/redis/client';
-import { sendTextMessage, sendMediaMessage, sendInteractiveButtonsMessage, sendInteractiveListMessage, MetaMediaType } from '@/lib/meta/service';
+import { sendTextMessage, sendMediaMessage, sendInteractiveButtonsMessage, sendInteractiveListMessage, isCtwaReferral, MetaMediaType } from '@/lib/meta/service';
 import { greetingName } from '@/lib/utils/contact-name';
 import { decryptToken } from '@/lib/utils/crypto';
 import { processMessageWithAI, TenantAIConfig } from '@/lib/ai/engine';
@@ -184,7 +184,7 @@ async function runFlowsForMessageInner(
     return false;
   }
 
-  const isFromAd = !!referral && referral.source_type === 'ad';
+  const isFromAd = isCtwaReferral(referral);
 
   const ctx: ExecContext = {
     tenantId,
