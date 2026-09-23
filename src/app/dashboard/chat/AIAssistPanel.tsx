@@ -299,7 +299,7 @@ export default function AIAssistPanel({
             "shadow-[0_8px_40px_rgba(0,0,0,0.15)] dark:shadow-[0_8px_40px_rgba(0,0,0,0.4)]",
             "ring-1 ring-black/[0.06] dark:ring-white/[0.08]",
           )}
-          style={{ maxHeight: '70vh' }}
+          style={{ maxHeight: '70dvh' }}
         >
           {/* ── Header ── */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">

@@ -246,6 +246,9 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  // Mobile-only overflow sheet for composer actions that don't fit the primary row
+  // (interactive message / AI assist / location) — see composer's `lg:hidden` trigger.
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   // Attachment picked but not yet sent — already validated/converted for WhatsApp.
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingFileNote, setPendingFileNote] = useState<string | null>(null);
@@ -2368,7 +2371,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       </AnimatePresence>
 
       {/* ── Composer ── */}
-      <div className="flex-shrink-0 px-4 pb-4 pt-3 relative">
+      <div className="flex-shrink-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 relative">
         {/* AI Assist floating panel */}
         <AIAssistPanel
           open={aiPanelOpen}
@@ -2451,15 +2454,74 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             onClick={() => fileInputRef.current?.click()}
             disabled={preparingFile}
             title="Attach photo, video or file"
-            className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/50 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors flex-shrink-0 mb-0.5 disabled:opacity-40"
+            className="w-11 h-11 lg:w-8 lg:h-8 rounded-full flex items-center justify-center text-muted-foreground/50 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors flex-shrink-0 mb-0.5 disabled:opacity-40"
           >
             <Paperclip className="w-4 h-4" />
           </button>
+
+          {/* Mobile: secondary actions (interactive message / AI assist / location)
+              collapse into one overflow sheet — a row of 6+ icon buttons doesn't fit
+              a phone width without shrinking below a usable touch target. Desktop
+              keeps them inline (unchanged, hidden here via lg:flex below). */}
+          <div className="relative flex-shrink-0 mb-0.5 lg:hidden">
+            <button
+              onClick={() => setMobileActionsOpen(v => !v)}
+              title="More actions"
+              className={cn(
+                "w-11 h-11 rounded-full flex items-center justify-center transition-all",
+                (mobileActionsOpen || interactiveComposerOpen || aiPanelOpen)
+                  ? "bg-black/[0.06] dark:bg-white/[0.08] text-foreground"
+                  : "text-muted-foreground/50 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+              )}
+            >
+              <Plus className={cn("w-5 h-5 transition-transform duration-150", mobileActionsOpen && "rotate-45")} />
+            </button>
+            <AnimatePresence>
+              {mobileActionsOpen && (
+                <>
+                  <div className="fixed inset-0 z-40 cursor-default" onClick={() => setMobileActionsOpen(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: 8 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                    transition={{ type: "spring", stiffness: 450, damping: 30 }}
+                    className="absolute bottom-14 left-0 z-50 bg-white dark:bg-[#1C2333] border border-black/10 dark:border-white/10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.18)] overflow-hidden min-w-[220px] py-1.5"
+                  >
+                    <button
+                      onClick={() => { setInteractiveComposerOpen(v => !v); setEmojiOpen(false); setAiPanelOpen(false); setMobileActionsOpen(false); }}
+                      className="w-full min-h-11 flex items-center gap-3 px-4 text-[13.5px] font-medium text-foreground/90 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                    >
+                      <LayoutList className="w-4 h-4 text-teal-500 flex-shrink-0" /> Interactive message
+                    </button>
+                    <button
+                      onClick={() => { setAiPanelOpen(v => !v); setEmojiOpen(false); setMobileActionsOpen(false); }}
+                      className="w-full min-h-11 flex items-center gap-3 px-4 text-[13.5px] font-medium text-foreground/90 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                    >
+                      <Sparkles className="w-4 h-4 text-violet-500 flex-shrink-0" /> AI Assistant
+                    </button>
+                    <button
+                      onClick={() => {
+                        setLocationPickerOpen(true);
+                        setEmojiOpen(false);
+                        setAiPanelOpen(false);
+                        setInteractiveComposerOpen(false);
+                        setMobileActionsOpen(false);
+                      }}
+                      className="w-full min-h-11 flex items-center gap-3 px-4 text-[13.5px] font-medium text-foreground/90 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                    >
+                      <MapPin className="w-4 h-4 text-emerald-500 flex-shrink-0" /> Send location
+                    </button>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+
           <button
             onClick={() => { setInteractiveComposerOpen(v => !v); setEmojiOpen(false); setAiPanelOpen(false); }}
             title="Send interactive message with buttons"
             className={cn(
-              "w-8 h-8 rounded-full flex items-center justify-center transition-all flex-shrink-0 mb-0.5",
+              "hidden lg:flex w-8 h-8 rounded-full items-center justify-center transition-all flex-shrink-0 mb-0.5",
               interactiveComposerOpen
                 ? "bg-teal-100 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400 shadow-[0_0_0_2px_rgba(20,184,166,0.2)]"
                 : "text-teal-500/70 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/30"
@@ -2471,7 +2533,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             onClick={() => { setAiPanelOpen(v => !v); setEmojiOpen(false); }}
             title="AI Assistant ✨"
             className={cn(
-              "w-8 h-8 rounded-full flex items-center justify-center transition-all flex-shrink-0 mb-0.5",
+              "hidden lg:flex w-8 h-8 rounded-full items-center justify-center transition-all flex-shrink-0 mb-0.5",
               aiPanelOpen
                 ? "bg-violet-100 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400 shadow-[0_0_0_2px_rgba(139,92,246,0.2)]"
                 : "text-violet-500/70 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30"
@@ -2487,7 +2549,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
               setInteractiveComposerOpen(false);
             }}
             title="Send Location Card"
-            className="w-8 h-8 rounded-full flex items-center justify-center text-emerald-500/70 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-all flex-shrink-0 mb-0.5"
+            className="hidden lg:flex w-8 h-8 rounded-full items-center justify-center text-emerald-500/70 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-all flex-shrink-0 mb-0.5"
           >
             <MapPin className="w-4 h-4" />
           </button>
@@ -2508,64 +2570,20 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             className="flex-1 bg-transparent border-0 resize-none outline-none text-[13.5px] text-foreground placeholder:text-muted-foreground/50 py-1.5 px-1 min-h-[36px] max-h-32"
           />
 
-          {/* Emoji picker */}
+          {/* Emoji picker trigger — the popover itself renders below, as a
+              sibling of the pill, anchored to the full-width composer wrapper
+              rather than this small button so it can't overflow a narrow phone. */}
           <div className="relative flex-shrink-0 mb-0.5">
             <button
               onClick={() => setEmojiOpen(v => !v)}
               title="Emoji"
               className={cn(
-                "w-8 h-8 rounded-full flex items-center justify-center transition-colors",
+                "w-11 h-11 lg:w-8 lg:h-8 rounded-full flex items-center justify-center transition-colors",
                 emojiOpen ? "bg-amber-50 dark:bg-amber-950/30 text-amber-500" : "text-muted-foreground/50 hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
               )}
             >
               <Smile className="w-4 h-4" />
             </button>
-            <AnimatePresence>
-              {emojiOpen && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.9, y: 4 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.9, y: 4 }}
-                  transition={{ duration: 0.12 }}
-                  className="absolute bottom-12 right-0 z-50 bg-white dark:bg-[#1C2333] border border-black/10 dark:border-white/10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.18)] overflow-hidden w-[300px]"
-                >
-                  {/* Header */}
-                  <div className="px-3 pt-2.5 pb-1.5 border-b border-border">
-                    <p className="text-[11px] font-semibold text-muted-foreground">{EMOJI_CATEGORIES[emojiCategory].name}</p>
-                  </div>
-
-                  {/* Category tabs */}
-                  <div className="flex border-b border-black/[0.06] dark:border-white/[0.06] bg-black/[0.03] dark:bg-white/[0.03]">
-                    {EMOJI_CATEGORIES.map((cat, i) => (
-                      <button
-                        key={cat.name}
-                        onClick={() => setEmojiCategory(i)}
-                        title={cat.name}
-                        className={cn(
-                          'flex-1 py-1.5 text-[15px] transition-colors',
-                          i === emojiCategory
-                            ? 'bg-white dark:bg-[#1C2333] border-b-2 border-[#00A884]'
-                            : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.05] opacity-60'
-                        )}
-                      >{cat.label}</button>
-                    ))}
-                  </div>
-
-                  {/* Scrollable emoji grid */}
-                  <div className="overflow-y-auto" style={{ maxHeight: '200px' }}>
-                    <div className="grid grid-cols-8 gap-0.5 p-2">
-                      {EMOJI_CATEGORIES[emojiCategory].emojis.map(e => (
-                        <button
-                          key={e}
-                          onClick={() => handleEmojiInsert(e)}
-                          className="w-8 h-8 flex items-center justify-center text-[18px] hover:bg-muted rounded-lg transition-colors"
-                        >{e}</button>
-                      ))}
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
           </div>
 
           {/* Send button — active when text typed OR file pending */}
@@ -2573,7 +2591,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             disabled={(!inputMsg.trim() && !pendingFile) || sending || preparingFile}
             onClick={() => handleSend()}
             className={cn(
-              "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mb-0.5 transition-all duration-150",
+              "w-11 h-11 lg:w-8 lg:h-8 rounded-full flex items-center justify-center flex-shrink-0 mb-0.5 transition-all duration-150",
               (inputMsg.trim() || pendingFile) && !sending && !preparingFile
                 ? "bg-[#00A884] text-white hover:bg-[#009874]"
                 : "text-muted-foreground/30 cursor-not-allowed"
@@ -2586,6 +2604,56 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             )}
           </button>
         </div>
+
+        {/* Emoji picker popover — anchored to this full-width relative wrapper
+            (not the small trigger button) and capped to the viewport width, so
+            it can never push past the screen edge on a phone. */}
+        <AnimatePresence>
+          {emojiOpen && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 4 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 4 }}
+              transition={{ duration: 0.12 }}
+              className="absolute bottom-[5rem] right-4 z-50 bg-white dark:bg-[#1C2333] border border-black/10 dark:border-white/10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.18)] overflow-hidden w-[min(300px,calc(100vw-2.5rem))]"
+            >
+              {/* Header */}
+              <div className="px-3 pt-2.5 pb-1.5 border-b border-border">
+                <p className="text-[11px] font-semibold text-muted-foreground">{EMOJI_CATEGORIES[emojiCategory].name}</p>
+              </div>
+
+              {/* Category tabs */}
+              <div className="flex border-b border-black/[0.06] dark:border-white/[0.06] bg-black/[0.03] dark:bg-white/[0.03]">
+                {EMOJI_CATEGORIES.map((cat, i) => (
+                  <button
+                    key={cat.name}
+                    onClick={() => setEmojiCategory(i)}
+                    title={cat.name}
+                    className={cn(
+                      'flex-1 py-1.5 text-[15px] transition-colors',
+                      i === emojiCategory
+                        ? 'bg-white dark:bg-[#1C2333] border-b-2 border-[#00A884]'
+                        : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.05] opacity-60'
+                    )}
+                  >{cat.label}</button>
+                ))}
+              </div>
+
+              {/* Scrollable emoji grid */}
+              <div className="overflow-y-auto" style={{ maxHeight: '200px' }}>
+                <div className="grid grid-cols-8 gap-0.5 p-2">
+                  {EMOJI_CATEGORIES[emojiCategory].emojis.map(e => (
+                    <button
+                      key={e}
+                      onClick={() => handleEmojiInsert(e)}
+                      className="w-8 h-8 flex items-center justify-center text-[18px] hover:bg-muted rounded-lg transition-colors"
+                    >{e}</button>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* ── Delete Confirmation Modal ── */}

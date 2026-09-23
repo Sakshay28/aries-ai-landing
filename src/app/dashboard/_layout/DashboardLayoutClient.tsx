@@ -30,8 +30,10 @@ export default function DashboardLayoutClient({
   return (
     <UserContext.Provider value={{ userName: userName || "", userEmail: userEmail || "" }}>
     <SidebarProvider>
-      {/* Root: full-screen flex row */}
-      <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
+      {/* Root: full-screen flex row. h-dvh (not h-screen/100vh) so iOS Safari's
+          dynamic address bar doesn't leave content, e.g. the chat composer,
+          sized against a taller viewport than what's actually visible. */}
+      <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
         <AppSidebar userEmail={userEmail} modules={modules} businessType={businessType} isPlatformAdmin={isPlatformAdmin} />
         <Backdrop />
 

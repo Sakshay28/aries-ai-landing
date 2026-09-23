@@ -200,9 +200,9 @@ Please verify your production environment variables in your deployment dashboard
   }
 
   return (
-    <div style={styles.root}>
-      {/* ── LEFT PANE: brand + value ──────────────────────────── */}
-      <aside style={styles.left}>
+    <div style={styles.root} className="flex min-h-dvh flex-col lg:flex-row">
+      {/* ── LEFT PANE: brand + value (desktop only) ───────────── */}
+      <aside style={styles.left} className="hidden lg:flex">
         <div style={styles.leftInner}>
           <Link href="/" style={styles.logoWrap}>
             <img src="/logo.png" alt="Aries AI" style={{ height: 38 }} />
@@ -230,10 +230,17 @@ Please verify your production environment variables in your deployment dashboard
         </div>
       </aside>
 
+      {/* ── Mobile-only compact brand header ──────────────────── */}
+      <div className="flex items-center px-5 pt-6 pb-1 lg:hidden">
+        <Link href="/" style={styles.logoWrap}>
+          <img src="/logo.png" alt="Aries AI" style={{ height: 30 }} />
+        </Link>
+      </div>
+
       {/* ── RIGHT PANE: form ──────────────────────────────────── */}
-      <main style={styles.right}>
-        {/* Top-right signup link */}
-        <div style={styles.topRight}>
+      <main style={styles.right} className="flex flex-1 flex-col px-5 py-6 sm:px-10 lg:flex-[1_1_45%] lg:px-14 lg:py-12">
+        {/* Top-right signup link — desktop only; mobile shows it below the form */}
+        <div style={styles.topRight} className="hidden lg:block">
           Not a member yet?{" "}
           <Link href="/signup" style={{ color: G, fontWeight: 700, textDecoration: "none" }}>
             Sign up
@@ -399,7 +406,14 @@ Please verify your production environment variables in your deployment dashboard
         </div>
         )}
 
-        <p style={styles.legal}>
+        {!alreadySignedInEmail && (
+          <p className="mt-6 text-center text-sm text-slate-500 lg:hidden">
+            Not a member yet?{" "}
+            <Link href="/signup" style={{ color: G, fontWeight: 700 }}>Sign up</Link>
+          </p>
+        )}
+
+        <p style={styles.legal} className="static mt-8 mb-1 lg:absolute lg:bottom-6 lg:mt-0 lg:mb-0">
           By continuing you agree to our{" "}
           <Link href="/terms" style={styles.legalLink}>Terms</Link> &{" "}
           <Link href="/privacy" style={styles.legalLink}>Privacy Policy</Link>.
@@ -478,8 +492,6 @@ function focusOff(e: React.FocusEvent<HTMLInputElement>) {
 // ─── Styles ────────────────────────────────────────────────────────────────
 const styles: Record<string, React.CSSProperties> = {
   root: {
-    display: "flex",
-    minHeight: "100vh",
     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
     background: "#fff",
     color: "#111",
@@ -489,7 +501,6 @@ const styles: Record<string, React.CSSProperties> = {
     maxWidth: "55%",
     background: `linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 40%, #ffffff 100%)`,
     padding: "48px 56px",
-    display: "flex",
     alignItems: "center",
     position: "relative",
     overflow: "hidden",
@@ -546,10 +557,6 @@ const styles: Record<string, React.CSSProperties> = {
   trustText: { fontSize: 12, color: "#475569", fontWeight: 500 },
 
   right: {
-    flex: "1 1 45%",
-    padding: "48px 56px",
-    display: "flex",
-    flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
     position: "relative",
@@ -636,8 +643,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
   forgotLink: { fontSize: 13, color: "#64748b", textDecoration: "none", fontWeight: 500 },
   legal: {
-    position: "absolute",
-    bottom: 24,
     fontSize: 12,
     color: "#94a3b8",
     textAlign: "center",

@@ -15,6 +15,7 @@ import {
   Puzzle,
   ChevronLeft,
   ChevronRight,
+  X,
   CreditCard,
   Settings,
   Bot,
@@ -91,13 +92,15 @@ export default function AppSidebar({ userEmail, modules = [], businessType = "",
       {/* Mobile — fixed drawer */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-sidebar-border bg-sidebar transition-transform duration-300 ease-in-out lg:hidden",
+          "fixed inset-y-0 left-0 z-50 flex w-[min(85vw,320px)] flex-col border-r border-sidebar-border bg-sidebar transition-transform duration-300 ease-in-out lg:hidden",
           "shadow-[inset_-1px_0_rgba(255,255,255,0.4)] dark:shadow-[4px_0_24px_-4px_rgba(0,0,0,0.8)]",
+          "pb-[env(safe-area-inset-bottom)]",
           isMobileOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
         <SidebarBody
           isOpen
+          isMobile
           onToggle={() => setMobileOpen(false)}
           isActive={isActive}
           initials={initials}
@@ -146,6 +149,7 @@ function SidebarBody({
   userEmail,
   displayName,
   isPlatformAdmin,
+  isMobile = false,
 }: {
   isOpen: boolean;
   onToggle: () => void;
@@ -154,6 +158,7 @@ function SidebarBody({
   userEmail?: string;
   displayName: string;
   isPlatformAdmin: boolean;
+  isMobile?: boolean;
 }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -214,17 +219,20 @@ function SidebarBody({
           variant="ghost"
           size="icon"
           onClick={onToggle}
-          className="h-7 w-7 text-sidebar-foreground hover:bg-black/5 dark:hover:bg-white/5 hover:text-sidebar-accent-foreground"
-          aria-label="Toggle sidebar"
+          className={cn(
+            "text-sidebar-foreground hover:bg-black/5 dark:hover:bg-white/5 hover:text-sidebar-accent-foreground",
+            isMobile ? "h-11 w-11" : "h-7 w-7",
+          )}
+          aria-label={isMobile ? "Close menu" : "Toggle sidebar"}
         >
-          {isOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          {isMobile ? <X className="h-5 w-5" /> : isOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </Button>
       </div>
 
       {/* Primary nav */}
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-5">
         {navigationItems.map((item) => (
-          <NavButton key={item.label} item={item} isOpen={isOpen} isActive={isActive(item.href)} userPlan={plan} />
+          <NavButton key={item.label} item={item} isOpen={isOpen} isActive={isActive(item.href)} userPlan={plan} isMobile={isMobile} />
         ))}
 
       </nav>
@@ -243,24 +251,24 @@ function SidebarBody({
               item={{ label: "Admin Dashboard", icon: ShieldCheck, href: "/dashboard/admin" }}
               isOpen={isOpen}
               isActive={pathname === "/dashboard/admin"}
-              userPlan={plan}
+              userPlan={plan} isMobile={isMobile}
             />
             <NavButton
               item={{ label: "Approvals", icon: ShieldCheck, href: "/dashboard/admin/approvals" }}
               isOpen={isOpen}
               isActive={isActive("/dashboard/admin/approvals")}
-              userPlan={plan}
+              userPlan={plan} isMobile={isMobile}
             />
             <NavButton
               item={{ label: "Onboard Client", icon: UserPlus, href: "/dashboard/admin/onboard" }}
               isOpen={isOpen}
               isActive={isActive("/dashboard/admin/onboard")}
-              userPlan={plan}
+              userPlan={plan} isMobile={isMobile}
             />
           </>
         )}
         {bottomItems.map((item) => (
-          <NavButton key={item.label} item={item} isOpen={isOpen} isActive={isActive(item.href)} userPlan={plan} />
+          <NavButton key={item.label} item={item} isOpen={isOpen} isActive={isActive(item.href)} userPlan={plan} isMobile={isMobile} />
         ))}
       </div>
 
@@ -352,11 +360,13 @@ function NavButton({
   isOpen,
   isActive,
   userPlan: _userPlan,
+  isMobile = false,
 }: {
   item: NavItem;
   isOpen: boolean;
   isActive: boolean;
   userPlan: string;
+  isMobile?: boolean;
 }) {
   const Icon = item.icon;
 
@@ -370,6 +380,7 @@ function NavButton({
           ? "bg-black/5 dark:bg-white/5 text-sidebar-accent-foreground"
           : "text-sidebar-foreground/80 hover:bg-black/5 dark:hover:bg-white/5 hover:text-sidebar-accent-foreground",
         !isOpen && "justify-center",
+        isMobile && "min-h-[44px]",
       )}
       title={!isOpen ? item.label : undefined}
     >
