@@ -223,8 +223,9 @@ describe('GET /api/auth/google/callback — new-tenant provisioning', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.GOOGLE_CLIENT_SECRET = 'test-secret';
+    const mockPayload = Buffer.from(JSON.stringify({ email: 'newuser@acme.com', name: 'New User' })).toString('base64');
     global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ id_token: 'fake-id-token' }),
+      json: () => Promise.resolve({ id_token: `header.${mockPayload}.signature`, access_token: 'mock-access-token' }),
     }) as any;
   });
 

@@ -45,6 +45,7 @@ export async function GET(req: NextRequest) {
     state,
     nonce: hashedNonce,
     prompt: 'select_account',
+    access_type: 'offline',
   });
 
   const response = NextResponse.redirect(
