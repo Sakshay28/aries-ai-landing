@@ -97,6 +97,7 @@ export async function GET(req: NextRequest) {
   const applySessionCookies = (response: NextResponse) => {
     response.cookies.delete('google_oauth_state');
     response.cookies.delete('google_oauth_nonce');
+    response.cookies.delete('google_oauth_consent');
     pendingCookies.forEach(({ name, value, options }) => {
       response.cookies.set(name, value, {
         ...options,
@@ -109,12 +110,29 @@ export async function GET(req: NextRequest) {
     return response;
   };
 
-  // Returning user — go to dashboard
-  const { data: existingUser } = await supabaseAdmin
+  // 1. Returning user by auth_id — go straight to dashboard
+  let { data: existingUser } = await supabaseAdmin
     .from('users')
-    .select('tenant_id')
+    .select('id, tenant_id, auth_id')
     .eq('auth_id', user.id)
     .maybeSingle();
+
+  // 2. Existing user by email (e.g. signed up with OTP/password previously) — link auth_id and go to dashboard
+  if (!existingUser && user.email) {
+    const { data: userByEmail } = await supabaseAdmin
+      .from('users')
+      .select('id, tenant_id, auth_id')
+      .eq('email', user.email.toLowerCase().trim())
+      .maybeSingle();
+
+    if (userByEmail) {
+      await supabaseAdmin
+        .from('users')
+        .update({ auth_id: user.id })
+        .eq('id', userByEmail.id);
+      existingUser = userByEmail;
+    }
+  }
 
   if (existingUser) {
     await logAuthEvent('google_oauth_success', user.email ?? '', ip, { userId: user.id, returning: true });
