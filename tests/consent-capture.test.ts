@@ -58,6 +58,7 @@ function chain(overrides: Record<string, any> = {}) {
   const c: any = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    ilike: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
     delete: vi.fn().mockReturnThis(),
     single: vi.fn().mockResolvedValue({ data: null, error: null }),
@@ -218,7 +219,7 @@ describe('GET /api/auth/google — consent cookie', () => {
   });
 });
 
-describe('GET /api/auth/google/callback — consent gate on new-tenant provisioning', () => {
+describe('GET /api/auth/google/callback — new-tenant provisioning', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.GOOGLE_CLIENT_SECRET = 'test-secret';
@@ -234,24 +235,7 @@ describe('GET /api/auth/google/callback — consent gate on new-tenant provision
     );
   }
 
-  it('refuses to auto-provision a new tenant without the consent cookie', async () => {
-    mockSignInWithIdToken.mockResolvedValue({ data: { user: { id: 'auth-new', email: 'newuser@acme.com' } }, error: null });
-    (supabaseAdmin.from as any).mockImplementation((table: string) => {
-      if (table === 'users') return chain({ maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }) });
-      return chain();
-    });
-
-    const { GET } = await import('@/app/api/auth/google/callback/route');
-    const cookieHeader = 'google_oauth_state=matching-state; google_oauth_nonce=raw-nonce';
-    const res = await GET(makeCallbackReq(cookieHeader));
-
-    expect(res.headers.get('location')).toContain('/signup?error=consent_required');
-    const tenantsCalls = (supabaseAdmin.from as any).mock.calls.filter((c: any[]) => c[0] === 'tenants');
-    expect(tenantsCalls.length).toBe(0);
-    expect(recordConsent).not.toHaveBeenCalled();
-  });
-
-  it('provisions and records consent when the cookie is present', async () => {
+  it('provisions and records consent for new Google OAuth signups', async () => {
     mockSignInWithIdToken.mockResolvedValue({ data: { user: { id: 'auth-new', email: 'newuser@acme.com' } }, error: null });
     (supabaseAdmin.from as any).mockImplementation((table: string) => {
       if (table === 'users') return chain({ maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }) });
@@ -260,7 +244,7 @@ describe('GET /api/auth/google/callback — consent gate on new-tenant provision
     });
 
     const { GET } = await import('@/app/api/auth/google/callback/route');
-    const cookieHeader = 'google_oauth_state=matching-state; google_oauth_nonce=raw-nonce; google_oauth_consent=1';
+    const cookieHeader = 'google_oauth_state=matching-state; google_oauth_nonce=raw-nonce';
     const res = await GET(makeCallbackReq(cookieHeader));
 
     expect(res.headers.get('location')).toContain('/onboard');

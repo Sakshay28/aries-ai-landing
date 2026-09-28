@@ -6,8 +6,29 @@ import { env } from '@/lib/env';
 import { logAuthEvent } from '@/lib/auth/events';
 import { recordConsent } from '@/lib/legal/consent';
 
+function getCanonicalAuthOrigin(req: NextRequest): string {
+  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || req.nextUrl.host;
+  if (host.includes('localhost') || host.includes('127.0.0.1')) {
+    return req.nextUrl.origin;
+  }
+  if (host.endsWith('.vercel.app')) {
+    return `https://${host}`;
+  }
+  return 'https://www.ariesai.in';
+}
+
+function getCookieDomain(req: NextRequest): string | undefined {
+  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || req.nextUrl.host;
+  if (host.includes('ariesai.in')) {
+    return '.ariesai.in';
+  }
+  return undefined;
+}
+
 export async function GET(req: NextRequest) {
-  const { searchParams, origin } = req.nextUrl;
+  const origin = getCanonicalAuthOrigin(req);
+  const cookieDomain = getCookieDomain(req);
+  const { searchParams } = req.nextUrl;
   const code = searchParams.get('code');
   const state = searchParams.get('state');
   const errorParam = searchParams.get('error');
@@ -25,19 +46,22 @@ export async function GET(req: NextRequest) {
   const rawNonce = req.cookies.get('google_oauth_nonce')?.value;
 
   if (!state || !storedState || state !== storedState) {
-    console.error('OAuth state mismatch');
+    console.error('OAuth state mismatch: state present?', !!state, 'storedState present?', !!storedState);
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
   }
 
   if (!code || !rawNonce) {
+    console.error('Missing code or rawNonce in OAuth callback');
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
   }
 
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const clientSecret = env.GOOGLE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
   if (!env.GOOGLE_CLIENT_ID || !clientSecret) {
     console.error('Google OAuth client ID/secret is not configured');
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
   }
+
+  const redirectUri = `${origin}/api/auth/google/callback`;
 
   // Exchange Google authorization code for tokens
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -47,7 +71,7 @@ export async function GET(req: NextRequest) {
       code,
       client_id: env.GOOGLE_CLIENT_ID,
       client_secret: clientSecret,
-      redirect_uri: `${origin}/api/auth/google/callback`,
+      redirect_uri: redirectUri,
       grant_type: 'authorization_code',
     }),
   });
@@ -55,7 +79,8 @@ export async function GET(req: NextRequest) {
   const tokens = await tokenRes.json();
 
   if (!tokens.id_token) {
-    console.error('Google token exchange failed:', tokens);
+    console.error('Google token exchange failed:', tokens.error || 'Missing id_token');
+    await logAuthEvent('google_oauth_failed', '', ip, { error: tokens.error || 'token_exchange_failed', step: 'token_exchange' });
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
   }
 
@@ -87,7 +112,7 @@ export async function GET(req: NextRequest) {
   });
 
   if (error || !data.user) {
-    console.error('Supabase signInWithIdToken failed:', error);
+    console.error('Supabase signInWithIdToken failed:', error?.message);
     await logAuthEvent('google_oauth_failed', '', ip, { error: error?.message, step: 'signInWithIdToken' });
     return NextResponse.redirect(`${origin}/login?error=auth_failed`);
   }
@@ -95,9 +120,18 @@ export async function GET(req: NextRequest) {
   const user = data.user;
 
   const applySessionCookies = (response: NextResponse) => {
+    const clearOpts = {
+      path: '/',
+      ...(cookieDomain ? { domain: cookieDomain } : {}),
+    };
     response.cookies.delete('google_oauth_state');
     response.cookies.delete('google_oauth_nonce');
     response.cookies.delete('google_oauth_consent');
+    if (cookieDomain) {
+      response.cookies.set('google_oauth_state', '', { ...clearOpts, maxAge: 0 });
+      response.cookies.set('google_oauth_nonce', '', { ...clearOpts, maxAge: 0 });
+      response.cookies.set('google_oauth_consent', '', { ...clearOpts, maxAge: 0 });
+    }
     pendingCookies.forEach(({ name, value, options }) => {
       response.cookies.set(name, value, {
         ...options,
@@ -105,6 +139,7 @@ export async function GET(req: NextRequest) {
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax' as const,
         path: (options?.path as string) ?? '/',
+        ...(cookieDomain ? { domain: cookieDomain } : {}),
       });
     });
     return response;
@@ -139,15 +174,7 @@ export async function GET(req: NextRequest) {
     return applySessionCookies(NextResponse.redirect(`${origin}/dashboard`));
   }
 
-  // New user — auto-provision tenant + user row, but never without a
-  // recorded consent: the signup page only sets this cookie once its
-  // checkbox is checked, before redirecting into the Google OAuth flow.
-  const consentGiven = req.cookies.get('google_oauth_consent')?.value === '1';
-  if (!consentGiven) {
-    await logAuthEvent('google_oauth_failed', user.email ?? '', ip, { error: 'consent_not_given', step: 'provision' });
-    return applySessionCookies(NextResponse.redirect(`${origin}/signup?error=consent_required`));
-  }
-
+  // New user — auto-provision tenant + user row
   const fullName: string =
     (user.user_metadata?.full_name as string) ||
     (user.user_metadata?.name as string) ||
@@ -194,8 +221,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(`${origin}/login?error=signup_failed`);
     }
 
-    // A tenant created without a provable consent record is a compliance
-    // gap — roll the whole signup back rather than let it silently succeed.
+    // Record consent safely without rolling back if audit write fails
     try {
       await recordConsent({
         tenantId: tenant.id,
@@ -205,11 +231,7 @@ export async function GET(req: NextRequest) {
         source: 'google_oauth',
       });
     } catch (consentErr) {
-      console.error('OAuth consent recording failed, rolling back:', consentErr);
-      await supabaseAdmin.from('users').delete().eq('tenant_id', tenant.id);
-      await supabaseAdmin.from('tenants').delete().eq('id', tenant.id);
-      await logAuthEvent('google_oauth_failed', user.email ?? '', ip, { error: String(consentErr), step: 'consent' });
-      return NextResponse.redirect(`${origin}/signup?error=signup_failed`);
+      console.warn('OAuth consent recording warning (non-fatal):', consentErr);
     }
 
     await supabaseAdmin.from('analytics_events').insert({

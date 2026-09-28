@@ -52,6 +52,7 @@ const rawPlatformAdminEmail = process.env.PLATFORM_ADMIN_EMAIL;
 // was empty and Google rejected the request with "Missing required parameter:
 // client_id". Prefer GOOGLE_CLIENT_ID; fall back to the legacy prefixed name.
 const rawGoogleClientId = process.env.GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+const rawGoogleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
 // 2. Export sanitized environment variable block
 export const env = {
@@ -61,9 +62,9 @@ export const env = {
   SUPABASE_SERVICE_ROLE_KEY: isServer ? cleanEnvValue(rawServiceRoleKey) : '',
   NEXT_PUBLIC_APP_URL: cleanEnvValue(rawAppUrl) || 'http://localhost:3000',
   PLATFORM_ADMIN_EMAIL: cleanEnvValue(rawPlatformAdminEmail) || 'admin@ariesai.in',
-  // Server-only — the client ID is not a secret, but it is only read by server
-  // route handlers, so we never inline it into the browser bundle.
+  // Server-only — the client ID and secret are only read by server route handlers
   GOOGLE_CLIENT_ID: isServer ? cleanEnvValue(rawGoogleClientId) : '',
+  GOOGLE_CLIENT_SECRET: isServer ? cleanEnvValue(rawGoogleClientSecret) : '',
   NODE_ENV: process.env.NODE_ENV || 'development',
 };
 
