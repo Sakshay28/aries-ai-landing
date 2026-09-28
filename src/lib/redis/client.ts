@@ -28,17 +28,44 @@ let _redis: RedisClient | null = null;
 export function getRedisClient(): RedisClient | null {
   if (_redis) return _redis;
 
-  const url = process.env.UPSTASH_REDIS_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return null;
+  let restUrl = (process.env.UPSTASH_REDIS_REST_URL || '').trim();
+  let restToken = (process.env.UPSTASH_REDIS_REST_TOKEN || process.env.UPSTASH_REDIS_TOKEN || '').trim();
 
-  // Upstash REST API wrapper — works in any Node.js / Edge environment
+  // If REST URL is not explicitly set, see if UPSTASH_REDIS_URL was provided
+  const rawUrl = (process.env.UPSTASH_REDIS_URL || '').trim();
+  if (!restUrl && rawUrl) {
+    if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+      restUrl = rawUrl;
+    } else if (rawUrl.startsWith('redis://') || rawUrl.startsWith('rediss://')) {
+      try {
+        const parsed = new URL(rawUrl);
+        restUrl = `https://${parsed.hostname}`;
+        if (!restToken && parsed.password) {
+          restToken = parsed.password;
+        }
+      } catch {
+        // Invalid URL format
+      }
+    }
+  }
+
+  if (!restUrl || !restToken || !restUrl.startsWith('http')) {
+    return null;
+  }
+
+  // Upstash REST API wrapper with strict 1.5s timeout — never hangs requests
   const call = async (method: string, args: unknown[]): Promise<unknown> => {
-    const res = await fetch(`${url}/${[method, ...args].map(a => encodeURIComponent(String(a))).join('/')}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const json = await res.json() as { result: unknown };
-    return json.result;
+    try {
+      const res = await fetch(`${restUrl}/${[method, ...args].map(a => encodeURIComponent(String(a))).join('/')}`, {
+        headers: { Authorization: `Bearer ${restToken}` },
+        signal: AbortSignal.timeout(1500),
+      });
+      if (!res.ok) return null;
+      const json = await res.json() as { result: unknown };
+      return json.result;
+    } catch {
+      return null;
+    }
   };
 
   _redis = {
@@ -192,15 +219,17 @@ export async function checkRedisRateLimit(
   try {
     const redisKey = `rl:${key}`;
     const count = await redis.incr(redisKey);
+    if (typeof count !== 'number' || isNaN(count)) {
+      return _memRateLimit(key, maxRequests, windowSeconds);
+    }
     // Set TTL only on first request in the window
     if (count === 1) {
-      await redis.expire(redisKey, windowSeconds);
+      await redis.expire(redisKey, windowSeconds).catch(() => {});
     }
     const remaining = Math.max(0, maxRequests - count);
     return { allowed: count <= maxRequests, remaining };
   } catch (err) {
     // Redis error — fall back to in-memory limit
-    console.warn('⚠️ Rate limit Redis error (using in-memory fallback):', (err as Error).message);
     return _memRateLimit(key, maxRequests, windowSeconds);
   }
 }
