@@ -18,24 +18,24 @@
 // ═══════════════════════════════════════════════════════════
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { analyzeImage, analyzeVideo, classifyPdfText, extractPdfText, buildContentText } from '@/lib/ai/media-analysis';
+import { analyzeImage, analyzeVideo, classifyDocText, extractDocumentText, buildContentText } from '@/lib/ai/media-analysis';
 import { storeDocEmbedding } from '@/lib/ai/rag';
 import * as Sentry from '@/lib/sentry-stub';
 
 export interface MediaAnalysisJobData {
-  docId:       string;
-  storagePath: string;
-  bucket:      string;
-  mimeType:    string;
-  fileType:    string; // extension: jpg/png/webp/mp4/mov/webm/pdf
-  filename:    string;
-  contentText?: string; // already-extracted PDF text, if any
+  docId:        string;
+  storagePath:  string;
+  bucket:       string;
+  mimeType:     string;
+  fileType:     string; // extension: jpg/png/webp/mp4/mov/webm/pdf/docx/xlsx/txt/md/etc.
+  filename:     string;
+  contentText?: string; // already-extracted text, if any
 }
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp']);
 const VIDEO_EXTS = new Set(['mp4', 'mov', 'webm']);
 
-// ── Simple in-process throttle: max N concurrent Gemini vision calls ──
+// ── Simple in-process throttle: max N concurrent Gemini vision/analysis calls ──
 const MAX_CONCURRENT = 2;
 let _running = 0;
 const _pending: Array<() => void> = [];
@@ -54,6 +54,7 @@ function releaseSlot() {
 
 async function runAnalysis(job: MediaAnalysisJobData): Promise<void> {
   const { docId, storagePath, bucket, mimeType, fileType, filename } = job;
+  const normExt = (fileType || '').toLowerCase().trim();
 
   const { error: markErr } = await supabaseAdmin
     .from('knowledge_docs')
@@ -68,12 +69,12 @@ async function runAnalysis(job: MediaAnalysisJobData): Promise<void> {
     let category = '';
     let contentText = '';
 
-    if (IMAGE_EXTS.has(fileType) || VIDEO_EXTS.has(fileType)) {
+    if (IMAGE_EXTS.has(normExt) || VIDEO_EXTS.has(normExt)) {
       const { data: fileData, error: dlErr } = await supabaseAdmin.storage.from(bucket).download(storagePath);
-      if (dlErr || !fileData) throw new Error(dlErr?.message || 'download failed');
+      if (dlErr || !fileData) throw new Error(dlErr?.message || 'Storage download failed');
       const buffer = Buffer.from(await fileData.arrayBuffer());
 
-      const result = IMAGE_EXTS.has(fileType)
+      const result = IMAGE_EXTS.has(normExt)
         ? await analyzeImage(buffer, mimeType)
         : await analyzeVideo(buffer, mimeType);
 
@@ -82,33 +83,30 @@ async function runAnalysis(job: MediaAnalysisJobData): Promise<void> {
       tags = result.tags;
       category = result.category;
       contentText = buildContentText(filename, result);
-    } else if (fileType === 'pdf') {
-      // Text extraction happens here (self-contained, like image/video
-      // analysis) rather than synchronously in the upload route — a large
-      // PDF's Gemini extraction call could otherwise approach or exceed the
-      // serverless function's request timeout before the row is even
-      // inserted. The caller may still pass already-extracted text (e.g.
-      // the stuck-job reconciler re-using a previously extracted value).
+    } else {
+      // Document / Text files: PDF, DOCX, DOC, XLSX, XLS, PPT, PPTX, CSV, TXT, MD, JSON
       let extractedText = job.contentText || '';
       if (!extractedText) {
         const { data: fileData, error: dlErr } = await supabaseAdmin.storage.from(bucket).download(storagePath);
-        if (dlErr || !fileData) throw new Error(dlErr?.message || 'download failed');
+        if (dlErr || !fileData) throw new Error(dlErr?.message || 'Storage download failed');
         const buffer = Buffer.from(await fileData.arrayBuffer());
-        extractedText = await extractPdfText(buffer);
+        extractedText = await extractDocumentText(buffer, normExt);
       }
-      const result = await classifyPdfText(extractedText, filename);
-      title = result.title;
-      description = result.description;
-      tags = result.tags;
-      category = result.category;
-      contentText = extractedText;
+
+      if (extractedText.trim()) {
+        const result = await classifyDocText(extractedText, filename);
+        title = result.title;
+        description = result.description;
+        tags = result.tags;
+        category = result.category;
+        contentText = extractedText;
+      } else {
+        contentText = `${filename} (${normExt.toUpperCase()})`;
+      }
     }
 
-    // Store the embedding BEFORE flipping processing_status to 'ready' — a
-    // reader that sees 'ready' must always find a non-null embedding, or
-    // match_knowledge_docs (which requires embedding IS NOT NULL) would
-    // silently miss a doc the UI already claims is searchable.
-    if (contentText) {
+    // Store the embedding BEFORE flipping processing_status to 'ready'
+    if (contentText && contentText.trim()) {
       await storeDocEmbedding(docId, contentText);
     }
 

@@ -11,12 +11,14 @@ import { computeSha256, validateFileSignature, findDuplicateByHash } from '@/lib
 export const maxDuration = 60; // clamped to 10s on Hobby — see MediaAnalysisWorkerService for the retry story on files whose analysis exceeds that
 
 const TEXT_TYPES = new Set(['txt', 'md', 'csv', 'json', 'html', 'xml']);
-const MEDIA_TYPES = new Set(['mp4', 'mov', 'webm', 'jpg', 'jpeg', 'png', 'webp']);
-const ALLOWED_EXTS = new Set([...TEXT_TYPES, 'pdf', ...MEDIA_TYPES]);
+const MEDIA_TYPES = new Set(['mp4', 'mov', 'webm', '3gp', 'jpg', 'jpeg', 'png', 'webp', 'gif']);
+const DOC_TYPES = new Set(['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']);
+const ALLOWED_EXTS = new Set([...TEXT_TYPES, ...DOC_TYPES, ...MEDIA_TYPES]);
 const MAX_BYTES = 500_000;          // 500 KB text cap before truncation
-const MAX_UPLOAD_BYTES_TEXT = 5_000_000;  // 5 MB for text/PDF
-const MAX_UPLOAD_BYTES_MEDIA = 16_000_000; // 16 MB for video/images (WhatsApp limit)
-const MAX_UPLOADS_PER_DAY = 20;     // per-tenant upload cap (Gemini cost abuse guard)
+const MAX_UPLOAD_BYTES_TEXT = 20_000_000;  // 20 MB for text
+const MAX_UPLOAD_BYTES_MEDIA = 16_000_000; // 16 MB for video/images
+const MAX_UPLOAD_BYTES_DOC = 100_000_000;  // 100 MB for documents
+const MAX_UPLOADS_PER_DAY = 300;    // per-tenant upload cap (Gemini cost abuse guard)
 
 // ── GET: list all knowledge docs for the tenant ──────────────
 export async function GET() {
@@ -64,11 +66,10 @@ export async function POST(req: NextRequest) {
   const tenantId = await getTenantId();
   if (!tenantId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  // Per-tenant upload rate limit — caps Gemini PDF-extraction cost abuse.
   const rl = await checkRedisRateLimit(`kb_upload:${tenantId}`, MAX_UPLOADS_PER_DAY, 86400);
   if (!rl.allowed) {
     return NextResponse.json(
-      { error: 'Daily knowledge upload limit reached. Try again tomorrow.' },
+      { error: 'Daily upload limit reached. Try again tomorrow.' },
       { status: 429 }
     );
   }
@@ -77,18 +78,24 @@ export async function POST(req: NextRequest) {
   const file = form.get('file') as File | null;
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
 
+  if (file.size <= 0) {
+    return NextResponse.json({ error: `File "${file.name}" is empty (0 bytes).` }, { status: 400 });
+  }
+
   const ext = file.name.split('.').pop()?.toLowerCase() ?? 'txt';
 
-  // Reject unsupported types up front (only text formats + pdf are processed).
   if (!ALLOWED_EXTS.has(ext)) {
     return NextResponse.json(
-      { error: `Unsupported file type ".${ext}". Allowed: ${[...ALLOWED_EXTS].join(', ')}.` },
+      { error: `Unsupported file type ".${ext}". Allowed: PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT, MD, CSV, JSON, JPG, PNG, WEBP, MP4, WebM.` },
       { status: 400 }
     );
   }
 
-  const isMedia = MEDIA_TYPES.has(ext);
-  const maxBytes = isMedia ? MAX_UPLOAD_BYTES_MEDIA : MAX_UPLOAD_BYTES_TEXT;
+  const maxBytes = DOC_TYPES.has(ext)
+    ? MAX_UPLOAD_BYTES_DOC
+    : MEDIA_TYPES.has(ext)
+      ? MAX_UPLOAD_BYTES_MEDIA
+      : MAX_UPLOAD_BYTES_TEXT;
 
   if (file.size > maxBytes) {
     return NextResponse.json(
@@ -98,18 +105,12 @@ export async function POST(req: NextRequest) {
   }
 
   const isText = TEXT_TYPES.has(ext);
-  const isPdf = ext === 'pdf';
-
   let contentText = '';
   let fileUrl: string | null = null;
 
   const bytes = await file.arrayBuffer();
   const buffer = Buffer.from(bytes);
 
-  // ── Reject files whose bytes don't match their claimed type ───────
-  // (Stand-in for AV scanning — these are owner-only uploads to their own
-  // private tenant bucket, not public user-generated content, so we
-  // validate structure rather than run a full virus scan.)
   if (!validateFileSignature(buffer, ext)) {
     return NextResponse.json(
       { error: `File content doesn't match its extension ".${ext}". The file may be corrupted or mislabeled.` },
@@ -117,41 +118,27 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── Soft duplicate check — warn, don't block ───────────────────────
   const fileHash = computeSha256(buffer);
   const duplicate = await findDuplicateByHash(tenantId, fileHash);
   if (duplicate) {
     return NextResponse.json({ success: true, duplicate: true, existingDoc: duplicate });
   }
 
-  // ── Upload raw file to Supabase Storage ──────────────────
-  const storagePath = `${tenantId}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+  // Sanitize storage path
+  const sanitized = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/_+/g, '_');
+  const storagePath = `${tenantId}/${Date.now()}_${sanitized}`;
   const { error: uploadErr } = await supabaseAdmin.storage
     .from('knowledge-docs')
     .upload(storagePath, buffer, { contentType: file.type || 'application/octet-stream', upsert: false });
 
   if (!uploadErr) {
-    // Store the storage path, not a permanent public URL.
-    // Knowledge docs may contain proprietary content (menus, SOPs, pricing).
-    // Public URLs are guessable from the path pattern; signed URLs (generated
-    // on read with a 1-hour expiry) require server-side generation and are
-    // not accessible to unauthenticated parties. The GET handler now generates
-    // signed URLs on each listing request so the dashboard can display/download files.
     fileUrl = storagePath;
   }
 
-  // ── Extract text for plain text types now (cheap, synchronous). PDFs go ──
-  // through async analysis (enqueueMediaAnalysis) instead of extracting here
-  // — a large PDF's Gemini call could otherwise approach this request's
-  // own timeout before the row is even inserted.
   if (isText) {
     const raw = buffer.toString('utf-8');
     contentText = raw.length > MAX_BYTES ? raw.slice(0, MAX_BYTES) + '\n...[truncated]' : raw;
   }
-
-  // Media and PDFs go through async AI analysis (vision/video/tagging) before
-  // they're searchable — start as 'pending' so the UI can show a processing state.
-  const needsAnalysis = isMedia || isPdf;
 
   const { data, error } = await supabaseAdmin
     .from('knowledge_docs')
@@ -162,31 +149,30 @@ export async function POST(req: NextRequest) {
       content_text: contentText,
       file_url: fileUrl,
       file_hash: fileHash,
-      processing_status: needsAnalysis ? 'pending' : 'ready',
+      processing_status: 'pending',
     })
     .select('id, filename, file_type, file_url, created_at, embedding, title, description, tags, category, processing_status')
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  // after() guarantees this keeps running past the response being sent —
-  // a plain fire-and-forget call has no such guarantee on Vercel.
-  if (data?.id) {
-    if (needsAnalysis) {
-      after(() => enqueueMediaAnalysis({
-        docId:       data.id,
-        storagePath: storagePath,
-        bucket:      'knowledge-docs',
-        mimeType:    file.type || 'application/octet-stream',
-        fileType:    ext,
-        filename:    file.name,
-      }));
-    } else if (contentText) {
-      after(() => enqueueEmbedding({ docId: data.id, contentText }));
+  if (error) {
+    if (fileUrl) {
+      await supabaseAdmin.storage.from('knowledge-docs').remove([fileUrl]);
     }
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Flush all tenant caches so the next AI request immediately uses the new document
+  if (data?.id) {
+    after(() => enqueueMediaAnalysis({
+      docId:       data.id,
+      storagePath: storagePath,
+      bucket:      'knowledge-docs',
+      mimeType:    file.type || 'application/octet-stream',
+      fileType:    ext,
+      filename:    file.name,
+      contentText: contentText || undefined,
+    }));
+  }
+
   await invalidateTenantAllCaches(tenantId);
 
   return NextResponse.json({ success: true, data });
@@ -201,6 +187,14 @@ export async function DELETE(req: NextRequest) {
   const id = searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
+  // Get file_url to clean up storage if needed
+  const { data: existing } = await supabaseAdmin
+    .from('knowledge_docs')
+    .select('file_url')
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+    .maybeSingle();
+
   const { error } = await supabaseAdmin
     .from('knowledge_docs')
     .delete()
@@ -209,7 +203,10 @@ export async function DELETE(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Flush all tenant caches so the next AI request won't use stale RAG results
+  if (existing?.file_url && !existing.file_url.startsWith('http')) {
+    await supabaseAdmin.storage.from('knowledge-docs').remove([existing.file_url]);
+  }
+
   await invalidateTenantAllCaches(tenantId);
 
   return NextResponse.json({ success: true });

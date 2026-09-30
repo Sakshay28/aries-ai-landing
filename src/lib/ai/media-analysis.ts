@@ -108,8 +108,125 @@ Return ONLY a JSON object with these exact keys:
   }
 }
 
-// ── Extract raw text from a PDF via Gemini (no size gate — the underlying ──
-// ── request either succeeds or throws, callers handle both gracefully) ──
+import * as zlib from 'zlib';
+import * as XLSX from 'xlsx';
+
+// ── Extract text from DOCX files by reading word/document.xml from ZIP ──
+export function extractDocxText(buffer: Buffer): string {
+  try {
+    let offset = 0;
+    while (offset < buffer.length - 4) {
+      if (buffer.readUInt32LE(offset) === 0x04034b50) {
+        const compMethod = buffer.readUInt16LE(offset + 8);
+        const compSize = buffer.readUInt32LE(offset + 18);
+        const fnLen = buffer.readUInt16LE(offset + 26);
+        const extraLen = buffer.readUInt16LE(offset + 28);
+        const filename = buffer.slice(offset + 30, offset + 30 + fnLen).toString('utf8');
+        const dataOffset = offset + 30 + fnLen + extraLen;
+
+        if (filename === 'word/document.xml') {
+          const compData = buffer.slice(dataOffset, dataOffset + compSize);
+          let xml = '';
+          if (compMethod === 8) {
+            xml = zlib.inflateRawSync(compData).toString('utf8');
+          } else if (compMethod === 0) {
+            xml = compData.toString('utf8');
+          }
+          return xml
+            .replace(/<w:p[^>]*>/g, '\n')
+            .replace(/<w:tab\/>/g, '\t')
+            .replace(/<w:br\/>/g, '\n')
+            .replace(/<[^>]+>/g, '')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&amp;/g, '&')
+            .replace(/&quot;/g, '"')
+            .replace(/&apos;/g, "'")
+            .replace(/\n\s*\n/g, '\n')
+            .trim();
+        }
+        offset = dataOffset + compSize;
+      } else {
+        offset++;
+      }
+    }
+  } catch (err) {
+    console.error('media-analysis: extractDocxText failed:', (err as Error).message);
+  }
+  return '';
+}
+
+// ── Extract text from PPTX files by reading slide XMLs from ZIP ──
+export function extractPptxText(buffer: Buffer): string {
+  try {
+    let offset = 0;
+    const slides: Array<{ num: number; text: string }> = [];
+    while (offset < buffer.length - 4) {
+      if (buffer.readUInt32LE(offset) === 0x04034b50) {
+        const compMethod = buffer.readUInt16LE(offset + 8);
+        const compSize = buffer.readUInt32LE(offset + 18);
+        const fnLen = buffer.readUInt16LE(offset + 26);
+        const extraLen = buffer.readUInt16LE(offset + 28);
+        const filename = buffer.slice(offset + 30, offset + 30 + fnLen).toString('utf8');
+        const dataOffset = offset + 30 + fnLen + extraLen;
+
+        const match = filename.match(/^ppt\/slides\/slide(\d+)\.xml$/);
+        if (match) {
+          const slideNum = parseInt(match[1], 10);
+          const compData = buffer.slice(dataOffset, dataOffset + compSize);
+          let xml = '';
+          if (compMethod === 8) {
+            xml = zlib.inflateRawSync(compData).toString('utf8');
+          } else if (compMethod === 0) {
+            xml = compData.toString('utf8');
+          }
+          const text = xml
+            .replace(/<a:p[^>]*>/g, '\n')
+            .replace(/<[^>]+>/g, '')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&amp;/g, '&')
+            .replace(/&quot;/g, '"')
+            .replace(/&apos;/g, "'")
+            .replace(/\n\s*\n/g, '\n')
+            .trim();
+          if (text) slides.push({ num: slideNum, text });
+        }
+        offset = dataOffset + compSize;
+      } else {
+        offset++;
+      }
+    }
+    slides.sort((a, b) => a.num - b.num);
+    return slides.map(s => `Slide ${s.num}:\n${s.text}`).join('\n\n');
+  } catch (err) {
+    console.error('media-analysis: extractPptxText failed:', (err as Error).message);
+  }
+  return '';
+}
+
+// ── Extract text from Excel (XLSX, XLS) or CSV spreadsheets ──
+export function extractSpreadsheetText(buffer: Buffer): string {
+  try {
+    const wb = XLSX.read(buffer, { type: 'buffer' });
+    let text = '';
+    for (const name of wb.SheetNames) {
+      const sheet = wb.Sheets[name];
+      if (sheet) {
+        const csv = XLSX.utils.sheet_to_csv(sheet);
+        if (csv.trim()) {
+          text += `Sheet: ${name}\n${csv}\n\n`;
+        }
+      }
+    }
+    return text.trim();
+  } catch (err) {
+    console.error('media-analysis: extractSpreadsheetText failed:', (err as Error).message);
+    return '';
+  }
+}
+
+// ── Extract raw text from a PDF via Gemini ──
 export async function extractPdfText(buffer: Buffer): Promise<string> {
   try {
     const response = await getAI().models.generateContent({
@@ -126,9 +243,34 @@ export async function extractPdfText(buffer: Buffer): Promise<string> {
   }
 }
 
-// ── Classify already-extracted PDF text: title/description/tags/category ──
-// ── (cheap — no re-upload of the PDF bytes, reuses the existing extraction) ──
-export async function classifyPdfText(contentText: string, filename: string): Promise<Pick<MediaAnalysisResult, 'title' | 'description' | 'tags' | 'category'>> {
+// ── Unified Document Text Extractor ──
+export async function extractDocumentText(buffer: Buffer, ext: string): Promise<string> {
+  const normExt = ext.toLowerCase().trim();
+  if (normExt === 'pdf') {
+    return extractPdfText(buffer);
+  }
+  if (normExt === 'xlsx' || normExt === 'xls' || normExt === 'csv') {
+    return extractSpreadsheetText(buffer);
+  }
+  if (normExt === 'docx') {
+    return extractDocxText(buffer);
+  }
+  if (normExt === 'pptx') {
+    return extractPptxText(buffer);
+  }
+  if (['txt', 'md', 'json', 'html', 'xml'].includes(normExt)) {
+    return buffer.toString('utf-8');
+  }
+  // Fallback: try utf-8 string or regex printable ASCII/Unicode
+  try {
+    const str = buffer.toString('utf-8');
+    if (/[\x20-\x7E\s]{10,}/.test(str)) return str;
+  } catch {}
+  return '';
+}
+
+// ── Classify extracted document text: title/description/tags/category ──
+export async function classifyDocText(contentText: string, filename: string): Promise<Pick<MediaAnalysisResult, 'title' | 'description' | 'tags' | 'category'>> {
   if (!contentText.trim()) return { title: '', description: '', tags: [], category: '' };
 
   const prompt = `This is the extracted text of a business document named "${filename}", used in a WhatsApp AI assistant's knowledge base.
@@ -158,10 +300,13 @@ ${contentText.slice(0, 6000)}`;
       category: typeof raw.category === 'string' ? raw.category.slice(0, 60) : '',
     };
   } catch (err) {
-    console.error('media-analysis: classifyPdfText failed:', (err as Error).message);
+    console.error('media-analysis: classifyDocText failed:', (err as Error).message);
     return { title: '', description: '', tags: [], category: '' };
   }
 }
+
+// Backward-compatible alias for existing imports
+export const classifyPdfText = classifyDocText;
 
 // ── Build the embeddable text blob from analysis output ──────────────
 export function buildContentText(filename: string, result: MediaAnalysisResult): string {

@@ -12,11 +12,20 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { enqueueMediaAnalysis } from '@/lib/ai/media-queue';
 
 const STALE_MINUTES = 10;
-const MEDIA_FILE_TYPES = ['jpg', 'jpeg', 'png', 'webp', 'mp4', 'mov', 'webm', 'pdf'];
+const MEDIA_FILE_TYPES = [
+  'jpg', 'jpeg', 'png', 'webp',
+  'mp4', 'mov', 'webm',
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+  'txt', 'md', 'csv', 'json'
+];
 const MIME_BY_EXT: Record<string, string> = {
   mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm',
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
   pdf: 'application/pdf',
+  doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', json: 'application/json',
 };
 
 export class MediaAnalysisWorkerService {

@@ -47,6 +47,8 @@ interface KnowledgeDoc {
   processing_error?: string | null;
   usage_count?: number | null;
   manually_edited?: boolean | null;
+  rawFile?: File;
+  uploadStage?: 'uploading' | 'analyzing' | 'ready' | 'failed';
 }
 
 const MEDIA_CATEGORIES = [
@@ -657,37 +659,51 @@ export default function AISettingsPage() {
     }, 2000);
   };
 
+  const DOC_EXTS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
+  const TEXT_EXTS = ['txt', 'md', 'csv', 'json'];
+  const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+  const VIDEO_EXTS = ['mp4', 'mov', 'webm', '3gp'];
+  const ACCEPTED_KNOWLEDGE_EXTS = [...DOC_EXTS, ...TEXT_EXTS, ...IMAGE_EXTS, ...VIDEO_EXTS];
+
   const handleMultipleFileUpload = async (files: FileList | File[]) => {
     const list = Array.from(files);
     if (list.length === 0) return;
-    const CONCURRENCY = 3;
-    for (let i = 0; i < list.length; i += CONCURRENCY) {
-      await Promise.all(list.slice(i, i + CONCURRENCY).map(f => handleFileUpload(f)));
+    setUploading(true);
+    try {
+      const CONCURRENCY = 3;
+      for (let i = 0; i < list.length; i += CONCURRENCY) {
+        await Promise.all(list.slice(i, i + CONCURRENCY).map(f => handleFileUpload(f)));
+      }
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const handleFileUpload = async (file: File) => {
-    const ext = file.name.split('.').pop()?.toLowerCase();
-    const textExts = ['txt', 'md', 'csv', 'json'];
-    const presignExts = ['pdf', 'mp4', 'mov', 'webm', 'jpg', 'jpeg', 'png', 'webp'];
-    const accepted = [...textExts, ...presignExts];
-    if (!ext || !accepted.includes(ext)) {
-      toast.error(`Unsupported file type. Accepted: ${accepted.map(a => `.${a}`).join(', ')}`);
+  const handleFileUpload = async (file: File, retryDocId?: string) => {
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    if (!ext || !ACCEPTED_KNOWLEDGE_EXTS.includes(ext)) {
+      toast.error(`Unsupported file type ".${ext}". Accepted: PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT, MD, CSV, JSON, Images, Videos`);
       return;
     }
 
-    const usePresign = presignExts.includes(ext);
-    const videoExts = ['mp4', 'mov', 'webm'];
-    const imageExts = ['jpg', 'jpeg', 'png', 'webp'];
-    const maxMB = videoExts.includes(ext) ? 16 : imageExts.includes(ext) ? 5 : ext === 'pdf' ? 100 : 5;
+    if (file.size <= 0) {
+      toast.error(`"${file.name}" is empty (0 bytes) and cannot be uploaded.`);
+      return;
+    }
+
+    const maxMB = VIDEO_EXTS.includes(ext) ? 16 : IMAGE_EXTS.includes(ext) ? 10 : DOC_EXTS.includes(ext) ? 100 : 20;
     if (file.size > maxMB * 1024 * 1024) {
-      toast.error(`File must be under ${maxMB} MB`);
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+      toast.error(`"${file.name}" (${sizeMB} MB) exceeds the ${maxMB} MB limit.`);
       return;
     }
 
-    const isMedia = videoExts.includes(ext) || imageExts.includes(ext);
-    const tempId = `temp-${Date.now()}`;
-    const optimisticDoc = {
+    const isMedia = VIDEO_EXTS.includes(ext) || IMAGE_EXTS.includes(ext);
+    const tempId = retryDocId || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const uploadToastId = `upload-${tempId}`;
+
+    const optimisticDoc: KnowledgeDoc = {
       id: tempId,
       filename: file.name,
       file_type: ext,
@@ -695,73 +711,69 @@ export default function AISettingsPage() {
       content_text: '',
       created_at: new Date().toISOString(),
       embedding: null,
-      isOptimistic: true
+      processing_status: 'pending',
+      uploadStage: 'uploading',
+      rawFile: file,
     };
 
-    setDocs(prev => [optimisticDoc, ...prev]);
+    setDocs(prev => {
+      const exists = prev.some(d => d.id === tempId);
+      if (exists) {
+        return prev.map(d => d.id === tempId ? { ...optimisticDoc, id: tempId } : d);
+      }
+      return [optimisticDoc, ...prev];
+    });
 
-    const uploadLabel = isMedia ? 'media' : ext === 'pdf' ? 'document' : 'knowledge';
-    const uploadToastId = toast.loading(`Uploading ${uploadLabel}...`);
-    setUploading(true);
+    const uploadLabel = isMedia ? 'media' : DOC_EXTS.includes(ext) ? 'document' : 'knowledge';
+    toast.loading(`Uploading ${file.name}...`, { id: uploadToastId });
 
     try {
-      let resultData: any;
+      // 1. Presign upload URL
+      const presignRes = await fetch('/api/dashboard/knowledge/presign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, size: file.size, contentType: file.type }),
+      });
+      const presignJson = await presignRes.json();
+      if (!presignRes.ok) throw new Error(presignJson.error || 'Failed to get upload URL');
 
-      if (usePresign) {
-        // Presigned URL upload: browser → Supabase Storage directly (bypasses Vercel body limit)
-        const presignRes = await fetch('/api/dashboard/knowledge/presign', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: file.name, size: file.size, contentType: file.type }),
-        });
-        const presignJson = await presignRes.json();
-        if (!presignRes.ok) throw new Error(presignJson.error || 'Failed to get upload URL');
+      // 2. Direct upload to Supabase Storage
+      const uploadRes = await fetch(presignJson.signedUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': presignJson.contentType },
+        body: file,
+      });
+      if (!uploadRes.ok) throw new Error(`Storage upload failed (${uploadRes.status})`);
 
-        const uploadRes = await fetch(presignJson.signedUrl, {
-          method: 'PUT',
-          headers: { 'Content-Type': presignJson.contentType },
-          body: file,
-        });
-        if (!uploadRes.ok) throw new Error(`Storage upload failed (${uploadRes.status})`);
+      // 3. Register knowledge file in DB & start analysis
+      const regRes = await fetch('/api/dashboard/knowledge/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storagePath: presignJson.storagePath, filename: file.name, ext: presignJson.ext }),
+      });
+      const regJson = await regRes.json();
+      if (!regRes.ok) throw new Error(regJson.error || 'Failed to register file');
 
-        const regRes = await fetch('/api/dashboard/knowledge/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ storagePath: presignJson.storagePath, filename: file.name, ext: presignJson.ext }),
-        });
-        const regJson = await regRes.json();
-        if (!regRes.ok) throw new Error(regJson.error || 'Failed to register file');
-        if (regJson.duplicate) {
-          toast.warning(`"${file.name}" looks identical to already-uploaded "${regJson.existingDoc?.filename}" — skipped`, { id: uploadToastId, duration: 5000 });
-          setDocs(prev => prev.filter(d => d.id !== tempId));
-          return;
-        }
-        resultData = regJson.data;
-      } else {
-        // Direct upload for small text files
-        const formData = new FormData();
-        formData.append('file', file);
-        const res = await fetch('/api/dashboard/knowledge', { method: 'POST', body: formData });
-        const json = await res.json();
-        if (!json.success) throw new Error(json.error || 'Upload failed');
-        if (json.duplicate) {
-          toast.warning(`"${file.name}" looks identical to already-uploaded "${json.existingDoc?.filename}" — skipped`, { id: uploadToastId, duration: 5000 });
-          setDocs(prev => prev.filter(d => d.id !== tempId));
-          return;
-        }
-        resultData = json.data;
+      if (regJson.duplicate) {
+        toast.warning(`"${file.name}" looks identical to already-uploaded "${regJson.existingDoc?.filename}" — skipped`, { id: uploadToastId, duration: 5000 });
+        setDocs(prev => prev.filter(d => d.id !== tempId));
+        return;
       }
 
-      toast.success(`${isMedia ? 'Media' : ext === 'pdf' ? 'Document' : 'Knowledge'} uploaded — AI is analyzing it now`, { id: uploadToastId });
-      setDocs(prev => prev.map(d => d.id === tempId ? resultData : d));
+      const resultData = regJson.data;
+      toast.success(`${isMedia ? 'Media' : DOC_EXTS.includes(ext) ? 'Document' : 'Knowledge'} uploaded — AI is analyzing "${file.name}"`, { id: uploadToastId });
+      setDocs(prev => prev.map(d => d.id === tempId ? { ...resultData, rawFile: undefined } : d));
       pollDocStatus(resultData.id);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Upload failed. Please try again.', { id: uploadToastId });
-      setDocs(prev => prev.filter(d => d.id !== tempId));
+      const errorMsg = e instanceof Error ? e.message : 'Upload failed. Please try again.';
+      toast.error(`Upload failed for "${file.name}": ${errorMsg}`, { id: uploadToastId });
+      setDocs(prev => prev.map(d => d.id === tempId ? {
+        ...d,
+        processing_status: 'failed',
+        processing_error: errorMsg,
+        rawFile: file,
+      } : d));
       console.error('Upload error:', e);
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -1838,11 +1850,11 @@ export default function AISettingsPage() {
                         multiple
                         className="hidden"
                         onChange={e => { if (e.target.files?.length) handleMultipleFileUpload(e.target.files); }}
-                        accept=".txt,.md,.csv,.json,.pdf,.mp4,.mov,.webm,.jpg,.jpeg,.png,.webp"
+                        accept=".txt,.md,.csv,.json,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.mp4,.mov,.webm,.3gp,.jpg,.jpeg,.png,.webp,.gif"
                       />
                     </div>
                     <p className="text-[10px] text-muted-foreground/60 -mt-2">
-                      Drag & drop or select multiple files at once — menus, brochures, photos, videos. The AI analyzes and tags each one automatically.
+                      Drag & drop or select multiple files at once — menus, brochures, spreadsheets, photos, videos. The AI analyzes, indexes, and tags each one automatically.
                     </p>
 
                     {/* Health Signals */}
@@ -1944,8 +1956,8 @@ export default function AISettingsPage() {
                         const isFailed = status === 'failed';
                         const isOptimistic = (doc as any).isOptimistic;
                         const ext = (doc.file_type || doc.filename.split('.').pop() || 'txt').toLowerCase();
-                        const isImage = ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
-                        const isVideo = ['mp4', 'mov', 'webm'].includes(ext);
+                        const isImage = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext);
+                        const isVideo = ['mp4', 'mov', 'webm', '3gp'].includes(ext);
                         const isEditing = editingDocId === doc.id;
                         const displayTitle = doc.title || doc.filename;
 
@@ -1981,7 +1993,7 @@ export default function AISettingsPage() {
                                       ) : isReady ? (
                                         <><Check className="w-3 h-3 text-emerald-500" /> Ready</>
                                       ) : (
-                                        <><Loader2 className="w-3 h-3 animate-spin" /> AI analyzing...</>
+                                        <><Loader2 className="w-3 h-3 animate-spin" /> {doc.uploadStage === 'uploading' ? 'Uploading...' : 'AI analyzing...'}</>
                                       )}
                                     </span>
                                     {doc.category && <><span>•</span><span className="px-1.5 py-0.5 rounded bg-secondary/60 font-semibold">{doc.category}</span></>}
@@ -1990,6 +2002,15 @@ export default function AISettingsPage() {
                                 </div>
                               </div>
                               <div className="flex items-center gap-1 shrink-0">
+                                {isFailed && doc.rawFile && (
+                                  <button
+                                    onClick={() => handleFileUpload(doc.rawFile!, doc.id)}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 transition-colors cursor-pointer"
+                                    title="Retry upload"
+                                  >
+                                    <RefreshCw className="w-3 h-3" /> Retry
+                                  </button>
+                                )}
                                 {doc.file_url && (
                                   <a
                                     href={doc.file_url}
@@ -2001,7 +2022,7 @@ export default function AISettingsPage() {
                                     <Library className="w-3.5 h-3.5" />
                                   </a>
                                 )}
-                                {(isImage || isVideo || ext === 'pdf') && (
+                                {(isImage || isVideo || DOC_EXTS.includes(ext)) && (
                                   <button
                                     onClick={() => {
                                       if (isEditing) { setEditingDocId(null); return; }
