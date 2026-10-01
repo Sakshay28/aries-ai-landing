@@ -5,7 +5,7 @@ vi.mock('@/lib/shiprocket/service', () => ({ getValidShiprocketToken: vi.fn(), s
 vi.mock('@/lib/shiprocket/notify', () => ({ sendShipmentStatusUpdate: vi.fn() }));
 
 import { parseShiprocketDate, snapshotShiprocketOrder } from '@/lib/shiprocket/orderSnapshot';
-import { noticeForTransition } from '@/lib/shiprocket/orderSync';
+import { noticeForTransition, isCustomerQuietHours } from '@/lib/shiprocket/orderSync';
 import type { ShiprocketOrder } from '@/lib/shiprocket/client';
 
 // Trimmed from real GET /v1/external/orders rows (Devprayagjal, 2026-10-01).
@@ -101,5 +101,15 @@ describe('noticeForTransition', () => {
     expect(noticeForTransition('delivered', { ...base, status: 'delivered', deliveredAt: recent }, now)).toBeNull();
     expect(noticeForTransition('created', { ...base, status: 'pickup_scheduled', updatedAt: recent }, now)).toBeNull();
     expect(noticeForTransition('created', { ...base, status: 'cancelled', updatedAt: recent }, now)).toBeNull();
+  });
+});
+
+describe('isCustomerQuietHours (IST)', () => {
+  it('is quiet from 21:00 to 08:00 IST and open in between', () => {
+    expect(isCustomerQuietHours(new Date('2026-10-01T15:29:00Z'))).toBe(false); // 20:59 IST
+    expect(isCustomerQuietHours(new Date('2026-10-01T15:30:00Z'))).toBe(true);  // 21:00 IST
+    expect(isCustomerQuietHours(new Date('2026-10-01T20:00:00Z'))).toBe(true);  // 01:30 IST
+    expect(isCustomerQuietHours(new Date('2026-10-02T02:29:00Z'))).toBe(true);  // 07:59 IST
+    expect(isCustomerQuietHours(new Date('2026-10-02T02:30:00Z'))).toBe(false); // 08:00 IST
   });
 });

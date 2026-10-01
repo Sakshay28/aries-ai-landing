@@ -36,6 +36,17 @@ const FORWARD_RANK: Partial<Record<ShipmentStatus, number>> = {
 };
 
 /**
+ * 21:00–08:00 IST: no customer shipment messages. Couriers post scans (RTO,
+ * late deliveries) at any hour; a "your order was delivered" ping at 23:40 is
+ * not premium service. Pure.
+ */
+export function isCustomerQuietHours(now: Date = new Date()): boolean {
+  const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  return minutes >= 21 * 60 || minutes < 8 * 60;
+}
+
+/**
  * Which customer message (if any) a status move deserves. Pure.
  *
  *  - Only forward progress notifies: an NDR shows up as out_for_delivery →
@@ -89,6 +100,8 @@ export interface ShiprocketSyncResult {
   inserted: number;
   updated: number;
   notified: number;
+  /** Notifiable moves deferred until morning (quiet hours). */
+  held?: number;
   backfill: boolean;
   snapshots: ShiprocketOrderSnapshot[];
 }
@@ -187,6 +200,15 @@ export async function syncShiprocketShipments(
 
     const prev = shipmentByOrderId.get(order.id) || null;
     const nextStatus: ShipmentStatus = snap.status ?? prev?.status ?? 'created';
+
+    // Hold a move that would message the customer during quiet hours: leave
+    // the row untouched so the first pass after 08:00 IST sees the same
+    // transition and sends it then (well inside the 36h freshness window).
+    // The daily report reads Shiprocket live, so its numbers aren't affected.
+    if (notify && isCustomerQuietHours(now) && noticeForTransition(prev?.status ?? null, snap, now)) {
+      result.held = (result.held ?? 0) + 1;
+      continue;
+    }
     const fields = {
       shopify_order_number: order.order_number,
       shopify_order_shopify_id: order.shopify_id,
@@ -264,7 +286,7 @@ export async function syncAllShiprocketTenants(deadlineMs: number): Promise<Arra
     const r = await syncShiprocketShipments(c.tenant_id as string);
     out.push({
       tenantId: c.tenant_id as string, ok: r.ok, error: r.error, fetched: r.fetched, matched: r.matched,
-      inserted: r.inserted, updated: r.updated, notified: r.notified, backfill: r.backfill,
+      inserted: r.inserted, updated: r.updated, notified: r.notified, held: r.held, backfill: r.backfill,
     });
   }
   return out;
