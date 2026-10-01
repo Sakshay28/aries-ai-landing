@@ -15,9 +15,15 @@
 //   DELIVERY / NDR / RTO — pulled LIVE from the Shiprocket API at report time
 //     (orderSync.ts's fetchShiprocketSnapshots), not from shiprocket_shipments:
 //     the report must be right even if the background sync is behind.
-//   Profit / Top Profit — shopify_variants.cost, when that column exists and
-//     the merchant has filled in cost per item in Shopify.
-//   Ads — campaign_analytics, once Meta Ads is connected.
+//   Profit / Top Profit — cost per item read live from Shopify (liveSources.ts),
+//     falling back to shopify_variants.cost. Profit = revenue − product cost
+//     (gross; shipping, COD fees, ads and RTO losses are not deducted). When
+//     only some items have a cost set, Profit covers those and says how many
+//     were left out.
+//   Ads — spend read live from the Meta Marketing API (liveSources.ts), or
+//     campaign_analytics for an OAuth-connected tenant. ROAS and CPA are
+//     blended against Shopify: revenue ÷ spend and spend ÷ orders — Meta's own
+//     pixel ROAS counts COD orders that never pay.
 // Anything without a source renders "N/A", never a guessed number.
 //
 // Definitions (the client's template has no glossary, so these are ours):
@@ -32,6 +38,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { fetchShiprocketSnapshots } from '@/lib/shiprocket/orderSync';
 import type { ShiprocketOrderSnapshot } from '@/lib/shiprocket/orderSnapshot';
+import { fetchVariantCostsLive, fetchAdSpendLive } from './liveSources';
 
 // ─── Trigger detection ─────────────────────────────────────
 // Blast radius is capped upstream — only the tenant's own staff/manager
@@ -74,6 +81,8 @@ export interface DailyReportData {
   orders: number;
   aov: number | null;
   profit: number | null;
+  /** Units sold with no cost price set — excluded from `profit`. */
+  profitMissingUnits?: number;
   adSpend: number | null;
   roas: number | null;
   cpa: number | null;
@@ -171,6 +180,8 @@ export interface GenerateDailyReportOptions {
   now?: Date;
   /** Injected Shiprocket data (tests). undefined = fetch live; null = unavailable. */
   snapshots?: ShiprocketOrderSnapshot[] | null;
+  /** Injected ad spend (tests). undefined = fetch live; null = unavailable. */
+  adSpend?: number | null;
 }
 
 export async function generateDailyReport(tenantId: string, opts: GenerateDailyReportOptions = {}): Promise<DailyReportData> {
@@ -218,9 +229,19 @@ export async function generateDailyReport(tenantId: string, opts: GenerateDailyR
   // Enrich with variant cost. Best-effort: 42703 "column cost does not exist"
   // (pre-migration environments) or any other query error → costs stay
   // unknown, Profit + Top Profit render as N/A. Never crashes the report.
-  const costByVariant = new Map<number, number>();
+  let costByVariant = new Map<number, number>();
   let costDataAvailable = false;
-  if (variantIdsSeen.size > 0) {
+  const productIdsSeen = new Set<number>();
+  for (const order of orderRows) {
+    for (const item of (order.line_items || []) as ShopifyOrderLineItem[]) {
+      if (typeof item.product_id === 'number') productIdsSeen.add(item.product_id);
+    }
+  }
+  const liveCosts = productIdsSeen.size > 0 ? await fetchVariantCostsLive(tenantId, Array.from(productIdsSeen)) : null;
+  if (liveCosts) {
+    costByVariant = liveCosts;
+    costDataAvailable = true;
+  } else if (variantIdsSeen.size > 0) {
     const { data: variants, error: varErr } = await supabaseAdmin
       .from('shopify_variants')
       .select('shopify_id, cost, shopify_product_id')
@@ -255,21 +276,30 @@ export async function generateDailyReport(tenantId: string, opts: GenerateDailyR
   let topUnits = 0;
   let topProfitTitle: string | null = null;
   let topProfit = -Infinity;
-  let totalCost = 0;
-  let costPartial = false; // some line items missing cost — mark Profit as N/A
+  // Profit is summed per line item over items that HAVE a cost, and the units
+  // without one are counted so the report can say what was left out — the
+  // merchant fills costs in gradually, and "N/A" until every last SKU has one
+  // would hide a number that's already 95% there.
+  let knownProfit = 0;
+  let knownLines = 0;
+  let missingUnits = 0;
+  for (const order of orderRows) {
+    for (const item of (order.line_items || []) as ShopifyOrderLineItem[]) {
+      const qty = Number(item.quantity) || 0;
+      const c = typeof item.variant_id === 'number' ? costByVariant.get(item.variant_id) : undefined;
+      if (c == null) { missingUnits += qty; continue; }
+      knownProfit += qty * ((Number(item.price) || 0) - c);
+      knownLines++;
+    }
+  }
   for (const entry of byProduct.values()) {
     if (entry.units > topUnits) { topUnits = entry.units; topSellerTitle = entry.title; }
     if (entry.costKnown) {
-      totalCost += entry.cost;
       const p = entry.revenue - entry.cost;
       if (p > topProfit) { topProfit = p; topProfitTitle = entry.title; }
-    } else if (entry.units > 0) {
-      costPartial = true;
     }
   }
-  // Any missing per-line cost → total cost is not trustworthy, so surface N/A
-  // rather than a low-side underestimate the client would spot immediately.
-  const profit = (!costDataAvailable || costPartial || byProduct.size === 0) ? null : revenue - totalCost;
+  const profit = costDataAvailable && knownLines > 0 ? Math.round(knownProfit) : null;
   if (topProfit === -Infinity) topProfitTitle = null;
 
   // Delivery / NDR / RTO — live from Shiprocket.
@@ -304,11 +334,18 @@ export async function generateDailyReport(tenantId: string, opts: GenerateDailyR
     }
   }
 
-  // Ads — only populated once a tenant has connected Meta Ads.
+  // Ads — live spend first (system-user token with ads_read); then the
+  // OAuth-connected campaign_analytics path.
   let adSpend: number | null = null;
   let roas: number | null = null;
   let cpa: number | null = null;
-  const { data: metaConnection } = await supabaseAdmin
+  const liveSpend = opts.adSpend !== undefined ? opts.adSpend : await fetchAdSpendLive(tenantId, todayDateStr).catch(() => null);
+  if (liveSpend != null) {
+    adSpend = liveSpend;
+    roas = liveSpend > 0 ? Math.round((revenue / liveSpend) * 100) / 100 : null;
+    cpa = liveSpend > 0 && orderCount > 0 ? Math.round(liveSpend / orderCount) : null;
+  }
+  const { data: metaConnection } = liveSpend != null ? { data: null } : await supabaseAdmin
     .from('meta_connections')
     .select('id, status')
     .eq('tenant_id', tenantId)
@@ -338,6 +375,7 @@ export async function generateDailyReport(tenantId: string, opts: GenerateDailyR
     orders: orderCount,
     aov,
     profit,
+    profitMissingUnits: profit != null ? missingUnits : 0,
     adSpend,
     roas,
     cpa,
@@ -400,7 +438,7 @@ export function formatDailyReportMessage(data: DailyReportData, businessName: st
     '',
     '💰 *SALES*',
     `Revenue: ${fmtMoney(data.revenue)} | Orders: ${fmtNumber(data.orders)}`,
-    `AOV: ${fmtMoney(data.aov)} | Profit: ${fmtMoney(data.profit)}`,
+    `AOV: ${fmtMoney(data.aov)} | Profit: ${fmtMoney(data.profit)}${data.profit != null && data.profitMissingUnits ? ` (excl. ${data.profitMissingUnits} item${data.profitMissingUnits === 1 ? '' : 's'} with no cost price)` : ''}`,
     '',
     '📢 *ADS*',
     `Spend: ${fmtMoney(data.adSpend)} | ROAS: ${fmtRatio(data.roas)} | CPA: ${fmtMoney(data.cpa)}`,

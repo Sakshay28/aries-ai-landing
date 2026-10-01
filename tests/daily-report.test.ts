@@ -4,10 +4,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@/lib/supabase/admin', () => ({
   supabaseAdmin: { from: vi.fn() },
 }));
+vi.mock('@/lib/reports/liveSources', () => ({
+  fetchVariantCostsLive: vi.fn(async () => null),
+  fetchAdSpendLive: vi.fn(async () => null),
+}));
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { isDailyReportRequest, generateDailyReport, formatDailyReportMessage, computeDeliveryMetrics, getTodayRangeIST, requestedReportDayOffset, type DailyReportData } from '@/lib/reports/dailyReport';
 import type { ShiprocketOrderSnapshot } from '@/lib/shiprocket/orderSnapshot';
+import { fetchVariantCostsLive } from '@/lib/reports/liveSources';
 
 /** A minimal chainable + thenable mock matching supabase-js's query builder shape. */
 function thenable(result: { data: unknown; error: unknown }) {
@@ -84,6 +89,35 @@ describe('generateDailyReport', () => {
     expect(result.topProfitTitle).toBeNull();
   });
 
+  it('computes Profit from live Shopify costs, leaving out (and counting) items with no cost', async () => {
+    mockTables([
+      { id: 'o1', order_number: 'DPJ-1', total_price: 2998, financial_status: 'pending', line_items: [
+        { product_id: 1, variant_id: 11, title: '7 Mukhi', quantity: 2, price: '999.00' },
+        { product_id: 2, variant_id: 22, title: 'Bracelet', quantity: 1, price: '1000.00' },
+      ] },
+      { id: 'o2', order_number: 'DPJ-2', total_price: 35999, financial_status: 'pending', line_items: [
+        { product_id: 3, variant_id: 33, title: '14 Mukhi', quantity: 1, price: '35999.00' },
+      ] },
+    ]);
+    (fetchVariantCostsLive as any).mockResolvedValueOnce(new Map([[11, 150], [22, 200]]));
+    const result = await generateDailyReport('tenant-1', { now: NOW, snapshots: [], adSpend: null });
+    expect(result.profit).toBe(2 * (999 - 150) + (1000 - 200)); // 14 Mukhi has no cost → excluded
+    expect(result.profitMissingUnits).toBe(1);
+    expect(result.topProfitTitle).toBe('7 Mukhi');
+    expect(formatDailyReportMessage(result, 'Devprayagjal')).toContain('Profit: ₹2,498 (excl. 1 item with no cost price)');
+  });
+
+  it('blends ROAS and CPA against Shopify revenue and orders when live spend is available', async () => {
+    mockTables([
+      { id: 'o1', order_number: 'DPJ-1', total_price: 3000, financial_status: 'pending', line_items: [] },
+      { id: 'o2', order_number: 'DPJ-2', total_price: 1000, financial_status: 'pending', line_items: [] },
+    ]);
+    const result = await generateDailyReport('tenant-1', { now: NOW, snapshots: [], adSpend: 1000 });
+    expect(result.adSpend).toBe(1000);
+    expect(result.roas).toBe(4);
+    expect(result.cpa).toBe(500);
+  });
+
   it('reports ₹0 / 0 orders (not N/A) on a day with no orders', async () => {
     mockTables([]);
     const result = await generateDailyReport('tenant-1', { now: NOW, snapshots: [] });
@@ -119,7 +153,7 @@ describe('generateDailyReport', () => {
       if (table === 'campaign_analytics') return thenable({ data: [{ spend: 1000, revenue: 4000, leads: 10 }], error: null });
       throw new Error(`unexpected table access: ${table}`);
     });
-    const result = await generateDailyReport('tenant-1', { now: NOW, snapshots: [] });
+    const result = await generateDailyReport('tenant-1', { now: NOW, snapshots: [], adSpend: null });
     expect(result.adSpend).toBe(1000);
     expect(result.roas).toBe(4);
     expect(result.cpa).toBe(100);
