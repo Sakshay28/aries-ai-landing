@@ -263,8 +263,9 @@ export default function ChatSidebar() {
     let inFlight = false;
     const tick = async () => {
       // Skip a tick if the previous digest fetch is still pending (slow network)
-      // so stalled requests can't pile up across ticks.
-      if (inFlight) return;
+      // so stalled requests can't pile up across ticks — or if the tab is in the
+      // background (caught up on return via the visibilitychange listener below).
+      if (inFlight || document.hidden) return;
       inFlight = true;
       const controller = new AbortController();
       const abortTimer = setTimeout(() => controller.abort(), 8_000);
@@ -288,8 +289,14 @@ export default function ChatSidebar() {
         inFlight = false;
       }
     };
+    const onVisible = () => { if (!document.hidden) tick(); };
+    document.addEventListener('visibilitychange', onVisible);
     const interval = setInterval(tick, 20_000);
-    return () => { cancelled = true; clearInterval(interval); };
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [load]);
 
   // ─── Keyboard shortcut ⌘K / Ctrl+K ──────────────────────────────────────

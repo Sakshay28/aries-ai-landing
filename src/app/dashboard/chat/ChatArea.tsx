@@ -863,13 +863,17 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
-  // Status polling: every 10s, always run — picks up delivered/read from Meta webhook DB updates.
-  // Realtime UPDATE events (Effect 2 above) already cover this in the common case; this is
-  // just a safety net, so it doesn't need sub-10s cadence (was 3s — a major Supabase
-  // egress/Disk-IO contributor at scale, see 2026-07-02 usage investigation).
+  // Status polling: every 10s while the tab is visible — picks up delivered/read from Meta
+  // webhook DB updates. Realtime UPDATE events (Effect 2 above) already cover this in the
+  // common case; this is just a safety net, so it doesn't need sub-10s cadence (was 3s — a
+  // major Supabase egress/Disk-IO contributor at scale, see 2026-07-02 usage investigation).
+  // Skipped while the tab is hidden: a Live Chat tab left open in the background all day
+  // was ~8,600 requests/day of pure Supabase log ingestion (over the free 1 GB, 2026-10-01).
+  // Catches up immediately when the tab becomes visible again.
   useEffect(() => {
     if (!conversationId) return;
     const poll = async () => {
+      if (document.hidden) return;
       try {
         const res = await fetch(`/api/dashboard/chat/statuses?conversationId=${conversationId}`);
         const data = await res.json();
@@ -888,10 +892,15 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         }));
       } catch { /* ignore */ }
     };
-    // Poll immediately on mount, then every 10s
+    // Poll immediately on mount, then every 10s, plus on return to the tab
     poll();
+    const onVisible = () => { if (!document.hidden) poll(); };
+    document.addEventListener('visibilitychange', onVisible);
     const interval = setInterval(poll, 10_000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [conversationId]);
 
   // Track latest message timestamp via ref (avoids stale closure in poll)

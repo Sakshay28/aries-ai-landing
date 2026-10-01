@@ -87,10 +87,16 @@ export function DashboardMetrics() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Refresh computed metrics (avg response time, hours saved) every 60s
+  // Refresh computed metrics (avg response time, hours saved) every 60s while the
+  // tab is visible; refresh on return instead of polling a background tab.
   useEffect(() => {
-    const id = setInterval(load, 60_000);
-    return () => clearInterval(id);
+    const id = setInterval(() => { if (!document.hidden) load(); }, 60_000);
+    const onVisible = () => { if (!document.hidden) load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [load]);
 
   // Supabase Realtime — live increments when new messages / conversations arrive
