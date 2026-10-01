@@ -6,11 +6,12 @@
 //    product sync that would copy cost into shopify_variants only runs on a
 //    full admin sync, which most tenants rarely do — and a cost edited in
 //    Shopify never fires a product webhook, so the copy goes stale silently.
-//  - Ad spend from the Meta Marketing API, using the tenant's WhatsApp
-//    system-user token. A system user from the merchant's OWN business and app
-//    can be granted ads_read on its own ad account with no App Review, so one
-//    token (whatsapp_* + ads_read) covers both — see
-//    scripts/connect-meta-ads-token.mjs. Without ads_read this returns null and
+//  - Ad spend from the Meta Marketing API, using tenants.meta_ads_token — a
+//    system-user token with ads_read from the business portfolio that owns the
+//    ad account (no App Review needed for a merchant's own app + ad account).
+//    It's separate from wa_access_token because the ad account and the
+//    WhatsApp number usually live in different portfolios. Set it with
+//    scripts/connect-meta-ads-token.mts. Without one this returns null and
 //    the report shows N/A.
 //
 // Both return null on any failure; the report never blocks on them.
@@ -85,8 +86,10 @@ async function graphGet<T>(path: string, token: string): Promise<T> {
  * own timezone — Indian accounts are Asia/Kolkata). null = no ads access.
  */
 export async function fetchAdSpendLive(tenantId: string, day: string): Promise<number | null> {
-  const { data: tenant } = await supabaseAdmin.from('tenants').select('wa_access_token').eq('id', tenantId).maybeSingle();
-  const token = tenant?.wa_access_token ? decryptTokenV2(tenant.wa_access_token as string) : null;
+  // Column may not exist yet (pre-migration) — that's just "no ads token".
+  const { data: tenant, error } = await supabaseAdmin.from('tenants').select('meta_ads_token').eq('id', tenantId).maybeSingle();
+  if (error) return null;
+  const token = tenant?.meta_ads_token ? decryptTokenV2(tenant.meta_ads_token as string) : null;
   if (!token) return null;
   try {
     const accounts = await graphGet<{ data: Array<{ id: string; account_status: number }> }>('me/adaccounts?fields=id,account_status&limit=50', token);
