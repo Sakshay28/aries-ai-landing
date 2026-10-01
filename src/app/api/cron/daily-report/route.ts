@@ -12,9 +12,12 @@
 // "View Report" quick reply); the tap is an inbound "View Report" message that
 // the webhook's report trigger answers with the full report.
 //
-// Idempotent per recipient per night: a report already logged to that
-// conversation in the last 12h is not re-sent (pass ?force=1 to override), so
-// an overlapping scheduler or a manual curl can't double-send.
+// Idempotent per recipient per night: the nightly send is tagged in
+// messages.metadata ({ nightly_report: '<date label>' }) and a second run for the
+// same date skips that recipient (pass ?force=1 to override), so overlapping
+// schedulers (pg_cron 22:00 + Vercel fallback) can't double-send. Only the
+// nightly tag counts — an on-demand "report" earlier in the day must not
+// suppress the nightly one (it did, with the old content-based check).
 // ═══════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -31,7 +34,6 @@ export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 const TIME_BUDGET_MS = 45_000;
-const DEDUPE_WINDOW_MS = 12 * 60 * 60 * 1000;
 
 function isAuthorized(req: NextRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
@@ -42,16 +44,14 @@ function isAuthorized(req: NextRequest): boolean {
 
 interface Delivery { phone: string; mode: 'text' | 'template' | 'skipped_duplicate' | 'failed'; error?: string }
 
-async function alreadySentRecently(tenantId: string, conversationId: string | null): Promise<boolean> {
+async function nightlyAlreadySent(tenantId: string, conversationId: string | null, dateLabel: string): Promise<boolean> {
   if (!conversationId) return false;
-  const since = new Date(Date.now() - DEDUPE_WINDOW_MS).toISOString();
   const { count } = await supabaseAdmin.from('messages')
     .select('id', { count: 'exact', head: true })
     .eq('tenant_id', tenantId)
     .eq('conversation_id', conversationId)
     .eq('direction', 'outbound')
-    .ilike('content', '%DAILY REPORT%')
-    .gte('created_at', since);
+    .eq('metadata->>nightly_report', dateLabel);
   return (count ?? 0) > 0;
 }
 
@@ -84,7 +84,7 @@ async function handler(req: NextRequest) {
 
     for (const phone of recipients) {
       const session = await getSessionState(tenant.id as string, phone);
-      if (!force && await alreadySentRecently(tenant.id as string, session.conversationId)) {
+      if (!force && await nightlyAlreadySent(tenant.id as string, session.conversationId, data.dateLabel)) {
         deliveries.push({ phone, mode: 'skipped_duplicate' });
         continue;
       }
@@ -121,6 +121,8 @@ async function handler(req: NextRequest) {
           error_message: sendError ? sendError.slice(0, 500) : null,
           ai_generated: false,
           wa_message_id: wamid,
+          // A failed send isn't tagged, so the fallback scheduler retries it.
+          metadata: wamid ? { nightly_report: data.dateLabel } : null,
         });
       }
 

@@ -368,7 +368,10 @@ MEDIA SENDING RULES:
 - NEVER say "I'll share a link" or "click here" for media — set mediaToSend and the file(s) arrive directly.
 - When you do send media, accompany it with a brief text reply (e.g. "Here's our rooftop terrace video!" or "Here's the banquet brochure with all the details").
 - If the customer asks for media and nothing on the list is even a plausible match, say you'll check with the team. Do NOT escalate for this alone.
-` : ''}
+` : `MEDIA: No media files matched this message, so "mediaToSend" must be an empty array.
+- NEVER write "here are the photos/videos" or "sending photos" (in any language, e.g. "यहाँ तस्वीरें हैं") unless something is actually being sent${tenantConfig.hasShopify ? ' — via "sendShopifyProducts" below, which sends the product photo' : ''}. Saying it without sending leaves the customer waiting for a photo that never arrives.
+- ${tenantConfig.hasShopify ? 'For a product photo request: set "sendShopifyProducts" to that product\'s handle (its photo is sent automatically) and include its exact product link — the link shows every photo.' : 'For a photo request you can\'t fulfil, say the team will share photos and set shouldEscalate=true.'}
+`}
 ${tenantConfig.hasShopify ? `SHOPIFY PRODUCTS & LINKS:
 - If your reply recommends or names a specific product from the SHOPIFY STORE CONTEXT block above, INCLUDE that product's exact link (the URL shown on its line in that block) in your reply text so the customer can tap it. Copy the URL character-for-character — never shorten it, alter the handle, or invent a link that isn't in the context.
 - When the customer asks for a product by name, its price, or "send me the link", reply with that product's name, price, and its exact URL.
@@ -1246,20 +1249,34 @@ export async function generateFollowUpMessage(
 ): Promise<string> {
   try {
     const cleanName = firstName(context.name);
-    const prompt = `Write a short, friendly WhatsApp follow-up message (under 200 chars) ${cleanName ? `for a customer named "${cleanName}"` : `for a customer (do NOT use or invent a name — greet them without one)`} who was interested in ${context.enquiry_type || 'visiting'} at ${tenantConfig.businessName}.
+    const booking = isBookingBusiness(tenantConfig.businessType);
+    // The old prompt assumed every tenant was a venue ("interested in visiting",
+    // "mention limited availability", "mention a special offer") — so a retail
+    // store's customers were told "spots are filling up" and promised offers
+    // that didn't exist (Devprayagjal, 2026-09). Frame by business type, and
+    // never let the model invent scarcity, offers or deadlines.
+    const offerLine = tenantConfig.welcomeOffer?.trim()
+      ? `The business's real current offer (you MAY mention it, word for word): "${tenantConfig.welcomeOffer.trim()}".`
+      : 'The business has NO current offer.';
+    const prompt = `Write a short, warm WhatsApp follow-up message (under 200 chars) ${cleanName ? `for a customer named "${cleanName}"` : `for a customer (do NOT use or invent a name — greet them without one)`} who chatted with ${tenantConfig.businessName} (${tenantConfig.businessType || 'business'}) but hasn't replied since.
+${booking
+  ? 'They were asking about a visit or booking.'
+  : 'They were asking about products. Do NOT talk about visiting, slots, spots, seats or bookings — this is a shop.'}
 
 Follow-up type: ${followUpType}
-- If "30min": Reassure them their booking is being confirmed
-- If "3hr": Gently ask if they're still interested, mention limited availability
-- If "24hr": Create urgency, mention a special offer or USP
-- If "7day": Friendly re-engagement, share something exciting about the business
+- "30min": let them know the team is on it and they can reply any time
+- "3hr": gently ask if they found what they were looking for, offer help
+- "24hr": friendly check-in, offer to answer any question
+- "7day": friendly re-engagement, no pressure
 
-Keep it casual, use 1-2 emojis, don't be salesy. Reply with ONLY the message text, no JSON.`;
+${offerLine}
+NEVER invent discounts, offers, deadlines, limited stock or limited availability. Never mention anything not stated here.
+Keep it polite and calm, 1 emoji at most, not salesy. Reply with ONLY the message text, no JSON.`;
 
     const response = await getAI().models.generateContent({
       model: MODEL,
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: { temperature: 0.8, maxOutputTokens: 200, thinkingConfig: { thinkingBudget: 0 } },
+      config: { temperature: 0.6, maxOutputTokens: 200, thinkingConfig: { thinkingBudget: 0 } },
     });
 
     const text = response.text?.trim();
@@ -1269,13 +1286,35 @@ Keep it casual, use 1-2 emojis, don't be salesy. Reply with ONLY the message tex
   }
 }
 
-function getDefaultFollowUp(
+/** Venues where "visit / slots / reservation" framing is right; everything else is treated as a shop. */
+export function isBookingBusiness(businessType: string | null | undefined): boolean {
+  return /restaurant|caf[eé]|bar|hotel|resort|homestay|hostel|travel|tour|adventure|camp|hospitality|salon|spa|clinic|event|venue|gym|stay/i
+    .test(businessType || '');
+}
+
+export function getDefaultFollowUp(
   context: ConversationContext,
   type: string,
   config: TenantAIConfig
 ): string {
   // Only address by a real, self-provided name; otherwise a neutral "there".
   const name = greetingFirstName(context.name);
+  const offer = config.welcomeOffer?.trim();
+
+  if (!isBookingBusiness(config.businessType)) {
+    switch (type) {
+      case '30min':
+        return `Hi ${name}! Our team at ${config.businessName} is looking into your query and will get back to you shortly 🙏`;
+      case '3hr':
+        return `Hi ${name}, did you find what you were looking for at ${config.businessName}? Happy to help with any questions 🙏`;
+      case '24hr':
+        return `Hi ${name}, just checking in from ${config.businessName}. Let us know if you have any questions — we're here to help 🙏${offer ? ` ${offer}` : ''}`;
+      case '7day':
+        return `Hi ${name}! Whenever you're ready, ${config.businessName} is here to help you choose the right product 🙏`;
+      default:
+        return `Hi ${name}! Just checking in from ${config.businessName} 🙏`;
+    }
+  }
 
   switch (type) {
     case '30min':
@@ -1283,7 +1322,7 @@ function getDefaultFollowUp(
     case '3hr':
       return `Hey ${name} 👋 Still thinking about visiting ${config.businessName}? We have limited slots this weekend 🗓️`;
     case '24hr':
-      return `${name}, we'd love to see you at ${config.businessName}! ✨ ${config.welcomeOffer || 'Check out our special offers'}`;
+      return `${name}, we'd love to see you at ${config.businessName}! ✨ ${offer || 'Check out our special offers'}`;
     case '7day':
       return `Hey ${name}! Something exciting at ${config.businessName} this week 🎉 Want to know more?`;
     default:

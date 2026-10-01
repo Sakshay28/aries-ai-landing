@@ -72,6 +72,17 @@ describe('AI Guardrails — Output Safety', () => {
     expect(guardOutput(leaked, 'safe reply')).toBe('safe reply');
   });
 
+  it('blocks a tenant knowledge-doc header echoed back (Devprayagjal, 2026-09-11)', () => {
+    const leaked = 'Product catalog for the Brass Idols & Diyas category. Prices in INR (₹), verified against the live\nShopify store on 17 July 2026. Text in `>` blocks is the website\'s own product copy.\nFollow the rules in the assistant instructions: never quote an out-of-stock item as\navailable';
+    expect(guardOutput(leaked, 'safe reply')).toBe('safe reply');
+    expect(guardOutput('## 7 Mukhi Rudraksha\nPrice: ₹999', 'safe reply')).toBe('safe reply');
+  });
+
+  it('does not block ordinary product replies that mention prices or hashtags', () => {
+    const ok = 'Our 7 Mukhi Nepali Rudraksha is ₹999 (16-19mm, silver coated). Order #DPJ-4495 is confirmed 🙏';
+    expect(guardOutput(ok, 'safe reply')).toBe(ok);
+  });
+
   it('passes through clean AI reply', () => {
     const clean = 'I can help you with a table booking! How many guests?';
     expect(guardOutput(clean, 'fallback')).toBe(clean);

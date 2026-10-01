@@ -46,6 +46,18 @@ const LEAKAGE_PATTERNS: RegExp[] = [
   /^RULES:/m,                // Case-sensitive, start of line
   /^SMART RULES/m,           // Case-sensitive, start of line
   /^CONVERSATION STATE:/m,   // Case-sensitive, start of line
+  // Tenant-authored knowledge docs / system prompts carry their own meta-text.
+  // A customer saying "thank you" once got a KB doc header echoed back verbatim
+  // ("Product catalog for the Brass Idols & Diyas category. Prices in INR (₹),
+  // verified against the live Shopify store… Follow the rules in the assistant
+  // instructions…" — Devprayagjal, 2026-09-11).
+  /\b(assistant|staff|bot)\s+instructions\b/i,
+  /\bSTAFF_GUIDELINES\b/,
+  /verified against the live (shopify )?(store|site|website)/i,
+  /text in `>` blocks/i,
+  /^product catalog for the\b/im,
+  /\bpaste this (whole )?file\b/i,
+  /^#{1,3} \S/m,              // markdown headings never belong in a WhatsApp reply
 ];
 
 // ─── SANITIZE INPUT ───────────────────────────────────────────
