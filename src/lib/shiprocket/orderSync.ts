@@ -16,6 +16,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { selectInBatches } from '@/lib/supabase/select-in-batches';
 import { normalizePhoneNumber } from '@/lib/whatsapp/phone';
+import { notifyAdmin } from '@/lib/alerts/admin';
 import { getValidShiprocketToken, shiprocketClientForTenant } from './service';
 import { snapshotShiprocketOrder, statusEventTime, type ShiprocketOrderSnapshot } from './orderSnapshot';
 import { sendShipmentStatusUpdate, type ShipmentNotice } from './notify';
@@ -277,13 +278,34 @@ export async function syncShiprocketShipments(
   return result;
 }
 
-/** Every tenant with a live Shiprocket connection. */
+/**
+ * Every tenant with a Shiprocket connection — including ones in 'error'.
+ * getValidShiprocketToken() flips a connection to 'error' on ANY failed
+ * login, a network blip included; selecting only 'connected' meant one bad
+ * minute stopped that tenant's status sync forever, silently. Retrying
+ * 'error' rows lets a transient failure heal itself (a successful login sets
+ * 'connected' again); a real one (changed password) alerts once, on the flip.
+ */
 export async function syncAllShiprocketTenants(deadlineMs: number): Promise<Array<{ tenantId: string } & Omit<ShiprocketSyncResult, 'snapshots'>>> {
-  const { data: conns } = await supabaseAdmin.from('shiprocket_connections').select('tenant_id').eq('status', 'connected');
+  const { data: conns } = await supabaseAdmin.from('shiprocket_connections')
+    .select('tenant_id, status').in('status', ['connected', 'error']);
   const out: Array<{ tenantId: string } & Omit<ShiprocketSyncResult, 'snapshots'>> = [];
   for (const c of conns || []) {
     if (Date.now() > deadlineMs) break;
     const r = await syncShiprocketShipments(c.tenant_id as string);
+    if (!r.ok && c.status === 'connected') {
+      const { data: after } = await supabaseAdmin.from('shiprocket_connections')
+        .select('status, last_auth_error').eq('tenant_id', c.tenant_id).maybeSingle();
+      if (after?.status === 'error') {
+        const { data: t } = await supabaseAdmin.from('tenants').select('business_name').eq('id', c.tenant_id).maybeSingle();
+        await notifyAdmin({
+          dedupeKey: `shiprocket-login-failed:${c.tenant_id}`,
+          subject: `Shiprocket login failing — ${t?.business_name || c.tenant_id}`,
+          summary: `Shipment status sync (and customer shipped/delivered messages) is stopped until Shiprocket login works again. Shiprocket said: ${after.last_auth_error || r.error}. If the merchant changed their Shiprocket password, reconnect Shiprocket in the dashboard.`,
+          context: { tenant_id: c.tenant_id, error: r.error },
+        }).catch(() => undefined);
+      }
+    }
     out.push({
       tenantId: c.tenant_id as string, ok: r.ok, error: r.error, fetched: r.fetched, matched: r.matched,
       inserted: r.inserted, updated: r.updated, notified: r.notified, held: r.held, backfill: r.backfill,

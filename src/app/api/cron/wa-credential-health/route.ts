@@ -21,6 +21,8 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { decryptToken } from '@/lib/utils/crypto';
 import { probeWhatsAppCredentials } from '@/lib/whatsapp/credentialHealth';
 import { reportCredentialFault, reportCredentialOk } from '@/lib/whatsapp/credentialHealth.server';
+import { checkSendingHealth } from '@/lib/whatsapp/sendingHealth';
+import { notifyAdmin } from '@/lib/alerts/admin';
 
 export const maxDuration = 60;
 
@@ -61,6 +63,7 @@ async function handler(req: NextRequest) {
   let skipped = 0;
   let unconfigured = 0;
   const brokenTenants: { tenant: string; fault: string }[] = [];
+  const sendingIssues: { tenant: string; issues: string[] }[] = [];
 
   for (const t of tenants ?? []) {
     if (Date.now() - startedAt > TIME_BUDGET_MS) {
@@ -99,6 +102,19 @@ async function handler(req: NextRequest) {
         businessName: t.business_name as string | null,
         phoneNumberId: configuredPhoneId,
       });
+      // Token works — but can the number actually send? (payment method,
+      // policy blocks, restrictions). See sendingHealth.ts for the outage
+      // this would have caught on day one.
+      const health = token ? await checkSendingHealth(token, configuredPhoneId) : null;
+      if (health && health.issues.length > 0) {
+        sendingIssues.push({ tenant: (t.business_name as string) || (t.id as string), issues: health.issues });
+        await notifyAdmin({
+          dedupeKey: `wa-sending-health:${t.id}`,
+          subject: `WhatsApp sending problem — ${t.business_name || t.id}`,
+          summary: `Meta reports can_send_message=${health.canSend} for ${t.business_name || t.id}. Customers may not be receiving order confirmations, shipping updates or other business-initiated messages until this is fixed in Meta Business Manager. ${health.issues.join(' | ')}`,
+          context: { tenant_id: t.id, phone_number_id: configuredPhoneId, can_send_message: health.canSend, issues: health.issues },
+        }).catch(() => undefined);
+      }
       continue;
     }
 
@@ -122,7 +138,7 @@ async function handler(req: NextRequest) {
     });
   }
 
-  const summary = { checked, ok, broken, skipped, unconfigured, brokenTenants, ms: Date.now() - startedAt };
+  const summary = { checked, ok, broken, skipped, unconfigured, brokenTenants, sendingIssues, ms: Date.now() - startedAt };
   console.log('[wa-health] sweep complete:', JSON.stringify(summary));
   return NextResponse.json({ success: true, ...summary });
 }
