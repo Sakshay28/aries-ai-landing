@@ -10,15 +10,28 @@
 // the DB and fills a fixed template; the webhook route sends the
 // result as a plain text message with no model in the loop.
 //
-// Data coverage today: Revenue/Orders/AOV, top seller (units sold),
-// delivery status counts + RTO%, Prepaid/COD split, Profit + Top Profit
-// (when shopify_variants.cost has been synced — see 20260825 migration),
-// and Highest RTO product are all computed from real synced data. Ads
-// (until Meta Ads is connected) and the NDR attempt breakdown have no
-// data source anywhere in the schema yet — those fields are always null
-// here and render as "N/A" rather than a guessed number.
+// Data sources:
+//   SALES / PRODUCTS / PAYMENT — today's shopify_orders (IST day).
+//   DELIVERY / NDR / RTO — pulled LIVE from the Shiprocket API at report time
+//     (orderSync.ts's fetchShiprocketSnapshots), not from shiprocket_shipments:
+//     the report must be right even if the background sync is behind.
+//   Profit / Top Profit — shopify_variants.cost, when that column exists and
+//     the merchant has filled in cost per item in Shopify.
+//   Ads — campaign_analytics, once Meta Ads is connected.
+// Anything without a source renders "N/A", never a guessed number.
+//
+// Definitions (the client's template has no glossary, so these are ours):
+//   Delivered / RTO Initiated / RTO — events that happened on the report day;
+//     RTO = shipments that physically got back to the seller that day.
+//   Transit / NDR / NDR 1st-3rd — a snapshot of right now: shipments moving
+//     forward, and those stuck after a failed delivery attempt (by attempt #).
+//   RTO % and Highest RTO — rolling 30 days of orders that reached a final
+//     outcome (delivered vs returned). One day is too few shipments for a
+//     rate to mean anything; the 30-day rate is the number the owner acts on.
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { fetchShiprocketSnapshots } from '@/lib/shiprocket/orderSync';
+import type { ShiprocketOrderSnapshot } from '@/lib/shiprocket/orderSnapshot';
 
 // ─── Trigger detection ─────────────────────────────────────
 // Blast radius is capped upstream — only the tenant's own staff/manager
@@ -31,22 +44,27 @@ export function isDailyReportRequest(text: string | null | undefined): boolean {
   return DAILY_REPORT_KEYWORDS.test(text);
 }
 
+/** "yesterday's report" / "kal ki report" → report for the previous IST day. */
+export function requestedReportDayOffset(text: string | null | undefined): 0 | 1 {
+  return text && /\b(yesterday|kal)\b/i.test(text) ? 1 : 0;
+}
+
 // ─── Date range ─────────────────────────────────────────────
 // Same +5.5h IST offset convention the webhook route already uses for
 // business-hours checks (route.ts ~line 1253) — no new timezone
 // dependency, and consistent with every tenant currently being IST.
-export function getTodayRangeIST(): { startUTC: Date; label: string } {
-  const nowUTC = new Date();
-  const nowIST = new Date(nowUTC.getTime() + 5.5 * 60 * 60 * 1000);
+export function getTodayRangeIST(now: Date = new Date(), dayOffset = 0): { startUTC: Date; endUTC: Date; label: string } {
+  const nowIST = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
   const y = nowIST.getUTCFullYear();
   const m = nowIST.getUTCMonth();
-  const d = nowIST.getUTCDate();
+  const d = nowIST.getUTCDate() - dayOffset;
   // Midnight IST expressed back in UTC (IST is UTC+5:30).
   const startUTC = new Date(Date.UTC(y, m, d) - 5.5 * 60 * 60 * 1000);
+  const endUTC = new Date(startUTC.getTime() + 24 * 60 * 60 * 1000);
   const label = new Date(Date.UTC(y, m, d)).toLocaleDateString('en-IN', {
     day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC',
   });
-  return { startUTC, label };
+  return { startUTC, endUTC, label };
 }
 
 // ─── Types ──────────────────────────────────────────────────
@@ -83,17 +101,89 @@ interface ShopifyOrderLineItem {
   product_id?: number;
 }
 
+// ─── Delivery metrics (pure) ─────────────────────────────────
+export interface DeliveryMetrics {
+  delivered: number;
+  transit: number;
+  ndrTotal: number;
+  ndr1: number;
+  ndr2: number;
+  ndr3: number;
+  rtoInitiated: number;
+  rtoCount: number;
+  rtoPercent: number | null;
+  highestRtoTitle: string | null;
+}
+
+const ROLLING_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+function within(d: Date | null, start: Date, end: Date): boolean {
+  return !!d && d.getTime() >= start.getTime() && d.getTime() < end.getTime();
+}
+
+/** See the header comment for what each number means. */
+export function computeDeliveryMetrics(snapshots: ShiprocketOrderSnapshot[], start: Date, end: Date): DeliveryMetrics {
+  const m: DeliveryMetrics = {
+    delivered: 0, transit: 0, ndrTotal: 0, ndr1: 0, ndr2: 0, ndr3: 0,
+    rtoInitiated: 0, rtoCount: 0, rtoPercent: null, highestRtoTitle: null,
+  };
+  const rollingStart = new Date(end.getTime() - ROLLING_WINDOW_MS);
+  let finalDelivered = 0;
+  let finalRto = 0;
+  const rtoUnits = new Map<string, number>();
+
+  for (const s of snapshots) {
+    if (within(s.deliveredAt, start, end)) m.delivered++;
+    if (within(s.rtoInitiatedAt, start, end)) m.rtoInitiated++;
+    if (within(s.rtoDeliveredAt, start, end)) m.rtoCount++;
+
+    if (s.inNdr) {
+      m.ndrTotal++;
+      if (s.ndrAttempts <= 1) m.ndr1++;
+      else if (s.ndrAttempts === 2) m.ndr2++;
+      else m.ndr3++;
+    } else if (s.status === 'in_transit' || s.status === 'out_for_delivery') {
+      m.transit++;
+    }
+
+    if (s.createdAt && s.createdAt >= rollingStart && s.createdAt < end) {
+      if (s.status === 'delivered') finalDelivered++;
+      if (s.status === 'rto') {
+        finalRto++;
+        for (const p of s.products) rtoUnits.set(p.title, (rtoUnits.get(p.title) || 0) + p.quantity);
+      }
+    }
+  }
+
+  const closed = finalDelivered + finalRto;
+  m.rtoPercent = closed > 0 ? Math.round((finalRto / closed) * 1000) / 10 : null;
+  let top = 0;
+  for (const [title, units] of rtoUnits) {
+    if (units > top) { top = units; m.highestRtoTitle = title; }
+  }
+  return m;
+}
+
 // ─── Aggregation ────────────────────────────────────────────
-export async function generateDailyReport(tenantId: string): Promise<DailyReportData> {
-  const { startUTC, label } = getTodayRangeIST();
+export interface GenerateDailyReportOptions {
+  /** 0 = today (default), 1 = yesterday, in IST. */
+  dayOffset?: number;
+  now?: Date;
+  /** Injected Shiprocket data (tests). undefined = fetch live; null = unavailable. */
+  snapshots?: ShiprocketOrderSnapshot[] | null;
+}
+
+export async function generateDailyReport(tenantId: string, opts: GenerateDailyReportOptions = {}): Promise<DailyReportData> {
+  const { startUTC, endUTC, label } = getTodayRangeIST(opts.now, opts.dayOffset ?? 0);
   const startIso = startUTC.toISOString();
-  const todayDateStr = startIso.slice(0, 10);
+  const todayDateStr = new Date(startUTC.getTime() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   const { data: orders } = await supabaseAdmin
     .from('shopify_orders')
-    .select('id, total_price, line_items')
+    .select('id, order_number, total_price, financial_status, line_items')
     .eq('tenant_id', tenantId)
     .gte('shopify_created_at', startIso)
+    .lt('shopify_created_at', endUTC.toISOString())
     .is('cancelled_at', null);
 
   const orderRows = orders || [];
@@ -101,9 +191,8 @@ export async function generateDailyReport(tenantId: string): Promise<DailyReport
   const revenue = orderRows.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0);
   const aov = orderCount > 0 ? revenue / orderCount : null;
 
-  // Product aggregates from today's line items — used for Top Seller (units),
-  // Top Profit (when cost data is present), and Highest RTO (joined against
-  // shiprocket status below).
+  // Product aggregates from the day's line items — Top Seller (units) and
+  // Top Profit (when cost data is present).
   interface ProductAgg { title: string; units: number; revenue: number; cost: number; costKnown: boolean; }
   const byProduct = new Map<string, ProductAgg>();
   const variantIdsSeen = new Set<number>();
@@ -140,7 +229,8 @@ export async function generateDailyReport(tenantId: string): Promise<DailyReport
     if (!varErr && variants) {
       costDataAvailable = true;
       for (const v of variants) {
-        const c = Number((v as { cost?: number | string | null }).cost);
+        const raw = (v as { cost?: number | string | null }).cost;
+        const c = raw == null ? NaN : Number(raw);
         if (Number.isFinite(c)) costByVariant.set(Number((v as { shopify_id: number }).shopify_id), c);
       }
     }
@@ -182,58 +272,35 @@ export async function generateDailyReport(tenantId: string): Promise<DailyReport
   const profit = (!costDataAvailable || costPartial || byProduct.size === 0) ? null : revenue - totalCost;
   if (topProfit === -Infinity) topProfitTitle = null;
 
-  // Delivery/RTO/payment split — shipments tied to today's orders.
-  const orderIds = orderRows.map((o) => o.id);
-  let delivered: number | null = null;
-  let transit: number | null = null;
-  let rtoCount: number | null = null;
-  let rtoPercent: number | null = null;
+  // Delivery / NDR / RTO — live from Shiprocket.
+  let snapshots: ShiprocketOrderSnapshot[] | null;
+  if (opts.snapshots !== undefined) {
+    snapshots = opts.snapshots;
+  } else {
+    const live = await fetchShiprocketSnapshots(tenantId, { lookbackDays: 45 }).catch(() => null);
+    snapshots = live && live.ok ? live.snapshots : null;
+  }
+  const delivery = snapshots ? computeDeliveryMetrics(snapshots, startUTC, endUTC) : null;
+
+  // Payment split over the day's orders. Shiprocket's payment_method is the
+  // ground truth when it has the order; otherwise Shopify's financial_status
+  // ('paid' = prepaid gateway, 'pending' = COD awaiting collection).
   let prepaidPercent: number | null = null;
   let codPercent: number | null = null;
-  let highestRtoTitle: string | null = null;
-
-  if (orderIds.length > 0) {
-    const { data: shipments } = await supabaseAdmin
-      .from('shiprocket_shipments')
-      .select('status, payment_method, shopify_order_id')
-      .eq('tenant_id', tenantId)
-      .in('shopify_order_id', orderIds);
-
-    const shipmentRows = shipments || [];
-    const totalShipments = shipmentRows.length;
-    if (totalShipments > 0) {
-      delivered = shipmentRows.filter((s) => s.status === 'delivered').length;
-      transit = shipmentRows.filter((s) => s.status === 'in_transit' || s.status === 'out_for_delivery').length;
-      rtoCount = shipmentRows.filter((s) => s.status === 'rto').length;
-      rtoPercent = Math.round((rtoCount / totalShipments) * 1000) / 10;
-
-      const withPaymentMethod = shipmentRows.filter((s) => s.payment_method === 'Prepaid' || s.payment_method === 'COD');
-      if (withPaymentMethod.length > 0) {
-        const prepaidCount = withPaymentMethod.filter((s) => s.payment_method === 'Prepaid').length;
-        prepaidPercent = Math.round((prepaidCount / withPaymentMethod.length) * 1000) / 10;
-        codPercent = Math.round(((withPaymentMethod.length - prepaidCount) / withPaymentMethod.length) * 1000) / 10;
-      }
-
-      // Highest-RTO product: for every RTO'd shipment, credit each of its
-      // order's line-item products with the RTO. Pick the product with the
-      // most RTO'd units today.
-      const rtoOrderIds = new Set(shipmentRows.filter(s => s.status === 'rto').map(s => s.shopify_order_id));
-      if (rtoOrderIds.size > 0) {
-        const rtoUnitsByProduct = new Map<string, { title: string; units: number }>();
-        for (const order of orderRows) {
-          if (!rtoOrderIds.has(order.id)) continue;
-          for (const item of (order.line_items || []) as ShopifyOrderLineItem[]) {
-            const key = String(item.product_id ?? item.title ?? 'unknown');
-            const title = item.title || 'Unknown item';
-            const existing = rtoUnitsByProduct.get(key);
-            rtoUnitsByProduct.set(key, { title, units: (existing?.units || 0) + (Number(item.quantity) || 0) });
-          }
-        }
-        let topRtoUnits = 0;
-        for (const entry of rtoUnitsByProduct.values()) {
-          if (entry.units > topRtoUnits) { topRtoUnits = entry.units; highestRtoTitle = entry.title; }
-        }
-      }
+  if (orderCount > 0) {
+    const srPayment = new Map((snapshots || []).map((s) => [s.channelOrderId, s.paymentMethod]));
+    let prepaid = 0;
+    let known = 0;
+    for (const o of orderRows) {
+      const sr = srPayment.get(o.order_number || '');
+      const mode = sr || (o.financial_status === 'paid' ? 'Prepaid' : o.financial_status === 'pending' ? 'COD' : null);
+      if (!mode) continue;
+      known++;
+      if (mode === 'Prepaid') prepaid++;
+    }
+    if (known > 0) {
+      prepaidPercent = Math.round((prepaid / known) * 1000) / 10;
+      codPercent = Math.round(((known - prepaid) / known) * 1000) / 10;
     }
   }
 
@@ -267,25 +334,25 @@ export async function generateDailyReport(tenantId: string): Promise<DailyReport
 
   return {
     dateLabel: label,
-    revenue: orderCount > 0 ? revenue : null,
+    revenue,
     orders: orderCount,
     aov,
     profit,
     adSpend,
     roas,
     cpa,
-    delivered,
-    transit,
-    ndrTotal: null,
-    rtoInitiated: null,
-    rtoCount,
-    rtoPercent,
-    ndr1: null,
-    ndr2: null,
-    ndr3: null,
+    delivered: delivery?.delivered ?? null,
+    transit: delivery?.transit ?? null,
+    ndrTotal: delivery?.ndrTotal ?? null,
+    rtoInitiated: delivery?.rtoInitiated ?? null,
+    rtoCount: delivery?.rtoCount ?? null,
+    rtoPercent: delivery?.rtoPercent ?? null,
+    ndr1: delivery?.ndr1 ?? null,
+    ndr2: delivery?.ndr2 ?? null,
+    ndr3: delivery?.ndr3 ?? null,
     topSellerTitle,
     topProfitTitle,
-    highestRtoTitle,
+    highestRtoTitle: delivery?.highestRtoTitle ?? null,
     prepaidPercent,
     codPercent,
   };

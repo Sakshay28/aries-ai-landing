@@ -31,6 +31,8 @@ type Job = {
 };
 
 const PAGINATED_RESOURCES = ['products', 'customers', 'orders'] as const;
+/** How long a drain waits for this tenant's in-process lane before giving up and postponing. */
+const LANE_WAIT_MS = 25_000;
 const ONESHOT_RESOURCES = ['collections', 'pages', 'blogs', 'policies', 'discounts'] as const;
 
 // ─── Enqueue helpers ────────────────────────────────────────
@@ -116,8 +118,17 @@ export class ShopifyWorker {
       byTenant.set(j.tenant_id, list);
     }
 
-    await Promise.all(Array.from(byTenant.entries()).map(([tenantId, list]) => {
-      if (this.activeTenants.has(tenantId)) return this.postpone(list, 5);
+    await Promise.all(Array.from(byTenant.entries()).map(async ([tenantId, list]) => {
+      // Shopify fires customers/create, orders/updated and orders/create within
+      // ~1s of each other, and each webhook's after() claims jobs, so a second
+      // drain in this same process routinely finds the tenant's lane busy.
+      // Postponing here used to strand the jobs until the NEXT webhook arrived
+      // (nothing else drained the queue promptly) — order confirmations went
+      // out 28 min to 4 h late (Devprayagjal, 2026-10-01). The busy lane is in
+      // this process and finishes in seconds, so wait for it instead.
+      if (this.activeTenants.has(tenantId) && !(await this.waitForLane(tenantId, LANE_WAIT_MS))) {
+        return this.postpone(list, 5);
+      }
       return this.processTenantLane(tenantId, list);
     }));
 
@@ -258,6 +269,15 @@ export class ShopifyWorker {
         context: { job_id: job.id, attempts: job.attempts, tenant_id: job.tenant_id },
       }).catch(() => undefined);
     }
+  }
+
+  private static async waitForLane(tenantId: string, maxMs: number): Promise<boolean> {
+    const deadline = Date.now() + maxMs;
+    while (this.activeTenants.has(tenantId)) {
+      if (Date.now() > deadline) return false;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return true;
   }
 
   private static async postpone(jobs: Job[], delaySeconds: number): Promise<void> {

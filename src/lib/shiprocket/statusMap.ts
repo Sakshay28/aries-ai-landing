@@ -17,14 +17,23 @@ const RULES: Array<{ pattern: RegExp; status: ShipmentStatus }> = [
   // RTO must be checked before "delivered"/"out for delivery" — Shiprocket's
   // RTO statuses ("RTO Initiated", "RTO Delivered", "RTO Out For Delivery")
   // otherwise match those broader patterns first and get misclassified as a
-  // normal forward delivery.
-  { pattern: /rto/i, status: 'rto' },
+  // normal forward delivery. "REACHED BACK AT SELLER CITY" is the leg after
+  // RTO Initiated on a live account (seen 2026-10-01) and has no "rto" in it.
+  { pattern: /rto|reached back at seller|return(ed)? to (origin|seller)/i, status: 'rto' },
+  // "UNDELIVERED" (an NDR attempt) also contains "delivered" — it's still a
+  // forward shipment in the courier network, so it must win over /delivered/.
+  { pattern: /undelivered|\bndr\b/i, status: 'in_transit' },
   { pattern: /out for delivery/i, status: 'out_for_delivery' },
   { pattern: /delivered/i, status: 'delivered' },
-  { pattern: /pickup.*scheduled|pickup.*generated/i, status: 'pickup_scheduled' },
-  { pattern: /picked up|shipped|in transit|in-transit/i, status: 'in_transit' },
-  { pattern: /awb.*assign|courier.*assign/i, status: 'awb_assigned' },
   { pattern: /cancel/i, status: 'cancelled' },
+  // "PICKUP BOOKED" / "OUT FOR PICKUP" / "PICKUP EXCEPTION" are what a live
+  // account actually returns between AWB assignment and pickup.
+  { pattern: /pickup.*(scheduled|generated|booked|exception|rescheduled|error)|out for pickup/i, status: 'pickup_scheduled' },
+  { pattern: /picked up|shipped|in transit|in-transit|reached at destination|destination hub|misrouted/i, status: 'in_transit' },
+  { pattern: /awb.*assign|courier.*assign|ready to ship|invoiced|label generated/i, status: 'awb_assigned' },
+  // A Shopify-channel order lands in Shiprocket as "NEW" until the merchant
+  // assigns a courier.
+  { pattern: /^new$/i, status: 'created' },
 ];
 
 /**

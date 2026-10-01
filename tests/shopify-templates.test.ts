@@ -4,10 +4,11 @@ import { shopifyTemplateSpecs } from '@/lib/shopify/templates';
 describe('shopifyTemplateSpecs', () => {
   const specs = shopifyTemplateSpecs();
 
-  it('ships the nine canned templates', () => {
+  it('ships the ten canned templates', () => {
     const names = specs.map(s => s.name).sort();
     expect(names).toEqual([
       'shopify_cart_recovery',
+      'shopify_daily_report_ready',
       'shopify_delivered',
       'shopify_order_cancelled',
       'shopify_order_confirmation',
@@ -28,6 +29,7 @@ describe('shopifyTemplateSpecs', () => {
     expect(byName.get('shopify_out_for_delivery')!.category).toBe('UTILITY');
     expect(byName.get('shopify_delivered')!.category).toBe('UTILITY');
     expect(byName.get('shopify_rto')!.category).toBe('UTILITY');
+    expect(byName.get('shopify_daily_report_ready')!.category).toBe('UTILITY');
     // Marketing category is required for pre-purchase / promotional touches
     expect(byName.get('shopify_cart_recovery')!.category).toBe('MARKETING');
     expect(byName.get('shopify_review_request')!.category).toBe('MARKETING');

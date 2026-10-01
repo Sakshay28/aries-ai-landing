@@ -15,7 +15,7 @@ import { getShopifyContext, renderShopifyContextForPrompt, reconcileProductLinks
 import { getShiprocketContext, renderShiprocketContextForPrompt } from '@/lib/shiprocket/aiContext';
 import { ORDER_CONFIRMATION_PAYLOAD_PREFIX, ORDER_CONFIRMATION_BUTTON_LABELS } from '@/lib/shopify/templates';
 import { renderOrderConfirmationCopy, type OrderConfirmationCopyKey } from '@/lib/shopify/orderConfirmationCopy';
-import { isDailyReportRequest, generateDailyReport, formatDailyReportMessage } from '@/lib/reports/dailyReport';
+import { isDailyReportRequest, requestedReportDayOffset, generateDailyReport, formatDailyReportMessage } from '@/lib/reports/dailyReport';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
 import { parseAllMetaMessages, sendTextMessage, sendMediaMessage, sendMediaMessageById, uploadMediaToMeta, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator, isCtwaReferral, type ParsedMetaMessage } from '@/lib/meta/service';
 import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus, resolveOrCreateConversation } from '@/lib/whatsapp/businessNotify';
@@ -1422,7 +1422,7 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
   if (isOwnStaffNumber && tenant.shopify_store_url && msg.text && isDailyReportRequest(msg.text)) {
     console.log(`📊 Daily report requested by staff/manager for tenant ${tenant.id}`);
     try {
-      const reportData = await generateDailyReport(tenant.id);
+      const reportData = await generateDailyReport(tenant.id, { dayOffset: requestedReportDayOffset(msg.text) });
       const reportText = formatDailyReportMessage(reportData, tenant.business_name || 'Your Store');
       if (decryptedAccessToken && tenant.wa_phone_number_id) {
         const result = await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id as string, cleanPhone, reportText)

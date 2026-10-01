@@ -6,12 +6,13 @@ vi.mock('@/lib/supabase/admin', () => ({
 }));
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { isDailyReportRequest, generateDailyReport, formatDailyReportMessage, type DailyReportData } from '@/lib/reports/dailyReport';
+import { isDailyReportRequest, generateDailyReport, formatDailyReportMessage, computeDeliveryMetrics, getTodayRangeIST, requestedReportDayOffset, type DailyReportData } from '@/lib/reports/dailyReport';
+import type { ShiprocketOrderSnapshot } from '@/lib/shiprocket/orderSnapshot';
 
 /** A minimal chainable + thenable mock matching supabase-js's query builder shape. */
 function thenable(result: { data: unknown; error: unknown }) {
   const builder: any = {};
-  const chainMethods = ['select', 'eq', 'in', 'gte', 'lte', 'is', 'order', 'limit', 'range'];
+  const chainMethods = ['select', 'eq', 'in', 'gte', 'lt', 'lte', 'is', 'order', 'limit', 'range'];
   for (const m of chainMethods) builder[m] = vi.fn(() => builder);
   builder.maybeSingle = vi.fn(async () => result);
   builder.single = vi.fn(async () => result);
@@ -36,97 +37,76 @@ describe('isDailyReportRequest', () => {
   });
 });
 
+function snap(over: Partial<ShiprocketOrderSnapshot>): ShiprocketOrderSnapshot {
+  return {
+    shiprocketOrderId: 1, shiprocketShipmentId: null, channelOrderId: 'DPJ-1', status: 'in_transit', statusRaw: 'IN TRANSIT',
+    awb: null, courierName: null, courierId: null, paymentMethod: 'COD', customerName: null, customerPhone: null,
+    createdAt: null, pickedUpAt: null, outForDeliveryAt: null, deliveredAt: null, rtoInitiatedAt: null, rtoDeliveredAt: null,
+    updatedAt: null, ndrAttempts: 0, inNdr: false, products: [], ...over,
+  };
+}
+
+// 1 Oct 2026, 21:00 IST
+const NOW = new Date('2026-10-01T15:30:00Z');
+const TODAY = new Date('2026-10-01T06:00:00Z');
+const YESTERDAY = new Date('2026-09-30T06:00:00Z');
+
 describe('generateDailyReport', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('computes revenue/orders/AOV/top-seller and delivery/payment splits for a normal day', async () => {
-    const orders = [
-      { id: 'o1', total_price: 1000, line_items: [{ product_id: 1, title: 'Rudraksha Mala', quantity: 2 }] },
-      { id: 'o2', total_price: 500, line_items: [{ product_id: 2, title: 'Bracelet', quantity: 1 }] },
-      { id: 'o3', total_price: 1500, line_items: [{ product_id: 1, title: 'Rudraksha Mala', quantity: 1 }] },
-    ];
-    const shipments = [
-      { status: 'delivered', payment_method: 'COD' },
-      { status: 'in_transit', payment_method: 'Prepaid' },
-      { status: 'rto', payment_method: 'COD' },
-      { status: 'out_for_delivery', payment_method: 'COD' },
-    ];
-
+  function mockTables(orders: unknown[]) {
     (supabaseAdmin.from as any).mockImplementation((table: string) => {
       if (table === 'shopify_orders') return thenable({ data: orders, error: null });
-      if (table === 'shiprocket_shipments') return thenable({ data: shipments, error: null });
+      if (table === 'shopify_variants') return thenable({ data: null, error: { message: 'column shopify_variants.cost does not exist' } });
       if (table === 'meta_connections') return thenable({ data: null, error: null });
-      if (table === 'campaign_analytics') return thenable({ data: [], error: null });
       throw new Error(`unexpected table access: ${table}`);
     });
+  }
 
-    const result = await generateDailyReport('tenant-1');
+  it('computes revenue/orders/AOV/top-seller and payment split from the day\'s orders', async () => {
+    mockTables([
+      { id: 'o1', order_number: 'DPJ-1', total_price: 1000, financial_status: 'pending', line_items: [{ product_id: 1, title: 'Rudraksha Mala', quantity: 2 }] },
+      { id: 'o2', order_number: 'DPJ-2', total_price: 500, financial_status: 'paid', line_items: [{ product_id: 2, title: 'Bracelet', quantity: 1 }] },
+      { id: 'o3', order_number: 'DPJ-3', total_price: 1500, financial_status: 'pending', line_items: [{ product_id: 1, title: 'Rudraksha Mala', quantity: 1 }] },
+      { id: 'o4', order_number: 'DPJ-4', total_price: 0, financial_status: 'pending', line_items: [] },
+    ]);
+    // Shiprocket says DPJ-3 is actually prepaid — it wins over Shopify's financial_status.
+    const result = await generateDailyReport('tenant-1', { now: NOW, snapshots: [snap({ channelOrderId: 'DPJ-3', paymentMethod: 'Prepaid' })] });
 
-    expect(result.orders).toBe(3);
+    expect(result.orders).toBe(4);
     expect(result.revenue).toBe(3000);
-    expect(result.aov).toBe(1000);
+    expect(result.aov).toBe(750);
     expect(result.topSellerTitle).toBe('Rudraksha Mala'); // 3 units vs 1 unit
-    expect(result.delivered).toBe(1);
-    expect(result.transit).toBe(2); // in_transit + out_for_delivery
-    expect(result.rtoCount).toBe(1);
-    expect(result.rtoPercent).toBe(25); // 1 of 4 shipments
-    expect(result.prepaidPercent).toBe(25); // 1 of 4
-    expect(result.codPercent).toBe(75);
-    // Always-unavailable fields stay null regardless of how much order/shipment data exists.
+    expect(result.prepaidPercent).toBe(50); // DPJ-2 (paid) + DPJ-3 (Shiprocket prepaid)
+    expect(result.codPercent).toBe(50);
+    // No cost column yet → Profit stays N/A rather than a fake number.
     expect(result.profit).toBeNull();
-    expect(result.ndr1).toBeNull();
-    expect(result.rtoInitiated).toBeNull();
     expect(result.topProfitTitle).toBeNull();
-    expect(result.highestRtoTitle).toBeNull();
   });
 
-  it('returns nulls (not zeros or NaN) for a day with zero orders', async () => {
-    (supabaseAdmin.from as any).mockImplementation((table: string) => {
-      if (table === 'shopify_orders') return thenable({ data: [], error: null });
-      if (table === 'meta_connections') return thenable({ data: null, error: null });
-      throw new Error(`unexpected table access: ${table}`);
-    });
-
-    const result = await generateDailyReport('tenant-1');
-
+  it('reports ₹0 / 0 orders (not N/A) on a day with no orders', async () => {
+    mockTables([]);
+    const result = await generateDailyReport('tenant-1', { now: NOW, snapshots: [] });
     expect(result.orders).toBe(0);
-    expect(result.revenue).toBeNull();
+    expect(result.revenue).toBe(0);
     expect(result.aov).toBeNull();
     expect(result.topSellerTitle).toBeNull();
-    expect(result.delivered).toBeNull();
-    expect(result.rtoPercent).toBeNull();
     expect(result.prepaidPercent).toBeNull();
   });
 
-  it('leaves delivery/payment fields null when orders exist but no Shiprocket shipments are synced yet (Devprayagjal today)', async () => {
-    const orders = [{ id: 'o1', total_price: 1000, line_items: [] }];
-    (supabaseAdmin.from as any).mockImplementation((table: string) => {
-      if (table === 'shopify_orders') return thenable({ data: orders, error: null });
-      if (table === 'shiprocket_shipments') return thenable({ data: [], error: null });
-      if (table === 'meta_connections') return thenable({ data: null, error: null });
-      throw new Error(`unexpected table access: ${table}`);
-    });
-
-    const result = await generateDailyReport('tenant-1');
-
-    expect(result.orders).toBe(1);
-    expect(result.revenue).toBe(1000);
+  it('leaves every delivery field N/A when Shiprocket is unreachable', async () => {
+    mockTables([{ id: 'o1', order_number: 'DPJ-1', total_price: 1000, financial_status: 'pending', line_items: [] }]);
+    const result = await generateDailyReport('tenant-1', { now: NOW, snapshots: null });
     expect(result.delivered).toBeNull();
-    expect(result.rtoCount).toBeNull();
+    expect(result.transit).toBeNull();
+    expect(result.ndrTotal).toBeNull();
     expect(result.rtoPercent).toBeNull();
-    expect(result.prepaidPercent).toBeNull();
-    expect(result.codPercent).toBeNull();
+    expect(result.codPercent).toBe(100); // falls back to Shopify's financial_status
   });
 
   it('leaves ad fields null when Meta Ads is not connected', async () => {
-    (supabaseAdmin.from as any).mockImplementation((table: string) => {
-      if (table === 'shopify_orders') return thenable({ data: [], error: null });
-      if (table === 'meta_connections') return thenable({ data: null, error: null });
-      throw new Error(`unexpected table access: ${table}`);
-    });
-
-    const result = await generateDailyReport('tenant-1');
-
+    mockTables([]);
+    const result = await generateDailyReport('tenant-1', { now: NOW, snapshots: [] });
     expect(result.adSpend).toBeNull();
     expect(result.roas).toBeNull();
     expect(result.cpa).toBeNull();
@@ -139,12 +119,53 @@ describe('generateDailyReport', () => {
       if (table === 'campaign_analytics') return thenable({ data: [{ spend: 1000, revenue: 4000, leads: 10 }], error: null });
       throw new Error(`unexpected table access: ${table}`);
     });
-
-    const result = await generateDailyReport('tenant-1');
-
+    const result = await generateDailyReport('tenant-1', { now: NOW, snapshots: [] });
     expect(result.adSpend).toBe(1000);
     expect(result.roas).toBe(4);
     expect(result.cpa).toBe(100);
+  });
+});
+
+describe('computeDeliveryMetrics', () => {
+  const { startUTC, endUTC } = getTodayRangeIST(NOW);
+
+  it('counts the day\'s events, the live transit/NDR snapshot, and a 30-day RTO rate', () => {
+    const m = computeDeliveryMetrics([
+      snap({ status: 'delivered', deliveredAt: TODAY, createdAt: YESTERDAY }),
+      snap({ status: 'delivered', deliveredAt: YESTERDAY, createdAt: YESTERDAY }), // not today
+      snap({ status: 'in_transit' }),
+      snap({ status: 'out_for_delivery' }),
+      snap({ status: 'in_transit', inNdr: true, ndrAttempts: 1 }),
+      snap({ status: 'in_transit', inNdr: true, ndrAttempts: 2 }),
+      snap({ status: 'out_for_delivery', inNdr: true, ndrAttempts: 4 }),
+      snap({ status: 'rto', rtoInitiatedAt: TODAY, createdAt: YESTERDAY, products: [{ title: '7 Mukhi', quantity: 1 }] }),
+      snap({ status: 'rto', rtoDeliveredAt: TODAY, createdAt: YESTERDAY, products: [{ title: '7 Mukhi', quantity: 1 }] }),
+      snap({ status: 'rto', createdAt: YESTERDAY, products: [{ title: 'Bracelet', quantity: 1 }] }),
+      snap({ status: 'rto', createdAt: new Date('2026-08-01T00:00:00Z') }), // outside 30 days
+    ], startUTC, endUTC);
+
+    expect(m.delivered).toBe(1);
+    expect(m.transit).toBe(2);
+    expect(m.ndrTotal).toBe(3);
+    expect([m.ndr1, m.ndr2, m.ndr3]).toEqual([1, 1, 1]);
+    expect(m.rtoInitiated).toBe(1);
+    expect(m.rtoCount).toBe(1);
+    expect(m.rtoPercent).toBe(60); // 3 RTO of 5 closed (2 delivered + 3 RTO) in 30 days
+    expect(m.highestRtoTitle).toBe('7 Mukhi');
+  });
+
+  it('has no RTO rate when nothing has closed out yet', () => {
+    const m = computeDeliveryMetrics([snap({ status: 'in_transit' })], startUTC, endUTC);
+    expect(m.rtoPercent).toBeNull();
+    expect(m.highestRtoTitle).toBeNull();
+  });
+});
+
+describe('requestedReportDayOffset', () => {
+  it('reads yesterday in English and Hinglish', () => {
+    expect(requestedReportDayOffset("yesterday's report")).toBe(1);
+    expect(requestedReportDayOffset('kal ki report bhejo')).toBe(1);
+    expect(requestedReportDayOffset('report')).toBe(0);
   });
 });
 

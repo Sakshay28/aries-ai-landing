@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildStatusLine } from '@/lib/shiprocket/notify';
+import { buildStatusLine, renderShipmentNotice } from '@/lib/shiprocket/notify';
 import type { ShiprocketShipmentRow } from '@/lib/shiprocket/shipments';
 
 function shipment(overrides: Partial<ShiprocketShipmentRow> = {}): ShiprocketShipmentRow {
@@ -50,5 +50,23 @@ describe('buildStatusLine', () => {
   it('falls back to a generic line for an unmapped status', () => {
     const line = buildStatusLine(shipment(), 'pending');
     expect(line).toBe('Update on your order #1042.');
+  });
+});
+
+describe('renderShipmentNotice', () => {
+  it('falls back to the platform line when the tenant has no override', () => {
+    expect(renderShipmentNotice(null, shipment(), 'in_transit')).toBe(buildStatusLine(shipment(), 'in_transit'));
+  });
+
+  it('fills every placeholder in a tenant override, with the COD line only for COD', () => {
+    const overrides = { out_for_delivery: '{{customer_name}} Ji, #{{order_id}} is out today{{cod_line}}. Track: {{tracking_url}}' };
+    const cod = renderShipmentNotice(overrides, shipment({ payment_method: 'COD', customer_name: 'Naina' }), 'out_for_delivery', { amount: '999.00' });
+    expect(cod).toBe('Naina Ji, ##1042 is out today and keep ₹999.00 ready (Cash on Delivery). Track: https://shiprocket.co/tracking/AWB123');
+    const prepaid = renderShipmentNotice(overrides, shipment({ payment_method: 'Prepaid', customer_name: 'Naina' }), 'out_for_delivery', { amount: '999.00' });
+    expect(prepaid).not.toContain('Cash on Delivery');
+  });
+
+  it('has a customer line for a failed delivery attempt', () => {
+    expect(buildStatusLine(shipment(), 'ndr')).toMatch(/couldn't deliver.*#1042/);
   });
 });

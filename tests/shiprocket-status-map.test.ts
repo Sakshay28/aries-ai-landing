@@ -15,6 +15,16 @@ describe('normalizeShiprocketStatus', () => {
     ['CANCELLED', 'cancelled'],
     ['Courier Assigned', 'awb_assigned'],
     ['AWB Assigned', 'awb_assigned'],
+    // Raw strings seen on a live account (Devprayagjal, 2026-10-01)
+    ['NEW', 'created'],
+    ['PICKUP BOOKED', 'pickup_scheduled'],
+    ['OUT FOR PICKUP', 'pickup_scheduled'],
+    ['RTO IN TRANSIT', 'rto'],
+    ['RTO OFD', 'rto'],
+    ['REACHED BACK AT SELLER CITY', 'rto'],
+    ['CANCELED', 'cancelled'],
+    ['UNDELIVERED', 'in_transit'],
+    ['REACHED AT DESTINATION HUB', 'in_transit'],
   ];
 
   it.each(cases)('maps %s -> %s', (raw, expected) => {

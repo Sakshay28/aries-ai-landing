@@ -46,16 +46,45 @@ jobs:
           echo "cron/expire-bookings -> $code"
           [ "$code" = "200" ] || exit 1
 
+      # Shopify webhook backstop + Shiprocket status pull (customer shipped /
+      # out-for-delivery / delivered messages). pg_cron is the precise
+      # scheduler for both; this is the redundant second path.
+      - name: Drain Shopify queue
+        id: shopify
+        continue-on-error: true
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 60 \
+            https://ariesai.in/api/cron/shopify-sync)
+          echo "cron/shopify-sync -> $code"
+          [ "$code" = "200" ] || exit 1
+
+      - name: Sync Shiprocket statuses
+        id: shiprocket
+        continue-on-error: true
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 60 \
+            https://ariesai.in/api/cron/shiprocket-sync)
+          echo "cron/shiprocket-sync -> $code"
+          [ "$code" = "200" ] || exit 1
+
       - name: Fail if any endpoint failed
         env:
           DRAIN: ${{ steps.drain.outcome }}
           FLOWS: ${{ steps.flows.outcome }}
           BOOKINGS: ${{ steps.bookings.outcome }}
+          SHOPIFY: ${{ steps.shopify.outcome }}
+          SHIPROCKET: ${{ steps.shiprocket.outcome }}
         run: |
           failed=""
           if [ "$DRAIN" = "failure" ]; then failed="$failed broadcast/process-queue"; fi
           if [ "$FLOWS" = "failure" ]; then failed="$failed cron/scheduled-flows"; fi
           if [ "$BOOKINGS" = "failure" ]; then failed="$failed cron/expire-bookings"; fi
+          if [ "$SHOPIFY" = "failure" ]; then failed="$failed cron/shopify-sync"; fi
+          if [ "$SHIPROCKET" = "failure" ]; then failed="$failed cron/shiprocket-sync"; fi
           if [ -n "$failed" ]; then
             echo "Failed endpoints:$failed"
             echo "A 401 on every endpoint means the Vercel CRON_SECRET no longer matches the CRON_SECRET GitHub Actions secret."

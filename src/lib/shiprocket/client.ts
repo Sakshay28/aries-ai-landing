@@ -129,6 +129,36 @@ export interface TrackingResult {
   shipment_track_activities: TrackingActivity[];
 }
 
+/** One row of GET /v1/external/orders — only the fields we read (live-verified 2026-10-01). */
+export interface ShiprocketOrder {
+  id: number;
+  channel_order_id: string;          // the Shopify order name, e.g. "DPJ-4495"
+  channel_name?: string;
+  base_channel_code?: string;
+  customer_name?: string;
+  customer_phone?: string;
+  status: string;                    // "NEW", "PICKUP BOOKED", "DELIVERED", "RTO IN TRANSIT", …
+  payment_method?: string;           // "cod" | "prepaid"
+  total?: string;
+  created_at?: string;               // "1 Oct 2026, 12:25 PM" (IST)
+  updated_at?: string;
+  activities?: string[];             // event codes, e.g. "ORDER_UNDELIVERED_2"
+  delivered_date?: string | null;    // "16-09-2026 14:33:00"
+  out_for_delivery_date?: string | null;
+  picked_up_date?: string | null;    // "2026-09-11 20:45:00"
+  products?: Array<{ name?: string; quantity?: number; channel_sku?: string }>;
+  shipments?: Array<{
+    id?: number;
+    awb?: string;
+    courier?: string;
+    courier_id?: number;
+    shipped_date?: string | null;
+    delivered_date?: string | null;
+    rto_initiated_date?: string | null;
+    rto_delivered_date?: string | null;
+  }>;
+}
+
 export interface CancelResult {
   status: number;
   message: string;
@@ -259,6 +289,20 @@ export class ShiprocketClient {
     });
     if (!res?.label_url) throw new ShiprocketApiError(0, 'Label generation returned no URL', res);
     return { label_url: res.label_url };
+  }
+
+  /**
+   * GET /v1/external/orders — every order in the account, including ones
+   * Shiprocket pulled in itself through its own Shopify channel (the way most
+   * merchants actually ship; those never go through createOrder above).
+   * Newest first. Verified against a live account 2026-10-01: `data` is the
+   * order array, `meta.pagination.total_pages` the page count.
+   */
+  async listOrders(page = 1, perPage = 100): Promise<{ orders: ShiprocketOrder[]; totalPages: number }> {
+    const res = await this.request<{ data?: ShiprocketOrder[]; meta?: { pagination?: { total_pages?: number } } }>(
+      'GET', '/v1/external/orders', { query: { page, per_page: perPage } },
+    );
+    return { orders: res?.data || [], totalPages: res?.meta?.pagination?.total_pages ?? 1 };
   }
 
   /** GET /v1/external/courier/track/awb/{awb} */

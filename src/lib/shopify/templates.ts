@@ -59,6 +59,8 @@ export const ORDER_CONFIRMATION_PAYLOAD_PREFIX = {
   change: 'order_change:',
 } as const;
 
+export const DAILY_REPORT_READY_TEMPLATE_NAME = 'shopify_daily_report_ready';
+
 const DEFAULT_ORDER_CONFIRMATION_BODY =
   'Hi {{1}}! 🛍️ Thanks for your order {{2}}.\n' +
   'Item: {{3}}\n' +
@@ -90,10 +92,13 @@ export function shopifyTemplateSpecs(): TemplateSpec[] {
       name: 'shopify_shipping_update',
       category: 'UTILITY',
       language: 'en',
-      body: 'Hi {{1}}! Your order {{2}} has shipped 🚚 Tracking: {{3}} (via {{4}}). Follow along here: {{5}}',
-      bodyExample: ['Aarav', '#1042', 'AWB123456', 'BlueDart', 'https://bluedart.com/track/AWB123456'],
+      // Meta rejects a bare '{{1}}' button URL ("is not a valid URI") — the
+      // variable must be a suffix of a fixed base. src/lib/shiprocket/notify.ts
+      // passes only the AWB to match.
+      body: 'Hi {{1}}! Your order {{2}} has shipped 🚚 Tracking number: {{3}} (via {{4}}). Tap below to follow it live.',
+      bodyExample: ['Aarav', '#1042', 'AWB123456', 'BlueDart'],
       buttons: [
-        { type: 'URL', text: 'Track shipment', url: '{{1}}', example: ['https://bluedart.com/track/AWB123456'] },
+        { type: 'URL', text: 'Track shipment', url: 'https://shiprocket.co/tracking/{{1}}', example: ['https://shiprocket.co/tracking/AWB123456'] },
       ],
     },
     {
@@ -136,6 +141,20 @@ export function shopifyTemplateSpecs(): TemplateSpec[] {
         { type: 'QUICK_REPLY', text: ORDER_CONFIRMATION_BUTTON_LABELS.confirm },
         { type: 'QUICK_REPLY', text: ORDER_CONFIRMATION_BUTTON_LABELS.cancel },
         { type: 'QUICK_REPLY', text: ORDER_CONFIRMATION_BUTTON_LABELS.change },
+      ],
+    },
+    {
+      // Nightly owner digest (src/app/api/cron/daily-report). Sent only when
+      // the owner's 24h window is closed; tapping the button is an inbound
+      // "View Report" message, which the webhook's report trigger answers with
+      // the full report as free-form text.
+      name: DAILY_REPORT_READY_TEMPLATE_NAME,
+      category: 'UTILITY',
+      language: 'en',
+      body: 'Namaste {{1}} 🙏 Your {{2}} daily report for {{3}} is ready. Revenue: {{4}} from {{5}} orders. Tap View Report for the full breakdown.',
+      bodyExample: ['Sushant', 'Devprayagjal', '01 Oct 2026', 'Rs 12,499', '9'],
+      buttons: [
+        { type: 'QUICK_REPLY', text: 'View Report' },
       ],
     },
     {

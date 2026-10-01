@@ -23,6 +23,8 @@ import { enqueueWebhookEvent, ShopifyWorker } from '@/lib/shopify/queue';
 import * as Sentry from '@/lib/sentry-stub';
 
 export const runtime = 'nodejs';
+// Room for the after() drain loop below (4 passes, 6s apart, plus the work).
+export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -112,7 +114,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // case. The cron endpoint is the safety net for stalled jobs.
   after(async () => {
     try {
-      await ShopifyWorker.processQueue(undefined, 5);
+      // Keep ticking briefly: a job postponed by a busy lane gets run_at +5s
+      // and, with the cron only daily on this plan, would otherwise wait for
+      // the next webhook to arrive.
+      for (let pass = 0; pass < 4; pass++) {
+        const claimed = await ShopifyWorker.processQueue(undefined, 5);
+        if (claimed === 0 && pass > 0) break;
+        await new Promise((r) => setTimeout(r, 6_000));
+      }
     } catch (err) {
       console.error('❌ [shopify webhook after()] worker tick failed', err);
     }

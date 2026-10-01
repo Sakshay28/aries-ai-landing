@@ -1,11 +1,12 @@
-// Cron: drain the Shiprocket sync queue (webhook_event jobs). Backstop only
-// — the webhook route's after() self-drain is the primary path; this exists
-// for jobs that don't finish before the function suspends, and to reclaim
-// jobs whose worker died mid-processing.
+// Cron: (1) pull every connected tenant's Shiprocket orders and update
+// shipment statuses + notify customers (orderSync.ts — the primary status
+// path, since most merchants never configure Shiprocket's webhook), then
+// (2) drain the webhook_event queue and reclaim jobs whose worker died.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { ShiprocketWorker } from '@/lib/shiprocket/queue';
+import { syncAllShiprocketTenants } from '@/lib/shiprocket/orderSync';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -41,6 +42,13 @@ async function handler(req: NextRequest) {
   let processed = 0;
   const deadline = startedAt + 55_000;
 
+  let orderSync: Awaited<ReturnType<typeof syncAllShiprocketTenants>> = [];
+  try {
+    orderSync = await syncAllShiprocketTenants(startedAt + 40_000);
+  } catch (err) {
+    console.error('[shiprocket cron] order sync failed:', (err as Error).message);
+  }
+
   while (Date.now() < deadline && processed < totalTarget) {
     const n = await ShiprocketWorker.processQueue(undefined, 20);
     processed += n;
@@ -50,6 +58,7 @@ async function handler(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     processed,
+    order_sync: orderSync,
     reclaimed_stuck: reclaimed ?? 0,
     purged_webhook_events: purgedWebhookEvents,
     duration_ms: Date.now() - startedAt,
