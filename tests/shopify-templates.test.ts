@@ -11,8 +11,8 @@ describe('shopifyTemplateSpecs', () => {
       'shopify_daily_report_ready',
       'shopify_delivered',
       'shopify_order_cancelled',
+      'shopify_order_confirm_utility',
       'shopify_order_confirmation',
-      'shopify_order_confirmation_action',
       'shopify_out_for_delivery',
       'shopify_review_request',
       'shopify_rto',
@@ -25,7 +25,7 @@ describe('shopifyTemplateSpecs', () => {
     expect(byName.get('shopify_order_confirmation')!.category).toBe('UTILITY');
     expect(byName.get('shopify_shipping_update')!.category).toBe('UTILITY');
     expect(byName.get('shopify_order_cancelled')!.category).toBe('UTILITY');
-    expect(byName.get('shopify_order_confirmation_action')!.category).toBe('UTILITY');
+    expect(byName.get('shopify_order_confirm_utility')!.category).toBe('UTILITY');
     expect(byName.get('shopify_out_for_delivery')!.category).toBe('UTILITY');
     expect(byName.get('shopify_delivered')!.category).toBe('UTILITY');
     expect(byName.get('shopify_rto')!.category).toBe('UTILITY');
@@ -36,7 +36,7 @@ describe('shopifyTemplateSpecs', () => {
   });
 
   it('shopify_order_confirmation_action has 3 quick-reply buttons with the fixed labels', () => {
-    const spec = specs.find(s => s.name === 'shopify_order_confirmation_action')!;
+    const spec = specs.find(s => s.name === 'shopify_order_confirm_utility')!;
     expect(spec.buttons?.map(b => b.text)).toEqual(['Confirm Order', 'Cancel Order', 'Change Details']);
     expect(spec.buttons?.every(b => b.type === 'QUICK_REPLY')).toBe(true);
   });

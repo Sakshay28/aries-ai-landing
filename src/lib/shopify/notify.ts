@@ -14,10 +14,10 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { decryptTokenV2 } from '@/lib/security/keyManager';
-import { sendTemplateMessage } from '@/lib/meta/service';
+import { sendTemplateMessage, MetaApiError } from '@/lib/meta/service';
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { resolveShopifyOrderVariables, type OrderLike } from './automationVariables';
-import { ORDER_CONFIRMATION_TEMPLATE_NAME, ORDER_CONFIRMATION_PAYLOAD_PREFIX } from './templates';
+import { ORDER_CONFIRMATION_TEMPLATE_NAME, LEGACY_ORDER_CONFIRMATION_TEMPLATE_NAME, ORDER_CONFIRMATION_PAYLOAD_PREFIX } from './templates';
 
 type OrderConfirmationOrder = OrderLike & { id: number };
 
@@ -102,6 +102,26 @@ async function findOrCreateConversation(
   return created?.id ?? null;
 }
 
+// Meta: 132001 = template doesn't exist / isn't approved in this language,
+// 132015 = paused, 132016 = disabled. Any of these on the new template means
+// "not usable on this WABA yet" — the legacy one is still approved.
+const TEMPLATE_UNAVAILABLE_CODES = new Set([132001, 132015, 132016]);
+
+async function sendOrderConfirmationTemplate(
+  accessToken: string,
+  phoneNumberId: string,
+  phone: string,
+  components: Array<Record<string, unknown>>,
+) {
+  try {
+    return await sendTemplateMessage(accessToken, phoneNumberId, phone, ORDER_CONFIRMATION_TEMPLATE_NAME, components, 'en');
+  } catch (err) {
+    const code = err instanceof MetaApiError ? (err.code ?? err.subcode) : undefined;
+    if (code == null || !TEMPLATE_UNAVAILABLE_CODES.has(code)) throw err;
+    return sendTemplateMessage(accessToken, phoneNumberId, phone, LEGACY_ORDER_CONFIRMATION_TEMPLATE_NAME, components, 'en');
+  }
+}
+
 export async function sendOrderConfirmationRequest(
   tenantId: string,
   order: OrderConfirmationOrder,
@@ -171,7 +191,7 @@ export async function sendOrderConfirmationRequest(
   ];
 
   try {
-    const result = await sendTemplateMessage(accessToken, tenant.wa_phone_number_id as string, phone, ORDER_CONFIRMATION_TEMPLATE_NAME, components, 'en');
+    const result = await sendOrderConfirmationTemplate(accessToken, tenant.wa_phone_number_id as string, phone, components);
 
     if (conversationId) {
       await supabaseAdmin.from('messages').insert({

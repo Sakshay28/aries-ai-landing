@@ -40,7 +40,15 @@ export interface TemplateSpec {
 // {{6}}=city, {{7}}=state. src/lib/shopify/notify.ts builds send-time params
 // in this exact order, and provisionShopifyTemplates() validates any tenant
 // override body uses all 7 (see below) before submitting it to Meta.
-export const ORDER_CONFIRMATION_TEMPLATE_NAME = 'shopify_order_confirmation_action';
+// Meta classified the original 'shopify_order_confirmation_action' as
+// MARKETING (from the client's blessing line), which subjects it to Meta's
+// per-user marketing cap — customers silently miss it ("not delivered to
+// maintain healthy ecosystem engagement", seen 2026-10-01) — and costs ~7x a
+// utility send. The transactional replacement is registered under a new name
+// as UTILITY; notify.ts falls back to the legacy name for any tenant whose
+// WABA doesn't have the new one approved yet.
+export const ORDER_CONFIRMATION_TEMPLATE_NAME = 'shopify_order_confirm_utility';
+export const LEGACY_ORDER_CONFIRMATION_TEMPLATE_NAME = 'shopify_order_confirmation_action';
 export const ORDER_CONFIRMATION_PLACEHOLDER_COUNT = 7;
 // Meta rejects QUICK_REPLY button text containing emojis, newlines, variables,
 // or other formatting characters (error_subcode 2388060, "Button format is
