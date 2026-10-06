@@ -192,6 +192,17 @@ function interpolate(template: string, ctx: ExecContext): string {
     });
 }
 
+const DEFAULT_HANDOFF_REASON = 'Flow completed (handoff initiated)';
+
+/** Staff-alert reason for a handoff node: its interpolated data.reason, or the
+ *  generic default when unset. A placeholder the flow never filled (customer
+ *  skipped a step) is shown as "—" rather than leaking raw {{braces}} to staff. */
+export function handoffAlertReason(template: unknown, ctx: Pick<ExecContext, 'leadName' | 'phone' | 'messageText' | 'variables'>): string {
+  const raw = typeof template === 'string' ? template.trim() : '';
+  if (!raw) return DEFAULT_HANDOFF_REASON;
+  return interpolate(raw, ctx as ExecContext).replace(/\{\{[\w.]+\}\}/g, '—');
+}
+
 // ── Main entry point ─────────────────────────────────────────
 /**
  * Checks all active flows for the tenant and runs the first
@@ -1169,8 +1180,12 @@ async function executeNode(
 
   // ── Human Handoff ────────────────────────────────────────
   if (type === 'handoff' || node.data?.label === 'Human Handoff') {
+    // data.reason (optional) lets a flow put what it collected — date, group
+    // size, etc. — into the staff alert; the alert otherwise only says the
+    // flow finished, and staff have to open the chat to learn anything.
+    const reason = handoffAlertReason(node.data?.reason, ctx);
     if (ctx.dryRun) {
-      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'handoff', payload: 'bot_paused=true', nextId: getNextNode(node.id, null, edges) });
+      ctx.trace?.push({ nodeId: node.id, nodeType: type, action: 'handoff', payload: `bot_paused=true — ${reason}`, variables: { ...ctx.variables }, nextId: getNextNode(node.id, null, edges) });
       return { nextId: getNextNode(node.id, null, edges) };
     }
     try {
@@ -1186,7 +1201,7 @@ async function executeNode(
         leadId: ctx.leadId,
         customerPhone: ctx.phone,
         customerName: ctx.leadName,
-        reason: 'Flow completed (handoff initiated)',
+        reason,
         lastMessage: ctx.messageText || '[Media/Choice selection]'
       });
     } catch (e) {
