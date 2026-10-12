@@ -14,6 +14,13 @@ export function isInvalidMediaUrl(url?: string): boolean {
   return false;
 }
 
+export interface ButtonPayloadConfig {
+  index: number;
+  type: string;
+  couponCode?: string;
+  url?: string;
+}
+
 export class MetaPayloadBuilderService {
   /**
    * Conforms resolved campaign variables into exact Meta template components schema payloads.
@@ -22,7 +29,8 @@ export class MetaPayloadBuilderService {
     variables: Record<string, VariableConfig>,
     detectedVarIndices: string[],
     lead: any,
-    headerConfig?: { type: 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'TEXT' | 'NONE'; mediaUrl?: string; text?: string }
+    headerConfig?: { type: 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'TEXT' | 'NONE'; mediaUrl?: string; text?: string },
+    buttonsConfig?: ButtonPayloadConfig[]
   ): any[] {
     const components: any[] = [];
 
@@ -78,7 +86,31 @@ export class MetaPayloadBuilderService {
       });
     }
 
+    // 3. Resolve button components (COPY_CODE coupon codes, dynamic URLs)
+    if (buttonsConfig && buttonsConfig.length > 0) {
+      buttonsConfig.forEach(btn => {
+        const bType = (btn.type || '').toUpperCase();
+        if (bType === 'COPY_CODE') {
+          const code = btn.couponCode?.trim();
+          if (code) {
+            components.push({
+              type: 'button',
+              sub_type: 'copy_code',
+              index: String(btn.index),
+              parameters: [
+                {
+                  type: 'coupon_code',
+                  coupon_code: code
+                }
+              ]
+            });
+          }
+        }
+      });
+    }
+
     return components;
   }
 }
+
 

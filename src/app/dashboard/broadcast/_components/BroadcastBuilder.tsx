@@ -402,13 +402,23 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
     setSaveStatus('saving');
 
     try {
-      console.log('[BROADCAST_SAVE] Saving:', name, 'id:', s.campaignId);
+      // If we are editing an already completed/locked campaign, save it as a new draft
+      // so it can be re-launched without violating the locked snapshot rules.
+      const isLockedHistorical = Boolean(
+        campaign?.id &&
+        s.campaignId === campaign.id &&
+        campaign.status &&
+        !['draft', 'scheduled'].includes(campaign.status)
+      );
+
+      const targetCampaignId = isLockedHistorical ? null : s.campaignId;
+      console.log('[BROADCAST_SAVE] Saving:', name, 'id:', targetCampaignId);
 
       const res  = await fetch('/api/broadcast/campaign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          campaignId:       s.campaignId,
+          campaignId:       targetCampaignId,
           campaignName:     name,
           templateName:     s.selectedTemplate?.name,
           templateCategory: s.selectedTemplate?.category,
@@ -430,6 +440,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
       }
 
       setCampaignId(data.campaignId);
+      stateRef.current.campaignId = data.campaignId;
       setSaveStatus('saved');
       console.log('[BROADCAST_SAVE] Success:', data.campaignId);
       setTimeout(() => setSaveStatus(s => s === 'saved' ? 'idle' : s), 2500);
@@ -595,6 +606,42 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
       toast.error(err.message || 'Failed to launch campaign');
     } finally {
       setIsLaunching(false);
+    }
+  };
+
+  // ── Duplicate ──────────────────────────────────────────────────────────────
+  const handleDuplicate = async () => {
+    setIsSaving(true);
+    try {
+      const copyName = `${campaignName.replace(/ \(Copy( \d+)?\)$/, '')} (Copy)`;
+      const res = await fetch('/api/broadcast/campaign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignId: null,
+          campaignName: copyName,
+          templateName: selectedTemplate?.name,
+          templateCategory: selectedTemplate?.category,
+          templateLanguage: selectedTemplate?.language,
+          headerMediaUrl: headerMediaUrl || null,
+          deliveryMode: delivery.mode,
+          scheduledAt: delivery.scheduledAt,
+          audience,
+          delivery,
+          variables,
+          automationRules,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.campaignId) throw new Error(data.error || 'Failed to duplicate campaign');
+      setCampaignId(data.campaignId);
+      stateRef.current.campaignId = data.campaignId;
+      setCampaignName(copyName);
+      toast.success('Campaign duplicated as new draft');
+    } catch (err: any) {
+      toast.error(err.message || 'Duplicate failed');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -806,6 +853,25 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
           <div className="broadcast-main-grid">
             <section className="broadcast-left-column space-y-8">
 
+              {/* Informational banner when viewing past/completed campaign */}
+              {campaign?.status && !['draft', 'scheduled'].includes(campaign.status) && (
+                <div className="bg-indigo-500/10 border border-indigo-500/20 text-indigo-700 dark:text-indigo-400 px-4 py-3 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[12.5px] font-medium">
+                  <div className="flex items-center gap-2">
+                    <Megaphone className="w-4 h-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                    <span>
+                      This broadcast previously completed ({campaign.status}). Launching will automatically start a fresh broadcast run to your recipients.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDuplicate}
+                    className="text-[11px] font-bold px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors shrink-0 self-start sm:self-auto cursor-pointer"
+                  >
+                    Duplicate as New Draft
+                  </button>
+                </div>
+              )}
+
               {/* Template Selection */}
               <div id="section-template" className="space-y-3 text-left">
                 <div className="space-y-1">
@@ -956,7 +1022,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                     }}
                     onLaunch={handleLaunch}
                     onTestSend={handleTestSend}
-                    onDuplicate={() => toast('Duplicate coming soon')}
+                    onDuplicate={handleDuplicate}
                     isSaving={isSaving}
                     isLaunching={isLaunching}
                     validationChecks={validationChecks}
@@ -1112,7 +1178,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
               }`}
             >
               {isLaunching ? <Spinner /> : <Send className="w-3 h-3" />}
-              {delivery.mode === 'scheduled' ? 'Schedule' : 'Launch'}
+              {delivery.mode === 'scheduled' ? 'Schedule' : (campaign?.status && !['draft', 'scheduled'].includes(campaign.status) ? 'Re-launch' : 'Launch')}
             </button>
           </div>
         </div>

@@ -17,7 +17,8 @@ import { decryptTokenV2 } from '@/lib/security/keyManager';
 import { sendTemplateMessage, MetaApiError } from '@/lib/meta/service';
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { resolveShopifyOrderVariables, type OrderLike } from './automationVariables';
-import { ORDER_CONFIRMATION_TEMPLATE_NAME, LEGACY_ORDER_CONFIRMATION_TEMPLATE_NAME, ORDER_CONFIRMATION_PAYLOAD_PREFIX } from './templates';
+import { ORDER_CONFIRMATION_TEMPLATE_NAME, LEGACY_ORDER_CONFIRMATION_TEMPLATE_NAME, ORDER_CONFIRMATION_PAYLOAD_PREFIX, ORDER_CONFIRMATION_BUTTON_LABELS, renderOrderConfirmationBody } from './templates';
+import type { TemplateMeta } from '@/lib/types';
 
 type OrderConfirmationOrder = OrderLike & { id: number };
 
@@ -128,7 +129,7 @@ export async function sendOrderConfirmationRequest(
 ): Promise<{ sent: boolean; reason?: string }> {
   const { data: tenant } = await supabaseAdmin
     .from('tenants')
-    .select('wa_access_token, wa_phone_number_id, shopify_order_confirmation_enabled, shopify_store_url')
+    .select('wa_access_token, wa_phone_number_id, shopify_order_confirmation_enabled, shopify_store_url, shopify_order_confirmation_message')
     .eq('id', tenantId)
     .maybeSingle();
 
@@ -194,18 +195,52 @@ export async function sendOrderConfirmationRequest(
     const result = await sendOrderConfirmationTemplate(accessToken, tenant.wa_phone_number_id as string, phone, components);
 
     if (conversationId) {
+      const formattedTotal = formatAmount(variables.order_total, variables.order_currency);
+      const renderedBody = renderOrderConfirmationBody(
+        tenant.shopify_order_confirmation_message as string | null,
+        {
+          customer_name: variables.customer_name,
+          order_number: variables.order_number || variables.order_id,
+          product_name: variables.product_name,
+          order_total: formattedTotal,
+          payment_method: variables.payment_method,
+          shipping_city: variables.shipping_city,
+          shipping_state: variables.shipping_state,
+        },
+      );
+
+      const metadata: TemplateMeta = {
+        interactive_type: 'template',
+        template_name: ORDER_CONFIRMATION_TEMPLATE_NAME,
+        buttons: [
+          { type: 'quick_reply', text: ORDER_CONFIRMATION_BUTTON_LABELS.confirm, id: `${ORDER_CONFIRMATION_PAYLOAD_PREFIX.confirm}${order.id}` } as any,
+          { type: 'quick_reply', text: ORDER_CONFIRMATION_BUTTON_LABELS.cancel, id: `${ORDER_CONFIRMATION_PAYLOAD_PREFIX.cancel}${order.id}` } as any,
+          { type: 'quick_reply', text: ORDER_CONFIRMATION_BUTTON_LABELS.change, id: `${ORDER_CONFIRMATION_PAYLOAD_PREFIX.change}${order.id}` } as any,
+        ],
+      };
+
       await supabaseAdmin.from('messages').insert({
         tenant_id: tenantId,
         conversation_id: conversationId,
         direction: 'outbound',
-        content: `Order confirmation requested for ${variables.order_number}: ${variables.product_name} — ${formatAmount(variables.order_total, variables.order_currency)} (${variables.payment_method}), delivering to ${variables.shipping_city}, ${variables.shipping_state}`,
+        content: renderedBody,
         message_type: 'template',
         channel: 'whatsapp',
         sender_id: null,
         status: result.messageId ? 'sent' : 'failed',
         ai_generated: false,
         wa_message_id: result.messageId || null,
+        metadata,
       });
+
+      await supabaseAdmin.from('conversations').update({
+        last_message_at: new Date().toISOString(),
+        last_outbound_at: new Date().toISOString(),
+        last_message_preview: renderedBody.slice(0, 150),
+        last_message_type: 'template',
+        last_template_name: ORDER_CONFIRMATION_TEMPLATE_NAME,
+        last_template_sent_at: new Date().toISOString(),
+      }).eq('id', conversationId);
     } else {
       console.warn(`[shopify:notify] order ${order.id} sent but no conversation to log it against`);
     }

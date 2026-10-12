@@ -305,6 +305,8 @@ export interface TemplateMeta {
   buttons?: Array<{ type: 'quick_reply' | 'url' | 'phone_number' | 'copy_code' | 'otp' | 'flow'; text: string; url?: string; phone_number?: string }>;
   header?: { type: 'text' | 'image' | 'video' | 'document'; text?: string; url?: string };
   footer?: string;
+  _selectedId?: string;
+  _selectedText?: string;
 }
 
 export interface FlowMeta {

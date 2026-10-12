@@ -19,6 +19,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { decryptTokenV2 } from '@/lib/security/keyManager';
+import { greetingName } from '@/lib/utils/contact-name';
 
 export interface TemplateSpec {
   name: string;
@@ -69,12 +70,37 @@ export const ORDER_CONFIRMATION_PAYLOAD_PREFIX = {
 
 export const DAILY_REPORT_READY_TEMPLATE_NAME = 'shopify_daily_report_ready';
 
-const DEFAULT_ORDER_CONFIRMATION_BODY =
+export const DEFAULT_ORDER_CONFIRMATION_BODY =
   'Hi {{1}}! 🛍️ Thanks for your order {{2}}.\n' +
   'Item: {{3}}\n' +
   'Amount: {{4}} ({{5}})\n' +
   'Delivery to: {{6}}, {{7}}\n\n' +
   'Please confirm your order below.';
+
+export interface OrderConfirmationBodyVars {
+  customer_name?: string;
+  order_number?: string;
+  product_name?: string;
+  order_total?: string;
+  payment_method?: string;
+  shipping_city?: string;
+  shipping_state?: string;
+}
+
+export function renderOrderConfirmationBody(
+  rawBody: string | null | undefined,
+  vars: OrderConfirmationBodyVars,
+): string {
+  const body = (rawBody && rawBody.trim()) || DEFAULT_ORDER_CONFIRMATION_BODY;
+  return body
+    .replace(/\{\{1\}\}/g, greetingName(vars.customer_name || null))
+    .replace(/\{\{2\}\}/g, vars.order_number || '')
+    .replace(/\{\{3\}\}/g, vars.product_name || 'your order')
+    .replace(/\{\{4\}\}/g, vars.order_total || '')
+    .replace(/\{\{5\}\}/g, vars.payment_method || '')
+    .replace(/\{\{6\}\}/g, vars.shipping_city || '-')
+    .replace(/\{\{7\}\}/g, vars.shipping_state || '-');
+}
 
 const ORDER_CONFIRMATION_BODY_EXAMPLE = ['Aarav', '#1042', 'Rudraksha Mala', 'INR 2499', 'COD', 'Dehradun', 'Uttarakhand'];
 

@@ -157,18 +157,18 @@ export default function CampaignStatsPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          {stats?.status === 'sending' && (
+          {(stats?.status === 'sending' || stats?.status === 'paused' || stats.failed > 0) && (
             <button
               onClick={handleRetryNow}
               disabled={retrying}
-              className="h-8 px-3 text-[12px] font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl flex items-center gap-1.5 transition-all disabled:opacity-50"
+              className="h-8 px-3 text-[12px] font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer shadow-sm hover:shadow"
             >
               {retrying ? (
                 <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
               ) : (
                 <Send className="w-3.5 h-3.5" />
               )}
-              Retry Now
+              {stats.failed > 0 && stats.status !== 'sending' ? 'Retry Failed Messages' : 'Retry Now'}
             </button>
           )}
           <button

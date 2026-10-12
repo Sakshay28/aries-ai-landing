@@ -1,18 +1,72 @@
 import { Template } from '@/app/dashboard/broadcast/types';
 
-interface ParsedComponents {
+export interface ParsedButton {
+  index: number;
+  type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER' | 'COPY_CODE' | 'OTP' | 'FLOW' | string;
+  text?: string;
+  url?: string;
+  phoneNumber?: string;
+  couponCode?: string;
+  example?: any;
+}
+
+export interface ParsedComponents {
   headerType: 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'NONE';
   headerText?: string;
   headerMediaUrl?: string;
   body: string;
   footer?: string;
-  buttons: Array<{
-    type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER';
-    text: string;
-    url?: string;
-    phoneNumber?: string;
-  }>;
+  buttons: ParsedButton[];
   detectedVariables: string[];
+}
+
+/**
+ * Extracts promo / coupon code from body text, template name, or button example.
+ */
+export function extractCouponCode(
+  bodyText?: string,
+  templateName?: string,
+  buttonExample?: any
+): string {
+  // 1. Check body text for explicit coupon / promo patterns
+  if (bodyText) {
+    const codeMatch = bodyText.match(
+      /(?:coupon\s*code|promo\s*code|offer\s*code|discount\s*code|use\s*code|code)\s*[:：\-–]?\s*\*?([A-Za-z0-9_-]{3,30})\*?/i
+    );
+    if (codeMatch && codeMatch[1]) {
+      const candidate = codeMatch[1].trim().replace(/^\*+|\*+$/g, '');
+      const lower = candidate.toLowerCase();
+      if (!['http', 'https', 'terms', 'conditions', 'apply', 'here', 'now', 'link'].includes(lower)) {
+        return candidate;
+      }
+    }
+  }
+
+  // 2. Check template name suffix (e.g. 7_mukhi_nepali_festive_offer_festive10 -> FESTIVE10)
+  if (templateName) {
+    const couponMatch = templateName.match(/(?:coupon|promo|code|offer)_*([a-zA-Z0-9]+)$/i) ||
+                        templateName.match(/(?:couponcode|promocode|offercode)([a-zA-Z0-9]+)$/i);
+    if (couponMatch && couponMatch[1]) {
+      return couponMatch[1].toUpperCase();
+    }
+    const parts = templateName.split('_');
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      if (p && /^(?:[a-zA-Z]+\d+|\d+[a-zA-Z]+)$/i.test(p)) {
+        return p.toUpperCase();
+      }
+    }
+  }
+
+  // 3. Fallback to button example from Meta template definition
+  if (buttonExample) {
+    const ex = Array.isArray(buttonExample) ? buttonExample[0] : buttonExample;
+    if (typeof ex === 'string' && ex.trim()) {
+      return ex.trim();
+    }
+  }
+
+  return '';
 }
 
 export class TemplateParserService {
@@ -42,19 +96,31 @@ export class TemplateParserService {
     }
 
     // 2. Resolve body & variables
-    const bodyText = bodyComp?.text || '';
+    const bodyText = bodyComp?.text || templateJson?.body || '';
     const matches = [...bodyText.matchAll(/{{(\d+)}}/g)];
     const detectedVariables = [...new Set(matches.map(m => m[1]))].sort((a, b) => Number(a) - Number(b));
 
     // 3. Resolve buttons
-    const parsedButtons: ParsedComponents['buttons'] = [];
-    if (buttonsComp?.buttons) {
-      buttonsComp.buttons.forEach((b: any) => {
+    const parsedButtons: ParsedButton[] = [];
+    const buttonsList = buttonsComp?.buttons || templateJson?.buttons || [];
+    if (Array.isArray(buttonsList)) {
+      buttonsList.forEach((b: any, index: number) => {
+        const bType = String(b.type || '').toUpperCase();
+        const bExample = b.example || (Array.isArray(b.examples) ? b.examples[0] : undefined);
+        let couponCode: string | undefined;
+
+        if (bType === 'COPY_CODE') {
+          couponCode = b.coupon_code || b.couponCode || extractCouponCode(bodyText, templateJson?.name, bExample);
+        }
+
         parsedButtons.push({
-          type: b.type as any,
-          text: b.text,
+          index,
+          type: bType,
+          text: b.text || '',
           url: b.url || undefined,
-          phoneNumber: b.phone_number || undefined,
+          phoneNumber: b.phone_number || b.phoneNumber || undefined,
+          couponCode,
+          example: bExample,
         });
       });
     }
@@ -64,7 +130,7 @@ export class TemplateParserService {
       headerText,
       headerMediaUrl,
       body: bodyText,
-      footer: footerComp?.text || undefined,
+      footer: footerComp?.text || templateJson?.footer || undefined,
       buttons: parsedButtons,
       detectedVariables
     };

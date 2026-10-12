@@ -2,6 +2,8 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { sendTemplateMessage } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
 import { VariableEngineService } from './variable-engine.service';
+import { MetaPayloadBuilderService } from './meta-payload-builder.service';
+import { TemplateParserService } from './template-parser.service';
 import { VariableConfig } from '@/app/dashboard/broadcast/types';
 
 export class TestSendService {
@@ -15,7 +17,8 @@ export class TestSendService {
     variables: Record<string, VariableConfig>,
     detectedVarIndices: string[],
     testRecipientPhone: string,
-    languageCode = 'en'
+    languageCode = 'en',
+    customHeaderMediaUrl?: string
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     try {
       if (!templateName || !testRecipientPhone) {
@@ -39,7 +42,7 @@ export class TestSendService {
 
       const decryptedToken = decryptToken(tenant.wa_access_token) as string;
 
-      // 2. Mock a test lead record for जयपुर clock tower Jaipurs Sakshay Jaipur Rajasthan Rajasthani
+      // 2. Mock a test lead record
       const testLead = {
         id: '00000000-0000-0000-0000-000000000000',
         name: 'Sakshay',
@@ -48,11 +51,41 @@ export class TestSendService {
         notes: 'Test lead account configuration'
       };
 
-      // 3. Resolve components via Variable Engine
-      const metaComponents = VariableEngineService.buildMetaPayload(
+      // 3. Resolve template headers & buttons from cache if available
+      let headerConfig: any;
+      let buttonsConfig: any;
+
+      const { data: tmpl } = await supabaseAdmin
+        .from('broadcast_templates_cache')
+        .select('template_json')
+        .eq('tenant_id', tenantId)
+        .eq('name', templateName)
+        .maybeSingle();
+
+      if (tmpl?.template_json) {
+        const parsed = TemplateParserService.parse({
+          ...tmpl.template_json,
+          name: templateName,
+        });
+        if (parsed.headerType !== 'NONE') {
+          headerConfig = {
+            type: parsed.headerType,
+            mediaUrl: customHeaderMediaUrl || parsed.headerMediaUrl,
+            text: parsed.headerText,
+          };
+        }
+        if (parsed.buttons && parsed.buttons.length > 0) {
+          buttonsConfig = parsed.buttons;
+        }
+      }
+
+      // 4. Resolve components via MetaPayloadBuilderService
+      const metaComponents = MetaPayloadBuilderService.buildPayload(
         variables,
         detectedVarIndices,
-        testLead
+        testLead,
+        headerConfig,
+        buttonsConfig
       );
 
       // 4. Dispatch actual Meta Outbound message

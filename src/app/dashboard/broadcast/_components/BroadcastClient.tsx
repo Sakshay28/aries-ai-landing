@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Search, X, Network, Play, Clock, FileText, CheckCircle2,
   BarChart3, Trash2, Zap, MoreHorizontal, Users, Send,
-  TrendingUp, Eye, RefreshCw, ChevronRight, Calendar,
+  TrendingUp, Eye, RefreshCw, ChevronRight, Calendar, Copy,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BroadcastBuilder } from './BroadcastBuilder';
@@ -110,7 +110,7 @@ function MiniDeliveryBar({ campaign }: { campaign: Campaign }) {
 
 // ── Campaign Row Card ─────────────────────────────────────────────────────────
 function CampaignCard({
-  campaign, index, onEdit, onAnalytics, onSend, onDelete, sending,
+  campaign, index, onEdit, onAnalytics, onSend, onDelete, onDuplicate, sending,
 }: {
   campaign: Campaign;
   index: number;
@@ -118,6 +118,7 @@ function CampaignCard({
   onAnalytics: (c: Campaign) => void;
   onSend: (id: string) => void;
   onDelete: (id: string) => void;
+  onDuplicate: (c: Campaign) => void;
   sending: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -240,6 +241,12 @@ function CampaignCard({
                 transition={{ duration: 0.12 }}
                 className="absolute right-0 top-full mt-1.5 w-40 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-50 py-1"
               >
+                <button
+                  onClick={() => { onDuplicate(campaign); setMenuOpen(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-[12px] font-medium text-foreground hover:bg-secondary transition-colors"
+                >
+                  <Copy className="w-3.5 h-3.5 text-muted-foreground" /> Duplicate
+                </button>
                 <button
                   onClick={() => { onDelete(campaign.id); setMenuOpen(false); }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-[12px] font-medium text-red-600 hover:bg-red-50"
@@ -488,6 +495,41 @@ export function BroadcastClient() {
     }
   };
 
+  const handleDuplicate = async (c: Campaign) => {
+    try {
+      toast.loading('Duplicating campaign…', { id: 'dup' });
+      const copyName = `${cleanCampaignName(c.name).display.replace(/ \(Copy( \d+)?\)$/, '')} (Copy)`;
+      const res = await fetch('/api/broadcast/campaign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignId: null,
+          campaignName: copyName,
+          templateName: c.template_name,
+          deliveryMode: 'now',
+          audience: { type: 'all' },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.campaignId) throw new Error(data.error || 'Failed to duplicate campaign');
+      toast.success('Campaign duplicated as new draft', { id: 'dup' });
+      await fetchCampaigns();
+      const newCamp: Campaign = {
+        ...c,
+        id: data.campaignId,
+        name: copyName,
+        status: 'draft',
+        sent_count: 0,
+        delivered_count: 0,
+        read_count: 0,
+        failed_count: 0,
+      };
+      setBuilderCampaign(newCamp);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to duplicate campaign', { id: 'dup' });
+    }
+  };
+
   // ── Builder mode ─────────────────────────────────────────────────────────────
   if (builderCampaign !== null) {
     return (
@@ -636,6 +678,7 @@ export function BroadcastClient() {
                   onAnalytics={c => setAnalyticsCampaign(c)}
                   onSend={handleSend}
                   onDelete={handleDelete}
+                  onDuplicate={handleDuplicate}
                   sending={sending}
                 />
               ))}

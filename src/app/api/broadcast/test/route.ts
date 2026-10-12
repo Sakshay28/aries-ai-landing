@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { sendWhatsAppMessage } from '@/lib/whatsapp/sendMessage';
+import { TestSendService } from '@/lib/broadcast/services/test-send.service';
+import { VariableConfig } from '@/app/dashboard/broadcast/types';
 import { checkRedisRateLimit } from '@/lib/redis/client';
 import { z } from 'zod';
 
@@ -54,31 +55,30 @@ export async function POST(req: NextRequest) {
       .select('*')
       .eq('campaign_id', campaignId);
 
-    const resolvedVars: Record<string, string> = {};
+    const variables: Record<string, VariableConfig> = {};
     for (const mapping of (mappings || [])) {
-      if (mapping.source_type === 'static') {
-        resolvedVars[mapping.variable_key] = mapping.custom_value || '';
-      } else if (mapping.source_type === 'crm_field') {
-        const field = mapping.crm_field?.toLowerCase() || '';
-        if (field.includes('name')) resolvedVars[mapping.variable_key] = 'Test Name';
-        else if (field.includes('email')) resolvedVars[mapping.variable_key] = 'test@example.com';
-        else if (field.includes('phone')) resolvedVars[mapping.variable_key] = phoneNumber;
-        else resolvedVars[mapping.variable_key] = `[${mapping.crm_field}]`;
-      } else {
-        resolvedVars[mapping.variable_key] = mapping.custom_value || `[${mapping.variable_key}]`;
-      }
+      variables[mapping.variable_key] = {
+        index: mapping.variable_key,
+        sourceType: mapping.source_type,
+        crmField: mapping.crm_field || undefined,
+        staticValue: mapping.custom_value || undefined,
+      };
     }
+
+    const detectedVarIndices = Object.keys(variables).sort((a, b) => Number(a) - Number(b));
 
     console.log(`[broadcast] [test] Dispatching test template message to ${phoneNumber} for campaign ${campaignId}`);
 
-    // 4. Send test message via WhatsApp API
-    const result = await sendWhatsAppMessage({
-      to: phoneNumber,
-      templateName: campaign.template_name,
-      languageCode: campaign.template_language || 'en',
-      variables: resolvedVars,
+    // 4. Send test message via TestSendService (supports headers & COPY_CODE buttons)
+    const result = await TestSendService.sendTest(
       tenantId,
-    });
+      campaign.template_name,
+      variables,
+      detectedVarIndices,
+      phoneNumber,
+      campaign.template_language || 'en',
+      campaign.header_media_url || undefined
+    );
 
     if (!result.success) {
       console.error(`[broadcast] [test] WhatsApp test dispatch failed:`, result.error);

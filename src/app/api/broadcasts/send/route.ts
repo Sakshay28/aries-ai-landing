@@ -10,7 +10,7 @@ import { checkLaunchRateLimit } from '@/lib/abuse/prevention';
 
 export const maxDuration = 10;
 
-const LAUNCH_ROLES = new Set(['owner', 'admin', 'manager']);
+const LAUNCH_ROLES = new Set(['owner', 'admin', 'manager', 'staff']);
 
 export async function POST(req: NextRequest) {
   try {

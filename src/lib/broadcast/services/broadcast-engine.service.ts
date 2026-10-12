@@ -736,6 +736,7 @@ export class BroadcastEngineService {
     const varIndicesCache  = new Map<string, string[]>();
     const varMapCache      = new Map<string, Record<string, any>>();
     const headerConfigCache = new Map<string, { type: 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'TEXT' | 'NONE'; mediaUrl?: string; text?: string }>();
+    const buttonsConfigCache = new Map<string, any[]>();
     const deliverySettingsCache = new Map<string, any>();
 
     const [campResults, settingsResults] = await Promise.all([
@@ -767,15 +768,12 @@ export class BroadcastEngineService {
       let indices = [...new Set((mappings || []).map((v: any) => String(v.variable_key)))].sort((a, b) => Number(a) - Number(b));
 
       // Always parse the cached template JSON, even when explicit variable
-      // mappings exist, so the header (image/video/document) config is
-      // available below. A template with a media header needs that media
-      // link sent as a header parameter on EVERY send — Meta only stores the
-      // approval-time example, not a reusable asset — so skipping this for
-      // templates that already have body variable mappings previously
-      // dropped the header entirely and Meta rejected the send.
+      // mappings exist, so the header (image/video/document) and button
+      // (COPY_CODE/dynamic URL) configs are available below.
       if (tmpl?.template_json) {
         const parsed = TemplateParserService.parse({
           ...tmpl.template_json,
+          name: camp.template_name,
           header_media_url: (tmpl.template_json as any).header_media_url
         });
 
@@ -795,6 +793,10 @@ export class BroadcastEngineService {
             mediaUrl: effectiveMediaUrl,
             text: parsed.headerText,
           });
+        }
+
+        if (parsed.buttons && parsed.buttons.length > 0) {
+          buttonsConfigCache.set(cid, parsed.buttons);
         }
       }
 
@@ -825,6 +827,7 @@ export class BroadcastEngineService {
         const variablesMap      = varMapCache.get(item.campaign_id) || {};
         const detectedVarIndices = varIndicesCache.get(item.campaign_id) || [];
         const headerConfig      = headerConfigCache.get(item.campaign_id);
+        const buttonsConfig     = buttonsConfigCache.get(item.campaign_id);
 
         if (!campaign) {
           await supabaseAdmin
@@ -998,7 +1001,8 @@ export class BroadcastEngineService {
           variablesMap,
           detectedVarIndices,
           leadRecord,
-          headerConfig
+          headerConfig,
+          buttonsConfig
         );
 
         const languageCode = item.language_code || campaign.template_language || 'en';

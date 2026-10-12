@@ -575,12 +575,71 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
         }).catch(e => console.error('[webhook] order-confirmation staff alert failed:', (e as Error).message));
       }
 
+      // Find the active/canonical conversation for this customer
+      let conversationId: string | null = null;
+      const { data: conv } = await supabaseAdmin.from('conversations')
+        .select('id, message_count')
+        .eq('tenant_id', tenant.id)
+        .in('sender_id', [cleanPhone, '+' + cleanPhone, msg.fromPhone])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (conv?.id) {
+        conversationId = conv.id;
+      }
+
+      // Log the customer's inbound button click into Live Chat
+      if (conversationId) {
+        await supabaseAdmin.from('messages').insert({
+          tenant_id: tenant.id,
+          conversation_id: conversationId,
+          direction: 'inbound',
+          content: buttonLabelByAction[action],
+          message_type: 'button',
+          channel: 'whatsapp',
+          status: 'delivered',
+          wa_message_id: msg.messageId || null,
+          metadata: {
+            selected_button_id: buttonId,
+            selected_button_text: buttonLabelByAction[action],
+            reply_to_wa_message_id: msg.contextMessageId || null,
+          },
+        });
+      }
+
+      let ackResult: { messageId?: string } | null = null;
       if (decryptedAccessToken && tenant.wa_phone_number_id) {
         try {
-          await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id, cleanPhone, ackTextByAction[action]);
+          ackResult = await sendTextMessage(decryptedAccessToken, tenant.wa_phone_number_id, cleanPhone, ackTextByAction[action]);
         } catch (e) {
           console.error('[webhook] order-confirmation ack send failed:', (e as Error).message);
         }
+      }
+
+      // Log the bot's outbound confirmation reply into Live Chat
+      if (conversationId && ackTextByAction[action]) {
+        await supabaseAdmin.from('messages').insert({
+          tenant_id: tenant.id,
+          conversation_id: conversationId,
+          direction: 'outbound',
+          content: ackTextByAction[action],
+          message_type: 'text',
+          channel: 'whatsapp',
+          status: ackResult?.messageId ? 'sent' : 'failed',
+          wa_message_id: ackResult?.messageId || null,
+          ai_generated: false,
+        });
+
+        await supabaseAdmin.from('conversations').update({
+          is_active: true,
+          last_message_at: new Date().toISOString(),
+          last_inbound_at: new Date().toISOString(),
+          last_outbound_at: new Date().toISOString(),
+          last_message_preview: ackTextByAction[action].slice(0, 150),
+          last_message_type: 'text',
+          message_count: (conv?.message_count ?? 0) + 2,
+        }).eq('id', conversationId);
       }
       return;
     }

@@ -11,7 +11,7 @@ import { detectPendingMigration, pendingMigrationUserMessage, pendingMigrationAd
 
 export const maxDuration = 60;
 
-const LAUNCH_ROLES = new Set(['owner', 'admin', 'manager']);
+const LAUNCH_ROLES = new Set(['owner', 'admin', 'manager', 'staff']);
 
 export async function POST(req: NextRequest) {
   try {

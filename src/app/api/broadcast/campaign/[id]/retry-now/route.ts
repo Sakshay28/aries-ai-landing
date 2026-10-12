@@ -39,21 +39,28 @@ export async function POST(
       }, { status: 400 });
     }
 
-    if (!['sending', 'draft', 'paused'].includes(campaign.status)) {
+    if (!['sending', 'draft', 'paused', 'completed'].includes(campaign.status)) {
       return NextResponse.json({
         success: false,
-        error: `Campaign is ${campaign.status} — only sending/draft/paused campaigns can be retried`,
+        error: `Campaign is ${campaign.status} — only sending/draft/paused/completed campaigns can be retried`,
       }, { status: 400 });
     }
 
-    // Resume paused campaigns back to 'sending'
-    if (campaign.status === 'paused') {
+    // Resume paused or completed campaigns back to 'sending'
+    if (campaign.status === 'paused' || campaign.status === 'completed') {
       await supabaseAdmin
         .from('broadcast_campaigns')
         .update({ status: 'sending', updated_at: new Date().toISOString() })
         .eq('id', campaignId)
         .eq('tenant_id', tenantId);
     }
+
+    // Reset failed items back to pending so they can be re-dispatched with fixed payload
+    await supabaseAdmin
+      .from('broadcast_queue')
+      .update({ status: 'pending', attempt_count: 0, failure_reason: null, next_attempt_at: null, locked_at: null })
+      .eq('campaign_id', campaignId)
+      .eq('status', 'failed');
 
     const { count } = await supabaseAdmin
       .from('broadcast_queue')
