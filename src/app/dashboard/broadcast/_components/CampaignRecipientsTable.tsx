@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Search, CheckCircle2, Eye, Send, AlertCircle, Clock, Users, ArrowRight } from 'lucide-react';
+import { Search, CheckCircle2, Eye, Send, AlertCircle, Clock, Users, ArrowRight, Copy, Check } from 'lucide-react';
 import { formatPhoneDisplay } from '@/lib/utils/phone';
 
 interface Recipient {
@@ -15,15 +15,23 @@ interface Recipient {
 
 interface CampaignRecipientsTableProps {
   campaignId: string;
+  initialStatusFilter?: string;
 }
 
-export function CampaignRecipientsTable({ campaignId }: CampaignRecipientsTableProps) {
+export function CampaignRecipientsTable({ campaignId, initialStatusFilter = 'all' }: CampaignRecipientsTableProps) {
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>(initialStatusFilter);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 50;
+
+  useEffect(() => {
+    if (initialStatusFilter) {
+      setStatusFilter(initialStatusFilter);
+      setCurrentPage(1);
+    }
+  }, [initialStatusFilter]);
 
   useEffect(() => {
     async function fetchRecipients() {
@@ -46,17 +54,44 @@ export function CampaignRecipientsTable({ campaignId }: CampaignRecipientsTableP
     }
   }, [campaignId]);
 
+  const [copiedPhone, setCopiedPhone] = useState<string | null>(null);
+
+  const handleCopyPhone = (phone: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(phone);
+    setCopiedPhone(phone);
+    setTimeout(() => setCopiedPhone(null), 2000);
+  };
+
+  const counts = useMemo(() => {
+    return {
+      all: recipients.length,
+      delivered: recipients.filter((r) => r.status === 'delivered' || r.status === 'read').length,
+      read: recipients.filter((r) => r.status === 'read').length,
+      sent: recipients.filter((r) => r.status === 'sent').length,
+      failed: recipients.filter((r) => r.status === 'failed' || r.status === 'cancelled').length,
+    };
+  }, [recipients]);
+
   const filteredRecipients = useMemo(() => {
     return recipients.filter((r) => {
       // Filter by status
-      if (statusFilter !== 'all' && r.status !== statusFilter) {
-        return false;
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'delivered') {
+          // Delivered includes both delivered and read
+          if (r.status !== 'delivered' && r.status !== 'read') return false;
+        } else if (statusFilter === 'failed') {
+          if (r.status !== 'failed' && r.status !== 'cancelled') return false;
+        } else if (r.status !== statusFilter) {
+          return false;
+        }
       }
       // Filter by search
       if (search.trim()) {
         const q = search.trim().toLowerCase();
+        const cleanQ = q.replace(/\D/g, '');
         const matchName = r.name?.toLowerCase().includes(q);
-        const matchPhone = r.phone.includes(q);
+        const matchPhone = r.phone.toLowerCase().includes(q) || (cleanQ !== '' && r.phone.includes(cleanQ));
         return matchName || matchPhone;
       }
       return true;
@@ -81,7 +116,7 @@ export function CampaignRecipientsTable({ campaignId }: CampaignRecipientsTableP
       case 'cancelled':
         return { label: status === 'cancelled' ? 'Capped' : 'Failed', cls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-800', icon: AlertCircle };
       default:
-        return { label: 'Processing', cls: 'bg-secondary text-muted-foreground border-border', icon: Clock };
+        return { label: 'In Queue', cls: 'bg-secondary text-muted-foreground border-border', icon: Clock };
     }
   };
 
@@ -114,11 +149,11 @@ export function CampaignRecipientsTable({ campaignId }: CampaignRecipientsTableP
 
         <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto scrollbar-none">
           {[
-            { id: 'all', label: `All (${recipients.length})` },
-            { id: 'read', label: 'Read' },
-            { id: 'delivered', label: 'Delivered' },
-            { id: 'sent', label: 'Sent' },
-            { id: 'failed', label: 'Failed / Capped' },
+            { id: 'all', label: `All (${counts.all})` },
+            { id: 'delivered', label: `Delivered (${counts.delivered})` },
+            { id: 'read', label: `Read (${counts.read})` },
+            { id: 'sent', label: `Sent (${counts.sent})` },
+            { id: 'failed', label: `Failed (${counts.failed})` },
           ].map((f) => (
             <button
               key={f.id}
@@ -128,7 +163,7 @@ export function CampaignRecipientsTable({ campaignId }: CampaignRecipientsTableP
               }}
               className={`h-8 px-3 text-[12px] font-semibold rounded-xl border transition-all cursor-pointer whitespace-nowrap ${
                 statusFilter === f.id
-                  ? 'bg-foreground text-background border-foreground'
+                  ? 'bg-foreground text-background border-foreground shadow-sm'
                   : 'bg-background text-muted-foreground border-border hover:bg-secondary/40'
               }`}
             >
@@ -164,11 +199,25 @@ export function CampaignRecipientsTable({ campaignId }: CampaignRecipientsTableP
               return (
                 <div key={r.id} className="grid grid-cols-1 sm:grid-cols-4 items-center p-4 hover:bg-secondary/20 transition-colors">
                   {/* Name & Phone */}
-                  <div className="min-w-0">
+                  <div className="min-w-0 pr-2">
                     <h4 className="text-[13.5px] font-semibold text-foreground truncate">{displayName}</h4>
-                    {displayName !== formattedPhone && (
-                      <p className="text-[11.5px] text-muted-foreground/60 truncate mt-0.5">{formattedPhone}</p>
-                    )}
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[11.5px] font-mono text-muted-foreground/80 tracking-tight">
+                        {formattedPhone}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => handleCopyPhone(r.phone, e)}
+                        title="Copy phone number"
+                        className="p-0.5 text-muted-foreground/50 hover:text-foreground hover:bg-secondary rounded transition-colors"
+                      >
+                        {copiedPhone === r.phone ? (
+                          <Check className="w-3 h-3 text-emerald-600" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   {/* Status Badge */}

@@ -2,12 +2,13 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, RefreshCw, BarChart3, Clock, FileText, Send, Users, CheckCircle2, Eye, AlertCircle } from 'lucide-react';
+import { ArrowLeft, RefreshCw, BarChart3, Clock, FileText, Send, Users, CheckCircle2, Eye, AlertCircle, XCircle, ArrowRight } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import { BroadcastExecutionTimeline } from '../../_components/BroadcastExecutionTimeline';
 import { BroadcastAuditLog } from '../../_components/BroadcastAuditLog';
 import { CampaignRecipientsTable } from '../../_components/CampaignRecipientsTable';
 import { CampaignInsights } from '../../_components/CampaignInsights';
+import { DeliveredRecipientsCard } from '../../_components/DeliveredRecipientsCard';
 import toast from 'react-hot-toast';
 
 interface CampaignStats {
@@ -33,7 +34,27 @@ export default function CampaignStatsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [activeTab, setActiveTab] = useState<'metrics' | 'recipients' | 'timeline' | 'audit'>('metrics');
+  const [recipientFilter, setRecipientFilter] = useState<string>('all');
+
+  const handleCancelCampaign = async () => {
+    if (!confirm('Are you sure you want to stop this broadcast? All remaining queued messages will be aborted immediately.')) {
+      return;
+    }
+    setCancelling(true);
+    try {
+      const res = await fetch(`/api/broadcast/campaign/${campaignId}/cancel`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to stop broadcast');
+      toast.success(`Broadcast stopped! ${data.cancelledMessages ?? 0} queued messages aborted.`);
+      fetchStats(true);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to stop broadcast');
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   const handleRetryNow = async () => {
     setRetrying(true);
@@ -157,6 +178,20 @@ export default function CampaignStatsPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {(stats?.status === 'sending' || stats?.status === 'running' || stats?.status === 'scheduled' || (stats?.pending && stats.pending > 0)) && (
+            <button
+              onClick={handleCancelCampaign}
+              disabled={cancelling}
+              className="h-8 px-3 text-[12px] font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer shadow-sm hover:shadow"
+            >
+              {cancelling ? (
+                <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <XCircle className="w-3.5 h-3.5" />
+              )}
+              Stop Broadcast
+            </button>
+          )}
           {(stats?.status === 'sending' || stats?.status === 'paused' || stats.failed > 0) && (
             <button
               onClick={handleRetryNow}
@@ -212,22 +247,35 @@ export default function CampaignStatsPage() {
             {/* KPI Cards Grid */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               {[
-                { label: 'Audience size', value: stats.totalRecipients, icon: Users, desc: 'Target recipients' },
-                { label: 'Sent', value: stats.sent, icon: Send, desc: 'Accepted by Meta API' },
-                { label: 'Delivered', value: stats.delivered, icon: CheckCircle2, desc: `${stats.deliveryRate}% delivery rate` },
-                { label: 'Read', value: stats.read, icon: Eye, desc: `${stats.readRate}% read rate` },
-                { label: 'Failed', value: stats.failed, icon: AlertCircle, desc: 'Undelivered messages' },
+                { label: 'Audience size', value: stats.totalRecipients, icon: Users, desc: 'Target recipients', filter: 'all' },
+                { label: 'Sent', value: stats.sent, icon: Send, desc: 'Accepted by Meta API', filter: 'sent' },
+                { label: 'Delivered', value: stats.delivered, icon: CheckCircle2, desc: `${stats.deliveryRate}% delivery rate`, filter: 'delivered' },
+                { label: 'Read', value: stats.read, icon: Eye, desc: `${stats.readRate}% read rate`, filter: 'read' },
+                { label: 'Failed', value: stats.failed, icon: AlertCircle, desc: 'Undelivered messages', filter: 'failed' },
               ].map(kpi => (
-                <div key={kpi.label} className="p-5 border border-border/60 rounded-2xl bg-card shadow-sm hover:shadow-md transition-shadow">
-                  <div className="flex items-center justify-between mb-3 text-muted-foreground/60">
+                <button
+                  key={kpi.label}
+                  type="button"
+                  onClick={() => {
+                    setRecipientFilter(kpi.filter);
+                    setActiveTab('recipients');
+                  }}
+                  className="p-5 border border-border/60 rounded-2xl bg-card shadow-sm hover:shadow-md hover:border-indigo-500/50 hover:bg-secondary/15 transition-all text-left cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between mb-3 text-muted-foreground/60 group-hover:text-indigo-600 transition-colors">
                     <span className="text-[11px] font-bold uppercase tracking-wider">{kpi.label}</span>
-                    <kpi.icon className="w-4 h-4 text-muted-foreground/40" />
+                    <kpi.icon className="w-4 h-4 text-muted-foreground/40 group-hover:text-indigo-600 transition-colors" />
                   </div>
                   <p className="text-[28px] font-semibold text-foreground leading-none tabular-nums">
                     {kpi.value.toLocaleString()}
                   </p>
-                  <p className="text-[11px] text-muted-foreground mt-2">{kpi.desc}</p>
-                </div>
+                  <div className="flex items-center justify-between mt-2">
+                    <p className="text-[11px] text-muted-foreground">{kpi.desc}</p>
+                    <span className="text-[10px] text-indigo-600 font-medium opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+                      View <ArrowRight className="w-2.5 h-2.5" />
+                    </span>
+                  </div>
+                </button>
               ))}
             </div>
 
@@ -264,6 +312,15 @@ export default function CampaignStatsPage() {
               </div>
             </div>
 
+            {/* Delivered Recipients Preview — direct visibility into reached numbers */}
+            <DeliveredRecipientsCard
+              campaignId={campaignId}
+              onViewAllRecipients={(filter) => {
+                setRecipientFilter(filter);
+                setActiveTab('recipients');
+              }}
+            />
+
             {/* Failure breakdown — surfaces the actual Meta rejection reason instead of
                 leaving "Failed" as an unexplained number. */}
             {stats.failed > 0 && (
@@ -289,7 +346,7 @@ export default function CampaignStatsPage() {
         )}
 
         {activeTab === 'recipients' && (
-          <CampaignRecipientsTable campaignId={campaignId} />
+          <CampaignRecipientsTable campaignId={campaignId} initialStatusFilter={recipientFilter} />
         )}
 
         {activeTab === 'timeline' && (

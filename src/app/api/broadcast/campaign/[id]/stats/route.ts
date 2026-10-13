@@ -37,20 +37,29 @@ export async function GET(
       return error ? 0 : (count || 0);
     };
 
-    const [pending, processing, retrying, queueSent, queueFailedRaw, queueCancelled, deliveriesFailed, analyticsRes] = await Promise.all([
+    const [
+      pending,
+      processing,
+      retrying,
+      queueSent,
+      queueFailedRaw,
+      queueCancelled,
+      deliveriesDelivered,
+      deliveriesRead,
+      deliveriesFailed,
+      deliveriesSentOnly,
+      analyticsRes
+    ] = await Promise.all([
       getCount('broadcast_queue', 'pending'),
       getCount('broadcast_queue', 'processing'),
       getCount('broadcast_queue', 'retrying'),
-      // Sent = queue items that reached Meta (authoritative before delivery receipts arrive)
       getCount('broadcast_queue', 'sent'),
       getCount('broadcast_queue', 'failed'),
       getCount('broadcast_queue', 'cancelled'),
+      getCount('broadcast_deliveries', 'delivered'),
+      getCount('broadcast_deliveries', 'read'),
       getCount('broadcast_deliveries', 'failed'),
-      // Delivered / read / failed are the reconciled cumulative counts written by the
-      // Meta status webhook (increment_broadcast_analytics). Do NOT derive them by
-      // counting broadcast_deliveries rows per status: `status` is monotonic, so a
-      // message that was delivered THEN read carries status='read' only and would
-      // silently drop out of the delivered tally.
+      getCount('broadcast_deliveries', 'sent'),
       supabaseAdmin
         .from('broadcast_analytics')
         .select('delivered_count, read_count, failed_count')
@@ -63,14 +72,24 @@ export async function GET(
     const totalRecipients = campaign.total_recipients || campaign.audience_count || campaign.recipient_count || 0;
     const queued = processing + retrying;
 
-    // Merge campaign counter values (updated by increment_campaign_counter) for accuracy
-    const queueFailed = queueFailedRaw + queueCancelled;
-    const sent     = Math.max(queueSent,   campaign.sent_count      || 0);
-    const failed   = Math.max(queueFailed, deliveriesFailed, analytics?.failed_count ?? 0, campaign.failed_count ?? 0);
-    const deliv    = analytics?.delivered_count ?? campaign.delivered_count ?? 0;
-    const readCnt  = analytics?.read_count      ?? campaign.read_count      ?? 0;
+    // Delivery rows are authoritative per-wamid state:
+    // A message with status='read' was delivered first, so delivered total = delivered + read
+    const deliveriesDeliveredTotal = deliveriesDelivered + deliveriesRead;
+    const totalDeliveriesRecorded = deliveriesDeliveredTotal + deliveriesFailed + deliveriesSentOnly;
 
-    const deliveryRate = sent > 0 ? Math.round((deliv   / sent) * 100) : 0;
+    const queueFailed = queueFailedRaw + queueCancelled;
+    const sent = Math.max(queueSent, totalDeliveriesRecorded, campaign.sent_count || 0);
+
+    // Reconcile delivered and read, strictly clamping to sent
+    const rawDeliv = Math.max(deliveriesDeliveredTotal, analytics?.delivered_count ?? 0, campaign.delivered_count ?? 0);
+    const deliv = sent > 0 ? Math.min(sent, rawDeliv) : rawDeliv;
+
+    const rawRead = Math.max(deliveriesRead, analytics?.read_count ?? 0, campaign.read_count ?? 0);
+    const readCnt = deliv > 0 ? Math.min(deliv, rawRead) : 0;
+
+    const failed = Math.max(queueFailed, deliveriesFailed, analytics?.failed_count ?? 0, campaign.failed_count ?? 0);
+
+    const deliveryRate = sent > 0 ? Math.round((deliv / sent) * 100) : 0;
     const readRate     = sent > 0 ? Math.round((readCnt / sent) * 100) : 0;
 
     return NextResponse.json({

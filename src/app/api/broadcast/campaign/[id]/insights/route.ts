@@ -45,7 +45,7 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Campaign not found' }, { status: 404 });
     }
 
-    const [analyticsRes, deliveriesRes, queueFailuresRes] = await Promise.all([
+    const [analyticsRes, deliveriesRes, queueFailuresRes, queueSentRes] = await Promise.all([
       // Reconciled cumulative counts (delivered/read/failed) — the webhook writes these.
       supabaseAdmin
         .from('broadcast_analytics')
@@ -67,21 +67,41 @@ export async function GET(
         .eq('tenant_id', tenantId)
         .eq('status', 'failed')
         .limit(ROW_SCAN_CAP),
+      supabaseAdmin
+        .from('broadcast_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('campaign_id', campaignId)
+        .eq('tenant_id', tenantId)
+        .eq('status', 'sent'),
     ]);
 
     const analytics = analyticsRes.data;
     const deliveries = deliveriesRes.data || [];
     const queueFailures = queueFailuresRes.data || [];
+    const queueSent = queueSentRes.count || 0;
 
-    const sent = campaign.sent_count || 0;
+    // Delivery rows are authoritative per-wamid state:
+    // A message with status='read' was delivered first, so delivered total = delivered + read
+    const deliveriesDeliveredTotal = deliveries.filter((d) => d.status === 'delivered' || d.status === 'read').length;
+    const deliveriesReadCount = deliveries.filter((d) => d.status === 'read').length;
+    const deliveryFailedCount = deliveries.filter((d) => d.status === 'failed').length;
+
+    const sent = Math.max(queueSent, deliveries.length, campaign.sent_count || 0);
+
+    const rawDeliv = Math.max(deliveriesDeliveredTotal, analytics?.delivered_count ?? 0);
+    const delivered = sent > 0 ? Math.min(sent, rawDeliv) : rawDeliv;
+
+    const rawRead = Math.max(deliveriesReadCount, analytics?.read_count ?? 0);
+    const read = delivered > 0 ? Math.min(delivered, rawRead) : 0;
+
+    const failed = Math.max(analytics?.failed_count ?? 0, deliveryFailedCount, queueFailures.length);
 
     // ── Funnel ──
-    const deliveryFailedCount = deliveries.filter((d) => d.status === 'failed').length;
     const funnel = buildFunnel({
       sent,
-      delivered: analytics?.delivered_count ?? 0,
-      read: analytics?.read_count ?? 0,
-      failed: Math.max(analytics?.failed_count ?? 0, deliveryFailedCount, queueFailures.length),
+      delivered,
+      read,
+      failed,
     });
 
     // ── Failures ──

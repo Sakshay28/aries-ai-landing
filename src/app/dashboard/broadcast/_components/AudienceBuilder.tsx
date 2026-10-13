@@ -417,8 +417,16 @@ function CSVUploadPanel({
 
 // ── Panel: All Contacts ───────────────────────────────────────────────────────
 
-function AllContactsPanel({ totalContacts, onClick }: { totalContacts: number; onClick?: () => void }) {
-  const count = totalContacts;
+function AllContactsPanel({
+  totalContacts,
+  excludedCount = 0,
+  onClick,
+}: {
+  totalContacts: number;
+  excludedCount?: number;
+  onClick?: () => void;
+}) {
+  const count = Math.max(0, totalContacts - excludedCount);
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
@@ -435,7 +443,11 @@ function AllContactsPanel({ totalContacts, onClick }: { totalContacts: number; o
           All Contacts Selected
         </p>
         <p className="text-[12px] text-muted-foreground/80 mt-0.5 leading-relaxed">
-          {count.toLocaleString()} eligible recipients in your database
+          {excludedCount > 0 ? (
+            <>Targeting <span className="font-bold text-indigo-600">{count.toLocaleString()}</span> of {totalContacts.toLocaleString()} contacts ({excludedCount.toLocaleString()} excluded)</>
+          ) : (
+            <>{count.toLocaleString()} eligible recipients in your database</>
+          )}
         </p>
         <p className="text-[11px] text-muted-foreground/60 mt-1.5">
           Broadcast will be delivered to all active opted-in contacts. Click to view list.
@@ -763,7 +775,7 @@ function RetargetingPanel({
 
 function EstimationCard({ estimate }: { estimate: EstimateResult }) {
   const risk = SPAM_RISK_CONFIG[estimate.spamRisk];
-  const recipients = Math.max(0, estimate.total - estimate.excluded - estimate.duplicates - estimate.invalid - (estimate.noConsent || 0));
+  const recipients = estimate.total;
 
   return (
     <div className="rounded-2xl border border-border/30 bg-[#fbfcfd] dark:bg-card/40 overflow-hidden shadow-sm pt-4.5 pb-2">
@@ -909,6 +921,9 @@ export function AudienceBuilder({
 
   const setChoice = useCallback((tab: ChoiceId) => {
     onChange({ ...audience, type: tab, recentCount: tab === 'recent' ? (audience.recentCount || 50) : audience.recentCount });
+    if (tab === 'manual') {
+      setPickerOpen(true);
+    }
   }, [audience, onChange]);
 
   const toggleTag = useCallback((tag: string) => {
@@ -955,7 +970,11 @@ export function AudienceBuilder({
             className="border-t border-border/20 pt-4"
           >
             {activeTab === 'all' && (
-              <AllContactsPanel totalContacts={totalContacts} onClick={onOpenRecipientsDrawer} />
+              <AllContactsPanel
+                totalContacts={totalContacts}
+                excludedCount={(audience.excludedContactIds || []).length}
+                onClick={onOpenRecipientsDrawer}
+              />
             )}
             {activeTab === 'recent' && (
               <RecentContactsPanel
@@ -993,19 +1012,41 @@ export function AudienceBuilder({
                     <Users className="w-4 h-4 text-indigo-500" />
                   </div>
                   <div className="flex-grow text-left">
-                    <p className="text-[13.5px] font-semibold text-foreground tracking-tight">
-                      Manual Contacts Targeting Active
-                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-[13.5px] font-semibold text-foreground tracking-tight">
+                        Manual Contacts Targeting Active
+                      </p>
+                      {(audience.manualContactIds || []).length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => onChange({ ...audience, manualContactIds: [] })}
+                          className="text-[11px] font-medium text-rose-600 hover:text-rose-700 hover:underline"
+                        >
+                          Clear Selection
+                        </button>
+                      )}
+                    </div>
                     <p className="text-[12px] text-muted-foreground/80 mt-0.5 leading-relaxed">
                       {(audience.manualContactIds || []).length} contact{(audience.manualContactIds || []).length !== 1 ? 's' : ''} selected manually
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => setPickerOpen(true)}
-                      className="mt-3 text-[11.5px] font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-500/[0.05] border border-indigo-500/15 hover:border-indigo-500/30 px-3 py-1.5 rounded-lg transition-all"
-                    >
-                      {(audience.manualContactIds || []).length > 0 ? 'Modify Selection' : 'Select Contacts'}
-                    </button>
+                    <div className="flex items-center gap-2 mt-3">
+                      <button
+                        type="button"
+                        onClick={() => setPickerOpen(true)}
+                        className="text-[11.5px] font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-500/[0.05] border border-indigo-500/15 hover:border-indigo-500/30 px-3 py-1.5 rounded-lg transition-all"
+                      >
+                        {(audience.manualContactIds || []).length > 0 ? 'Modify Selection' : 'Select Contacts'}
+                      </button>
+                      {(audience.manualContactIds || []).length > 0 && onOpenRecipientsDrawer && (
+                        <button
+                          type="button"
+                          onClick={onOpenRecipientsDrawer}
+                          className="text-[11.5px] font-semibold text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg border border-border transition-all"
+                        >
+                          Preview Selected List →
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

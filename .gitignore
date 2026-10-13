@@ -52,3 +52,4 @@ ngrok.log
 
 # non-code assets kept alongside the repo for convenience, not shipped
 /marketing/
+.claude/

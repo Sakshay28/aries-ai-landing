@@ -10,7 +10,7 @@ export const variableConfigSchema = z.object({
 });
 
 export const audienceStateSchema = z.object({
-  type: z.enum(['all', 'tags', 'custom', 'retarget', 'csv', 'manual']),
+  type: z.enum(['all', 'tags', 'custom', 'retarget', 'csv', 'manual', 'recent', 'shopify_segment']),
   tags: z.array(z.string()).default([]),
   customFilters: z.array(
     z.object({
@@ -23,7 +23,9 @@ export const audienceStateSchema = z.object({
   retargetCampaignId: z.string().nullable().default(null),
   retargetCondition: z.enum(['unread', 'no_reply', 'clicked_cta', 'not_clicked']).default('unread'),
   retargetDelayDays: z.number().min(1).default(1),
-  manualContactIds: z.array(z.string()).optional().default([]),
+  manualContactIds: z.array(z.string()).optional(),
+  excludedContactIds: z.array(z.string()).optional(),
+  recentCount: z.number().optional(),
   csvFile: z.object({
     name: z.string(),
     size: z.string(),
@@ -181,8 +183,8 @@ export function validateCampaignPreflight(
       audienceStatus = 'fail';
       audienceMessage = 'Please upload a valid CSV/Excel spreadsheet';
     } else if (netRecipients === 0) {
-      audienceStatus = 'warn';
-      audienceMessage = 'No active opted-in contacts qualify';
+      audienceStatus = 'fail';
+      audienceMessage = 'No active opted-in contacts qualify for this audience selection';
     }
   }
 

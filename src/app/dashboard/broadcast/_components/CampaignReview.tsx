@@ -93,6 +93,8 @@ export function CampaignReview({
       retargetCondition: audience?.retargetCondition || 'unread',
       retargetDelayDays: audience?.retargetDelayDays || 1,
       manualContactIds: audience?.manualContactIds || [],
+      excludedContactIds: audience?.excludedContactIds || [],
+      recentCount: audience?.recentCount || 50,
       csvFile: audience?.csvFile || null
     },
     delivery: {

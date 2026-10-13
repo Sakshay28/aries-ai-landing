@@ -498,17 +498,8 @@ export function BroadcastClient() {
   const handleDuplicate = async (c: Campaign) => {
     try {
       toast.loading('Duplicating campaign…', { id: 'dup' });
-      const copyName = `${cleanCampaignName(c.name).display.replace(/ \(Copy( \d+)?\)$/, '')} (Copy)`;
-      const res = await fetch('/api/broadcast/campaign', {
+      const res = await fetch(`/api/broadcast/campaign/${c.id}/duplicate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          campaignId: null,
-          campaignName: copyName,
-          templateName: c.template_name,
-          deliveryMode: 'now',
-          audience: { type: 'all' },
-        }),
       });
       const data = await res.json();
       if (!res.ok || !data.campaignId) throw new Error(data.error || 'Failed to duplicate campaign');
@@ -517,7 +508,7 @@ export function BroadcastClient() {
       const newCamp: Campaign = {
         ...c,
         id: data.campaignId,
-        name: copyName,
+        name: data.campaign?.name || `${cleanCampaignName(c.name).display.replace(/ \(Copy( \d+)?\)$/, '')} (Copy)`,
         status: 'draft',
         sent_count: 0,
         delivered_count: 0,

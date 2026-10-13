@@ -15,7 +15,7 @@ const campaignSaveSchema = z.object({
   deliveryMode: z.enum(['now', 'scheduled', 'recurring']).optional(),
   scheduledAt: z.string().nullable().optional(),
   audience: z.object({
-    type: z.enum(['all', 'tags', 'custom', 'retarget', 'csv', 'manual', 'recent']),
+    type: z.enum(['all', 'tags', 'custom', 'retarget', 'csv', 'manual', 'recent', 'shopify_segment']),
     tags: z.array(z.string()).optional(),
     customFilters: z.array(z.any()).optional(),
     retargetCampaignId: z.string().nullable().optional(),
