@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Search, Check, FileText, RotateCcw, AlertTriangle, Users, User } from 'lucide-react';
 import { List, type RowComponentProps } from 'react-window';
@@ -42,6 +43,11 @@ export function RecipientDrawer({
   const [activeFilter, setActiveFilter] = useState<FilterStatus>('all');
   const [tempManualContactIds, setTempManualContactIds] = useState<Set<string>>(new Set());
   const [tempExcludedContactIds, setTempExcludedContactIds] = useState<Set<string>>(new Set());
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const [crmSearchResults, setCrmSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -425,7 +431,9 @@ export function RecipientDrawer({
     );
   };
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
         <>
@@ -435,7 +443,7 @@ export function RecipientDrawer({
             animate={{ opacity: 0.4 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black z-50 backdrop-blur-xs"
+            className="fixed inset-0 bg-black z-[70] backdrop-blur-xs"
           />
 
           {/* HubSpot style Audience selector Drawer */}
@@ -444,7 +452,7 @@ export function RecipientDrawer({
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 28, stiffness: 240 }}
-            className="fixed right-0 top-0 bottom-0 w-full max-w-[500px] bg-background border-l border-border/80 shadow-2xl z-50 flex flex-col overflow-hidden text-left"
+            className="fixed right-0 top-0 bottom-0 w-full max-w-[500px] bg-background border-l border-border/80 shadow-2xl z-[70] flex flex-col overflow-hidden text-left"
           >
             {/* 1. Header (Sticky) */}
             <div className="px-5 pt-5 pb-4 border-b border-border/40 shrink-0">
@@ -608,6 +616,7 @@ export function RecipientDrawer({
           </motion.div>
         </>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

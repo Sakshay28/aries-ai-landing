@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, Check, Filter, User, Tag, Star, Users } from 'lucide-react';
 import { List, type RowComponentProps } from 'react-window';
@@ -24,12 +25,72 @@ interface ContactPickerDrawerProps {
   onApply: (selectedIds: string[], contacts: Contact[]) => void;
 }
 
+interface ContactRowItemProps {
+  contact: Contact;
+  isChecked: boolean;
+  onToggle: (id: string) => void;
+  style?: React.CSSProperties;
+}
+
+const ContactRowItem = React.memo(function ContactRowItem({
+  contact,
+  isChecked,
+  onToggle,
+  style,
+}: ContactRowItemProps) {
+  return (
+    <div
+      style={style}
+      onClick={() => onToggle(contact.id)}
+      className={`flex items-center gap-3 px-6 py-2 border-b border-border/25 hover:bg-secondary/20 cursor-pointer transition-colors select-none ${
+        isChecked ? 'bg-indigo-500/[0.02]' : ''
+      }`}
+    >
+      {/* Checkbox */}
+      <div className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-all ${
+        isChecked 
+          ? 'bg-indigo-600 border-indigo-600 text-white' 
+          : 'border-border/70 bg-background'
+      }`}>
+        {isChecked && <Check className="w-2.5 h-2.5 stroke-[3px]" />}
+      </div>
+
+      {/* Avatar */}
+      <div className="w-8.5 h-8.5 rounded-full bg-secondary flex items-center justify-center text-[12px] font-bold text-muted-foreground uppercase shrink-0">
+        {contactInitials(contact.name) || <User className="w-4 h-4 opacity-60" />}
+      </div>
+
+      {/* Info */}
+      <div className="flex-1 min-w-0 text-left">
+        <p className="text-[12.5px] font-semibold text-foreground leading-snug truncate">
+          {recipientDisplayName(contact.name, contact.phone)}
+        </p>
+        <p className="text-[10.5px] text-muted-foreground/75 mt-0.5 tabular-nums">
+          {contact.phone}
+        </p>
+      </div>
+
+      {/* Tags */}
+      {(contact.tags || []).length > 0 && (
+        <div className="flex items-center gap-1 overflow-hidden shrink-0 max-w-[120px]">
+          {contact.tags!.slice(0, 2).map(t => (
+            <span key={t} className="px-1.5 py-0.5 rounded bg-secondary text-[9px] font-bold text-muted-foreground border border-border/40 uppercase">
+              {t}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});
+
 export function ContactPickerDrawer({
   isOpen,
   onClose,
   selectedIds,
   onApply,
 }: ContactPickerDrawerProps) {
+  const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -39,6 +100,10 @@ export function ContactPickerDrawer({
   // Filters
   const [selectedTagFilter, setSelectedTagFilter] = useState<string>('');
   const [vipFilter, setVipFilter] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Debounced search input handler
   const triggerSearchDebounce = useDebounceCallback((val: string) => {
@@ -50,12 +115,13 @@ export function ContactPickerDrawer({
     triggerSearchDebounce(e.target.value);
   };
 
-  // Sync initial selection
+  // Sync initial selection ONLY when drawer opens
   useEffect(() => {
     if (isOpen) {
       setTempSelected(new Set(selectedIds));
     }
-  }, [isOpen, selectedIds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   // Load contacts based on search and filters
   useEffect(() => {
@@ -101,87 +167,65 @@ export function ContactPickerDrawer({
     return Array.from(tags).slice(0, 15);
   }, [contacts]);
 
-  const toggleSelect = (id: string) => {
-    const next = new Set(tempSelected);
-    if (next.has(id)) {
-      next.delete(id);
-    } else {
-      next.add(id);
-    }
-    setTempSelected(next);
-  };
+  const toggleSelect = useCallback((id: string) => {
+    setTempSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
 
-  const handleSelectAll = () => {
-    const next = new Set(tempSelected);
-    const allFilteredIds = contacts.map(c => c.id);
-    const areAllSelected = allFilteredIds.every(id => next.has(id));
+  const handleSelectAll = useCallback(() => {
+    setTempSelected(prev => {
+      const next = new Set(prev);
+      const allFilteredIds = contacts.map(c => c.id);
+      const areAllSelected = allFilteredIds.length > 0 && allFilteredIds.every(id => next.has(id));
 
-    if (areAllSelected) {
-      allFilteredIds.forEach(id => next.delete(id));
-    } else {
-      allFilteredIds.forEach(id => next.add(id));
-    }
-    setTempSelected(next);
-  };
+      if (areAllSelected) {
+        allFilteredIds.forEach(id => next.delete(id));
+      } else {
+        allFilteredIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  }, [contacts]);
 
-  const handleApply = () => {
+  const handleSelectNewest50 = useCallback(() => {
+    setTempSelected(prev => {
+      const next = new Set(prev);
+      const top50 = contacts.slice(0, 50).map(c => c.id);
+      top50.forEach(id => next.add(id));
+      return next;
+    });
+  }, [contacts]);
+
+  const handleApply = useCallback(() => {
     const selectedList = contacts.filter(c => tempSelected.has(c.id));
     onApply(Array.from(tempSelected), selectedList);
     onClose();
-  };
+  }, [contacts, tempSelected, onApply, onClose]);
 
-  // React Window row renderer
-  const Row = ({ index, style }: RowComponentProps) => {
+  // Virtual Row wrapper for > 200 items
+  const VirtualRow = ({ index, style }: RowComponentProps) => {
     const contact = contacts[index];
-    const isChecked = tempSelected.has(contact.id);
-
+    if (!contact) return null;
     return (
-      <div
+      <ContactRowItem
+        contact={contact}
+        isChecked={tempSelected.has(contact.id)}
+        onToggle={toggleSelect}
         style={style}
-        onClick={() => toggleSelect(contact.id)}
-        className={`flex items-center gap-3 px-6 py-2 border-b border-border/25 hover:bg-secondary/20 cursor-pointer transition-colors select-none ${
-          isChecked ? 'bg-indigo-500/[0.02]' : ''
-        }`}
-      >
-        {/* Checkbox */}
-        <div className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-all ${
-          isChecked 
-            ? 'bg-indigo-600 border-indigo-600 text-white' 
-            : 'border-border/70 bg-background'
-        }`}>
-          {isChecked && <Check className="w-2.5 h-2.5 stroke-[3px]" />}
-        </div>
-
-        {/* Avatar */}
-        <div className="w-8.5 h-8.5 rounded-full bg-secondary flex items-center justify-center text-[12px] font-bold text-muted-foreground uppercase shrink-0">
-          {contactInitials(contact.name) || <User className="w-4 h-4 opacity-60" />}
-        </div>
-
-        {/* Info */}
-        <div className="flex-1 min-w-0 text-left">
-          <p className="text-[12.5px] font-semibold text-foreground leading-snug truncate">
-            {recipientDisplayName(contact.name, contact.phone)}
-          </p>
-          <p className="text-[10.5px] text-muted-foreground/75 mt-0.5 tabular-nums">
-            {contact.phone}
-          </p>
-        </div>
-
-        {/* Tags */}
-        {(contact.tags || []).length > 0 && (
-          <div className="flex items-center gap-1 overflow-hidden shrink-0 max-w-[120px]">
-            {contact.tags!.slice(0, 2).map(t => (
-              <span key={t} className="px-1.5 py-0.5 rounded bg-secondary text-[9px] font-bold text-muted-foreground border border-border/40 uppercase">
-                {t}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
+      />
     );
   };
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
         <>
@@ -191,7 +235,7 @@ export function ContactPickerDrawer({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-background/50 backdrop-blur-[2.5px] z-50"
+            className="fixed inset-0 bg-background/50 backdrop-blur-[2.5px] z-[70]"
           />
 
           {/* Drawer Sliding Panel */}
@@ -200,7 +244,7 @@ export function ContactPickerDrawer({
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 260 }}
-            className="fixed inset-y-0 right-0 w-full sm:w-[520px] bg-white dark:bg-card border-l border-border shadow-2xl z-50 flex flex-col overflow-hidden will-change-transform"
+            className="fixed inset-y-0 right-0 w-full sm:w-[520px] bg-white dark:bg-card border-l border-border shadow-2xl z-[70] flex flex-col overflow-hidden will-change-transform"
           >
             {/* Drawer Header */}
             <div className="px-6 py-4.5 border-b border-border/45 flex items-center justify-between shrink-0">
@@ -214,8 +258,9 @@ export function ContactPickerDrawer({
                 </div>
               </div>
               <button
+                type="button"
                 onClick={onClose}
-                className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors"
+                className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors cursor-pointer"
               >
                 <X className="w-4.5 h-4.5" />
               </button>
@@ -234,7 +279,7 @@ export function ContactPickerDrawer({
                   className="w-full h-9.5 pl-9.5 pr-4 bg-background border border-border/60 hover:border-border/90 focus:border-indigo-500/40 rounded-xl text-[12.5px] text-foreground outline-none transition-all placeholder:text-muted-foreground/35"
                 />
                 {searchTerm && (
-                  <button onClick={() => { setSearchTerm(''); setDebouncedSearch(''); }} className="absolute right-3 text-muted-foreground/40 hover:text-muted-foreground">
+                  <button type="button" onClick={() => { setSearchTerm(''); setDebouncedSearch(''); }} className="absolute right-3 text-muted-foreground/40 hover:text-muted-foreground cursor-pointer">
                     <X className="w-3.5 h-3.5" />
                   </button>
                 )}
@@ -244,8 +289,9 @@ export function ContactPickerDrawer({
               <div className="flex items-center gap-2 overflow-x-auto pb-1 shrink-0 scrollbar-none">
                 {/* VIP filter */}
                 <button
+                  type="button"
                   onClick={() => setVipFilter(!vipFilter)}
-                  className={`h-7 px-2.5 rounded-full text-[11px] font-semibold border flex items-center gap-1.5 transition-all select-none ${
+                  className={`h-7 px-2.5 rounded-full text-[11px] font-semibold border flex items-center gap-1.5 transition-all select-none cursor-pointer ${
                     vipFilter
                       ? 'bg-amber-500/10 border-amber-500/35 text-amber-600'
                       : 'bg-background border-border/70 text-muted-foreground hover:border-border'
@@ -259,8 +305,9 @@ export function ContactPickerDrawer({
                 {allTags.map(tag => (
                   <button
                     key={tag}
+                    type="button"
                     onClick={() => setSelectedTagFilter(selectedTagFilter === tag ? '' : tag)}
-                    className={`h-7 px-2.5 rounded-full text-[11px] font-semibold border flex items-center gap-1.5 transition-all select-none ${
+                    className={`h-7 px-2.5 rounded-full text-[11px] font-semibold border flex items-center gap-1.5 transition-all select-none cursor-pointer ${
                       selectedTagFilter === tag
                         ? 'bg-indigo-500/10 border-indigo-500/35 text-indigo-600'
                         : 'bg-background border-border/70 text-muted-foreground hover:border-border'
@@ -281,20 +328,15 @@ export function ContactPickerDrawer({
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => {
-                    const top50 = contacts.slice(0, 50).map(c => c.id);
-                    const next = new Set(tempSelected);
-                    top50.forEach(id => next.add(id));
-                    setTempSelected(next);
-                  }}
-                  className="font-bold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800 transition-colors"
+                  onClick={handleSelectNewest50}
+                  className="font-bold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800 transition-colors cursor-pointer"
                 >
                   ⚡ Select Newest 50
                 </button>
                 <button
                   type="button"
                   onClick={handleSelectAll}
-                  className="font-bold text-indigo-600 hover:text-indigo-700"
+                  className="font-bold text-indigo-600 hover:text-indigo-700 cursor-pointer"
                 >
                   {contacts.length > 0 && contacts.every(c => tempSelected.has(c.id))
                     ? 'Deselect All on Page'
@@ -303,7 +345,7 @@ export function ContactPickerDrawer({
               </div>
             </div>
 
-            {/* Contacts list virtualized */}
+            {/* Contacts list */}
             <div className="flex-1 min-h-0 bg-background/5">
               {loading ? (
                 <div className="flex h-full items-center justify-center">
@@ -320,9 +362,20 @@ export function ContactPickerDrawer({
                     Try refining your search term or selecting a different status filter chip.
                   </p>
                 </div>
+              ) : contacts.length <= 200 ? (
+                <div className="overflow-y-auto h-full custom-scrollbar">
+                  {contacts.map(contact => (
+                    <ContactRowItem
+                      key={contact.id}
+                      contact={contact}
+                      isChecked={tempSelected.has(contact.id)}
+                      onToggle={toggleSelect}
+                    />
+                  ))}
+                </div>
               ) : (
                 <List
-                  rowComponent={Row}
+                  rowComponent={VirtualRow}
                   rowCount={contacts.length}
                   rowHeight={54}
                   rowProps={{}}
@@ -344,14 +397,16 @@ export function ContactPickerDrawer({
               </div>
               <div className="flex items-center gap-2">
                 <button
+                  type="button"
                   onClick={onClose}
-                  className="h-8.5 px-4 text-[11.5px] font-semibold border border-border/70 bg-background hover:bg-secondary/40 rounded-xl text-muted-foreground transition-all duration-[120ms]"
+                  className="h-8.5 px-4 text-[11.5px] font-semibold border border-border/70 bg-background hover:bg-secondary/40 rounded-xl text-muted-foreground transition-all duration-[120ms] cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={handleApply}
-                  className="h-8.5 px-4.5 text-[11.5px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm shadow-indigo-500/10 rounded-xl transition-all duration-[120ms] active:scale-[0.98]"
+                  className="h-8.5 px-4.5 text-[11.5px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm shadow-indigo-500/10 rounded-xl transition-all duration-[120ms] active:scale-[0.98] cursor-pointer"
                 >
                   Apply Selection
                 </button>
@@ -360,6 +415,8 @@ export function ContactPickerDrawer({
           </motion.div>
         </>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }
+

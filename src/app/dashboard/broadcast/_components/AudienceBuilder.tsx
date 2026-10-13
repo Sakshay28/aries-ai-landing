@@ -75,6 +75,8 @@ interface ChoiceCard {
   icon: React.ElementType;
 }
 
+const EMPTY_CONTACT_IDS: string[] = [];
+
 const AUDIENCE_CHOICES: ChoiceCard[] = [
   {
     id: 'all',
@@ -1039,10 +1041,11 @@ export function AudienceBuilder({
       <ContactPickerDrawer
         isOpen={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        selectedIds={audience.manualContactIds || []}
+        selectedIds={audience.manualContactIds || EMPTY_CONTACT_IDS}
         onApply={(ids) => {
           onChange({
             ...audience,
+            type: 'manual',
             manualContactIds: ids
           });
         }}
