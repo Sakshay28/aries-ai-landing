@@ -9,6 +9,7 @@ import { z } from 'zod';
 const TestSchema = z.object({
   campaignId: z.string().uuid(),
   phoneNumber: z.string().min(10),
+  recipientName: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    const { campaignId, phoneNumber } = parsed.data;
+    const { campaignId, phoneNumber, recipientName } = parsed.data;
 
     // Rate-limit test sends: 10 per tenant per hour to prevent quota abuse
     const rl = await checkRedisRateLimit(`broadcast:test:${tenantId}`, 10, 3600);
@@ -77,7 +78,8 @@ export async function POST(req: NextRequest) {
       detectedVarIndices,
       phoneNumber,
       campaign.template_language || 'en',
-      campaign.header_media_url || undefined
+      campaign.header_media_url || undefined,
+      recipientName
     );
 
     if (!result.success) {

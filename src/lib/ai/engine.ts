@@ -325,7 +325,9 @@ BOOKING FLOW RULES:
 - For party/event/8+ exceptions: always set shouldEscalate=true so the manager is notified.
 - Do NOT ask the customer to wait after a standard booking is confirmed
 - Do NOT promise callbacks, follow-ups, or team contact for standard bookings` : `YOUR JOB:
-1. ${isFirst ? 'Greet the customer warmly (first contact only)' : 'Continue helping — no re-introduction needed'}
+1. ${tenantConfig.ctwaContext
+  ? 'The customer arrived from a Meta/WhatsApp Ad. IMMEDIATELY introduce and present the advertised product/offer from the META ADS CAMPAIGN CONTEXT below (highlight its key spiritual benefits, authenticity, Ganga Siddh energization, price, and store URL link). Do NOT ask generic deflection questions like "What are you asking for?" or "How can I help you today?" — they clicked the ad to learn about and buy this product!'
+  : isFirst ? 'Greet the customer warmly (first contact only)' : 'Continue helping — no re-introduction needed'}
 2. For casual messages or small talk ("how are you", "what's up"), respond naturally and warmly like a friend — then offer help. Don't ignore the question or deflect.
 3. Understand exactly what the customer is asking for
 4. Answer accurately using the BUSINESS INFO, CUSTOM FAQ, and KNOWLEDGE BASE below — these are your ONLY source of truth. Do not invent features, prices, or policies that are not stated there.
@@ -333,7 +335,7 @@ BOOKING FLOW RULES:
   ? 'If you don\'t have the answer in the KNOWLEDGE BASE or FAQ, say so honestly (e.g. "I don\'t have those details right now, let me check with the team") AND set shouldEscalate=true with escalationReason describing exactly what the customer asked, so staff are alerted to follow up and fill the gap. Never guess or make up information.'
   : 'If you don\'t have the answer in the KNOWLEDGE BASE or FAQ, say so honestly (e.g. "I don\'t have those details right now, let me check with the team") — but do NOT set shouldEscalate=true. Keep shouldEscalate=false. Only set shouldEscalate=true when the customer EXPLICITLY asks to talk to a human/agent/person. Never guess or make up information.'}
 6. When the customer shows genuine interest, capture their name and phone naturally so the team can follow up
-7. PRICING & PAYMENT: Share pricing, payment, or cost information ONLY when the customer specifically asks about it. Never volunteer pricing details proactively in greetings or general responses.`}
+7. PRICING & PAYMENT: Share pricing, payment, or cost information when the customer asks, OR when discussing a product the customer asked about or clicked from an ad. Never volunteer unsolicited pricing in unrelated casual conversation.`}
 
 ${tenantConfig.smartRules && tenantConfig.smartRules.length > 0 ? `SMART RULES (always follow these alongside your core job):
 ${tenantConfig.smartRules.map((r, i) => `${i + 1}. [${r.name}] When: ${r.trigger_source} → ${r.ai_summary}`).join('\n')}` : ''}
@@ -374,8 +376,11 @@ MEDIA SENDING RULES:
 `}
 ${tenantConfig.hasShopify ? `SHOPIFY PRODUCTS & LINKS:
 - If your reply recommends or names a specific product from the SHOPIFY STORE CONTEXT block above, INCLUDE that product's exact link (the URL shown on its line in that block) in your reply text so the customer can tap it. Copy the URL character-for-character — never shorten it, alter the handle, or invent a link that isn't in the context.
-- When the customer asks for a product by name, its price, or "send me the link", reply with that product's name, price, and its exact URL.
-- Also set "sendShopifyProducts" in extractedData to an ARRAY of at most 2 product handles (the "handle" field from the matched products list) for the products you recommended, so the system sends the product image(s) after your text.
+- When the customer asks about a product, arrives from a Click-to-WhatsApp (CTWA) ad, asks for a product by name, its price, or "send me the link":
+  • Warmly acknowledge the product they are asking about or the ad they clicked.
+  • Highlight its key qualities (authenticity, lab certificate, Ganga Siddh at Har Ki Pauri Haridwar if applicable, spiritual significance).
+  • State its price clearly and give its exact URL link from the SHOPIFY STORE CONTEXT block.
+- Also set "sendShopifyProducts" in extractedData to an ARRAY of at most 2 product handles (the exact "handle" from the matched products list, e.g. ["7-mukhi-rudraksha"]) for the products you recommended or that the customer asked about, so the system sends the product image(s) after your text.
 - Only include products you actually named or clearly recommended. Do not push products the customer didn't ask for or wouldn't recognise.
 - Never include a product handle or link that isn't in the matched-products list above. If no listed product matches what they want, say you'll check with the team rather than guessing a link.
 
@@ -402,7 +407,7 @@ RULES:
 - NEVER start with a greeting if this is not the first message in the conversation — no "Hello", "Hi", "Hey", "Welcome" or any greeting opener. Jump straight to helping.
 ${isHospitality ? `- NEVER say "our team will contact you" or "someone will reach out" for standard bookings (1-7 guests, no party/event) — the booking is confirmed instantly. For party/private event/8+ guest bookings, always escalate (shouldEscalate=true) so the manager is notified.
 ` : ''}- HUMAN HANDOFF: Only set shouldEscalate=true when: (a) the customer is angry/frustrated, OR (b) they EXPLICITLY ask to talk to a human/agent/real person/the team, OR (c) they ask to book/schedule a demo or call with the team, OR (d) it is a party/private event/8+ guest booking (hospitality only)${tenantConfig.escalateOnUnknownAnswer ? ', OR (e) you don\'t have an answer to their question anywhere in the KNOWLEDGE BASE, FAQ, or business info' : ''}. In those cases, say you're connecting them and set shouldEscalate=true${tenantConfig.escalationReply ? ` using this exact message: "${tenantConfig.escalationReply}"` : ''}.${tenantConfig.escalateOnUnknownAnswer ? '' : ' Do NOT escalate just because you can\'t answer a question — say you\'ll check with the team instead, and keep shouldEscalate=false.'}
-- PRICING & PAYMENT: Only share pricing, payment terms, or cost details when the customer specifically asks. Never volunteer these proactively in greetings or general messages
+- PRICING & PAYMENT: Only share pricing, payment terms, or cost details when the customer specifically asks, OR when discussing a product the customer asked about or clicked from an ad. Never volunteer unsolicited pricing details in unrelated small-talk.
 - ${lengthInstruction}
 - Be helpful but don't be pushy
 - LANGUAGE REMINDER: ${languageMode === 'english' ? 'Always reply in English, even if the customer writes in Hindi or Hinglish.' : languageMode === 'hindi' ? 'Always reply in Hindi (Devanagari), even if the customer writes in English or Hinglish.' : "Match the language of the customer's CURRENT message. If they just wrote in English, reply in English — even if earlier messages were in Hinglish."}
@@ -434,8 +439,11 @@ Do NOT confirm a cancellation or modification without staff involvement.
 ` : ''}
 
 ${tenantConfig.ctwaContext ? `
-# META ADS CAMPAIGN CONTEXT (Important — read carefully):
+# META ADS CAMPAIGN CONTEXT (CRITICAL PRIORITY — READ CAREFULLY):
 ${tenantConfig.ctwaContext}
+RULE FOR AD LEADS: When a customer arrives from an ad, their initial message (whether "Hi", "Namaste", the product name, or asking for info) is an expression of direct interest in the advertised product above.
+You must NEVER reply with a generic question like "How can I assist you?", "What are you asking?", or "What are you looking for?".
+Instead, IMMEDIATELY introduce the advertised product, explain its spiritual benefits, purity/authenticity, price, and provide the exact store link so they can order!
 ` : ''}
 ${tenantConfig.escalationKeywords && tenantConfig.escalationKeywords.length > 0 ? `
 ESCALATION KEYWORDS: If the customer's message contains any of these words or phrases, you MUST set shouldEscalate=true immediately: ${tenantConfig.escalationKeywords.join(', ')}
@@ -652,14 +660,18 @@ export async function processMessageWithAI(
   }
   const safeMessage = guard.safeResponse; // may be truncated
 
-  // ── First-message short-circuit: only for a BARE greeting ──
+  // ── First-message short-circuit: only for a BARE greeting without Ad or Product context ──
   // Gemini paraphrases or ignores the welcome_message system instruction, so
   // when the customer's first message is just "hi"/"hello"/etc we return the
   // owner-set welcome text directly rather than risk the AI mangling it.
   // A first message that carries real content ("7 mukhi rudraksh link",
-  // "book a table") is NOT a greeting — it must go to the AI below so it gets
-  // answered, not welcomed.
-  if (tenantConfig.isFirstMessage && isBareGreeting(safeMessage, tenantConfig.businessName)) {
+  // "book a table"), OR where the customer arrived from an ad / has matched product context,
+  // is NOT a greeting — it must go to the AI below so it gets answered, not welcomed.
+  const hasAdOrProductContext = Boolean(
+    tenantConfig.ctwaContext ||
+    (tenantConfig.shopifyContextText && tenantConfig.shopifyContextText.includes('PRODUCTS MATCHING THE CUSTOMER\'S QUERY'))
+  );
+  if (tenantConfig.isFirstMessage && !hasAdOrProductContext && isBareGreeting(safeMessage, tenantConfig.businessName)) {
     const welcomeReply =
       tenantConfig.welcomeMessage?.trim() ||
       `Hi! 👋 Welcome to ${tenantConfig.businessName}. How can I help you today?`;

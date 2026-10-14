@@ -119,7 +119,7 @@ export function BroadcastAuditLog({ campaignId }: AuditLogProps) {
               
               <div className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground bg-secondary/40 px-1.5 py-0.5 rounded">
                 <User className="w-3 h-3" />
-                <span>Sakshay</span>
+                <span>{(log as any).actor || (log as any).user_name || 'Admin'}</span>
               </div>
             </div>
 

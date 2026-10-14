@@ -70,9 +70,9 @@ export interface WhatsAppPreviewProps {
 
 const PROFILES: { name: string; variables: Record<string, string> }[] = [
   {
-    name: "Sakshay",
+    name: "Rahul",
     variables: {
-      "1": "Sakshay",
+      "1": "Rahul",
       "2": "Friday, June 5",
       "3": "7:30 PM",
     },

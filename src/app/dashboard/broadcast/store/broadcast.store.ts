@@ -11,6 +11,6 @@
 export const useBroadcastStore = () => ({
   saveStatus:       'idle' as const,
   setSaveStatus:    (_: any) => {},
-  previewRecipient: 'Sakshay' as const,
+  previewRecipient: 'Rahul' as const,
   setPreviewRecipient: (_: any) => {},
 });

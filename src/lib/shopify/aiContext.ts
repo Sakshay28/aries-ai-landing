@@ -63,6 +63,15 @@ interface BuildInput {
   tenantId: string;
   message: string;
   lead: { phone?: string | null; email?: string | null; shopify_customer_id?: string | null } | null;
+  referral?: {
+    source_type?: string;
+    source_id?: string;
+    headline?: string;
+    body?: string;
+    ctwa_clid?: string;
+    source_url?: string;
+    image_url?: string;
+  };
 }
 
 // ─── Intent heuristics ─────────────────────────────────────
@@ -71,12 +80,15 @@ interface BuildInput {
 // context, but under-fetching means the answer is generic.
 const ORDER_KEYWORDS = /(order|tracking|track|shipped|shipping|dispatch|delivery|delivered|refund|return|cancel|invoice|receipt|awb|status|kaha|kab.*mile|order.*kaha)/i;
 const ORDER_NUMBER_RE = /#?\b(\d{3,10})\b/;
-const PRODUCT_KEYWORDS = /(product|item|price|cost|stock|available|buy|purchase|show|find|looking for|search|do you (have|sell)|kitne ka|kimat|milega|milegi)/i;
+const PRODUCT_KEYWORDS = /(product|item|price|cost|stock|available|buy|purchase|show|find|looking for|search|do you (have|sell)|kitne ka|kimat|milega|milegi|rudraksh|mukhi|mala|kavach|stone|pyrite|sphatik|gangajal|firoza|bracelet|pendant|karungali|original|certified|\b\d+[-–\s]*mukhi\b)/i;
+const PRODUCT_URL_RE = /(?:https?:\/\/[^\/\s]+)?(?:\/collections\/[a-zA-Z0-9_-]+)?\/products\/([a-zA-Z0-9_\u2013\u2014-]+)/i;
 const POLICY_KEYWORDS = /(refund|return|exchange|shipping policy|delivery policy|privacy|terms|cancel|warranty|policy)/i;
 const DISCOUNT_KEYWORDS = /(discount|coupon|promo|code|offer|deal|sale|off)/i;
 const FAQ_KEYWORDS = /(how (do|does|to)|what (is|are)|when|where|why|faq|help|question)/i;
 
-function hasShopifyIntent(msg: string): boolean {
+function hasShopifyIntent(msg: string, referral?: BuildInput['referral']): boolean {
+  if (referral) return true; // Any Click-to-WhatsApp ad arrival on a Shopify store is shop-related
+  if (PRODUCT_URL_RE.test(msg) || /https?:\/\//i.test(msg)) return true;
   return (
     ORDER_KEYWORDS.test(msg) ||
     PRODUCT_KEYWORDS.test(msg) ||
@@ -84,6 +96,17 @@ function hasShopifyIntent(msg: string): boolean {
     DISCOUNT_KEYWORDS.test(msg) ||
     FAQ_KEYWORDS.test(msg)
   );
+}
+
+function extractProductHandles(text?: string): string[] {
+  if (!text) return [];
+  const matches: string[] = [];
+  const re = new RegExp(PRODUCT_URL_RE.source, 'gi');
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m[1]) matches.push(m[1].toLowerCase());
+  }
+  return matches;
 }
 
 async function getTenantShopifyMeta(tenantId: string): Promise<{ store_url: string; currency: string | null } | null> {
@@ -96,11 +119,13 @@ async function getTenantShopifyMeta(tenantId: string): Promise<{ store_url: stri
 }
 
 /**
- * Extract a query for product search. Strips common filler words so
+ * Extract a query for product search. Strips common filler words and raw URLs so
  * "do you have silver rings under 2000" becomes "silver rings under 2000".
  */
 function extractProductQuery(msg: string): string {
-  return msg
+  const withoutUrls = msg.replace(/https?:\/\/[^\s]+/g, '').trim();
+  const target = withoutUrls || msg;
+  return target
     .replace(/^(hi|hello|hey|do you have|do u have|kya|kya aap|show me|show|find|looking for|i want|i need|i'?m looking|any|are there|is there|got any)\s+/i, '')
     .replace(/[?.!]+$/g, '')
     .trim()
@@ -108,12 +133,12 @@ function extractProductQuery(msg: string): string {
 }
 
 export async function getShopifyContext(input: BuildInput): Promise<ShopifyAIContext | null> {
-  const { tenantId, message, lead } = input;
+  const { tenantId, message, lead, referral } = input;
 
   // Fast-path skips: no connection or no Shopify-shaped intent.
   const meta = await getTenantShopifyMeta(tenantId);
   if (!meta) return null;
-  if (!hasShopifyIntent(message)) return null;
+  if (!hasShopifyIntent(message, referral)) return null;
 
   const ctx: ShopifyAIContext = { store_url: meta.store_url, currency: meta.currency };
 
@@ -143,24 +168,66 @@ export async function getShopifyContext(input: BuildInput): Promise<ShopifyAICon
     }
   }
 
-  // ── Product intent ────────────────────────────────────────
-  if (PRODUCT_KEYWORDS.test(message)) {
-    const q = extractProductQuery(message);
-    const products = await searchProducts(tenantId, { query: q, limit: 5 }).catch(() => []);
-    if (products.length > 0) {
-      ctx.matched_products = products.map(p => ({
-        handle: p.handle,
-        title: p.title,
-        vendor: p.vendor,
-        price_min: p.price_min,
-        price_max: p.price_max,
-        currency: p.currency,
-        in_stock: p.in_stock,
-        url: p.url,
-        snippet: p.snippet,
-        image_url: p.image_url,
-      }));
+  // ── Product intent / Ad Referral / Product Links ─────────
+  const urlHandles = [
+    ...extractProductHandles(message),
+    ...(referral?.source_url ? extractProductHandles(referral.source_url) : []),
+  ];
+
+  const matchedList: NonNullable<ShopifyAIContext['matched_products']> = [];
+  const seenHandles = new Set<string>();
+
+  // If exact product URL(s) are present in the message or ad referral, load them directly
+  for (const handle of urlHandles) {
+    if (seenHandles.has(handle)) continue;
+    seenHandles.add(handle);
+    const prod = await getProduct(tenantId, { handle }).catch(() => null);
+    if (prod) {
+      matchedList.push({
+        handle: prod.handle,
+        title: prod.title,
+        vendor: prod.vendor,
+        price_min: prod.price_min,
+        price_max: prod.price_max,
+        currency: prod.currency,
+        in_stock: prod.in_stock,
+        url: prod.url,
+        snippet: prod.snippet || (prod.body_text ? prod.body_text.slice(0, 300) : null),
+        image_url: prod.image_url,
+      });
     }
+  }
+
+  const isProductIntent = PRODUCT_KEYWORDS.test(message) || !!referral || urlHandles.length > 0;
+  if (isProductIntent) {
+    let q = extractProductQuery(message);
+    if (!q && referral?.headline) {
+      q = referral.headline.replace(/^(ad|offer|sponsored):\s*/i, '').trim();
+    }
+    if (q) {
+      const searched = await searchProducts(tenantId, { query: q, limit: 5 }).catch(() => []);
+      for (const p of searched) {
+        if (!seenHandles.has(p.handle)) {
+          seenHandles.add(p.handle);
+          matchedList.push({
+            handle: p.handle,
+            title: p.title,
+            vendor: p.vendor,
+            price_min: p.price_min,
+            price_max: p.price_max,
+            currency: p.currency,
+            in_stock: p.in_stock,
+            url: p.url,
+            snippet: p.snippet,
+            image_url: p.image_url,
+          });
+        }
+      }
+    }
+  }
+
+  if (matchedList.length > 0) {
+    ctx.matched_products = matchedList.slice(0, 6);
   }
 
   // ── Policy intent ─────────────────────────────────────────
@@ -238,16 +305,16 @@ export function renderShopifyContextForPrompt(ctx: ShopifyAIContext): string {
 
   if (ctx.matched_products && ctx.matched_products.length > 0) {
     lines.push('');
-    lines.push('PRODUCTS MATCHING THE CUSTOMER\'S QUERY:');
+    lines.push('PRODUCTS MATCHING THE CUSTOMER\'S QUERY / AD:');
     ctx.matched_products.forEach((p, i) => {
       const price = p.price_min != null
         ? (p.price_max && p.price_max !== p.price_min ? `${p.currency || ''} ${p.price_min}–${p.price_max}` : `${p.currency || ''} ${p.price_min}`)
         : 'price on request';
-      lines.push(`${i + 1}. "${p.title}" — ${price}${p.in_stock ? '' : ' (OUT OF STOCK)'}${p.vendor ? ` · by ${p.vendor}` : ''}`);
+      lines.push(`${i + 1}. "${p.title}" [handle: ${p.handle}] — ${price}${p.in_stock ? '' : ' (OUT OF STOCK)'}${p.vendor ? ` · by ${p.vendor}` : ''}`);
       if (p.snippet) lines.push(`   ${p.snippet}`);
       if (p.url) lines.push(`   ${p.url}`);
     });
-    lines.push('When you recommend a product, ALWAYS include its exact link (the URL shown on its line above) in your reply text so the customer can open it directly — copy the URL verbatim, never shorten, guess, or invent one. If the customer asks for a specific product or its link/price, give that product\'s URL. Also list the matching product `handle`(s) in extractedData.sendShopifyProducts (max 2) so we send the product image too.');
+    lines.push('When you recommend a product, ALWAYS include its exact link (the URL shown on its line above) in your reply text so the customer can open it directly — copy the URL verbatim, never shorten, guess, or invent one. If the customer asks for a specific product, arrived from an ad, or asks its link/price, give that product\'s URL. Also list the matching product `handle`(s) in extractedData.sendShopifyProducts (max 2) so we send the product image too.');
   }
 
   if (ctx.policies && ctx.policies.length > 0) {
@@ -298,7 +365,7 @@ export { getProduct as getShopifyProductDetail };
 // token-subset matching against the real handles; if we can't confidently
 // resolve it, drop the link rather than send a dead one.
 function tokenizeHandle(handle: string): string[] {
-  return handle.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return handle.toLowerCase().replace(/[\u2013\u2014]/g, '-').split(/[^a-z0-9]+/).filter(Boolean);
 }
 
 export function reconcileProductLinks(replyText: string, ctx: ShopifyAIContext | null): string {
@@ -308,12 +375,12 @@ export function reconcileProductLinks(replyText: string, ctx: ShopifyAIContext |
 
   const validUrls = new Set(products.map((p) => p.url));
   const host = ctx.store_url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const urlRe = new RegExp(`https?://${host}/products/[a-zA-Z0-9-]+(?:\\?[^\\s)\\]]*)?`, 'g');
+  const urlRe = new RegExp(`https?://${host}(?:/collections/[a-zA-Z0-9_-]+)?/products/([a-zA-Z0-9_\u2013\u2014-]+)(?:\\?[^\\s)\\]]*)?`, 'g');
 
   const corrected = replyText.replace(urlRe, (match) => {
     if (validUrls.has(match)) return match;
 
-    const slug = match.match(/\/products\/([a-zA-Z0-9-]+)/)?.[1] || '';
+    const slug = match.match(/\/products\/([a-zA-Z0-9_\u2013\u2014-]+)/)?.[1] || '';
     const slugTokens = new Set(tokenizeHandle(slug));
     const candidates = products.filter((p) => {
       const handleTokens = tokenizeHandle(p.handle);

@@ -1920,6 +1920,7 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
       tenantId: tenant.id,
       message: msg.text,
       lead: lead ? { phone: (lead as { phone?: string }).phone, email: (lead as { email?: string }).email, shopify_customer_id: (lead as { shopify_customer_id?: string }).shopify_customer_id } : null,
+      referral: msg.referral,
     }).catch(() => null) : Promise.resolve(null),
     hasShiprocket ? getShiprocketContext({
       tenantId: tenant.id,

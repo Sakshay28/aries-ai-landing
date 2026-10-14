@@ -142,26 +142,80 @@ export async function searchProducts(
   // substring and silently missed those. Instead we AND each meaningful word
   // token (every token must appear somewhere in search_text), which matches
   // by-name lookups far more reliably while staying on the trigram index.
-  const tokens = tokenizeQuery(q);
+  const qClean = q.replace(/[\u2013\u2014]/g, '-').trim();
+  const tokens = tokenizeQuery(qClean);
+  let candidates: ProductSummary[] = [];
+
   if (tokens.length > 0) {
     let builder = base();
     for (const t of tokens) builder = builder.ilike('search_text', `%${t}%`);
-    const { data, error } = await builder.limit(limit);
+    const { data, error } = await builder.limit(Math.max(limit * 3, 20));
     if (error) {
       console.error('[shopify:ai] searchProducts failed', error.message);
-      return [];
+    } else if (data && data.length > 0) {
+      candidates = data.map(r => toSummary(r, storeUrl));
     }
-    if (data && data.length > 0) return data.map(r => toSummary(r, storeUrl));
   }
 
   // Fallback: raw phrase substring (covers exact handles / single-word queries
   // and the case where AND-ing tokens over-filtered to zero rows).
-  const { data, error } = await base().ilike('search_text', `%${q}%`).limit(limit);
-  if (error) {
-    console.error('[shopify:ai] searchProducts fallback failed', error.message);
-    return [];
+  if (candidates.length === 0) {
+    const { data, error } = await base().ilike('search_text', `%${qClean}%`).limit(Math.max(limit * 3, 20));
+    if (error) {
+      console.error('[shopify:ai] searchProducts fallback failed', error.message);
+    } else if (data && data.length > 0) {
+      candidates = data.map(r => toSummary(r, storeUrl));
+    }
   }
-  return (data || []).map(r => toSummary(r, storeUrl));
+
+  if (candidates.length === 0) return [];
+  return rankProducts(candidates, qClean).slice(0, limit);
+}
+
+function rankProducts(candidates: ProductSummary[], query: string): ProductSummary[] {
+  const qClean = query.replace(/[\u2013\u2014]/g, '-').toLowerCase().trim();
+  const tokens = tokenizeQuery(qClean).map(t => t.toLowerCase());
+
+  const scored = candidates.map(p => {
+    let score = 0;
+    const titleNorm = p.title.replace(/[\u2013\u2014]/g, '-').toLowerCase();
+    const handleNorm = p.handle.toLowerCase();
+
+    // 1. Exact title or handle match
+    if (titleNorm === qClean || handleNorm === qClean) score += 100;
+
+    // 2. Word-boundary exact phrase match in title (e.g. "7 mukhi", "1-14 mukhi")
+    const esc = qClean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const reWord = new RegExp('(^|[^a-z0-9])' + esc + '([^a-z0-9]|$)', 'i');
+    if (reWord.test(titleNorm)) score += 60;
+    else if (titleNorm.includes(qClean)) score += 35;
+
+    // 3. Handle contains slugified query
+    const handleSlug = qClean.replace(/\s+/g, '-');
+    if (handleNorm.includes(handleSlug)) score += 40;
+
+    // 4. Token coverage in title
+    let allTokensInTitle = true;
+    let anyTokenInTitle = false;
+    for (const t of tokens) {
+      const tokEsc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const tokRe = new RegExp('(^|[^a-z0-9])' + tokEsc + '([^a-z0-9]|$)', 'i');
+      if (tokRe.test(titleNorm)) {
+        anyTokenInTitle = true;
+      } else {
+        allTokensInTitle = false;
+      }
+    }
+    if (allTokensInTitle && tokens.length > 0) score += 30;
+    else if (anyTokenInTitle) score += 15;
+
+    if (p.in_stock) score += 5;
+
+    return { p, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map(x => x.p);
 }
 
 // Words that carry no product-name signal, plus price/number filler that
@@ -177,17 +231,26 @@ const SEARCH_STOPWORDS = new Set([
 
 /** Split a query into meaningful word tokens for AND-matching. */
 function tokenizeQuery(q: string): string[] {
+  const norm = q.replace(/[\u2013\u2014]/g, '-');
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const raw of q.split(/[^a-z0-9]+/i)) {
-    const t = raw.trim();
-    if (t.length < 2) continue;      // drop 1-char noise
-    if (/^\d+$/.test(t)) continue;   // pure numbers = price filters, not names
-    if (SEARCH_STOPWORDS.has(t)) continue;
-    if (seen.has(t)) continue;
-    seen.add(t);
+  for (const raw of norm.split(/[^a-z0-9-]+/i)) {
+    const t = raw.trim().replace(/^-+|-+$/g, '');
+    if (!t) continue;
+    // Keep small numbers (e.g. 7, 5, 8, 1-14, 108) — these are crucial product descriptors (mukhi, size, beads).
+    // Only drop pure numbers >= 500 (likely large prices or generic IDs).
+    if (/^\d+$/.test(t)) {
+      const num = parseInt(t, 10);
+      if (num >= 500) continue;
+    } else if (t.length < 2 && !/^\d$/.test(t)) {
+      continue;
+    }
+    if (SEARCH_STOPWORDS.has(t.toLowerCase())) continue;
+    const lower = t.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
     out.push(t);
-    if (out.length >= 6) break;      // cap AND clauses
+    if (out.length >= 6) break;
   }
   return out;
 }

@@ -113,7 +113,7 @@ export interface VariableChip {
 
 export const VARIABLE_CHIPS: VariableChip[] = [
   // Customer
-  { group: 'Customer', name: 'customer_name', display: 'Customer Name', previewValue: 'Sakshay' },
+  { group: 'Customer', name: 'customer_name', display: 'Customer Name', previewValue: 'Rahul' },
   { group: 'Customer', name: 'customer_phone', display: 'Customer Phone', previewValue: '+91 98765 43210' },
   // Booking
   { group: 'Booking', name: 'booking_date', display: 'Booking Date', previewValue: 'Saturday' },

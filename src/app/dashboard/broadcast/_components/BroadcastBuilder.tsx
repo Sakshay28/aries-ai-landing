@@ -40,9 +40,9 @@ interface BroadcastBuilderProps {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const PREVIEW_PROFILES: Record<string, Record<string, string>> = {
-  Sakshay: { '1': 'Sakshay', '2': 'SKY-2045', '3': 'Friday, 7 PM' },
-  John:    { '1': 'John',    '2': 'JHN-1901', '3': 'Saturday, 11 AM' },
-  Priya:   { '1': 'Priya',  '2': 'PRY-0078', '3': 'Sunday, 5 PM' },
+  Rahul: { '1': 'Rahul', '2': 'SKY-2045', '3': 'Friday, 7 PM' },
+  John:  { '1': 'John',  '2': 'JHN-1901', '3': 'Saturday, 11 AM' },
+  Priya: { '1': 'Priya', '2': 'PRY-0078', '3': 'Sunday, 5 PM' },
 };
 
 const DEFAULT_AUDIENCE: AudienceState = {
@@ -106,11 +106,12 @@ function TestSendModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onSend: (phone: string) => void;
+  onSend: (phone: string, recipientName?: string) => void;
   isSending: boolean;
   templateName: string;
 }) {
   const [phone, setPhone] = useState('');
+  const [name, setName] = useState('');
 
   if (!open) return null;
 
@@ -121,7 +122,7 @@ function TestSendModal({
       toast.error('Enter a valid phone number (min 10 digits)');
       return;
     }
-    onSend(cleaned);
+    onSend(cleaned, name.trim() || undefined);
   };
 
   return (
@@ -157,6 +158,20 @@ function TestSendModal({
               Send to phone number
             </label>
             <PhoneInput value={phone} onChange={setPhone} autoFocus />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide flex items-center justify-between">
+              <span>Recipient Name</span>
+              <span className="text-[10px] text-muted-foreground/70 font-normal">Optional (auto-matched from CRM)</span>
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Rahul or leave blank for CRM match"
+              className="w-full h-9 px-3 text-[13px] bg-secondary/30 border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-indigo-500 placeholder:text-muted-foreground/50 text-foreground"
+            />
           </div>
 
           <div className="flex gap-2 pt-1">
@@ -196,7 +211,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
   const [audience,        setAudience]        = useState<AudienceState>(DEFAULT_AUDIENCE);
   const [delivery,        setDelivery]        = useState<DeliveryConfig>(DEFAULT_DELIVERY);
   const [automationRules, setAutomationRules] = useState<AutomationRule[]>(DEFAULT_AUTOMATION);
-  const [previewRecipient, setPreviewRecipient] = useState<'Sakshay' | 'John' | 'Priya'>('Sakshay');
+  const [previewRecipient, setPreviewRecipient] = useState<'Rahul' | 'John' | 'Priya'>('Rahul');
 
   // UI state
   const [templates,        setTemplates]        = useState<Template[]>([]);
@@ -511,7 +526,7 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
     setShowTestModal(true);
   };
 
-  const executeTestSend = async (phone: string) => {
+  const executeTestSend = async (phone: string, recipientName?: string) => {
     setIsTesting(true);
     setShowTestModal(false);
 
@@ -519,14 +534,18 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
       // Save first so we always have a campaignId
       const savedId = await save(true);
 
-      console.log('[BROADCAST_TEST] Sending to:', phone, 'campaignId:', savedId);
+      console.log('[BROADCAST_TEST] Sending to:', phone, 'campaignId:', savedId, 'recipientName:', recipientName);
 
       if (savedId) {
         // Use the production test route (campaignId + phone)
         const res  = await fetch('/api/broadcast/test', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ campaignId: savedId, phoneNumber: phone }),
+          body: JSON.stringify({ 
+            campaignId: savedId, 
+            phoneNumber: phone,
+            recipientName: recipientName?.trim() || undefined,
+          }),
         });
         const data = await res.json();
         if (data.success) {

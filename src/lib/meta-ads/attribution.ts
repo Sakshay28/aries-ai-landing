@@ -215,16 +215,19 @@ export function getCampaignContextForAI(referral: ReferralData | undefined): str
   if (!referral) return '';
 
   const parts: string[] = [];
-  parts.push('This customer came from a Meta/Facebook ad (Click-to-WhatsApp).');
+  parts.push('This customer clicked a Meta/Facebook/Instagram Click-to-WhatsApp (CTWA) ad.');
 
   if (referral.headline) {
-    parts.push(`Ad headline: "${referral.headline}"`);
+    parts.push(`Ad headline/product: "${referral.headline}"`);
   }
   if (referral.body) {
     parts.push(`Ad offer/details: "${referral.body}"`);
   }
+  if (referral.source_url) {
+    parts.push(`Ad target/product URL: "${referral.source_url}"`);
+  }
 
-  parts.push('Greet them warmly, acknowledge the ad they clicked, and continue the conversation based on the ad content.');
+  parts.push('IMPORTANT: Greet them warmly and specifically acknowledge the product or ad they clicked on. Answer their queries about this item (its spiritual significance/benefits, authenticity, energization/Ganga Siddh, price/variants, and order link). Do NOT give a generic bare greeting that ignores the product from the ad.');
 
   return parts.join(' ');
 }

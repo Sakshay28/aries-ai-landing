@@ -18,7 +18,8 @@ export class TestSendService {
     detectedVarIndices: string[],
     testRecipientPhone: string,
     languageCode = 'en',
-    customHeaderMediaUrl?: string
+    customHeaderMediaUrl?: string,
+    customRecipientName?: string
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     try {
       if (!templateName || !testRecipientPhone) {
@@ -42,13 +43,45 @@ export class TestSendService {
 
       const decryptedToken = decryptToken(tenant.wa_access_token) as string;
 
-      // 2. Mock a test lead record
+      // 2. Resolve test recipient identity dynamically from CRM leads
+      let recipientLeadName: string | null = null;
+      let recipientEmail = 'test@example.com';
+      let recipientNotes = 'Test recipient';
+      let leadId = '00000000-0000-0000-0000-000000000000';
+
+      const digitsOnly = testRecipientPhone.replace(/\D/g, '');
+      const last10 = digitsOnly.slice(-10);
+
+      if (last10.length === 10) {
+        const { data: matchedLead } = await supabaseAdmin
+          .from('leads')
+          .select('id, name, email, notes')
+          .eq('tenant_id', tenantId)
+          .ilike('phone', `%${last10}%`)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (matchedLead) {
+          leadId = matchedLead.id;
+          recipientLeadName = matchedLead.name;
+          if (matchedLead.email) recipientEmail = matchedLead.email;
+          if (matchedLead.notes) recipientNotes = matchedLead.notes;
+        }
+      }
+
+      // Priority:
+      // 1. Explicit customRecipientName if provided
+      // 2. Matched CRM lead name from database
+      // 3. Fallback to null (greetingName resolves to single source of truth neutral greeting)
+      const resolvedName = customRecipientName?.trim() || recipientLeadName || null;
+
       const testLead = {
-        id: '00000000-0000-0000-0000-000000000000',
-        name: 'Sakshay',
+        id: leadId,
+        name: resolvedName,
         phone: testRecipientPhone,
-        email: 'test@aries.ai',
-        notes: 'Test lead account configuration'
+        email: recipientEmail,
+        notes: recipientNotes,
       };
 
       // 3. Resolve template headers & buttons from cache if available
