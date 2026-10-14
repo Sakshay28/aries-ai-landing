@@ -67,6 +67,19 @@ export class MetaTemplateSyncService {
       const data = await res.json();
       const metaTemplates: MetaTemplateRaw[] = data.data || [];
 
+      // Fetch local draft templates to correlate permanent media URLs
+      const { data: localDrafts } = await supabaseAdmin
+        .from('draft_templates')
+        .select('normalized_name, header_media_url')
+        .eq('tenant_id', tenantId);
+
+      const draftMediaMap = new Map<string, string>();
+      for (const d of localDrafts || []) {
+        if (d.normalized_name && d.header_media_url) {
+          draftMediaMap.set(d.normalized_name, d.header_media_url);
+        }
+      }
+
       let syncedCount = 0;
 
       // 3. Normalize and cache each template
@@ -75,6 +88,11 @@ export class MetaTemplateSyncService {
         const headerComponent = t.components?.find(c => c.type === 'HEADER');
         const footerComponent = t.components?.find(c => c.type === 'FOOTER');
         const buttonComponent = t.components?.find(c => c.type === 'BUTTONS');
+
+        const draftMediaUrl = draftMediaMap.get(t.name);
+        const resolvedMediaUrl = (draftMediaUrl && !draftMediaUrl.includes('scontent.whatsapp.net'))
+          ? draftMediaUrl
+          : (headerComponent?.example?.header_handle?.[0] || undefined);
 
         const normalizedTemplate = {
           tenant_id: tenantId,
@@ -91,7 +109,8 @@ export class MetaTemplateSyncService {
             body: bodyComponent?.text || '',
             headerType: headerComponent?.format || 'NONE',
             headerText: headerComponent?.text || undefined,
-            headerMediaUrl: headerComponent?.example?.header_handle?.[0] || undefined,
+            headerMediaUrl: resolvedMediaUrl,
+            header_media_url: resolvedMediaUrl,
             footer: footerComponent?.text || undefined,
             buttons: buttonComponent?.buttons?.map(b => ({
               type: b.type,

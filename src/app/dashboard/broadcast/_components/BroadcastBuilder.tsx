@@ -885,7 +885,11 @@ export function BroadcastBuilder({ campaign, allCampaigns, onClose, onSaved }: B
                     onSelect={tpl => {
                       setSelectedTemplate(tpl);
                       setVariables({});
-                      setHeaderMediaUrl(''); // different template = different (or no) header media
+                      // Pre-populate with template's existing sample media if valid HTTPS (not ephemeral Meta scontent link)
+                      const existingMedia = tpl?.headerMediaUrl && !tpl.headerMediaUrl.includes('scontent.whatsapp.net') && /^https:\/\//i.test(tpl.headerMediaUrl)
+                        ? tpl.headerMediaUrl
+                        : '';
+                      setHeaderMediaUrl(existingMedia);
                       if (tpl) {
                         setTimeout(() => {
                           const el = variableMappingRef.current || document.getElementById('section-variables');
