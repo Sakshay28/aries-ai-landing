@@ -86,6 +86,14 @@ export async function PATCH(
         const apiKey = decryptToken(tenant.wa_access_token as string);
         if (apiKey) {
           const current = { ...existing, ...updateData };
+
+          if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(current.header_type as string) && !current.header_media_url) {
+            return NextResponse.json(
+              { success: false, error: `A sample ${(current.header_type as string).toLowerCase()} file is required for ${current.header_type} headers.` },
+              { status: 400 }
+            );
+          }
+
           const components = buildMetaComponents({
             headerType: current.header_type as string,
             headerText: current.header_text as string | undefined,

@@ -267,6 +267,13 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!saveDraftOnly && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType) && !headerMediaUrl) {
+      return NextResponse.json(
+        { success: false, error: `A sample ${headerType.toLowerCase()} file is required for ${headerType} headers. Please upload a file.` },
+        { status: 400 }
+      );
+    }
+
     // ── Upsert local draft ──
     const draftData = {
       tenant_id: tenantId,

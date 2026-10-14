@@ -55,6 +55,136 @@ export async function listMetaTemplates(
   });
 }
 
+// ── Cache for Meta App IDs by access token prefix (reduces duplicate /app lookups) ──
+const appIdCache = new Map<string, string>();
+
+export interface ResumableUploadMediaInput {
+  url?: string;
+  buffer?: Buffer;
+  mimeType?: string;
+  fileName?: string;
+}
+
+/**
+ * Uploads a media asset (image/video/document) to Meta via the Resumable Upload API
+ * and returns the upload handle `h` required by Meta Graph API for template headers.
+ */
+export async function uploadMediaToMetaResumable(
+  accessToken: string,
+  media: ResumableUploadMediaInput
+): Promise<string> {
+  let buffer = media.buffer;
+  let mimeType = media.mimeType;
+  let fileName = media.fileName || 'header_sample';
+
+  // 1. Download buffer if URL provided
+  if (!buffer && media.url) {
+    const res = await fetch(media.url, { signal: AbortSignal.timeout(25000) });
+    if (!res.ok) {
+      throw new Error(`Failed to download sample media for Meta approval (${res.status} ${res.statusText})`);
+    }
+    const contentType = res.headers.get('content-type');
+    if (!mimeType && contentType) {
+      mimeType = contentType.split(';')[0].trim().toLowerCase();
+    }
+    buffer = Buffer.from(await res.arrayBuffer());
+
+    if (!media.fileName) {
+      try {
+        const u = new URL(media.url);
+        const base = u.pathname.split('/').pop();
+        if (base) fileName = base;
+      } catch {
+        // keep fallback
+      }
+    }
+  }
+
+  if (!buffer || buffer.length === 0) {
+    throw new Error('Template sample media file is empty. Please upload a valid image.');
+  }
+
+  // Normalize / infer MIME type
+  if (mimeType) {
+    mimeType = mimeType.split(';')[0].trim().toLowerCase();
+    if (mimeType === 'image/jpg') mimeType = 'image/jpeg';
+  } else {
+    if (/\.jpe?g$/i.test(fileName)) mimeType = 'image/jpeg';
+    else if (/\.png$/i.test(fileName)) mimeType = 'image/png';
+    else if (/\.mp4$/i.test(fileName)) mimeType = 'video/mp4';
+    else if (/\.pdf$/i.test(fileName)) mimeType = 'application/pdf';
+    else if (buffer[0] === 0xff && buffer[1] === 0xd8) mimeType = 'image/jpeg';
+    else if (buffer[0] === 0x89 && buffer[1] === 0x50) mimeType = 'image/png';
+    else mimeType = 'image/jpeg';
+  }
+
+  // 2. Discover Meta App ID
+  const cacheKey = accessToken.slice(-16);
+  let appId = appIdCache.get(cacheKey) || process.env.META_APP_ID || process.env.NEXT_PUBLIC_META_APP_ID;
+  if (!appId) {
+    try {
+      const appRes = await fetch(`${META_BASE}/app?access_token=${accessToken}`, {
+        signal: AbortSignal.timeout(10000),
+      });
+      if (appRes.ok) {
+        const appJson = (await appRes.json()) as { id?: string };
+        if (appJson.id) {
+          appId = appJson.id;
+          appIdCache.set(cacheKey, appId);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to resolve Meta App ID from token:', (e as Error).message);
+    }
+  }
+
+  if (!appId) {
+    throw new Error('Unable to resolve Meta App ID required for media upload.');
+  }
+
+  // 3. Create resumable upload session on Meta
+  const sessionUrl = new URL(`${META_BASE}/${appId}/uploads`);
+  sessionUrl.searchParams.set('file_length', String(buffer.length));
+  sessionUrl.searchParams.set('file_type', mimeType);
+  sessionUrl.searchParams.set('file_name', fileName);
+  sessionUrl.searchParams.set('access_token', accessToken);
+
+  const sessionRes = await fetch(sessionUrl.toString(), {
+    method: 'POST',
+    signal: AbortSignal.timeout(15000),
+  });
+
+  const sessionJson = await sessionRes.json().catch(() => ({}));
+  if (!sessionRes.ok || !(sessionJson as { id?: string }).id) {
+    const errDetail =
+      (sessionJson as { error?: { message?: string } })?.error?.message || `Status ${sessionRes.status}`;
+    throw new Error(`Failed to create Meta upload session: ${errDetail}`);
+  }
+
+  const uploadSessionId = (sessionJson as { id: string }).id;
+
+  // 4. Upload binary bytes to Meta
+  const uploadRes = await fetch(`https://graph.facebook.com/v21.0/${uploadSessionId}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `OAuth ${accessToken}`,
+      file_offset: '0',
+      'Content-Type': 'application/octet-stream',
+    },
+    body: new Uint8Array(buffer),
+    signal: AbortSignal.timeout(35000),
+  });
+
+  const uploadJson = await uploadRes.json().catch(() => ({}));
+  if (!uploadRes.ok || !(uploadJson as { h?: string }).h) {
+    const errDetail =
+      (uploadJson as { error?: { message?: string } })?.error?.message || `Status ${uploadRes.status}`;
+    throw new Error(`Failed to transfer media to Meta: ${errDetail}`);
+  }
+
+  return (uploadJson as { h: string }).h;
+}
+
 // ── Create a new template ──────────────────────
 export interface MetaCreateTemplatePayload {
   name: string;
@@ -69,17 +199,91 @@ export async function createMetaTemplate(
   wabaId: string,
   payload: MetaCreateTemplatePayload
 ): Promise<{ id: string; status: string }> {
+  // Pre-process components: convert any media header URLs to valid Meta Resumable Upload handles
+  const processedComponents = await Promise.all(
+    (payload.components || []).map(async (comp) => {
+      const c = comp as Record<string, unknown>;
+      if (c && c.type === 'HEADER' && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(c.format as string)) {
+        const example = (c.example || {}) as Record<string, unknown>;
+        const handles = (example.header_handle as string[] | undefined) || [];
+        const firstHandle = handles[0];
+
+        // If handle is an HTTP(S) URL, upload to Meta via Resumable Upload API to obtain a valid handle
+        if (firstHandle && (firstHandle.startsWith('http://') || firstHandle.startsWith('https://'))) {
+          const handle = await uploadMediaToMetaResumable(accessToken, {
+            url: firstHandle,
+            fileName: `${(c.format as string).toLowerCase()}_sample`,
+          });
+          return {
+            ...c,
+            example: {
+              ...example,
+              header_handle: [handle],
+            },
+          };
+        }
+
+        // If no handle provided at all for media header, throw a clear error before Meta rejects with 2388273
+        if (!firstHandle) {
+          throw new Error(
+            `A sample ${String(c.format).toLowerCase()} file is required for ${c.format} headers. Please upload a media file before submitting.`
+          );
+        }
+      }
+      return c;
+    })
+  );
+
+  const finalPayload: MetaCreateTemplatePayload = {
+    ...payload,
+    components: processedComponents,
+  };
+
   return withRetry(async () => {
     const res = await fetch(`${META_BASE}/${wabaId}/message_templates`, {
       method: 'POST',
       headers: authHeader(accessToken),
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(12000),
+      body: JSON.stringify(finalPayload),
+      signal: AbortSignal.timeout(15000),
     });
 
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
       const err = (json as { error?: { message?: string; code?: number; error_subcode?: number; error_user_msg?: string } }).error;
+
+      // Self-healing: if template already exists in this language (subcode 2388024), update it instead!
+      if (err?.error_subcode === 2388024 || /already exists/i.test(err?.message || '')) {
+        try {
+          const listRes = await fetch(`${META_BASE}/${wabaId}/message_templates?name=${encodeURIComponent(finalPayload.name)}`, {
+            headers: authHeader(accessToken),
+            signal: AbortSignal.timeout(10000),
+          });
+          if (listRes.ok) {
+            const listJson = await listRes.json();
+            const existing = (listJson.data as Array<{ id: string; name: string; language: string }> || []).find(
+              (t) => t.name === finalPayload.name && (!finalPayload.language || t.language === finalPayload.language)
+            );
+            if (existing?.id) {
+              const editRes = await fetch(`${META_BASE}/${existing.id}`, {
+                method: 'POST',
+                headers: authHeader(accessToken),
+                body: JSON.stringify({ components: finalPayload.components }),
+                signal: AbortSignal.timeout(15000),
+              });
+              const editJson = await editRes.json();
+              if (editRes.ok && (editJson.success || editJson.id)) {
+                return {
+                  id: existing.id,
+                  status: 'PENDING',
+                };
+              }
+            }
+          }
+        } catch (updateErr) {
+          console.warn('Failed to update existing Meta template:', (updateErr as Error).message);
+        }
+      }
+
       const detail = [
         err?.message,
         err?.code ? `code ${err.code}` : null,
@@ -165,14 +369,18 @@ export function buildMetaComponents(input: BuildComponentsInput): unknown[] {
   // ── HEADER ──
   if (input.headerType === 'TEXT' && input.headerText) {
     components.push({ type: 'HEADER', format: 'TEXT', text: input.headerText });
-  } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(input.headerType) && input.headerMediaUrl) {
+  } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(input.headerType)) {
     const format = input.headerType; // 'IMAGE' | 'VIDEO' | 'DOCUMENT'
     components.push({
       type: 'HEADER',
       format,
-      example: {
-        header_handle: [input.headerMediaUrl],
-      },
+      ...(input.headerMediaUrl
+        ? {
+            example: {
+              header_handle: [input.headerMediaUrl],
+            },
+          }
+        : {}),
     });
   }
 
