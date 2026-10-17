@@ -73,6 +73,7 @@ export interface Tenant {
   staff_phone: string | null;
   staff_name: string | null;
   manager_phone: string | null;
+  notify_phone?: string | null;
   staff_email: string | null;
   // Custom message sent to staff on WhatsApp when a customer escalates.
   // Supports variables: {{customer_name}} {{customer_phone}} {{reason}} {{message}} {{business_name}}

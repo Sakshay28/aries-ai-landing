@@ -1382,6 +1382,11 @@ const HUMAN_HANDOFF_PHRASES = [
   'book a demo', 'schedule a demo', 'arrange a demo', 'request a demo', 'demo with the',
   'insaan se baat', 'kisi insaan', 'aadmi se baat', 'bande se baat',
   'team se baat', 'team se connect',
+  'call me', 'can someone call', 'please call', 'want a call', 'talk on call', 'speak on call',
+  'call karna', 'call karo', 'call krna', 'call kro', 'baat karni hai', 'baat krni hai',
+  'contact number', 'phone number', 'mobile number', 'helpline number', 'customer care number',
+  'number do', 'number de do', 'number bhejo', 'number share', 'aapka number',
+  'नंबर दीजिए', 'नंबर दो', 'बात करनी है', 'कॉल करना', 'कॉल करो',
 ];
 const HUMAN_HANDOFF_WORDS = ['human', 'representative', 'insaan'];
 

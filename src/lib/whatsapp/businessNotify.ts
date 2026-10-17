@@ -338,6 +338,12 @@ async function attemptDelivery(
   const rawRecipients: { phone: string; role: 'staff' | 'manager' }[] = [];
   if (tenant.staff_phone) rawRecipients.push({ phone: normalizePhoneNumber(tenant.staff_phone), role: 'staff' });
   if (tenant.manager_phone) rawRecipients.push({ phone: normalizePhoneNumber(tenant.manager_phone), role: 'manager' });
+  if (eventType === 'human_assistance' && tenant.notify_phone) {
+    for (const p of tenant.notify_phone.split(',')) {
+      const norm = normalizePhoneNumber(p.trim());
+      if (norm) rawRecipients.push({ phone: norm, role: 'staff' });
+    }
+  }
 
   const seen = new Set<string>(doneSet);
   const recipients = rawRecipients.filter(r => {

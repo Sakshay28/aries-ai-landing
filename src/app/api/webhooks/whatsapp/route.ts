@@ -278,11 +278,17 @@ function isPlatformTenant(tenant: { wa_phone_number_id?: string | null; business
 let _knownStaffCache: { set: Set<string>; at: number } | null = null;
 async function isKnownStaffNumber(phone: string): Promise<boolean> {
   if (!_knownStaffCache || Date.now() - _knownStaffCache.at > 60_000) {
-    const { data } = await supabaseAdmin.from('tenants').select('staff_phone, manager_phone');
+    const { data } = await supabaseAdmin.from('tenants').select('staff_phone, manager_phone, notify_phone');
     const set = new Set<string>();
     for (const t of data ?? []) {
       if (t.staff_phone) set.add(normalizePhoneNumber(t.staff_phone));
       if (t.manager_phone) set.add(normalizePhoneNumber(t.manager_phone));
+      if (t.notify_phone) {
+        for (const p of t.notify_phone.split(',')) {
+          const norm = normalizePhoneNumber(p.trim());
+          if (norm) set.add(norm);
+        }
+      }
     }
     _knownStaffCache = { set, at: Date.now() };
   }
@@ -402,7 +408,8 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
   const cleanPhone = normalizePhoneNumber(msg.fromPhone);
   const staffPhone = normalizePhoneNumber(tenant.staff_phone);
   const managerPhone = normalizePhoneNumber(tenant.manager_phone);
-  const isOwnStaffNumber = !!cleanPhone && (cleanPhone === staffPhone || cleanPhone === managerPhone);
+  const notifyPhones = (tenant.notify_phone || '').split(',').map(p => normalizePhoneNumber(p.trim())).filter(Boolean);
+  const isOwnStaffNumber = !!cleanPhone && (cleanPhone === staffPhone || cleanPhone === managerPhone || notifyPhones.includes(cleanPhone));
 
   // Static staff-portal reply is reserved for genuine control interactions only
   // (an ack / keepalive / "got it" button or text). Anything else — a staff member
@@ -2184,9 +2191,11 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
   // AI said (which may be an off-topic pitch) with a clean handoff line so the
   // customer isn't sold to when they asked for a person.
   if (aiResponse.shouldEscalate) {
+    const bizPhoneDigits = (tenant.business_phone || '').replace(/\D/g, '').slice(-10);
+    const replyAlreadyHasPhone = bizPhoneDigits.length === 10 && aiResponse.reply.replace(/\D/g, '').includes(bizPhoneDigits);
     if (tenant.escalation_reply?.trim()) {
       aiResponse.reply = tenant.escalation_reply.trim();
-    } else if (aiResponse.escalationReason === 'human_request' || aiResponse.escalationReason === 'keyword_match') {
+    } else if ((aiResponse.escalationReason === 'human_request' || aiResponse.escalationReason === 'keyword_match') && !replyAlreadyHasPhone) {
       aiResponse.reply = `I'm connecting you with ${tenant.staff_name || 'our team'} right away 🙏 They'll be with you shortly.`;
     }
   }

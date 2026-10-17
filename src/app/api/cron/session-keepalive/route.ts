@@ -78,8 +78,8 @@ async function runStaffKeepalive(): Promise<{ pinged: number; skipped: number; f
 
   const { data: tenants } = await supabaseAdmin
     .from('tenants')
-    .select('id, wa_access_token, wa_phone_number_id, business_name, staff_phone, manager_phone, staff_email')
-    .or('staff_phone.not.is.null,manager_phone.not.is.null');
+    .select('id, wa_access_token, wa_phone_number_id, business_name, staff_phone, manager_phone, notify_phone, staff_email')
+    .or('staff_phone.not.is.null,manager_phone.not.is.null,notify_phone.not.is.null');
 
   let pinged = 0;
   let skipped = 0;
@@ -91,7 +91,7 @@ async function runStaffKeepalive(): Promise<{ pinged: number; skipped: number; f
     if (!token) { skipped++; continue; }
 
     const phones = [...new Set(
-      [tenant.staff_phone, tenant.manager_phone]
+      [tenant.staff_phone, tenant.manager_phone, ...(tenant.notify_phone ? tenant.notify_phone.split(',') : [])]
         .map(p => normalizePhoneNumber(p))
         .filter(p => p !== ''),
     )] as string[];
