@@ -441,9 +441,9 @@ Do NOT confirm a cancellation or modification without staff involvement.
 ${tenantConfig.ctwaContext ? `
 # META ADS CAMPAIGN CONTEXT (CRITICAL PRIORITY — READ CAREFULLY):
 ${tenantConfig.ctwaContext}
-RULE FOR AD LEADS: When a customer arrives from an ad, their initial message (whether "Hi", "Namaste", the product name, or asking for info) is an expression of direct interest in the advertised product above.
-You must NEVER reply with a generic question like "How can I assist you?", "What are you asking?", or "What are you looking for?".
-Instead, IMMEDIATELY introduce the advertised product, explain its spiritual benefits, purity/authenticity, price, and provide the exact store link so they can order!
+RULE FOR AD LEADS: When a customer arrives from an ad, their initial message (whether "Hi", "Namaste", the product name, or asking for info) AND any short follow-up questions (such as "Price", "How much", "Kitne ka hai", "Cost", "Details", "Link", "Available?") refer directly to the advertised product above unless they explicitly name a different product.
+You must NEVER reply with a generic or clarifying question like "How can I assist you?", "What are you asking?", "What are you looking for?", or "Could you please specify which product you're interested in?".
+Instead, IMMEDIATELY answer for the advertised product — share its exact price, spiritual benefits, purity/authenticity, and provide the exact store link so they can order!
 ` : ''}
 ${tenantConfig.escalationKeywords && tenantConfig.escalationKeywords.length > 0 ? `
 ESCALATION KEYWORDS: If the customer's message contains any of these words or phrases, you MUST set shouldEscalate=true immediately: ${tenantConfig.escalationKeywords.join(', ')}

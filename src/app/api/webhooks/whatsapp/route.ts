@@ -724,10 +724,18 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
   // Always use the canonical conversation — NEVER null it out.
   const activeExistingConv = canonicalConv;
 
+  const adNote = isFromAd && msg.referral
+    ? `Meta Ad — "${msg.referral.headline || ''}"${msg.referral.body ? ` — ${msg.referral.body.replace(/\s+/g, ' ').trim().slice(0, 250)}` : ''} | Ad ID: ${msg.referral.source_id || ''}`
+    : undefined;
+
   if (existingLead) {
     lead = existingLead;
     const updateData: Record<string, any> = { last_message_at: new Date().toISOString() };
     if (isFromAd && !existingLead.source_detail) updateData.source_detail = leadSource;
+    if (adNote) {
+      updateData.notes = adNote;
+      existingLead.notes = adNote;
+    }
     // NOTE: We deliberately do NOT backfill leads.name from the WhatsApp profile
     // name (msg.contactName). Profile names are unreliable — emojis, nicknames,
     // or plain wrong — and were causing the bot to address customers by the wrong
@@ -843,7 +851,7 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
           ...(assignedTo && { assigned_to: assignedTo }),
           ...(campaignId && { campaign_id: campaignId }),
           ...(isFromAd && msg.referral && {
-            notes: `Meta Ad — "${msg.referral.headline || ''}" | Ad ID: ${msg.referral.source_id || ''}`,
+            notes: adNote,
             ...(msg.referral.ctwa_clid && { ctwa_clid: msg.referral.ctwa_clid }),
           }),
         },
@@ -1739,7 +1747,7 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
   const _aiBatchPromise = Promise.all([
     supabaseAdmin
       .from('messages')
-      .select('direction, content, ai_generated')
+      .select('direction, content, ai_generated, raw_webhook')
       .eq('conversation_id', conversation.id)
       // Defence-in-depth: also filter by tenant_id so a race-condition that assigns
       // a conversation to the wrong tenant never bleeds another tenant's history into
@@ -1825,6 +1833,21 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
     { data: kbEmbedCheck },
     { data: kbMediaFiles },
   ] = await _aiBatchPromise;
+
+  // Recover CTWA referral context across follow-up messages in the same conversation.
+  // Meta only attaches `referral` to the very first ad-click message; if the customer
+  // immediately sends a second message (e.g. "Price") before or after the first reply,
+  // recovering the referral from recentMsgs ensures the AI still knows which ad product
+  // the customer is asking about.
+  const recentAdReferral = !msg.referral
+    ? (recentMsgs || [])
+        .map(m => (m as { raw_webhook?: { referral?: typeof msg.referral } }).raw_webhook?.referral)
+        .find(ref => ref && isCtwaReferral(ref))
+    : undefined;
+  const effectiveReferral = msg.referral || recentAdReferral;
+  if (!ctwaContext && effectiveReferral) {
+    ctwaContext = getCampaignContextForAI(effectiveReferral);
+  }
 
   const history = (recentMsgs || [])
     .reverse()
@@ -1922,8 +1945,8 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
     ...history.slice(-4).reverse().map(h => h.content),
     ...((lead as { notes?: string } | null)?.notes ? [String((lead as { notes?: string }).notes)] : []),
   ].filter(Boolean);
-  const ragQuery = isFromAd && msg.referral
-    ? [msg.text, msg.referral.headline, msg.referral.body].filter(Boolean).join('\n')
+  const ragQuery = effectiveReferral
+    ? [msg.text, effectiveReferral.headline, effectiveReferral.body].filter(Boolean).join('\n')
     : (msg.text.trim().length < 25 && recentContextMessages.length > 0
       ? [msg.text, recentContextMessages[0]].join(' — ')
       : msg.text);
@@ -1935,7 +1958,7 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
       tenantId: tenant.id,
       message: msg.text,
       lead: lead ? { phone: (lead as { phone?: string }).phone, email: (lead as { email?: string }).email, shopify_customer_id: (lead as { shopify_customer_id?: string }).shopify_customer_id, notes: (lead as { notes?: string }).notes } : null,
-      referral: msg.referral,
+      referral: effectiveReferral,
       recentMessages: recentContextMessages,
     }).catch(() => null) : Promise.resolve(null),
     hasShiprocket ? getShiprocketContext({
