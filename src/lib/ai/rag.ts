@@ -46,6 +46,8 @@ export interface RetrievedDoc {
   similarity:   number;
 }
 
+const NON_TEXT_MEDIA_TYPES = new Set(['jpg', 'jpeg', 'png', 'webp', 'mp4', 'mov', 'webm']);
+
 export async function retrieveRelevantDocs(
   tenantId:   string,
   query:      string,
@@ -63,7 +65,7 @@ export async function retrieveRelevantDocs(
   const { data, error } = await supabaseAdmin.rpc('match_knowledge_docs', {
     query_embedding:  `[${queryEmbedding.join(',')}]`,
     match_tenant_id:  tenantId,
-    match_count:      topK,
+    match_count:      Math.max(topK * 4, 15), // over-fetch so media rows don't crowd out text docs
     min_similarity:   minSimilarity,
   });
 
@@ -72,7 +74,10 @@ export async function retrieveRelevantDocs(
     return [];
   }
 
-  return (data as RetrievedDoc[]) ?? [];
+  type DocRow = RetrievedDoc & { file_type?: string | null };
+  return ((data as DocRow[]) ?? [])
+    .filter(r => !NON_TEXT_MEDIA_TYPES.has((r.file_type || '').toLowerCase()) && (r.content_text || '').trim().length > 0)
+    .slice(0, topK);
 }
 
 // ── Retrieve top-K most relevant MEDIA assets (images/videos/PDFs) ────

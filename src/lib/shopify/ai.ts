@@ -157,14 +157,32 @@ export async function searchProducts(
     }
   }
 
-  // Fallback: raw phrase substring (covers exact handles / single-word queries
-  // and the case where AND-ing tokens over-filtered to zero rows).
+  // Fallback 1: raw phrase substring (covers exact handles / single-word queries)
   if (candidates.length === 0) {
     const { data, error } = await base().ilike('search_text', `%${qClean}%`).limit(Math.max(limit * 3, 20));
     if (error) {
       console.error('[shopify:ai] searchProducts fallback failed', error.message);
     } else if (data && data.length > 0) {
       candidates = data.map(r => toSummary(r, storeUrl));
+    }
+  }
+
+  // Fallback 2: token-OR match when a multi-token query (e.g. ad copy or conversational
+  // query with an extra descriptive word) over-filtered strict AND to zero rows.
+  if (candidates.length === 0 && tokens.length > 1) {
+    const orFilter = tokens
+      .map(t => `search_text.ilike.%${t.replace(/[,()]/g, '')}%`)
+      .join(',');
+    const { data, error } = await base().or(orFilter).limit(Math.max(limit * 5, 30));
+    if (!error && data && data.length > 0) {
+      const minMatchedTokens = Math.min(2, tokens.length);
+      candidates = data
+        .map(r => toSummary(r, storeUrl))
+        .filter(p => {
+          const hay = `${p.title} ${p.handle}`.replace(/[\u2013\u2014]/g, '-').toLowerCase();
+          const hits = tokens.filter(t => hay.includes(t.toLowerCase())).length;
+          return hits >= minMatchedTokens;
+        });
     }
   }
 
@@ -194,20 +212,17 @@ function rankProducts(candidates: ProductSummary[], query: string): ProductSumma
     const handleSlug = qClean.replace(/\s+/g, '-');
     if (handleNorm.includes(handleSlug)) score += 40;
 
-    // 4. Token coverage in title
-    let allTokensInTitle = true;
-    let anyTokenInTitle = false;
+    // 4. Token coverage in title + handle (proportional to how many tokens matched)
+    let matchedInTitle = 0;
+    let matchedInHandle = 0;
     for (const t of tokens) {
       const tokEsc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const tokRe = new RegExp('(^|[^a-z0-9])' + tokEsc + '([^a-z0-9]|$)', 'i');
-      if (tokRe.test(titleNorm)) {
-        anyTokenInTitle = true;
-      } else {
-        allTokensInTitle = false;
-      }
+      if (tokRe.test(titleNorm)) matchedInTitle++;
+      if (tokRe.test(handleNorm)) matchedInHandle++;
     }
-    if (allTokensInTitle && tokens.length > 0) score += 30;
-    else if (anyTokenInTitle) score += 15;
+    score += matchedInTitle * 12 + matchedInHandle * 6;
+    if (tokens.length > 0 && matchedInTitle === tokens.length) score += 25;
 
     if (p.in_stock) score += 5;
 
@@ -218,15 +233,25 @@ function rankProducts(candidates: ProductSummary[], query: string): ProductSumma
   return scored.map(x => x.p);
 }
 
-// Words that carry no product-name signal, plus price/number filler that
-// lives in the price columns rather than search_text (so ANDing them in
-// would wrongly zero out results).
+// Words that carry no product-name signal, plus price/number filler and
+// common CTWA ad / chat conversational words that would wrongly zero out
+// token-AND searches if treated as required product title tokens.
 const SEARCH_STOPWORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'for', 'with', 'of', 'in', 'on', 'to', 'my',
-  'me', 'you', 'do', 'have', 'has', 'any', 'is', 'are', 'this', 'that', 'it',
+  'me', 'you', 'your', 'our', 'we', 'us', 'do', 'does', 'did', 'have', 'has',
+  'any', 'is', 'are', 'was', 'were', 'be', 'been', 'this', 'that', 'these',
+  'those', 'it', 'its', 'at', 'by', 'as', 'from', 'into', 'about', 'regarding',
   'under', 'below', 'above', 'over', 'less', 'more', 'than', 'upto', 'up',
-  'rs', 'inr', 'rupees', 'price', 'cost', 'send', 'show', 'link', 'buy',
-  'want', 'need', 'looking', 'please', 'pls', 'kya', 'hai', 'ka', 'ki', 'ke',
+  'rs', 'inr', 'rupees', 'price', 'pricing', 'cost', 'rate', 'send', 'show',
+  'link', 'buy', 'purchase', 'order', 'want', 'need', 'looking', 'please',
+  'pls', 'plz', 'kya', 'hai', 'hain', 'ka', 'ki', 'ke', 'ko', 'se', 'mein',
+  'hi', 'hii', 'hello', 'hey', 'namaste', 'namaskar', 'can', 'could', 'may',
+  'will', 'would', 'get', 'give', 'tell', 'know', 'share', 'info', 'information',
+  'details', 'detail', 'what', 'which', 'how', 'much', 'many', 'some', 'full',
+  'today', 'now', 'bring', 'home', 'make', 'selected', 'carefully', 'meaningful',
+  'journey', 'towards', 'connection', 'divine', 'devotional', 'spiritual',
+  'product', 'products', 'item', 'items', 'available', 'stock', 'kimat',
+  'kitna', 'kitne', 'batao', 'bataiye', 'chahiye', 'milega', 'milegi',
 ]);
 
 /** Split a query into meaningful word tokens for AND-matching. */
@@ -250,7 +275,7 @@ function tokenizeQuery(q: string): string[] {
     if (seen.has(lower)) continue;
     seen.add(lower);
     out.push(t);
-    if (out.length >= 6) break;
+    if (out.length >= 8) break;
   }
   return out;
 }

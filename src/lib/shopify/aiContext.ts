@@ -62,7 +62,7 @@ export interface ShopifyAIContext {
 interface BuildInput {
   tenantId: string;
   message: string;
-  lead: { phone?: string | null; email?: string | null; shopify_customer_id?: string | null } | null;
+  lead: { phone?: string | null; email?: string | null; shopify_customer_id?: string | null; notes?: string | null } | null;
   referral?: {
     source_type?: string;
     source_id?: string;
@@ -72,6 +72,7 @@ interface BuildInput {
     source_url?: string;
     image_url?: string;
   };
+  recentMessages?: string[];
 }
 
 // ─── Intent heuristics ─────────────────────────────────────
@@ -80,22 +81,28 @@ interface BuildInput {
 // context, but under-fetching means the answer is generic.
 const ORDER_KEYWORDS = /(order|tracking|track|shipped|shipping|dispatch|delivery|delivered|refund|return|cancel|invoice|receipt|awb|status|kaha|kab.*mile|order.*kaha)/i;
 const ORDER_NUMBER_RE = /#?\b(\d{3,10})\b/;
-const PRODUCT_KEYWORDS = /(product|item|price|cost|stock|available|buy|purchase|show|find|looking for|search|do you (have|sell)|kitne ka|kimat|milega|milegi|rudraksh|mukhi|mala|kavach|stone|pyrite|sphatik|gangajal|firoza|bracelet|pendant|karungali|original|certified|\b\d+[-–\s]*mukhi\b)/i;
+const PRODUCT_KEYWORDS = /(product|item|price|cost|rate|how much|stock|available|buy|purchase|show|find|looking for|search|do you (have|sell)|kitne|kitna|kimat|kimt|milega|milegi|rudraksh|mukhi|mala|kavach|stone|pyrite|sphatik|gangajal|firoza|bracelet|pendant|karungali|original|nepali|certified|siddh|\b\d+[-–\s]*mukhi\b|प्राइस|किंमत|कीमत|मुखी|माला|रुद्राक्ष)/i;
 const PRODUCT_URL_RE = /(?:https?:\/\/[^\/\s]+)?(?:\/collections\/[a-zA-Z0-9_-]+)?\/products\/([a-zA-Z0-9_\u2013\u2014-]+)/i;
 const POLICY_KEYWORDS = /(refund|return|exchange|shipping policy|delivery policy|privacy|terms|cancel|warranty|policy)/i;
 const DISCOUNT_KEYWORDS = /(discount|coupon|promo|code|offer|deal|sale|off)/i;
 const FAQ_KEYWORDS = /(how (do|does|to)|what (is|are)|when|where|why|faq|help|question)/i;
 
-function hasShopifyIntent(msg: string, referral?: BuildInput['referral']): boolean {
+function hasShopifyIntent(msg: string, referral?: BuildInput['referral'], recentMessages?: string[]): boolean {
   if (referral) return true; // Any Click-to-WhatsApp ad arrival on a Shopify store is shop-related
   if (PRODUCT_URL_RE.test(msg) || /https?:\/\//i.test(msg)) return true;
-  return (
+  if (
     ORDER_KEYWORDS.test(msg) ||
     PRODUCT_KEYWORDS.test(msg) ||
     POLICY_KEYWORDS.test(msg) ||
     DISCOUNT_KEYWORDS.test(msg) ||
     FAQ_KEYWORDS.test(msg)
-  );
+  ) {
+    return true;
+  }
+  if (recentMessages?.some(m => PRODUCT_KEYWORDS.test(m) || PRODUCT_URL_RE.test(m))) {
+    return true;
+  }
+  return false;
 }
 
 function extractProductHandles(text?: string): string[] {
@@ -119,26 +126,61 @@ async function getTenantShopifyMeta(tenantId: string): Promise<{ store_url: stri
 }
 
 /**
- * Extract a query for product search. Strips common filler words and raw URLs so
- * "do you have silver rings under 2000" becomes "silver rings under 2000".
+ * Extract a query for product search. Strips common filler words, CTWA ad
+ * icebreaker prefixes ("Hello! Can I get more info on ..."), and raw URLs so
+ * "Hello! Can I get more info on 1–14 Mukhi Siddh Mala ?" becomes
+ * "1–14 Mukhi Siddh Mala", and "Hello! Can I get more info on this?" becomes "".
  */
 function extractProductQuery(msg: string): string {
   const withoutUrls = msg.replace(/https?:\/\/[^\s]+/g, '').trim();
   const target = withoutUrls || msg;
   return target
-    .replace(/^(hi|hello|hey|do you have|do u have|kya|kya aap|show me|show|find|looking for|i want|i need|i'?m looking|any|are there|is there|got any)\s+/i, '')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, ' ')
+    .replace(/^(?:(?:hi+|hello+|hey+|namaste|namaskar)[,!.\s]*)+/i, '')
+    .replace(/^(?:can\s+(?:i|we)\s+(?:get|have|know)|could\s+(?:i|we)\s+(?:get|have)|please\s+(?:share|send|give|tell)|(?:tell|give|send|show)\s+me|do\s+you\s+have|do\s+u\s+have|kya\s+aapke\s+paas|kya\s+aap|kya|show|find|looking\s+for|i\s+want\s+to\s+(?:know|buy|get)|i\s+want|i\s+need|i'?m\s+looking\s+for|i'?m\s+interested\s+in|interested\s+in|any|are\s+there|is\s+there|got\s+any|bring\s+home\s+your)\s+/i, '')
+    .replace(/^(?:more\s+|some\s+|full\s+)?(?:info|information|details?|price|pricing|cost|rate)\s+(?:on|about|for|of|regarding)\s+/i, '')
+    .replace(/\b(?:today|now|please|pls|plz)\b[?.!\s]*$/i, '')
+    .replace(/^(?:this|that|it|these|those|the\s+product|this\s+product|this\s+item|price|cost|rate|how\s+much|kitna|kitne\s+ka|प्राइस|कीमत|किंमत)\b[?.!\s]*$/i, '')
     .replace(/[?.!]+$/g, '')
     .trim()
     .slice(0, 120);
 }
 
+/**
+ * Extract candidate search queries from Meta CTWA referral headline + body.
+ * Prioritizes lines/sentences that mention product keywords (e.g. "Bring home your
+ * 1–14 Mukhi Rudraksha Siddh Mala today.") over generic brand intro lines.
+ */
+function extractReferralQueries(referral?: BuildInput['referral']): string[] {
+  if (!referral) return [];
+  const rawSegments: string[] = [];
+  if (referral.body) {
+    for (const seg of referral.body.split(/[\n.!]+/)) {
+      const cleaned = extractProductQuery(seg);
+      if (cleaned.length >= 3) rawSegments.push(cleaned);
+    }
+  }
+  if (referral.headline) {
+    for (const seg of referral.headline.replace(/^(ad|offer|sponsored):\s*/i, '').split(/[\n.!]+/)) {
+      const cleaned = extractProductQuery(seg);
+      if (cleaned.length >= 3) rawSegments.push(cleaned);
+    }
+  }
+  // Sort segments matching PRODUCT_KEYWORDS or numbers first
+  return rawSegments.sort((a, b) => {
+    const aScore = (PRODUCT_KEYWORDS.test(a) ? 2 : 0) + (/\d/.test(a) ? 1 : 0);
+    const bScore = (PRODUCT_KEYWORDS.test(b) ? 2 : 0) + (/\d/.test(b) ? 1 : 0);
+    return bScore - aScore;
+  });
+}
+
 export async function getShopifyContext(input: BuildInput): Promise<ShopifyAIContext | null> {
-  const { tenantId, message, lead, referral } = input;
+  const { tenantId, message, lead, referral, recentMessages } = input;
 
   // Fast-path skips: no connection or no Shopify-shaped intent.
   const meta = await getTenantShopifyMeta(tenantId);
   if (!meta) return null;
-  if (!hasShopifyIntent(message, referral)) return null;
+  if (!hasShopifyIntent(message, referral, recentMessages)) return null;
 
   const ctx: ShopifyAIContext = { store_url: meta.store_url, currency: meta.currency };
 
@@ -172,18 +214,35 @@ export async function getShopifyContext(input: BuildInput): Promise<ShopifyAICon
   const urlHandles = [
     ...extractProductHandles(message),
     ...(referral?.source_url ? extractProductHandles(referral.source_url) : []),
+    ...(recentMessages ? recentMessages.flatMap(m => extractProductHandles(m)) : []),
   ];
 
   const matchedList: NonNullable<ShopifyAIContext['matched_products']> = [];
   const seenHandles = new Set<string>();
 
+  const pushMatched = (p: {
+    handle: string;
+    title: string;
+    vendor: string | null;
+    price_min: number | null;
+    price_max: number | null;
+    currency: string | null;
+    in_stock: boolean;
+    url: string | null;
+    snippet: string | null;
+    image_url: string | null;
+  }) => {
+    if (seenHandles.has(p.handle)) return;
+    seenHandles.add(p.handle);
+    matchedList.push(p);
+  };
+
   // If exact product URL(s) are present in the message or ad referral, load them directly
   for (const handle of urlHandles) {
     if (seenHandles.has(handle)) continue;
-    seenHandles.add(handle);
     const prod = await getProduct(tenantId, { handle }).catch(() => null);
     if (prod) {
-      matchedList.push({
+      pushMatched({
         handle: prod.handle,
         title: prod.title,
         vendor: prod.vendor,
@@ -198,30 +257,39 @@ export async function getShopifyContext(input: BuildInput): Promise<ShopifyAICon
     }
   }
 
-  const isProductIntent = PRODUCT_KEYWORDS.test(message) || !!referral || urlHandles.length > 0;
+  const isProductIntent =
+    PRODUCT_KEYWORDS.test(message) ||
+    !!referral ||
+    urlHandles.length > 0 ||
+    !!recentMessages?.some(m => PRODUCT_KEYWORDS.test(m));
+
   if (isProductIntent) {
-    let q = extractProductQuery(message);
-    if (!q && referral?.headline) {
-      q = referral.headline.replace(/^(ad|offer|sponsored):\s*/i, '').trim();
-    }
+    const q = extractProductQuery(message);
     if (q) {
       const searched = await searchProducts(tenantId, { query: q, limit: 5 }).catch(() => []);
-      for (const p of searched) {
-        if (!seenHandles.has(p.handle)) {
-          seenHandles.add(p.handle);
-          matchedList.push({
-            handle: p.handle,
-            title: p.title,
-            vendor: p.vendor,
-            price_min: p.price_min,
-            price_max: p.price_max,
-            currency: p.currency,
-            in_stock: p.in_stock,
-            url: p.url,
-            snippet: p.snippet,
-            image_url: p.image_url,
-          });
-        }
+      for (const p of searched) pushMatched(p);
+    }
+
+    // If the message itself didn't resolve a product (e.g. "Hello! Can I get more info on this?")
+    // and the customer arrived from a Meta Ad, search using the ad's body & headline segments.
+    if (matchedList.length === 0 && referral) {
+      const refQueries = extractReferralQueries(referral);
+      for (const rq of refQueries) {
+        const searched = await searchProducts(tenantId, { query: rq, limit: 5 }).catch(() => []);
+        for (const p of searched) pushMatched(p);
+        if (matchedList.length > 0) break;
+      }
+    }
+
+    // If still no match on a short follow-up (e.g. "Price", "Nepali hai kya ye mala"),
+    // check recent messages in the conversation or lead notes for the product being discussed.
+    if (matchedList.length === 0 && recentMessages && recentMessages.length > 0) {
+      for (const prev of recentMessages) {
+        const pq = extractProductQuery(prev);
+        if (!pq) continue;
+        const searched = await searchProducts(tenantId, { query: pq, limit: 5 }).catch(() => []);
+        for (const p of searched) pushMatched(p);
+        if (matchedList.length > 0) break;
       }
     }
   }
@@ -368,6 +436,54 @@ function tokenizeHandle(handle: string): string[] {
   return handle.toLowerCase().replace(/[\u2013\u2014]/g, '-').split(/[^a-z0-9]+/).filter(Boolean);
 }
 
+export function resolveMatchedProductByHandle(
+  handleOrSlug: string,
+  products: NonNullable<ShopifyAIContext['matched_products']>
+): NonNullable<ShopifyAIContext['matched_products']>[number] | null {
+  if (!handleOrSlug || !products.length) return null;
+  const exact = products.find(p => p.handle.toLowerCase() === handleOrSlug.toLowerCase());
+  if (exact) return exact;
+
+  const slugTokensArr = tokenizeHandle(handleOrSlug);
+  if (slugTokensArr.length === 0) return products.length === 1 ? products[0] : null;
+  const slugTokens = new Set(slugTokensArr);
+
+  // 1. Real handle tokens are a subset of the slug tokens (model added extra words)
+  const handleSubset = products.filter(p => {
+    const hTokens = tokenizeHandle(p.handle);
+    return hTokens.length > 0 && hTokens.every(t => slugTokens.has(t));
+  });
+  if (handleSubset.length === 1) return handleSubset[0];
+
+  // 2. Slug tokens are a subset of the product's handle + title tokens (model shortened a long handle)
+  const titleOrHandleSuperset = products.filter(p => {
+    const combined = new Set([...tokenizeHandle(p.handle), ...tokenizeHandle(p.title)]);
+    return slugTokensArr.every(t => combined.has(t));
+  });
+  if (titleOrHandleSuperset.length === 1) return titleOrHandleSuperset[0];
+
+  // 3. Best token overlap against handle + title (require >= 2 matching tokens and >= 50% of slug tokens)
+  let best: NonNullable<ShopifyAIContext['matched_products']>[number] | null = null;
+  let bestHits = 0;
+  let tied = false;
+  for (const p of products) {
+    const combined = new Set([...tokenizeHandle(p.handle), ...tokenizeHandle(p.title)]);
+    const hits = slugTokensArr.filter(t => combined.has(t)).length;
+    if (hits > bestHits) {
+      bestHits = hits;
+      best = p;
+      tied = false;
+    } else if (hits === bestHits && hits > 0) {
+      tied = true;
+    }
+  }
+  if (best && !tied && bestHits >= Math.min(2, slugTokensArr.length) && bestHits / slugTokensArr.length >= 0.5) {
+    return best;
+  }
+
+  return products.length === 1 ? products[0] : null;
+}
+
 export function reconcileProductLinks(replyText: string, ctx: ShopifyAIContext | null): string {
   if (!ctx?.matched_products?.length || !replyText) return replyText;
   const products = ctx.matched_products.filter((p) => p.url);
@@ -381,13 +497,7 @@ export function reconcileProductLinks(replyText: string, ctx: ShopifyAIContext |
     if (validUrls.has(match)) return match;
 
     const slug = match.match(/\/products\/([a-zA-Z0-9_\u2013\u2014-]+)/)?.[1] || '';
-    const slugTokens = new Set(tokenizeHandle(slug));
-    const candidates = products.filter((p) => {
-      const handleTokens = tokenizeHandle(p.handle);
-      return handleTokens.length > 0 && handleTokens.every((t) => slugTokens.has(t));
-    });
-
-    const winner = candidates.length === 1 ? candidates[0] : products.length === 1 ? products[0] : null;
+    const winner = resolveMatchedProductByHandle(slug, products);
     if (winner?.url) {
       console.warn('[shopify:ai] corrected hallucinated product link', { invented: match, corrected: winner.url });
       return winner.url;
@@ -396,6 +506,6 @@ export function reconcileProductLinks(replyText: string, ctx: ShopifyAIContext |
     return '';
   });
 
-  // Tidy up any whitespace left behind by a dropped link.
+  // Tidy up any whitespace or dangling "here:" left behind by a dropped link.
   return corrected.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }

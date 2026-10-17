@@ -750,7 +750,7 @@ export async function processMessageWithAI(
         config: {
           systemInstruction: systemPrompt,
           temperature: 0.7,
-          maxOutputTokens: 400,
+          maxOutputTokens: 1024,
           topP: 0.9,
           responseMimeType: 'application/json',
           // Disable gemini-2.5-flash "thinking" tokens. For a KB-grounded,
@@ -785,7 +785,11 @@ export async function processMessageWithAI(
     parsed.reply = sanitizeReplyText(parsed.reply);
 
     // ── Guardrail: hallucination redirect ──
-    const hasKB = (tenantConfig.knowledgeDocs?.length ?? 0) > 0 || (tenantConfig.customFaqs?.length ?? 0) > 0;
+    const hasKB = (tenantConfig.knowledgeDocs?.length ?? 0) > 0
+      || (tenantConfig.customFaqs?.length ?? 0) > 0
+      || !!tenantConfig.shopifyContextText
+      || !!tenantConfig.ctwaContext
+      || !!tenantConfig.systemPrompt?.trim();
     if (shouldRedirectToHuman(parsed.confidence, hasKB, parsed.intent, safeMessage)) {
       parsed.reply = HALLUCINATION_REDIRECT;
       parsed.shouldEscalate = true;
@@ -910,19 +914,34 @@ function parseAIResponse(text: string): AIResponse {
         // Also try to extract other fields
         const intentMatch = text.match(/"intent"\s*:\s*"([^"]+)"/);
         const nextStepMatch = text.match(/"nextStep"\s*:\s*"([^"]+)"/);
+        const confidenceMatch = text.match(/"confidence"\s*:\s*([0-9.]+)/);
+        const escalateMatch = text.match(/"shouldEscalate"\s*:\s*(true|false)/);
         const extractedDataMatch = text.match(/"extractedData"\s*:\s*(\{[^}]*\})/);
-        let extractedData = {};
+        let extractedData: Record<string, any> = {};
         if (extractedDataMatch) {
           try { extractedData = JSON.parse(extractedDataMatch[1]); } catch {}
         }
+        if (!extractedData.mediaToSend) {
+          const mediaMatch = text.match(/"mediaToSend"\s*:\s*(\[[^\]]*\])/);
+          if (mediaMatch) {
+            try { extractedData.mediaToSend = JSON.parse(mediaMatch[1]); } catch {}
+          }
+        }
+        if (!extractedData.sendShopifyProducts) {
+          const shopifyMatch = text.match(/"sendShopifyProducts"\s*:\s*(\[[^\]]*\])/);
+          if (shopifyMatch) {
+            try { extractedData.sendShopifyProducts = JSON.parse(shopifyMatch[1]); } catch {}
+          }
+        }
+        const parsedConf = confidenceMatch ? parseFloat(confidenceMatch[1]) : NaN;
         return {
           reply: extractedReply,
           extractedData,
           intent: (intentMatch?.[1] as any) || 'unknown',
           sentiment: 'neutral',
-          shouldEscalate: false,
+          shouldEscalate: escalateMatch?.[1] === 'true',
           nextStep: nextStepMatch?.[1] || 'ask_intent',
-          confidence: 0.4,
+          confidence: Number.isFinite(parsedConf) ? parsedConf : 0.75,
         };
       } catch {}
     }

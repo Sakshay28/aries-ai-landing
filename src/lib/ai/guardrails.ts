@@ -123,9 +123,9 @@ export function guardOutput(reply: string, fallback: string): string {
 const POLICY_PERMISSION_PATTERNS: RegExp[] = [
   /\b(is|are)\s+(\w+\s+){0,4}allowed\b/i,
   /\ballowed\s+to\b/i,
-  /\bcan\s+(i|we)\s+(bring|carry|have|get|take)\b/i,
+  /\bcan\s+(i|we)\s+(bring|carry)\b/i,
   /\bdo\s+you\s+(allow|permit)\b/i,
-  /\bis\s+it\s+(ok|okay|fine|possible|permitted|permissible)\s+to\b/i,
+  /\bis\s+it\s+(ok|okay|fine|permitted|permissible)\s+to\b/i,
   /\bpermitted\s+to\b/i,
   /\byour\s+policy\s+(on|about|regarding)\b/i,
   /\bwhat('s| is)\s+your\s+policy\b/i,

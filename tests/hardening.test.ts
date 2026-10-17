@@ -143,6 +143,12 @@ describe('AI Guardrails — Policy/Permission Question Detection', () => {
   it('does NOT flag a pricing question', () => {
     expect(isPolicyPermissionQuestion('how much does it cost for 2 people?')).toBe(false);
   });
+
+  it('does NOT flag Meta CTWA ad icebreakers ("Can I get more info on ...")', () => {
+    expect(isPolicyPermissionQuestion('Hello! Can I get more info on 1–14 Mukhi Siddh Mala ?')).toBe(false);
+    expect(isPolicyPermissionQuestion('Hello! Can I get more info on this?')).toBe(false);
+    expect(isPolicyPermissionQuestion('Can I have the price and details?')).toBe(false);
+  });
 });
 
 describe('AI Guardrails — Hallucination Redirect for Permission Questions', () => {

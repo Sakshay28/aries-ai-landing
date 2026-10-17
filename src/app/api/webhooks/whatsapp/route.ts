@@ -11,7 +11,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { isDuplicateMessage, getRedisClient, acquireOffHoursLock, acquireOnceNotice } from '@/lib/redis/client';
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
 import { retrieveRelevantDocs, retrieveRelevantMedia } from '@/lib/ai/rag';
-import { getShopifyContext, renderShopifyContextForPrompt, reconcileProductLinks } from '@/lib/shopify/aiContext';
+import { getShopifyContext, renderShopifyContextForPrompt, reconcileProductLinks, resolveMatchedProductByHandle } from '@/lib/shopify/aiContext';
 import { getShiprocketContext, renderShiprocketContextForPrompt } from '@/lib/shiprocket/aiContext';
 import { ORDER_CONFIRMATION_PAYLOAD_PREFIX, ORDER_CONFIRMATION_BUTTON_LABELS } from '@/lib/shopify/templates';
 import { renderOrderConfirmationCopy, type OrderConfirmationCopyKey } from '@/lib/shopify/orderConfirmationCopy';
@@ -1767,11 +1767,12 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
       .order('booking_date', { ascending: false })
       .limit(1)
       .maybeSingle(),
-    // Fetch KB doc text directly (no embedding — fast)
+    // Fetch KB doc text directly (no embedding — fast, exclude media assets)
     supabaseAdmin
       .from('knowledge_docs')
       .select('filename, content_text')
       .eq('tenant_id', tenant.id)
+      .is('file_url', null)
       .neq('content_text', '')
       .limit(5),
     // Check if any docs have stored embeddings (for conditional RAG)
@@ -1913,14 +1914,29 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
   // Shiprocket shipments only exist for Shopify orders in this MVP slice —
   // no point checking a separate connection flag if Shopify isn't even connected.
   const hasShiprocket = hasShopify;
+
+  // Enrich the RAG + Shopify query when the customer arrives from a Meta CTWA ad
+  // (e.g. "Hello! Can I get more info on this?" where the product name is only in
+  // msg.referral.body / headline) or sends a short follow-up ("Price", "How much").
+  const recentContextMessages = [
+    ...history.slice(-4).reverse().map(h => h.content),
+    ...((lead as { notes?: string } | null)?.notes ? [String((lead as { notes?: string }).notes)] : []),
+  ].filter(Boolean);
+  const ragQuery = isFromAd && msg.referral
+    ? [msg.text, msg.referral.headline, msg.referral.body].filter(Boolean).join('\n')
+    : (msg.text.trim().length < 25 && recentContextMessages.length > 0
+      ? [msg.text, recentContextMessages[0]].join(' — ')
+      : msg.text);
+
   const [ragDocs, mediaCandidates, shopifyContext, shiprocketContext] = await Promise.all([
-    needsTextRag ? retrieveRelevantDocs(tenant.id, msg.text, 3).catch(() => []) : Promise.resolve([]),
-    hasMedia ? retrieveRelevantMedia(tenant.id, msg.text, 8, 0.35).catch(() => []) : Promise.resolve([]),
+    needsTextRag ? retrieveRelevantDocs(tenant.id, ragQuery, 3).catch(() => []) : Promise.resolve([]),
+    hasMedia ? retrieveRelevantMedia(tenant.id, ragQuery, 8, 0.35).catch(() => []) : Promise.resolve([]),
     hasShopify ? getShopifyContext({
       tenantId: tenant.id,
       message: msg.text,
-      lead: lead ? { phone: (lead as { phone?: string }).phone, email: (lead as { email?: string }).email, shopify_customer_id: (lead as { shopify_customer_id?: string }).shopify_customer_id } : null,
+      lead: lead ? { phone: (lead as { phone?: string }).phone, email: (lead as { email?: string }).email, shopify_customer_id: (lead as { shopify_customer_id?: string }).shopify_customer_id, notes: (lead as { notes?: string }).notes } : null,
       referral: msg.referral,
+      recentMessages: recentContextMessages,
     }).catch(() => null) : Promise.resolve(null),
     hasShiprocket ? getShiprocketContext({
       tenantId: tenant.id,
@@ -2453,12 +2469,14 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
     const productHandles = (aiResponse.extractedData as { sendShopifyProducts?: string[] })?.sendShopifyProducts;
     if (Array.isArray(productHandles) && productHandles.length > 0 && shopifyContext?.matched_products?.length && decryptedAccessToken && tenant.wa_phone_number_id) {
       const byHandle = new Map(shopifyContext.matched_products.map(p => [p.handle, p]));
+      const sentHandles = new Set<string>();
       const MAX_PRODUCT_IMAGES = 2;
       let sent = 0;
       for (const handle of productHandles) {
         if (sent >= MAX_PRODUCT_IMAGES) break;
-        const p = byHandle.get(handle);
-        if (!p) continue;
+        const p = byHandle.get(handle) ?? resolveMatchedProductByHandle(handle, shopifyContext.matched_products);
+        if (!p || sentHandles.has(p.handle)) continue;
+        sentHandles.add(p.handle);
         const priceLabel = p.price_min != null
           ? (p.price_max && p.price_max !== p.price_min ? `${p.currency || ''} ${p.price_min}–${p.price_max}` : `${p.currency || ''} ${p.price_min}`)
           : '';
