@@ -158,7 +158,7 @@ export function getPrebuiltFlow(templateId: string, businessType: string): { nod
       { id: 'gr2',  type: 'standard',     position: { x: 400, y: 210  }, data: { label: 'Welcome', content: "Hi {{name}}! 👋 Thanks for your interest in our *100 KM Rishikesh Ganga Rafting Expedition (3N/4D)*! 🌊\n\nLet me quickly get a few details so our team can assist you." } },
 
       // 3. Date selection
-      { id: 'gr3',  type: 'send_buttons', position: { x: 400, y: 390  }, data: { label: 'Which Date?', message: 'Which October departure date are you looking to join? 📅', buttons: [{ id: 'b1', label: '1st - 4th Oct', value: 'oct_1_4' }, { id: 'b2', label: '15th - 18th Oct', value: 'oct_15_18' }, { id: 'b3', label: '22nd - 25th Oct', value: 'oct_22_25' }] } },
+      { id: 'gr3',  type: 'send_buttons', position: { x: 400, y: 390  }, data: { label: 'Which Date?', message: 'Which departure date are you looking to join? 📅', buttons: [{ id: 'b1', label: '29th Oct - 1st Nov', value: 'oct_29_nov_1' }, { id: 'b2', label: '19th - 22nd Nov', value: 'nov_19_22' }] } },
       { id: 'gr4',  type: 'condition',    position: { x: 400, y: 570  }, data: { label: 'Date Selected', field: 'button_value', operator: '!=', value: 'NEVER_MATCHES' } },
 
       // 4. Cost confirmation
