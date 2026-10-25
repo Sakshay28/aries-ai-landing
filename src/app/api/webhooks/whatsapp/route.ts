@@ -10,7 +10,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { isDuplicateMessage, getRedisClient, acquireOffHoursLock, acquireOnceNotice } from '@/lib/redis/client';
 import { createPaymentLink } from '@/lib/payments/razorpay-links';
-import { retrieveRelevantDocs, retrieveRelevantMedia } from '@/lib/ai/rag';
+import { retrieveRelevantDocs, retrieveRelevantMedia, TEXT_KNOWLEDGE_DOC_FILTER } from '@/lib/ai/rag';
 import { getShopifyContext, renderShopifyContextForPrompt, reconcileProductLinks, resolveMatchedProductByHandle } from '@/lib/shopify/aiContext';
 import { getShiprocketContext, renderShiprocketContextForPrompt } from '@/lib/shiprocket/aiContext';
 import { ORDER_CONFIRMATION_PAYLOAD_PREFIX, ORDER_CONFIRMATION_BUTTON_LABELS } from '@/lib/shopify/templates';
@@ -1782,12 +1782,13 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
       .order('booking_date', { ascending: false })
       .limit(1)
       .maybeSingle(),
-    // Fetch KB doc text directly (no embedding — fast, exclude media assets)
+    // Fetch KB doc text directly (no embedding — fast, exclude media assets by file_type;
+    // every upload has a file_url, so filtering on file_url dropped ALL knowledge)
     supabaseAdmin
       .from('knowledge_docs')
       .select('filename, content_text')
       .eq('tenant_id', tenant.id)
-      .is('file_url', null)
+      .or(TEXT_KNOWLEDGE_DOC_FILTER)
       .neq('content_text', '')
       .limit(5),
     // Check if any docs have stored embeddings (for conditional RAG)

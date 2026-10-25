@@ -46,7 +46,15 @@ export interface RetrievedDoc {
   similarity:   number;
 }
 
-const NON_TEXT_MEDIA_TYPES = new Set(['jpg', 'jpeg', 'png', 'webp', 'mp4', 'mov', 'webm']);
+// Image/video uploads: their content_text is an AI-written description of the
+// asset, not reference text, so they never belong in the text knowledge base.
+// Documents (pdf/doc/md/txt/...) also carry a file_url — file_url is NOT the
+// media signal, file_type is.
+export const NON_TEXT_MEDIA_TYPES: readonly string[] = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'mov', 'webm', '3gp', 'm4v', 'avi'];
+const NON_TEXT_MEDIA_TYPE_SET = new Set(NON_TEXT_MEDIA_TYPES);
+
+/** PostgREST `.or()` filter selecting text knowledge docs (excludes media assets). */
+export const TEXT_KNOWLEDGE_DOC_FILTER = `file_type.is.null,file_type.not.in.(${NON_TEXT_MEDIA_TYPES.join(',')})`;
 
 export async function retrieveRelevantDocs(
   tenantId:   string,
@@ -76,7 +84,7 @@ export async function retrieveRelevantDocs(
 
   type DocRow = RetrievedDoc & { file_type?: string | null };
   return ((data as DocRow[]) ?? [])
-    .filter(r => !NON_TEXT_MEDIA_TYPES.has((r.file_type || '').toLowerCase()) && (r.content_text || '').trim().length > 0)
+    .filter(r => !NON_TEXT_MEDIA_TYPE_SET.has((r.file_type || '').toLowerCase()) && (r.content_text || '').trim().length > 0)
     .slice(0, topK);
 }
 
