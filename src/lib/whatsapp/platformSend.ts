@@ -213,6 +213,9 @@ async function getPlatformCreds(): Promise<{ token: string; phoneId: string; ten
   return _cachedCreds;
 }
 
+/** PostgREST `.or()` filter excluding rows logged by logPlatformSend (staff alerts). */
+export const NOT_PLATFORM_ALERT_FILTER = 'metadata.is.null,metadata->>platform_alert.is.null';
+
 // Logs a platform send to the messages table under the Aries AI tenant so the
 // existing webhook status pipeline marks it sent→delivered→read→failed and it
 // shows in the dashboard. This is what makes staff-alert delivery *visible and
@@ -245,8 +248,9 @@ async function logPlatformSend(
           sender_name: 'Staff Alert',
           channel: 'whatsapp',
           is_active: true,
-          // Never let the platform-tenant AI engage staff who reply to an alert.
-          bot_paused: true,
+          // Not bot_paused: staff/owners also test the bot from this number. Their
+          // "Got it"/ack taps are intercepted by the webhook before the AI runs, and
+          // alert rows (metadata.platform_alert) are excluded from AI history.
           created_at: new Date().toISOString(),
           last_message_at: new Date().toISOString(),
         })
@@ -254,10 +258,9 @@ async function logPlatformSend(
         .single();
       conversationId = created?.id ?? null;
     } else {
-      // Ensure the bot stays paused on this conversation even if it pre-existed.
       await supabaseAdmin
         .from('conversations')
-        .update({ bot_paused: true, last_message_at: new Date().toISOString() })
+        .update({ last_message_at: new Date().toISOString() })
         .eq('id', conversationId);
     }
     if (!conversationId) return;

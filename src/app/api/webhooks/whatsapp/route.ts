@@ -44,6 +44,7 @@ import { noteSendFailure, noteSendSuccess } from '@/lib/whatsapp/credentialHealt
 import { sendBookingAlertEmail } from '@/lib/alerts/bookingEmail';
 import { isCoexistenceChange, handleCoexistenceWebhook } from '@/lib/webhook/coexistence';
 import { storageRefUrl, toSignedMediaUrl } from '@/lib/utils/storage';
+import { NOT_PLATFORM_ALERT_FILTER } from '@/lib/whatsapp/platformSend';
 import { triggerAutomations, cancelLeadAutomations } from '@/lib/automations/engine';
 import { resolveBookingVariables } from '@/lib/automations/variables';
 import { zonedDateTimeToUtc } from '@/lib/utils/datetime';
@@ -1760,6 +1761,9 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
       // a conversation to the wrong tenant never bleeds another tenant's history into
       // this AI context. The admin client bypasses RLS so we enforce it explicitly.
       .eq('tenant_id', tenant.id)
+      // Staff alerts sent to this number (platformSend) are not part of the
+      // customer conversation — never feed them to the AI as its own replies.
+      .or(NOT_PLATFORM_ALERT_FILTER)
       .order('created_at', { ascending: false })
       .limit(20),
     supabaseAdmin
