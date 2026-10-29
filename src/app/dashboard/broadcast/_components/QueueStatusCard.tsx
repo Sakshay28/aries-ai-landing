@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
+import { useVisiblePoll } from '@/hooks/useVisiblePoll';
 import {
   Users, CheckCircle2, AlertTriangle, Eye, Send,
   Hourglass, Activity, RefreshCw, BarChart2, HelpCircle
@@ -45,19 +46,21 @@ export function QueueStatusCard({ campaignId }: QueueStatusCardProps) {
   // for the other half of this bug (it used to swallow errors into fake zeros).
   const [statsUnavailable, setStatsUnavailable] = useState(false);
 
-  const fetchStats = async () => {
+  const fetchStats = async (): Promise<boolean> => {
     try {
       const res = await fetch(`/api/broadcasts/observability?campaignId=${campaignId}`);
       const data = await res.json();
       if (data.success && data.stats) {
         setStats(data.stats);
         setStatsUnavailable(false);
-      } else {
-        setStatsUnavailable(true);
+        return true;
       }
+      setStatsUnavailable(true);
+      return false;
     } catch (err) {
       console.error('Failed to load queue status observability statistics:', err);
       setStatsUnavailable(true);
+      return false;
     } finally {
       setLoading(false);
     }
@@ -68,9 +71,23 @@ export function QueueStatusCard({ campaignId }: QueueStatusCardProps) {
     fetchStats();
   }, [campaignId]);
 
-  // 2. Periodic reconciliation poll (every 5 seconds) + realtime listeners
+  // 2. Reconciliation poll. Realtime below is the live channel; this is only a
+  // safety net, so 15s, paused in background tabs, backs off when the DB is slow.
+  useVisiblePoll(fetchStats, 15_000);
+
+  // Realtime fires once per changed queue row — thousands of events during a
+  // send. Coalesce them into at most one refetch every 3s.
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleRefetch = () => {
+    if (refetchTimer.current) return;
+    refetchTimer.current = setTimeout(() => {
+      refetchTimer.current = null;
+      fetchStats();
+    }, 3_000);
+  };
+
+  // 3. Realtime listeners
   useEffect(() => {
-    const interval = setInterval(fetchStats, 5000);
 
     // Bind real-time Postgres channels for database mutations
     const analyticsChannel = supabase
@@ -84,7 +101,7 @@ export function QueueStatusCard({ campaignId }: QueueStatusCardProps) {
           filter: `campaign_id=eq.${campaignId}`
         },
         () => {
-          fetchStats(); // Hot-reload data instantly on updates
+          scheduleRefetch();
         }
       )
       .subscribe();
@@ -100,13 +117,14 @@ export function QueueStatusCard({ campaignId }: QueueStatusCardProps) {
           filter: `campaign_id=eq.${campaignId}`
         },
         () => {
-          fetchStats();
+          scheduleRefetch();
         }
       )
       .subscribe();
 
     return () => {
-      clearInterval(interval);
+      if (refetchTimer.current) clearTimeout(refetchTimer.current);
+      refetchTimer.current = null;
       supabase.removeChannel(analyticsChannel);
       supabase.removeChannel(queueChannel);
     };

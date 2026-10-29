@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
+import { useVisiblePoll } from '@/hooks/useVisiblePoll';
 import { CheckCircle2, Eye, Copy, Check, ArrowRight, Phone, Clock, AlertCircle } from 'lucide-react';
 import { formatPhoneDisplay } from '@/lib/utils/phone';
 
@@ -25,29 +26,26 @@ export function DeliveredRecipientsCard({ campaignId, onViewAllRecipients }: Del
   const [loading, setLoading] = useState(true);
   const [copiedPhone, setCopiedPhone] = useState<string | null>(null);
 
-  useEffect(() => {
-    let isMounted = true;
-    async function load() {
-      try {
-        const res = await fetch(`/api/broadcast/campaign/${campaignId}/recipients`);
-        const json = await res.json();
-        if (isMounted && res.ok && json.success) {
-          setRecipients(json.data || []);
-        }
-      } catch (err) {
-        console.error('Failed to load delivered recipients:', err);
-      } finally {
-        if (isMounted) setLoading(false);
+  // Full recipient list — was refetched every 5s even in background tabs.
+  // 30s, visible-only, backs off while the DB is slow.
+  const load = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/broadcast/campaign/${campaignId}/recipients`);
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setRecipients(json.data || []);
+        return true;
       }
+      return false;
+    } catch (err) {
+      console.error('Failed to load delivered recipients:', err);
+      return false;
+    } finally {
+      setLoading(false);
     }
-
-    load();
-    const interval = setInterval(load, 5000);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
   }, [campaignId]);
+
+  useVisiblePoll(load, 30_000, { immediate: true });
 
   const handleCopy = (phone: string, e: React.MouseEvent) => {
     e.stopPropagation();

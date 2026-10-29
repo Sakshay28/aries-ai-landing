@@ -25,12 +25,22 @@ async function handler(req: NextRequest) {
   // crashed, function timed out). SKIP LOCKED means the reclaim is safe.
   const { data: reclaimed } = await supabaseAdmin.rpc('reclaim_stuck_shopify_jobs', { p_timeout_minutes: 10 });
 
+  // Pruning is daily housekeeping, but pg_cron hits this route every 2 min.
+  // Neither DELETE filter column is indexed, so each run was two full table
+  // scans (one over JSONB webhook payloads) — 720×/day on a free-plan instance,
+  // which helped drain the Disk IO budget on 2026-10-29. Only the run that lands
+  // in the first 2 minutes of 21:00 UTC (02:30 IST) prunes; ?prune=1 forces it.
+  const now = new Date();
+  const shouldPrune =
+    req.nextUrl.searchParams.get('prune') === '1' ||
+    (now.getUTCHours() === 21 && now.getUTCMinutes() < 2);
+
   // Prune expired order snapshots. snapshot_expires_at is stamped 90 days out
   // at ingest time; anything past that is stale and only inflating egress. We
   // don't count the row-limit precisely — Supabase caps deletes at 1000 rows
   // per call by default, which is plenty for daily cleanup on a single shop.
   let purgedOrders = 0;
-  try {
+  if (shouldPrune) try {
     const { count } = await supabaseAdmin
       .from('shopify_orders')
       .delete({ count: 'exact' })
@@ -43,7 +53,7 @@ async function handler(req: NextRequest) {
   // Prune old webhook idempotency rows too — the UNIQUE(webhook_id) index is
   // small but the payload column is JSONB and adds up over months.
   let purgedWebhookEvents = 0;
-  try {
+  if (shouldPrune) try {
     const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const { count } = await supabaseAdmin
       .from('shopify_webhook_events')

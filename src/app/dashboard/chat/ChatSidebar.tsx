@@ -258,10 +258,25 @@ export default function ChatSidebar() {
   // load() when it differs from the last full load. Any missed message moves (count,
   // maxTs), so the fallback still self-heals; on any digest error we fall back to a
   // full load (previous behaviour), so the inbox can never get stuck stale.
+  // When the digest itself fails (slow/overloaded DB), the full load() fallback
+  // is the heaviest query in the app — running it every 20s per open tab kept
+  // Supabase saturated on 2026-10-29. Fallback full loads are now spaced at
+  // least 2 min apart, and the poll skips ticks with growing backoff while the
+  // digest keeps failing. A successful digest resets both.
   useEffect(() => {
     let cancelled = false;
     let inFlight = false;
+    let failures = 0;
+    let skipTicks = 0;
+    let lastFallbackAt = 0;
+    const fallbackLoad = () => {
+      const now = Date.now();
+      if (now - lastFallbackAt < 120_000) return;
+      lastFallbackAt = now;
+      load();
+    };
     const tick = async () => {
+      if (skipTicks > 0) { skipTicks--; return; }
       // Skip a tick if the previous digest fetch is still pending (slow network)
       // so stalled requests can't pile up across ticks — or if the tab is in the
       // background (caught up on return via the visibilitychange listener below).
@@ -275,15 +290,19 @@ export default function ChatSidebar() {
         });
         const d = await res.json();
         if (cancelled) return;
-        if (!d?.success) { load(); return; }
+        if (!d?.success) throw new Error('digest failed');
+        failures = 0;
         const last = lastDigestRef.current;
         if (last.count === null || d.count !== last.count || d.maxTs !== last.maxTs) {
           load();
         }
       } catch {
-        // Network error or abort — fall back to a full load so the inbox can
-        // never silently go stale.
-        if (!cancelled) load();
+        // Network error, abort or server error — fall back to a (rate-limited)
+        // full load so the inbox can never silently go stale.
+        if (cancelled) return;
+        failures++;
+        skipTicks = Math.min(2 ** failures - 1, 15); // 20s → 40s → 80s … ~5 min
+        fallbackLoad();
       } finally {
         clearTimeout(abortTimer);
         inFlight = false;

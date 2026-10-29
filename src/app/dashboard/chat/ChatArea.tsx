@@ -872,8 +872,11 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   // Catches up immediately when the tab becomes visible again.
   useEffect(() => {
     if (!conversationId) return;
+    let inFlight = false;
     const poll = async () => {
-      if (document.hidden) return;
+      // Don't stack requests behind a slow server.
+      if (document.hidden || inFlight) return;
+      inFlight = true;
       try {
         const res = await fetch(`/api/dashboard/chat/statuses?conversationId=${conversationId}`);
         const data = await res.json();
@@ -891,6 +894,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
           };
         }));
       } catch { /* ignore */ }
+      finally { inFlight = false; }
     };
     // Poll immediately on mount, then every 10s, plus on return to the tab
     poll();

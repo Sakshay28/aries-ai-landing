@@ -5,6 +5,7 @@ import { Bot, User, ArrowLeftRight, CheckCheck, Clock } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { SkeletonRow } from "@/components/ui/skeleton";
 import Link from "next/link";
+import { useVisiblePoll } from "@/hooks/useVisiblePoll";
 
 interface LogItem {
   id: string;
@@ -64,14 +65,10 @@ export function LiveActivityFeed() {
 
   useEffect(() => {
     loadLogs();
-    
-    // Auto refresh feed every 30 seconds for live updates
-    const interval = setInterval(() => {
-      loadLogs();
-    }, 30000);
-
-    return () => clearInterval(interval);
   }, []);
+
+  // Auto refresh every 30s — visible tabs only, never stacked behind a slow DB.
+  useVisiblePoll(loadLogs, 30_000);
 
   if (loading) {
     return (

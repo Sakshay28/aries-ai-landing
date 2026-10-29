@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { RefreshCw, Database, Zap, Cpu, MailWarning, Radio, CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
+import { useVisiblePoll } from "@/hooks/useVisiblePoll";
 
 interface ServiceStatus { status: "up" | "down" | "degraded"; latencyMs?: number; detail?: string; }
 interface HealthReport {
@@ -49,11 +50,8 @@ export default function SystemStatusPage() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-    const interval = setInterval(load, 30_000); // auto-refresh every 30s
-    return () => clearInterval(interval);
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
+  useVisiblePoll(load, 30_000); // auto-refresh every 30s while visible
 
   const overallColor = report ? STATUS_COLORS[report.status] : "#9CA3AF";
 

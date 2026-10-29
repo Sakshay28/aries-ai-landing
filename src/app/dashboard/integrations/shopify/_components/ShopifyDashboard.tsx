@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useVisiblePoll } from "@/hooks/useVisiblePoll";
 import {
   ShoppingBag, CheckCircle2, AlertCircle, RefreshCw, Loader2, Trash2,
   Package, Layers, Users, Receipt, FileText, Percent, BookOpen, Shield,
@@ -53,14 +54,16 @@ export function ShopifyDashboard() {
   // next "Provision templates" click.
   const [templateResult, setTemplateResult] = useState<TemplateProvisionResult | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<boolean> => {
     try {
       const res = await fetch("/api/integrations/shopify", { cache: "no-store" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load status");
       setStatus(data);
+      return true;
     } catch (err) {
       toast.error((err as Error).message);
+      return false;
     } finally {
       setLoading(false);
     }
@@ -68,12 +71,11 @@ export function ShopifyDashboard() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Poll while syncing so counts + status refresh live.
-  useEffect(() => {
-    if (status?.sync_status !== "syncing" && (status?.pending_jobs || 0) === 0) return;
-    const id = setInterval(load, 5000);
-    return () => clearInterval(id);
-  }, [status?.sync_status, status?.pending_jobs, load]);
+  // Poll while syncing so counts + status refresh live. 15s, visible-only,
+  // backs off on errors (a stuck pending job used to mean 5s polling forever).
+  useVisiblePoll(load, 15_000, {
+    enabled: status?.sync_status === "syncing" || (status?.pending_jobs || 0) > 0,
+  });
 
   const connect = async () => {
     if (!form.store_url.trim() || !form.access_token.trim() || !form.shared_secret.trim()) {

@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, RefreshCw, BarChart3, Clock, FileText, Send, Users, CheckCircle2, Eye, AlertCircle, XCircle, ArrowRight } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
+import { useVisiblePoll } from '@/hooks/useVisiblePoll';
 import { BroadcastExecutionTimeline } from '../../_components/BroadcastExecutionTimeline';
 import { BroadcastAuditLog } from '../../_components/BroadcastAuditLog';
 import { CampaignRecipientsTable } from '../../_components/CampaignRecipientsTable';
@@ -71,7 +72,7 @@ export default function CampaignStatsPage() {
     }
   };
 
-  const fetchStats = useCallback(async (showIndicator = false) => {
+  const fetchStats = useCallback(async (showIndicator = false): Promise<boolean> => {
     if (showIndicator) setRefreshing(true);
     try {
       const res = await fetch(`/api/broadcast/campaign/${campaignId}/stats`);
@@ -80,44 +81,53 @@ export default function CampaignStatsPage() {
         throw new Error(data.error || 'Failed to fetch statistics');
       }
       setStats(data);
+      return true;
     } catch (err: any) {
       console.error('[stats page] Error:', err);
-      toast.error(err.message || 'Failed to load campaign statistics');
+      // Background polls stay quiet; only a manual refresh shows the error.
+      if (showIndicator) toast.error(err.message || 'Failed to load campaign statistics');
+      return false;
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [campaignId]);
 
-  // Initial load — run once on mount
-  // Initial load & continuous polling so asynchronous Meta webhooks (delivered/read) update live
-  useEffect(() => {
-    fetchStats(false);
-    const interval = setInterval(() => {
-      fetchStats(false);
-    }, 4000);
+  // Initial load, then a 15s safety-net poll (was 4s, even in background tabs).
+  // Realtime below delivers delivered/read updates live.
+  useEffect(() => { fetchStats(false); }, [fetchStats]);
+  useVisiblePoll(() => fetchStats(false), 15_000);
 
-    return () => clearInterval(interval);
-  }, [campaignId, fetchStats]);
+  // Realtime fires once per delivery row — coalesce into one refetch per 3s.
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Realtime Supabase Subscription — update metrics instantly when Meta webhooks fire
   useEffect(() => {
+    const scheduleRefetch = () => {
+      if (refetchTimer.current) return;
+      refetchTimer.current = setTimeout(() => {
+        refetchTimer.current = null;
+        fetchStats(false);
+      }, 3_000);
+    };
     const supabase = createBrowserSupabaseClient();
     const channel = supabase
       .channel(`campaign-stats-${campaignId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'broadcast_analytics', filter: `campaign_id=eq.${campaignId}` },
-        () => fetchStats(false)
+        scheduleRefetch
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'broadcast_deliveries', filter: `campaign_id=eq.${campaignId}` },
-        () => fetchStats(false)
+        scheduleRefetch
       )
       .subscribe();
 
     return () => {
+      if (refetchTimer.current) clearTimeout(refetchTimer.current);
+      refetchTimer.current = null;
       supabase.removeChannel(channel);
     };
   }, [campaignId, fetchStats]);
