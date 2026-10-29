@@ -43,6 +43,7 @@ import { notifyAdmin } from '@/lib/alerts/admin';
 import { noteSendFailure, noteSendSuccess } from '@/lib/whatsapp/credentialHealth.server';
 import { sendBookingAlertEmail } from '@/lib/alerts/bookingEmail';
 import { isCoexistenceChange, handleCoexistenceWebhook } from '@/lib/webhook/coexistence';
+import { claimForAriesCommand } from '@/lib/webhook/ariesCommand';
 import { storageRefUrl, toSignedMediaUrl } from '@/lib/utils/storage';
 import { NOT_PLATFORM_ALERT_FILTER } from '@/lib/whatsapp/platformSend';
 import { triggerAutomations, cancelLeadAutomations } from '@/lib/automations/engine';
@@ -224,9 +225,13 @@ export async function POST(req: NextRequest) {
 
   // Defer heavy execution using Next.js after() to return 200 quickly
   after(async () => {
+    // Content approvals on the platform number belong to Aries Command; the
+    // ids it claims never reach the bot. Never throws (see ariesCommand.ts).
+    const forCommand = await claimForAriesCommand(freshList).catch(() => new Set<string>());
     // Sequential, and each item's failure is isolated — one bad message must
     // not block the rest of the batch from being processed.
     for (const parsed of freshList) {
+      if (forCommand.has(parsed.messageId)) continue;
       try {
         await processWebhookAsync(parsed);
       } catch (err) {
