@@ -31,6 +31,7 @@ import { checkAICostLimit, checkDailyAICostLimit, AI_FALLBACK_MESSAGE } from '@/
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
 import { decryptToken } from '@/lib/utils/crypto';
 import { matchWebhookSecret } from '@/lib/meta/webhookSecret';
+import { classifyMessageAge } from '@/lib/meta/messageAge';
 import { runFlowsForMessage } from '@/lib/flows/engine';
 import { fireIntegrations, createBookingPaymentLink } from '@/lib/integrations/runner';
 import { MicrosoftExcelWorkerService } from '@/lib/integrations/microsoft-excel-worker';
@@ -209,18 +210,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // Replay-attack guard: reject messages with a timestamp more than 5 minutes old.
-  // Meta's webhooks include a Unix timestamp on every message. Even if the dedup
-  // Redis key has expired, a replayed signed message from days/months ago is rejected
-  // here before any DB writes or AI invocations are triggered.
+  // Message-age guard (see src/lib/meta/messageAge.ts). Meta re-delivers failed
+  // webhooks for up to 7 days, so late messages are real customer messages, not
+  // replays — those are stopped by the UNIQUE(wa_message_id) insert gate. Late
+  // ones are saved for staff but get no AI reply; > 7 days is rejected.
   // Status updates don't carry a user-level timestamp — skip the check for those.
-  // A stale item only drops itself — siblings in the same batch still get processed.
+  // An expired item only drops itself — siblings in the same batch still get processed.
+  const delayedIds = new Set<string>();
   const freshList = parsedList.filter((parsed) => {
     if (!parsed.isStatusUpdate && parsed.timestamp) {
-      const ageMs = Math.abs(Date.now() - parsed.timestamp);
-      if (ageMs > 5 * 60 * 1000) {
-        console.warn(`⏱️ Meta Webhook: stale message rejected (age=${Math.round(ageMs / 1000)}s), phone_number_id=${parsed.appPhoneId}`);
+      const age = classifyMessageAge(parsed.timestamp);
+      const ageSecs = Math.round(Math.abs(Date.now() - parsed.timestamp) / 1000);
+      if (age === 'expired') {
+        console.warn(`⏱️ Meta Webhook: expired message rejected (age=${ageSecs}s), phone_number_id=${parsed.appPhoneId}`);
         return false; // return 200 so Meta doesn't retry
+      }
+      if (age === 'delayed') {
+        console.warn(`⏱️ Meta Webhook: delayed message (age=${ageSecs}s) — saving without AI reply, phone_number_id=${parsed.appPhoneId}`);
+        delayedIds.add(parsed.messageId);
       }
     }
     return true;
@@ -243,7 +250,7 @@ export async function POST(req: NextRequest) {
     for (const parsed of freshList) {
       if (forCommand.has(parsed.messageId) || forCover.has(parsed.messageId)) continue;
       try {
-        await processWebhookAsync(parsed);
+        await processWebhookAsync(parsed, { delayed: delayedIds.has(parsed.messageId) });
       } catch (err) {
         console.error('❌ Meta Webhook processing error:', err);
       }
@@ -266,7 +273,7 @@ export async function POST(req: NextRequest) {
 }
 
 // ── Async Process Webhook Payload ──
-async function processWebhookAsync(parsed: ParsedMetaMessage) {
+async function processWebhookAsync(parsed: ParsedMetaMessage, { delayed = false }: { delayed?: boolean } = {}) {
   if (parsed.isStatusUpdate) {
     await handleStatusUpdate(parsed);
     return;
@@ -277,7 +284,7 @@ async function processWebhookAsync(parsed: ParsedMetaMessage) {
     return;
   }
 
-  await handleIncomingMessage(parsed);
+  await handleIncomingMessage(parsed, { delayed });
 }
 
 // The Aries AI platform number sends staff alerts for EVERY client and receives
@@ -312,7 +319,7 @@ async function isKnownStaffNumber(phone: string): Promise<boolean> {
 }
 
 // ── Inbound Message Processing ──
-async function handleIncomingMessage(msg: ParsedMetaMessage) {
+async function handleIncomingMessage(msg: ParsedMetaMessage, { delayed = false }: { delayed?: boolean } = {}) {
   if (!msg.messageId || !msg.fromPhone || !msg.appPhoneId) {
     console.warn('⚠️ Meta Webhook: skipping message with missing identifiers');
     return;
@@ -1370,6 +1377,14 @@ async function handleIncomingMessage(msg: ParsedMetaMessage) {
   }
 
 
+
+  // A message Meta re-delivered long after it was sent (e.g. after an outage) is
+  // already saved above for staff to see; an AI answer hours later would be
+  // confusing, so stop here.
+  if (delayed) {
+    console.log(`⏱️ Meta: delayed message ${msg.messageId} saved to conversation ${conversation.id}, skipping AI`);
+    return;
+  }
 
   // bot_paused = hard stop (human agent has taken over — never override),
   // except when the tenant has opted into auto-resume via
