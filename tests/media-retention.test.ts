@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 import {
   purgeExpiredChatMedia,
   resolveRetentionDays,
+  retentionDaysForBucket,
   CHAT_MEDIA_RETENTION_BUCKETS,
   type StorageLike,
 } from '@/lib/media/media-retention';
@@ -59,8 +60,8 @@ describe('purgeExpiredChatMedia', () => {
       'chat-attachments': {
         't1': 'folder',
         't1/c1': 'folder',
-        't1/c1/old.mp4': { created_at: daysAgo(31), size: 5000 },
-        't1/c1/new.pdf': { created_at: daysAgo(29), size: 7000 },
+        't1/c1/old.mp4': { created_at: daysAgo(8), size: 5000 },
+        't1/c1/new.pdf': { created_at: daysAgo(6), size: 7000 },
       },
     });
 
@@ -122,6 +123,15 @@ describe('purgeExpiredChatMedia', () => {
     const r = await purgeExpiredChatMedia(storage, { retentionDays: 30, deadline: Date.now() - 1, now: NOW });
     expect(r.complete).toBe(false);
     expect(removed['whatsapp-media']).toBeUndefined();
+  });
+});
+
+describe('retentionDaysForBucket', () => {
+  it('caps outbound inbox uploads at 7 days but keeps inbound media at the full window', () => {
+    expect(retentionDaysForBucket('chat-attachments', 30)).toBe(7);
+    expect(retentionDaysForBucket('voice-notes', 30)).toBe(7);
+    expect(retentionDaysForBucket('whatsapp-media', 30)).toBe(30);
+    expect(retentionDaysForBucket('whatsapp-media', 14)).toBe(14);
   });
 });
 

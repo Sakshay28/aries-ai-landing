@@ -21,6 +21,18 @@ export const CHAT_MEDIA_RETENTION_BUCKETS = ['whatsapp-media', 'chat-attachments
 export const DEFAULT_MEDIA_RETENTION_DAYS = 30;
 export const MIN_MEDIA_RETENTION_DAYS = 7;
 
+// Agent uploads from the inbox (chat-attachments, legacy voice-notes) are
+// already delivered to the customer's WhatsApp, and they are big: on
+// 2026-10-30 chat-attachments was 1.25 GB in 364 files, mostly < 30 days old.
+// They are kept for at most this many days; only the dashboard preview goes.
+export const OUTBOUND_MEDIA_RETENTION_DAYS = 7;
+const OUTBOUND_BUCKETS = new Set<string>(['chat-attachments', 'voice-notes']);
+
+/** Effective retention for a bucket: outbound uploads never exceed OUTBOUND_MEDIA_RETENTION_DAYS. */
+export function retentionDaysForBucket(bucket: string, retentionDays: number): number {
+  return OUTBOUND_BUCKETS.has(bucket) ? Math.min(retentionDays, OUTBOUND_MEDIA_RETENTION_DAYS) : retentionDays;
+}
+
 const LIST_PAGE_SIZE = 1000;
 const REMOVE_CHUNK_SIZE = 100;
 const MAX_FOLDER_DEPTH = 4;
@@ -60,9 +72,9 @@ export async function purgeExpiredChatMedia(
   storage: StorageLike,
   { retentionDays, deadline, now = Date.now() }: { retentionDays: number; deadline: number; now?: number },
 ): Promise<MediaRetentionResult> {
-  const cutoffMs = now - retentionDays * 24 * 60 * 60 * 1000;
+  const cutoffFor = (bucket: string) => now - retentionDaysForBucket(bucket, retentionDays) * 24 * 60 * 60 * 1000;
   const result: MediaRetentionResult = {
-    cutoff: new Date(cutoffMs).toISOString(),
+    cutoff: new Date(cutoffFor('whatsapp-media')).toISOString(),
     deletedFiles: 0,
     freedBytes: 0,
     scannedFiles: 0,
@@ -76,6 +88,7 @@ export async function purgeExpiredChatMedia(
   };
 
   const purgeFolder = async (bucket: string, prefix: string, depth: number): Promise<void> => {
+    const cutoffMs = cutoffFor(bucket);
     const expired: { path: string; size: number }[] = [];
     const subfolders: string[] = [];
 

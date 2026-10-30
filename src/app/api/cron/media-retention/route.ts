@@ -1,9 +1,10 @@
 // ═══════════════════════════════════════════════════════════
 // 🗑️ Chat media retention — runs daily
 // ═══════════════════════════════════════════════════════════
-// Deletes WhatsApp/chat media files older than MEDIA_RETENTION_DAYS (default
-// 30) so Storage stays under the free plan's 1 GB file quota. Exceeding it
-// got the whole project restricted on 2026-10-30. See
+// Deletes inbound WhatsApp media older than MEDIA_RETENTION_DAYS (default 30)
+// and inbox uploads older than 7 days, so Storage stays under the free plan's
+// 1 GB file quota. Exceeding it got the whole project restricted on
+// 2026-10-30. See
 // src/lib/media/media-retention.ts for what is and isn't deleted.
 //
 // Manual run: GET /api/cron/media-retention?days=14 with the cron bearer
