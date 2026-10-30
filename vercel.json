@@ -73,6 +73,10 @@
       "schedule": "0 14 * * *"
     },
     {
+      "path": "/api/cron/media-retention",
+      "schedule": "0 19 * * *"
+    },
+    {
       "path": "/api/cron/shopify-sync",
       "schedule": "0 15 * * *"
     },
