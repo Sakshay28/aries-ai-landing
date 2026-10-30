@@ -48,3 +48,32 @@ describe('webhook: verifySignature', () => {
     expect(verifySignature(body, sig, APP_SECRET)).toBe(false);
   });
 });
+
+describe('webhook: matchWebhookSecret', () => {
+  const body = '{"entry":[]}';
+
+  it('matches the tenant secret first', async () => {
+    const { matchWebhookSecret } = await import('../src/lib/meta/webhookSecret');
+    expect(matchWebhookSecret(body, sign(body, 'tenant'), 'tenant', 'platform')).toBe('tenant');
+  });
+
+  it('falls back to the platform secret when the tenant secret is stale', async () => {
+    const { matchWebhookSecret } = await import('../src/lib/meta/webhookSecret');
+    expect(matchWebhookSecret(body, sign(body, 'platform'), 'stale-tenant', 'platform')).toBe('platform');
+  });
+
+  it('rejects a signature made with neither secret', async () => {
+    const { matchWebhookSecret } = await import('../src/lib/meta/webhookSecret');
+    expect(matchWebhookSecret(body, sign(body, 'attacker'), 'tenant', 'platform')).toBeNull();
+  });
+
+  it('rejects a missing signature even when secrets are set', async () => {
+    const { matchWebhookSecret } = await import('../src/lib/meta/webhookSecret');
+    expect(matchWebhookSecret(body, null, 'tenant', 'platform')).toBeNull();
+  });
+
+  it('rejects when no secrets are configured', async () => {
+    const { matchWebhookSecret } = await import('../src/lib/meta/webhookSecret');
+    expect(matchWebhookSecret(body, sign(body, ''), null, '')).toBeNull();
+  });
+});

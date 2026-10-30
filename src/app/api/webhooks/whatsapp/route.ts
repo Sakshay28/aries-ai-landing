@@ -17,7 +17,7 @@ import { ORDER_CONFIRMATION_PAYLOAD_PREFIX, ORDER_CONFIRMATION_BUTTON_LABELS } f
 import { renderOrderConfirmationCopy, type OrderConfirmationCopyKey } from '@/lib/shopify/orderConfirmationCopy';
 import { isDailyReportRequest, requestedReportDayOffset, generateDailyReport, formatDailyReportMessage } from '@/lib/reports/dailyReport';
 import { appendBookingRow } from '@/lib/integrations/google-sheets';
-import { parseAllMetaMessages, sendTextMessage, sendMediaMessage, sendMediaMessageById, uploadMediaToMeta, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, verifySignature, markMessageAsRead, sendTypingIndicator, isCtwaReferral, type ParsedMetaMessage } from '@/lib/meta/service';
+import { parseAllMetaMessages, sendTextMessage, sendMediaMessage, sendMediaMessageById, uploadMediaToMeta, sendInteractiveButtonsMessage, sendInteractiveUrlButtonMessage, getMediaUrl, markMessageAsRead, sendTypingIndicator, isCtwaReferral, type ParsedMetaMessage } from '@/lib/meta/service';
 import { sendBusinessEvent, triggerEscalationAlert, summarizeStatus, resolveOrCreateConversation } from '@/lib/whatsapp/businessNotify';
 import { normalizePhoneNumber, isSamePhoneNumber } from '@/lib/whatsapp/phone';
 import { sanitizeName } from '@/lib/utils/name';
@@ -30,6 +30,7 @@ import { checkSenderRateLimit } from '@/lib/abuse/prevention';
 import { checkAICostLimit, checkDailyAICostLimit, AI_FALLBACK_MESSAGE } from '@/lib/billing/costProtection';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
 import { decryptToken } from '@/lib/utils/crypto';
+import { matchWebhookSecret } from '@/lib/meta/webhookSecret';
 import { runFlowsForMessage } from '@/lib/flows/engine';
 import { fireIntegrations, createBookingPaymentLink } from '@/lib/integrations/runner';
 import { MicrosoftExcelWorkerService } from '@/lib/integrations/microsoft-excel-worker';
@@ -120,7 +121,8 @@ export async function POST(req: NextRequest) {
   const phoneNumberId =
     body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id as string | undefined;
 
-  let appSecretToUse = process.env.META_APP_SECRET ?? '';
+  const platformSecret = process.env.META_APP_SECRET ?? '';
+  let appSecretToUse = platformSecret;
 
   if (phoneNumberId) {
     const redis = getRedisClient();
@@ -162,9 +164,13 @@ export async function POST(req: NextRequest) {
     // The previous `signature && !verify` form let an attacker bypass verification
     // entirely just by omitting the x-hub-signature-256 header (signature falsy →
     // condition short-circuits to false → request accepted unsigned).
-    if (!signature || !verifySignature(rawBody, signature, appSecretToUse)) {
+    const matched = matchWebhookSecret(rawBody, signature, appSecretToUse, platformSecret);
+    if (!matched) {
       console.warn('❌ Meta Webhook: missing or invalid signature for phone_number_id:', phoneNumberId);
       return new Response('Unauthorized', { status: 401 });
+    }
+    if (matched === 'platform' && appSecretToUse !== platformSecret) {
+      console.warn('⚠️ Meta Webhook: tenant wa_app_secret is stale — signature matched the platform app secret for phone_number_id:', phoneNumberId);
     }
   } else {
     // No secret configured at all.
