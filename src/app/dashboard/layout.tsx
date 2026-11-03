@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createServerClient } from "@supabase/ssr";
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import DashboardLayoutClient from "./_layout/DashboardLayoutClient";
 import { env, isSupabaseConfigured } from "@/lib/env";
@@ -18,39 +18,29 @@ export default async function DashboardLayout({
   let isPlatformAdmin = false;
 
   if (isSupabaseConfigured) {
-    // middleware.ts already ran auth.getUser() for this request and forwards the
-    // verified identity via these headers (never trusted from client input — see
-    // middleware.ts). Reusing it saves a second Supabase Auth round trip on every
-    // single dashboard navigation. Falls back to a real getUser() call otherwise.
-    const headerStore = await headers();
-    let userId = headerStore.get("x-verified-user-id");
-    let resolvedEmail = headerStore.get("x-verified-user-email") || "";
-    let metadataFullName: string | undefined;
-
-    if (!userId) {
-      const cookieStore = await cookies();
-      const supabase = createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
-          },
-          setAll(cookiesToSet) {
-            try {
-              cookiesToSet.forEach(({ name, value, options }) => {
-                cookieStore.set(name, value, options);
-              });
-            } catch {}
-          },
+    // Session cookie only, never a request header (see lib/auth/getTenantId).
+    const cookieStore = await cookies();
+    const supabase = createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
         },
-      });
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          } catch {}
+        },
+      },
+    });
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      userId = user?.id ?? null;
-      resolvedEmail = user?.email || "";
-      metadataFullName = user?.user_metadata?.full_name as string | undefined;
-    }
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const userId = user?.id ?? null;
+    const resolvedEmail = user?.email || "";
+    const metadataFullName = user?.user_metadata?.full_name as string | undefined;
 
     if (!userId) redirect("/login");
     if (userId) {

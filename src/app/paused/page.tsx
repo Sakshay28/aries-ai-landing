@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 import type { Metadata } from "next";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { env } from "@/lib/env";
 import { isPlanPaused } from "@/lib/tenant/pause";
 import PausedScreen from "./PausedScreen";
 
@@ -41,8 +43,15 @@ async function getWaitingStats(tenantId: string) {
 }
 
 export default async function PausedPage() {
-  const headerStore = await headers();
-  const userId = headerStore.get("x-verified-user-id");
+  const cookieStore = await cookies();
+  const supabase = createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+    cookies: {
+      getAll() { return cookieStore.getAll(); },
+      setAll() {},
+    },
+  });
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  const userId = authUser?.id;
   if (!userId) redirect("/login");
 
   const { data: user } = await supabaseAdmin
