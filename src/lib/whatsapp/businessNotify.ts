@@ -9,6 +9,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getTenantById } from '@/lib/tenant/manager';
+import { isPlanPaused } from '@/lib/tenant/pause';
 import { decryptToken } from '@/lib/utils/crypto';
 import { sanitizeName } from '@/lib/utils/name';
 import { sendTextMessage, sendTemplateMessage } from '@/lib/meta/service';
@@ -74,6 +75,11 @@ export async function sendBusinessEvent(params: BusinessEventParams): Promise<Bu
   const traceId = crypto.randomUUID();
 
   console.log(`[TRACE:${traceId}] Initializing business event "${eventType}" for tenant ${tenantId}. IdempotencyKey=${idempotencyKey ?? 'None'}`);
+
+  // Paused accounts get no alerts on any channel, including the platform number.
+  if (isPlanPaused((await getTenantById(tenantId))?.plan_status)) {
+    return { notificationId: '', waStatus: 'paused', recipients: [], traceId };
+  }
 
   // 1. Idempotency Check
   if (idempotencyKey) {
@@ -323,6 +329,10 @@ async function attemptDelivery(
   alreadySucceeded: RecipientResult[],
   traceId: string,
 ): Promise<{ waStatus: string; recipients: RecipientResult[] }> {
+  if (isPlanPaused(tenant?.plan_status)) {
+    return { waStatus: alreadySucceeded.length ? 'partially_sent' : 'failed', recipients: alreadySucceeded };
+  }
+
   if (!tenant || !tenant.wa_access_token || !tenant.wa_phone_number_id) {
     console.warn(`[TRACE:${traceId}] Tenant ${tenantId} is missing WhatsApp configuration.`);
     return { waStatus: alreadySucceeded.length ? 'partially_sent' : 'failed', recipients: alreadySucceeded };

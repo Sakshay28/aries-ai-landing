@@ -471,6 +471,7 @@ export function AdminDashboardClient() {
                   <option value="trialing">Trial</option>
                   <option value="cancelled">Cancelled</option>
                   <option value="past_due">Past Due</option>
+                  <option value="suspended">Paused (no WhatsApp, dashboard locked)</option>
                 </select>
               </div>
 

@@ -4,6 +4,7 @@ import { cookies, headers } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import DashboardLayoutClient from "./_layout/DashboardLayoutClient";
 import { env, isSupabaseConfigured } from "@/lib/env";
+import { isPlanPaused } from "@/lib/tenant/pause";
 
 export default async function DashboardLayout({
   children,
@@ -60,7 +61,7 @@ export default async function DashboardLayout({
       // modules, business type) so we don't pay 3 extra sequential round trips per navigation.
       const { data: userData, error: userQueryErr } = await supabaseAdmin
         .from("users")
-        .select("tenant_id, full_name, is_platform_admin, tenants!tenant_id(onboarding_completed, is_approved, modules, business_type)")
+        .select("tenant_id, full_name, is_platform_admin, tenants!tenant_id(onboarding_completed, is_approved, modules, business_type, plan_status)")
         .eq("auth_id", userId)
         .maybeSingle();
 
@@ -84,6 +85,7 @@ export default async function DashboardLayout({
           is_approved: boolean;
           modules: string[] | null;
           business_type: string | null;
+          plan_status: string | null;
         };
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const tenantsRaw = (userData as any).tenants as TenantRow | TenantRow[] | null;
@@ -92,6 +94,11 @@ export default async function DashboardLayout({
         // Platform approval gate — new signups wait in /pending until approved.
         if (tenantsVal && tenantsVal.is_approved === false) {
           redirect("/pending");
+        }
+
+        // Unpaid subscription hold — see lib/tenant/pause.
+        if (isPlanPaused(tenantsVal?.plan_status) && !isPlatformAdmin) {
+          redirect("/paused");
         }
 
         if (tenantsVal?.onboarding_completed === false) {

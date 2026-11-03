@@ -29,6 +29,7 @@ import type { ChatMediaMeta } from '@/lib/types';
 import { checkSenderRateLimit } from '@/lib/abuse/prevention';
 import { checkAICostLimit, checkDailyAICostLimit, AI_FALLBACK_MESSAGE } from '@/lib/billing/costProtection';
 import { getTenantByPhoneNumberId, getTenantConfig } from '@/lib/tenant/manager';
+import { isPlanPaused } from '@/lib/tenant/pause';
 import { decryptToken } from '@/lib/utils/crypto';
 import { matchWebhookSecret } from '@/lib/meta/webhookSecret';
 import { classifyMessageAge } from '@/lib/meta/messageAge';
@@ -454,8 +455,11 @@ async function handleIncomingMessage(msg: ParsedMetaMessage, { delayed = false }
     isStaffMessage = isStaffControlMessage;
   }
 
+  // Paused accounts fall straight through to the store-and-stop block below.
+  const accountPaused = isPlanPaused(tenant.plan_status);
+
   // Early Intercept for Staff Alert Acknowledgements & Keepalives
-  if (isStaffMessage) {
+  if (isStaffMessage && !accountPaused) {
     const role = (cleanPhone === staffPhone) ? 'staff' : 'manager';
     const conversationId = await resolveOrCreateConversation(tenant.id, cleanPhone, role);
 
@@ -537,7 +541,7 @@ async function handleIncomingMessage(msg: ParsedMetaMessage, { delayed = false }
   // src/lib/shopify/notify.ts — order_confirm:/order_cancel:/order_change:
   // payloads are attached per-send, not baked into the template). Deliberately
   // outside the staff-message block above: the tapper here is the customer.
-  if (msg.buttonId) {
+  if (msg.buttonId && !accountPaused) {
     const buttonId = msg.buttonId;
     const orderActionEntry = (Object.entries(ORDER_CONFIRMATION_PAYLOAD_PREFIX) as Array<[keyof typeof ORDER_CONFIRMATION_PAYLOAD_PREFIX, string]>)
       .find(([, prefix]) => buttonId.startsWith(prefix));
@@ -1159,6 +1163,14 @@ async function handleIncomingMessage(msg: ParsedMetaMessage, { delayed = false }
     .from('conversations')
     .update({ last_message_at: new Date().toISOString() })
     .eq('id', conversation.id);
+
+  // ── Account paused (unpaid subscription) ──
+  // Total silence: the inbound message/conversation above are persisted so the
+  // client loses nothing, but no AI, automation, alert or reply runs for it.
+  if (accountPaused) {
+    console.log(`⏸️ Meta Webhook: ${tenant.business_name} is paused, message stored without reply`);
+    return;
+  }
 
   // ── Service-disabled kill switch ──
   // Owner-facing toggle for "shut this bot off but still tell people why",

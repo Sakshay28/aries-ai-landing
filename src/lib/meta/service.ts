@@ -7,6 +7,7 @@
 // Auth: Bearer {ACCESS_TOKEN}
 import crypto from 'crypto';
 import { decryptToken } from '@/lib/utils/crypto';
+import { assertWhatsAppNotPaused, isWhatsAppNumberPaused } from '@/lib/tenant/pause';
 
 const META_BASE = 'https://graph.facebook.com/v21.0';
 
@@ -232,6 +233,7 @@ export async function markMessageAsRead(
   messageId: string
 ): Promise<void> {
   if (!accessToken || !phoneNumberId || !messageId) return;
+  if (await isWhatsAppNumberPaused(phoneNumberId)) return;
 
   try {
     const res = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
@@ -268,6 +270,7 @@ export async function sendTypingIndicator(
   messageId: string
 ): Promise<void> {
   if (!accessToken || !phoneNumberId || !messageId) return;
+  if (await isWhatsAppNumberPaused(phoneNumberId)) return;
 
   try {
     await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
@@ -299,6 +302,7 @@ export async function sendTextMessage(
   if (!accessToken || !phoneNumberId || !destination || !text) {
     throw new Error('Meta sendTextMessage: missing required parameters');
   }
+  await assertWhatsAppNotPaused(phoneNumberId);
 
   const payload: any = {
     messaging_product: 'whatsapp',
@@ -357,6 +361,7 @@ export async function sendLocationMessage(
   if (!accessToken || !phoneNumberId || !destination || latitude === undefined || longitude === undefined || !name || !address) {
     throw new Error('Meta sendLocationMessage: missing required parameters');
   }
+  await assertWhatsAppNotPaused(phoneNumberId);
 
   const payload = {
     messaging_product: 'whatsapp',
@@ -413,6 +418,7 @@ export async function sendInteractiveButtonsMessage(
   if (!accessToken || !phoneNumberId || !destination || !bodyText) {
     throw new Error('Meta sendInteractiveButtonsMessage: missing required parameters');
   }
+  await assertWhatsAppNotPaused(phoneNumberId);
   if (buttons.length === 0 || buttons.length > 3) {
     throw new Error(`Meta sendInteractiveButtonsMessage: must have 1-3 buttons (got ${buttons.length})`);
   }
@@ -470,6 +476,7 @@ export async function sendInteractiveUrlButtonMessage(
   if (!accessToken || !phoneNumberId || !destination || !bodyText || !buttonTitle || !url) {
     throw new Error('Meta sendInteractiveUrlButtonMessage: missing required parameters');
   }
+  await assertWhatsAppNotPaused(phoneNumberId);
 
   const interactive: Record<string, unknown> = {
     type: 'cta_url',
@@ -525,6 +532,7 @@ export async function sendInteractiveListMessage(
   if (!accessToken || !phoneNumberId || !destination || !bodyText) {
     throw new Error('Meta sendInteractiveListMessage: missing required parameters');
   }
+  await assertWhatsAppNotPaused(phoneNumberId);
 
   const interactive: Record<string, unknown> = {
     type: 'list',
@@ -580,6 +588,7 @@ export async function sendTemplateMessage(
   if (!accessToken || !phoneNumberId || !destination || !templateName) {
     throw new Error('Meta sendTemplateMessage: missing required parameters');
   }
+  await assertWhatsAppNotPaused(phoneNumberId);
 
   // Backwards compatibility: Map a simple array of string body variables to Meta's body component format
   let components = componentsOrVariables;
@@ -652,6 +661,7 @@ export async function sendMediaMessage(
   if (!accessToken || !phoneNumberId || !destination || !url) {
     throw new Error('Meta sendMediaMessage: missing required parameters');
   }
+  await assertWhatsAppNotPaused(phoneNumberId);
 
   const mediaPayload: Record<string, string> = { link: url };
   if (caption && (mediaType === 'image' || mediaType === 'document')) {
@@ -719,6 +729,7 @@ export async function sendMediaMessageById(
   if (!accessToken || !phoneNumberId || !destination || !mediaId) {
     throw new Error('Meta sendMediaMessageById: missing required parameters');
   }
+  await assertWhatsAppNotPaused(phoneNumberId);
 
   const mediaPayload: Record<string, string> = { id: mediaId };
   if (caption && (mediaType === 'image' || mediaType === 'document')) {
@@ -794,6 +805,7 @@ export async function sendWhatsAppMedia(
   if (!accessToken || !phoneNumberId || !destination || (!media.mediaId && !media.link)) {
     throw new Error('Meta sendWhatsAppMedia: missing required parameters');
   }
+  await assertWhatsAppNotPaused(phoneNumberId);
 
   const object: Record<string, string> = media.mediaId ? { id: media.mediaId } : { link: media.link! };
   if (media.caption && media.sendAs !== 'audio') object.caption = media.caption.slice(0, 1024);

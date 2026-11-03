@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { sendTemplateMessage, MetaApiError, explainMetaError } from '@/lib/meta/service';
 import { decryptToken } from '@/lib/utils/crypto';
+import { isPlanPaused } from '@/lib/tenant/pause';
 import { AudienceEngineService } from './audience-engine.service';
 import { MetaPayloadBuilderService, isInvalidMediaUrl } from './meta-payload-builder.service';
 import { TemplateParserService } from './template-parser.service';
@@ -696,9 +697,20 @@ export class BroadcastEngineService {
     // A. Resolve tenant credentials and local settings
     const { data: tenant } = await supabaseAdmin
       .from('tenants')
-      .select('wa_access_token, wa_phone_number_id, timezone')
+      .select('wa_access_token, wa_phone_number_id, timezone, plan_status')
       .eq('id', tenantId)
       .single();
+
+    // Paused account: hand the batch back untouched so the campaign carries on
+    // after a restore. next_attempt_at keeps these rows out of the global claim
+    // for an hour, otherwise a paused campaign would starve every other tenant.
+    if (isPlanPaused(tenant?.plan_status)) {
+      await supabaseAdmin
+        .from('broadcast_queue')
+        .update({ status: 'pending', locked_at: null, next_attempt_at: new Date(Date.now() + 60 * 60 * 1000).toISOString() })
+        .in('id', items.map(i => i.id));
+      return 0;
+    }
 
     if (!tenant?.wa_access_token || !tenant?.wa_phone_number_id) {
       await supabaseAdmin

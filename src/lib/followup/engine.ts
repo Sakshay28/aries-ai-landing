@@ -19,6 +19,7 @@ import { decryptToken } from '@/lib/utils/crypto';
 import { firstName } from '@/lib/utils/name';
 import { greetingName, greetingFirstName } from '@/lib/utils/contact-name';
 import * as Sentry from '@/lib/sentry-stub';
+import { isPlanPaused } from '@/lib/tenant/pause';
 
 // ── Fallback scheduler — NOTE: setInterval is DEAD on Vercel serverless.
 // The nightly cron (/api/cron/timeout) is the real mechanism. This interval
@@ -152,7 +153,7 @@ async function processFollowUpJob(data: FollowUpJobData): Promise<void> {
 
   // Get tenant
   const tenant = await getTenantById(tenantId);
-  if (!tenant || !tenant.is_active || !isMetaConfigured(tenant)) {
+  if (!tenant || !tenant.is_active || isPlanPaused(tenant.plan_status) || !isMetaConfigured(tenant)) {
     await markFollowUpCancelled(followUpId, tenant ? 'WhatsApp not configured' : 'Tenant inactive');
     return;
   }
@@ -303,7 +304,7 @@ export async function processPendingFollowUps(deadline?: number): Promise<number
       }
 
       const tenant = await getTenantById(followUp.tenant_id);
-      if (!tenant || !tenant.is_active || !isMetaConfigured(tenant)) {
+      if (!tenant || !tenant.is_active || isPlanPaused(tenant.plan_status) || !isMetaConfigured(tenant)) {
         await markFollowUpCancelled(followUp.id, 'Tenant inactive or WA not configured');
         continue;
       }

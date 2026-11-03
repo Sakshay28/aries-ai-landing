@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies, headers } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { env, isSupabaseConfigured } from '@/lib/env';
+import { isPlanPaused } from '@/lib/tenant/pause';
 
 // cache() deduplicates this function within a single server-request lifecycle.
 // Every dashboard route that calls getTenantId() in the same render will share
@@ -49,7 +50,7 @@ export const getTenantId = cache(async (): Promise<string | null> => {
     // Use supabaseAdmin to bypass RLS on the users table
     const { data: userData, error } = await supabaseAdmin
       .from('users')
-      .select('tenant_id')
+      .select('tenant_id, is_platform_admin, tenants!tenant_id(plan_status)')
       .eq('auth_id', userId)
       .single();
 
@@ -60,6 +61,14 @@ export const getTenantId = cache(async (): Promise<string | null> => {
 
     if (!userData?.tenant_id) {
       console.error('getTenantId: no tenant row for auth_id:', userId);
+      return null;
+    }
+
+    // Paused accounts are locked out of every tenant API. Same query, so no extra
+    // round trip. Platform admins keep access.
+    const tenantRaw = (userData as { tenants?: unknown }).tenants as { plan_status?: string } | { plan_status?: string }[] | null | undefined;
+    const planStatus = (Array.isArray(tenantRaw) ? tenantRaw[0] : tenantRaw)?.plan_status;
+    if (isPlanPaused(planStatus) && !(userData as { is_platform_admin?: boolean }).is_platform_admin) {
       return null;
     }
 

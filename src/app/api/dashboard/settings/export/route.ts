@@ -9,7 +9,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth/getCurrentUser';
+import { getCurrentUserIncludingPaused } from '@/lib/auth/getCurrentUser';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { checkRedisRateLimit } from '@/lib/redis/client';
 import { logAudit } from '@/lib/audit/logger';
@@ -102,7 +102,7 @@ async function fetchSection(
 
 export async function GET(_req: NextRequest) {
   try {
-    const user = await getCurrentUser();
+    const user = await getCurrentUserIncludingPaused();
     if (!user) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }

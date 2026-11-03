@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getCurrentUser } from '@/lib/auth/getCurrentUser';
+import { invalidateTenantAllCaches } from '@/lib/tenant/manager';
+import { clearPauseCache } from '@/lib/tenant/pause';
 
 const PLAN_PRICES: Record<string, number> = {
   starter: 999,
@@ -83,6 +85,10 @@ export async function PATCH(req: NextRequest) {
   if (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
+
+  // The webhook reads plan_status from the tenant cache: apply pause/restore now.
+  await invalidateTenantAllCaches(tenant_id);
+  clearPauseCache();
 
   return NextResponse.json({ success: true });
 }

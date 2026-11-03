@@ -26,6 +26,7 @@ import { decryptTokenV2 } from '@/lib/security/keyManager';
 import { sendTextMessage, sendTemplateMessage } from '@/lib/meta/service';
 import { getSessionState } from '@/lib/whatsapp/session';
 import { normalizePhoneNumber } from '@/lib/whatsapp/phone';
+import { isPlanPaused } from '@/lib/tenant/pause';
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { generateDailyReport, formatDailyReportMessage } from '@/lib/reports/dailyReport';
 import { DAILY_REPORT_READY_TEMPLATE_NAME } from '@/lib/shopify/templates';
@@ -63,7 +64,7 @@ async function handler(req: NextRequest) {
   const startedAt = Date.now();
 
   const { data: tenants, error } = await supabaseAdmin.from('tenants')
-    .select('id, business_name, staff_phone, staff_name, manager_phone, wa_access_token, wa_phone_number_id, modules, is_active')
+    .select('id, business_name, staff_phone, staff_name, manager_phone, wa_access_token, wa_phone_number_id, modules, is_active, plan_status')
     .contains('modules', ['daily_report'])
     .eq('is_active', true);
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
@@ -71,6 +72,7 @@ async function handler(req: NextRequest) {
   const results: Array<{ tenantId: string; deliveries: Delivery[] }> = [];
   for (const tenant of tenants || []) {
     if (Date.now() - startedAt > TIME_BUDGET_MS) break;
+    if (isPlanPaused(tenant.plan_status as string | null)) continue;
     const token = tenant.wa_access_token ? decryptTokenV2(tenant.wa_access_token as string) : null;
     if (!token || !tenant.wa_phone_number_id) continue;
 

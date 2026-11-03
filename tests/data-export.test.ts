@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/getCurrentUser', () => ({
-  getCurrentUser: vi.fn(),
+  getCurrentUserIncludingPaused: vi.fn(),
 }));
 
 vi.mock('@/lib/supabase/admin', () => ({
@@ -18,7 +18,7 @@ vi.mock('@/lib/audit/logger', () => ({
   logAudit: vi.fn(),
 }));
 
-import { getCurrentUser } from '@/lib/auth/getCurrentUser';
+import { getCurrentUserIncludingPaused as getCurrentUser } from '@/lib/auth/getCurrentUser';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { checkRedisRateLimit } from '@/lib/redis/client';
 import { logAudit } from '@/lib/audit/logger';

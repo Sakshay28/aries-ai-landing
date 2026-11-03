@@ -35,6 +35,7 @@ import { getSessionState, shouldPingForKeepalive } from '@/lib/whatsapp/session'
 import { sendPlatformKeepalive, isPlatformConfigured } from '@/lib/whatsapp/platformSend';
 import { resolveEventTemplate, mapVariablesToPositional } from '@/lib/whatsapp/templateManager';
 import { normalizePhoneNumber } from '@/lib/whatsapp/phone';
+import { isPlanPaused } from '@/lib/tenant/pause';
 
 const WINDOW_OPEN_HOURS  = 22;    // nudge customer at 22h — window still open
 const WINDOW_CLOSE_HOURS = 23.5;  // stop after 23.5h — too late, window closed
@@ -78,7 +79,7 @@ async function runStaffKeepalive(): Promise<{ pinged: number; skipped: number; f
 
   const { data: tenants } = await supabaseAdmin
     .from('tenants')
-    .select('id, wa_access_token, wa_phone_number_id, business_name, staff_phone, manager_phone, notify_phone, staff_email')
+    .select('id, wa_access_token, wa_phone_number_id, business_name, staff_phone, manager_phone, notify_phone, staff_email, plan_status')
     .or('staff_phone.not.is.null,manager_phone.not.is.null,notify_phone.not.is.null');
 
   let pinged = 0;
@@ -86,6 +87,7 @@ async function runStaffKeepalive(): Promise<{ pinged: number; skipped: number; f
   let failed = 0;
 
   for (const tenant of tenants ?? []) {
+    if (isPlanPaused(tenant.plan_status)) { skipped++; continue; }
     if (!tenant.wa_access_token || !tenant.wa_phone_number_id) { skipped++; continue; }
     const token = decryptToken(tenant.wa_access_token);
     if (!token) { skipped++; continue; }

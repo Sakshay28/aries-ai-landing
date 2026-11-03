@@ -11,6 +11,7 @@ import { getRedisClient } from '@/lib/redis/client';
 import { notifyAdmin } from '@/lib/alerts/admin';
 import { createHash } from 'crypto';
 import * as Sentry from '@/lib/sentry-stub';
+import { isPlanPaused } from '@/lib/tenant/pause';
 import type { Tenant } from '@/lib/types';
 
 function generateIdempotencyKey(automationId: string, leadId: string, scheduledAt: string): string {
@@ -390,7 +391,7 @@ export async function processPendingAutomations(): Promise<number> {
         }
 
         const tenant = await getTenantById(item.tenant_id);
-        if (!tenant || !tenant.is_active || !isMetaConfigured(tenant)) {
+        if (!tenant || !tenant.is_active || isPlanPaused(tenant.plan_status) || !isMetaConfigured(tenant)) {
           await updateQueueStatus(item.id, 'cancelled', 'Tenant inactive or WA not configured');
           continue;
         }

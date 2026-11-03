@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { decryptToken } from '@/lib/utils/crypto';
+import { isWhatsAppNumberPaused } from '@/lib/tenant/pause';
 
 export interface SendMessageParams {
   to: string;
@@ -61,6 +62,10 @@ export async function sendWhatsAppMessage(params: SendMessageParams): Promise<Se
     const errorMsg = 'Missing Meta credentials. Please set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID or link your Meta account.';
     console.error('[whatsapp] Credentials check failed:', errorMsg);
     return { success: false, error: errorMsg };
+  }
+
+  if (await isWhatsAppNumberPaused(phoneNumberId)) {
+    return { success: false, error: 'WhatsApp sending is paused for this account' };
   }
 
   // 2. Sanitise phone number: keep only digits

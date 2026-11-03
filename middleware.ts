@@ -11,7 +11,7 @@ import { detectBrandFromHost } from '@/lib/brand';
 import { env, isSupabaseConfigured } from '@/lib/env';
 
 // Routes that require authentication
-const PROTECTED_ROUTES = ['/dashboard', '/admin', '/onboard'];
+const PROTECTED_ROUTES = ['/dashboard', '/admin', '/onboard', '/paused'];
 // Routes that should redirect to dashboard if already logged in
 const AUTH_ROUTES = ['/login', '/signup'];
 
@@ -196,6 +196,7 @@ export const config = {
     '/dashboard/:path*',
     '/admin/:path*',
     '/onboard',
+    '/paused',
     '/login',
     '/signup',
     // API routes that need session refresh

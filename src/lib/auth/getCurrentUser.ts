@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { env, isSupabaseConfigured } from '@/lib/env';
+import { isPlanPaused } from '@/lib/tenant/pause';
 
 export type Role = 'owner' | 'admin' | 'manager' | 'staff' | 'viewer';
 
@@ -14,12 +15,19 @@ export interface CurrentUser {
   role: Role;
   is_sales_agent: boolean;
   is_platform_admin: boolean;
+  tenant_paused: boolean;
 }
 
 // Like getTenantId(), but resolves the full team-member row for the signed-in
 // user so routes can make role-based decisions. cache() dedupes within one
-// server-request lifecycle.
+// server-request lifecycle. Returns null for a paused account (see lib/tenant/pause).
 export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
+  const user = await getCurrentUserIncludingPaused();
+  return user?.tenant_paused && !user.is_platform_admin ? null : user;
+});
+
+// Only for what a paused account must still reach: the /paused data export.
+export const getCurrentUserIncludingPaused = cache(async (): Promise<CurrentUser | null> => {
   try {
     const cookieStore = await cookies();
     if (!isSupabaseConfigured) return null;
@@ -50,11 +58,13 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     // hasn't been migrated yet — missing fields just come back undefined.
     const { data, error } = await supabaseAdmin
       .from('users')
-      .select('*')
+      .select('*, tenants!tenant_id(plan_status)')
       .eq('auth_id', userId)
       .single();
 
     if (error || !data?.tenant_id) return null;
+
+    const tenantRow = Array.isArray(data.tenants) ? data.tenants[0] : data.tenants;
 
     return {
       id: data.id,
@@ -64,6 +74,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
       role: (data.role ?? 'staff') as Role,
       is_sales_agent: Boolean(data.is_sales_agent),
       is_platform_admin: Boolean(data.is_platform_admin),
+      tenant_paused: isPlanPaused(tenantRow?.plan_status),
     };
   } catch (err) {
     console.error('getCurrentUser: unexpected error:', err);
