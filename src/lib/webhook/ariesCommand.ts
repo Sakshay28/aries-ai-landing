@@ -9,8 +9,12 @@
 //
 // Forwarded: on the platform number only,
 //   - button replies whose id starts with ap: / ch: / aa: (Command's buttons),
-//   - plain texts that are not daily-report requests.
-// Command claims a text only while that owner has a review open.
+//   - plain texts that are not daily-report requests,
+//   - voice notes, photos, clips and files (by their media id; Command fetches the
+//     file itself with the number's token, and only for a message it claims).
+// Command claims a text only while that owner has a review open, and anything
+// (text, voice note, photo, file) from one of its own team's numbers: those
+// are for its WhatsApp desk, where the agency's people give the AI work.
 //
 // Env (both or nothing; unset = feature off, nothing forwarded):
 //   ARIES_COMMAND_FORWARD_URL    = https://aries-command.vercel.app/api/webhooks/whatsapp/forwarded
@@ -23,6 +27,9 @@ import { isDailyReportRequest } from '@/lib/reports/dailyReport';
 
 const DEFAULT_PLATFORM_PHONE_NUMBER_ID = '1207672335754940';
 export const COMMAND_BUTTON = /^(ap|ch|aa):/;
+// What a person on Command's team may send its desk besides text.
+// A clip too: the desk answers it with where the original should go.
+const COMMAND_MEDIA = new Set(['audio', 'voice', 'image', 'document', 'video']);
 const TIMEOUT_MS = 4000;
 
 const platformPhoneNumberId = () => process.env.PLATFORM_WA_PHONE_NUMBER_ID || DEFAULT_PLATFORM_PHONE_NUMBER_ID;
@@ -32,6 +39,7 @@ export function commandCandidates(list: ParsedMetaMessage[]): ParsedMetaMessage[
   return list.filter((m) => {
     if (m.isStatusUpdate || m.isReaction || m.appPhoneId !== platformPhoneNumberId()) return false;
     if (m.buttonId) return COMMAND_BUTTON.test(m.buttonId);
+    if (COMMAND_MEDIA.has(m.type)) return !!m.mediaId;
     return m.type === 'text' && !!m.text?.trim() && !isDailyReportRequest(m.text);
   });
 }

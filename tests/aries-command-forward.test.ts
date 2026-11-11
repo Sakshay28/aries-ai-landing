@@ -24,9 +24,34 @@ describe('Aries Command hand-off: what is forwarded', () => {
     const report = msg({ text: "today's report" });
     const clientNumber = msg({ appPhoneId: '999' });
     const status = msg({ isStatusUpdate: true });
-    const image = msg({ type: 'image', text: '' });
-    const out = commandCandidates([approve, text, otherButton, report, clientNumber, status, image]);
+    const out = commandCandidates([approve, text, otherButton, report, clientNumber, status]);
     expect(out.map((m) => m.messageId)).toEqual([approve.messageId, text.messageId]);
+  });
+
+  it('forwards voice notes, photos and files by media id, for Command\'s team desk', () => {
+    const voice = msg({ type: 'audio', text: '', mediaId: 'A1', mediaMimeType: 'audio/ogg; codecs=opus' });
+    const photo = msg({ type: 'image', text: 'post on this', mediaId: 'I1', mediaMimeType: 'image/jpeg' });
+    const file = msg({ type: 'document', text: '', mediaId: 'D1', mediaMimeType: 'application/pdf' });
+    const noId = msg({ type: 'image', text: '' });
+    const clip = msg({ type: 'video', text: '', mediaId: 'V1' });
+    const sticker = msg({ type: 'sticker', text: '', mediaId: 'S1' });
+    const otherNumber = msg({ type: 'audio', text: '', mediaId: 'A2', appPhoneId: '999' });
+    const out = commandCandidates([voice, photo, file, noId, clip, sticker, otherNumber]);
+    expect(out.map((m) => m.messageId)).toEqual([voice.messageId, photo.messageId, file.messageId, clip.messageId]);
+  });
+
+  it('a voice note Command does not claim still goes to the bot', async () => {
+    const voice = msg({ type: 'audio', text: '', mediaId: 'A1' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ claimed: [] }))));
+    process.env.ARIES_COMMAND_FORWARD_URL = 'https://command.test/api/webhooks/whatsapp/forwarded';
+    process.env.ARIES_COMMAND_FORWARD_SECRET = 'shh';
+    try {
+      expect([...(await claimForAriesCommand([voice]))]).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+      delete process.env.ARIES_COMMAND_FORWARD_URL;
+      delete process.env.ARIES_COMMAND_FORWARD_SECRET;
+    }
   });
 
   it('signs exactly the way Command verifies (HMAC of "<ts>.<body>")', () => {
