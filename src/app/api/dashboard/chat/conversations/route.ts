@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getCurrentUser } from '@/lib/auth/getCurrentUser';
 import { selectInBatches } from '@/lib/supabase/select-in-batches';
 import { notifyAdmin } from '@/lib/alerts/admin';
+import { withTransientRetry } from '@/lib/supabase/transient-retry';
 
 export async function GET(req: NextRequest) {
   try {
@@ -23,15 +24,19 @@ export async function GET(req: NextRequest) {
     // needed anymore. This used to also fetch up to 5000 messages tenant-wide on every
     // call (every 20s poll + every realtime event tenant-wide), which was the dominant
     // cost behind the dashboard chat lag.
-    const { data: rawConvos, error: convErr, count: rawCount } = await supabaseAdmin
-      .from('conversations')
-      .select(
-        'id, last_message_at, is_active, bot_paused, sender_id, lead_id, escalated, message_count, last_message_preview, last_message_type',
-        { count: 'exact' },
-      )
-      .eq('tenant_id', tenantId)
-      .order('last_message_at', { ascending: false, nullsFirst: false })
-      .limit(2000); // fetch wide; collapsed to one thread per contact below
+    // Retried once on a transient DB error (statement timeout, dropped connection):
+    // a single free-plan stall used to blank the whole inbox (2026-11-21).
+    const { data: rawConvos, error: convErr, count: rawCount } = await withTransientRetry(() =>
+      supabaseAdmin
+        .from('conversations')
+        .select(
+          'id, last_message_at, is_active, bot_paused, sender_id, lead_id, escalated, message_count, last_message_preview, last_message_type',
+          { count: 'exact' },
+        )
+        .eq('tenant_id', tenantId)
+        .order('last_message_at', { ascending: false, nullsFirst: false })
+        .limit(2000), // fetch wide; collapsed to one thread per contact below
+    );
 
     if (convErr) {
       console.error('Conversations fetch error:', convErr);
@@ -87,7 +92,9 @@ export async function GET(req: NextRequest) {
       let leads: Array<{ id: string; name: string | null; phone: string | null; assigned_to: string | null }>;
       try {
         leads = await selectInBatches(leadIds, (batch) =>
-          supabaseAdmin.from('leads').select('id, name, phone, assigned_to').in('id', batch)
+          withTransientRetry(() =>
+            supabaseAdmin.from('leads').select('id, name, phone, assigned_to').in('id', batch),
+          )
         );
       } catch (e: any) {
         // Do NOT return conversations with all-null assignments (the old silent bug).

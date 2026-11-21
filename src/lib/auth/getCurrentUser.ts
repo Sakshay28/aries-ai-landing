@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { env, isSupabaseConfigured } from '@/lib/env';
 import { isPlanPaused } from '@/lib/tenant/pause';
+import { withTransientRetry } from '@/lib/supabase/transient-retry';
 
 export type Role = 'owner' | 'admin' | 'manager' | 'staff' | 'viewer';
 
@@ -56,11 +57,15 @@ export const getCurrentUserIncludingPaused = cache(async (): Promise<CurrentUser
 
     // select('*') keeps this resilient even if a column (e.g. is_sales_agent)
     // hasn't been migrated yet — missing fields just come back undefined.
-    const { data, error } = await supabaseAdmin
-      .from('users')
-      .select('*, tenants!tenant_id(plan_status)')
-      .eq('auth_id', userId)
-      .single();
+    // A transient DB error here used to surface as a bogus 401 on every
+    // dashboard API, so it gets one retry (see lib/supabase/transient-retry).
+    const { data, error } = await withTransientRetry(() =>
+      supabaseAdmin
+        .from('users')
+        .select('*, tenants!tenant_id(plan_status)')
+        .eq('auth_id', userId)
+        .single(),
+    );
 
     if (error || !data?.tenant_id) return null;
 

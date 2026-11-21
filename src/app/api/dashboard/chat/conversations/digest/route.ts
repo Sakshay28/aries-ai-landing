@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getCurrentUser } from '@/lib/auth/getCurrentUser';
+import { withTransientRetry } from '@/lib/supabase/transient-retry';
 
 // Ultra-light change-probe for the chat sidebar's fallback poll.
 // Returns only { count, maxTs } — the exact tenant-wide conversation count plus
@@ -22,12 +23,14 @@ export async function GET() {
     const me = await getCurrentUser();
     if (!me) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
-    const { data, error, count } = await supabaseAdmin
-      .from('conversations')
-      .select('last_message_at', { count: 'exact' })
-      .eq('tenant_id', me.tenant_id)
-      .order('last_message_at', { ascending: false, nullsFirst: false })
-      .limit(1);
+    const { data, error, count } = await withTransientRetry(() =>
+      supabaseAdmin
+        .from('conversations')
+        .select('last_message_at', { count: 'exact' })
+        .eq('tenant_id', me.tenant_id)
+        .order('last_message_at', { ascending: false, nullsFirst: false })
+        .limit(1),
+    );
 
     if (error) {
       // Surface as a soft failure — the sidebar falls back to a full load on any

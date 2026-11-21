@@ -107,6 +107,46 @@ export default function ChatSidebar() {
   // refetch per inbound/outbound message when a chat is active).
   const loadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ─── Empty-inbox auto-retry ───────────────────────────────────────────────
+  // A failed refresh of a list that's already on screen is harmless: the
+  // fallback poll below catches up. A failed FIRST load leaves the agent
+  // looking at "Couldn't load conversations" with nothing to work from, and the
+  // poll can back off for minutes while the DB is struggling. So while the list
+  // is empty we retry on our own: 2s, 4s, 8s, 15s, then every 30s. On
+  // 2026-11-21 one brief DB stall right after sign-in stranded Adventure
+  // Island's owner on that screen.
+  const loadRef = useRef<() => Promise<void>>(async () => {});
+  const emptyRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const emptyRetryAttemptRef = useRef(0);
+  const [autoRetrying, setAutoRetrying] = useState(false);
+
+  const onLoadFailed = useCallback(() => {
+    setLoading(false);
+    setLoadError(true);
+    if (convosRef.current.length > 0 || emptyRetryTimerRef.current) return;
+    const delays = [2_000, 4_000, 8_000, 15_000, 30_000];
+    const delay = delays[Math.min(emptyRetryAttemptRef.current, delays.length - 1)];
+    emptyRetryAttemptRef.current++;
+    setAutoRetrying(true);
+    emptyRetryTimerRef.current = setTimeout(() => {
+      emptyRetryTimerRef.current = null;
+      loadRef.current();
+    }, delay);
+  }, []);
+
+  const onLoadSucceeded = useCallback(() => {
+    emptyRetryAttemptRef.current = 0;
+    if (emptyRetryTimerRef.current) {
+      clearTimeout(emptyRetryTimerRef.current);
+      emptyRetryTimerRef.current = null;
+    }
+    setAutoRetrying(false);
+  }, []);
+
+  useEffect(() => () => {
+    if (emptyRetryTimerRef.current) clearTimeout(emptyRetryTimerRef.current);
+  }, []);
+
   // ─── STABLE load() — no dependencies that change on URL navigation ───────
   // Using a ref-based pattern so the Realtime callback always calls the latest
   // version without needing to re-subscribe the channel.
@@ -116,17 +156,19 @@ export default function ChatSidebar() {
     const isInitial = convosRef.current.length === 0;
     const slowTimer = isInitial ? setTimeout(() => setSlowLoad(true), 4_000) : null;
     const controller = new AbortController();
-    const abortTimer = setTimeout(() => controller.abort(), 15_000);
+    // 20s: the server retries a timed-out query once, so a slow-but-successful
+    // answer can take a little over 15s.
+    const abortTimer = setTimeout(() => controller.abort(), 20_000);
     try {
       const res = await fetch(`/api/dashboard/chat/conversations?_t=${Date.now()}`, { signal: controller.signal });
       const data = await res.json();
       if (!data.success) {
-        setLoading(false);
-        setLoadError(true);
+        onLoadFailed();
         return;
       }
       setConvos(data.conversations);
       setLoadError(false);
+      onLoadSucceeded();
       // Refresh the digest baseline so the next fallback poll compares against
       // what we just loaded (server returns the same {count, maxTs} shape).
       if (data.digest) lastDigestRef.current = data.digest;
@@ -146,15 +188,15 @@ export default function ChatSidebar() {
     } catch {
       // Keep any already-loaded list on screen (loadError still surfaces a
       // non-blocking "couldn't refresh" banner); only a truly empty list turns
-      // this into a full blocking error state below.
-      setLoading(false);
-      setLoadError(true);
+      // this into a full blocking error state below, which retries itself.
+      onLoadFailed();
     } finally {
       if (slowTimer) clearTimeout(slowTimer);
       clearTimeout(abortTimer);
       setSlowLoad(false);
     }
-  }, []); // ← intentionally empty: uses refs for activeId and router
+  }, [onLoadFailed, onLoadSucceeded]); // both stable; uses refs for activeId and router
+  useEffect(() => { loadRef.current = load; }, [load]);
 
   // Debounced reload for Realtime events: a burst of message/conversation events
   // (common during an active chat) collapses into one full-list fetch instead of
@@ -309,12 +351,17 @@ export default function ChatSidebar() {
       }
     };
     const onVisible = () => { if (!document.hidden) tick(); };
+    // Phones drop the network while locked; reload an empty inbox as soon as
+    // it's back instead of waiting for the next retry slot.
+    const onOnline = () => { if (convosRef.current.length === 0) load(); };
     document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onOnline);
     const interval = setInterval(tick, 20_000);
     return () => {
       cancelled = true;
       clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onOnline);
     };
   }, [load]);
 
@@ -453,6 +500,9 @@ export default function ChatSidebar() {
         ) : loadError && convos.length === 0 ? (
           <div className="py-16 px-6 text-center flex flex-col items-center gap-3">
             <p className="text-[13px] text-muted-foreground">Couldn&rsquo;t load conversations.</p>
+            {autoRetrying && (
+              <p className="text-[11.5px] text-muted-foreground/60 -mt-1">Trying again automatically…</p>
+            )}
             <button
               onClick={() => { setLoading(true); load(); }}
               className="text-[12px] font-medium px-3 py-1.5 rounded-lg bg-secondary hover:bg-[#E8ECF0] dark:hover:bg-white/8 text-foreground transition-colors"
