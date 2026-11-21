@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { sharedRefreshFetch } from "@/lib/supabase/shared-session-refresh";
 import type { Metadata } from "next";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { env } from "@/lib/env";
@@ -45,6 +46,7 @@ async function getWaitingStats(tenantId: string) {
 export default async function PausedPage() {
   const cookieStore = await cookies();
   const supabase = createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+    global: { fetch: sharedRefreshFetch }, // share session refreshes (lib/supabase/shared-session-refresh)
     cookies: {
       getAll() { return cookieStore.getAll(); },
       setAll() {},

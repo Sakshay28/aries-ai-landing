@@ -4,6 +4,7 @@
 // returning the full tenant row needed by call/billing routes.
 // ───────────────────────────────────────────────────────────────────────────
 import { createServerClient } from '@supabase/ssr';
+import { sharedRefreshFetch } from '@/lib/supabase/shared-session-refresh';
 import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { env, isSupabaseConfigured } from '@/lib/env';
@@ -19,6 +20,7 @@ export async function getTenantFromCookies(): Promise<TenantContext | null> {
     if (!isSupabaseConfigured) return null;
 
     const supabase = createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+      global: { fetch: sharedRefreshFetch }, // share session refreshes (lib/supabase/shared-session-refresh)
       cookies: { getAll() { return cookieStore.getAll(); } },
     });
 

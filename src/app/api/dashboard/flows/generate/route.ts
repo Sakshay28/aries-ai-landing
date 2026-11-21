@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { sharedRefreshFetch } from '@/lib/supabase/shared-session-refresh';
 import { cookies } from 'next/headers';
 import { env, isSupabaseConfigured } from '@/lib/env';
 
@@ -168,6 +169,7 @@ export async function POST(req: NextRequest) {
     if (isSupabaseConfigured) {
       const cookieStore = await cookies();
       const supabase = createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+        global: { fetch: sharedRefreshFetch }, // share session refreshes (lib/supabase/shared-session-refresh)
         cookies: {
           getAll() { return cookieStore.getAll(); },
           setAll() {},
