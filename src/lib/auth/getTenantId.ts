@@ -5,6 +5,7 @@ import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { env, isSupabaseConfigured } from '@/lib/env';
 import { isPlanPaused } from '@/lib/tenant/pause';
+import { withTransientRetry } from '@/lib/supabase/transient-retry';
 
 // cache() deduplicates this function within a single server-request lifecycle.
 // Every dashboard route that calls getTenantId() in the same render will share
@@ -42,12 +43,15 @@ export const getTenantId = cache(async (): Promise<string | null> => {
       return null;
     }
 
-    // Use supabaseAdmin to bypass RLS on the users table
-    const { data: userData, error } = await supabaseAdmin
-      .from('users')
-      .select('tenant_id, is_platform_admin, tenants!tenant_id(plan_status)')
-      .eq('auth_id', userId)
-      .single();
+    // Use supabaseAdmin to bypass RLS on the users table. Retried once on a DB
+    // stall: a 57014 here used to deny a signed-in operator ("Unauthorized").
+    const { data: userData, error } = await withTransientRetry(() =>
+      supabaseAdmin
+        .from('users')
+        .select('tenant_id, is_platform_admin, tenants!tenant_id(plan_status)')
+        .eq('auth_id', userId)
+        .single(),
+    );
 
     if (error) {
       console.error('getTenantId: DB error for auth_id:', userId, error.message);

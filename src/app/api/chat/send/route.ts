@@ -6,6 +6,7 @@ import { sendTextMessage, MetaApiError, explainMetaError } from '@/lib/meta/serv
 import { noteSendFailure } from '@/lib/whatsapp/credentialHealth.server';
 import { sendInstagramMessage } from '@/lib/instagram/service';
 import { decryptToken } from '@/lib/utils/crypto';
+import { withTransientRetry, withUncommittedWriteRetry } from '@/lib/supabase/transient-retry';
 
 export async function POST(req: NextRequest) {
   try {
@@ -22,19 +23,25 @@ export async function POST(req: NextRequest) {
 
     const supabase = await createServerSupabaseClient();
 
-    // Fetch conversation + tenant credentials in parallel to cut latency
+    // Fetch conversation + tenant credentials in parallel to cut latency.
+    // Each read retries once on a DB stall — otherwise a 57014 on the
+    // conversation lookup reached the operator as "Conversation not found".
     const [convResult, tenantResult] = await Promise.all([
-      supabase
-        .from('conversations')
-        .select('id, sender_id, tenant_id, channel, leads(phone)')
-        .eq('id', conversationId)
-        .eq('tenant_id', tenantId)
-        .single(),
-      supabaseAdmin
-        .from('tenants')
-        .select('wa_access_token, wa_phone_number_id, business_name')
-        .eq('id', tenantId)
-        .single(),
+      withTransientRetry(() =>
+        supabase
+          .from('conversations')
+          .select('id, sender_id, tenant_id, channel, leads(phone)')
+          .eq('id', conversationId)
+          .eq('tenant_id', tenantId)
+          .single(),
+      ),
+      withTransientRetry(() =>
+        supabaseAdmin
+          .from('tenants')
+          .select('wa_access_token, wa_phone_number_id, business_name')
+          .eq('id', tenantId)
+          .single(),
+      ),
     ]);
 
     const { data: conv, error: convErr } = convResult;
@@ -59,22 +66,26 @@ export async function POST(req: NextRequest) {
 
     // Insert the outbound message — optimistically mark as 'sent' so the client
     // shows a tick immediately. after() will flip to 'failed' if Meta rejects.
-    const { data: insertedMsg, error: insertErr } = await supabaseAdmin
-      .from('messages')
-      .insert({
-        tenant_id: tenantId,
-        conversation_id: conversationId,
-        direction: 'outbound',
-        content: message.trim(),
-        message_type: 'text',
-        channel: conv.channel || 'whatsapp',
-        sender_id: null,
-        status: 'sent',
-        ai_generated: false,
-        reply_to_message_id: replyToMessageId || null,
-      })
-      .select()
-      .single();
+    // Retried only when Postgres guarantees the first attempt did not commit
+    // (2026-11-23: a statement timeout here made Adventure Island retype a reply).
+    const { data: insertedMsg, error: insertErr } = await withUncommittedWriteRetry(() =>
+      supabaseAdmin
+        .from('messages')
+        .insert({
+          tenant_id: tenantId,
+          conversation_id: conversationId,
+          direction: 'outbound',
+          content: message.trim(),
+          message_type: 'text',
+          channel: conv.channel || 'whatsapp',
+          sender_id: null,
+          status: 'sent',
+          ai_generated: false,
+          reply_to_message_id: replyToMessageId || null,
+        })
+        .select()
+        .single(),
+    );
 
     if (insertErr) {
       console.error('Failed to insert message:', insertErr);

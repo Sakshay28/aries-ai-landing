@@ -55,3 +55,39 @@ export async function withTransientRetry<T extends { error: DbErrorLike }>(
   await new Promise((resolve) => setTimeout(resolve, delayMs));
   return run();
 }
+
+// Errors where Postgres guarantees the statement did NOT commit: it was
+// cancelled or rolled back, or it never got a connection. A write that failed
+// this way can be sent again without risk of applying it twice. Dropped
+// connections and network errors are deliberately absent — the write may have
+// committed before the reply was lost.
+const UNCOMMITTED_WRITE_CODES = new Set([
+  '57014', // query_canceled (statement timeout) — transaction rolled back
+  '40001', // serialization_failure — rolled back
+  '40P01', // deadlock_detected — rolled back
+  '53300', // too_many_connections — never ran
+  '57P03', // cannot_connect_now — never ran
+  'PGRST003', // timed out acquiring a pool connection — never ran
+]);
+
+export function isUncommittedWriteError(err: DbErrorLike): boolean {
+  return !!err && UNCOMMITTED_WRITE_CODES.has(err.code ?? '');
+}
+
+/**
+ * Run a write; if Postgres says it definitely did not commit (statement
+ * timeout, deadlock, no connection), run it once more. Never retries an
+ * ambiguous failure, so a write is never applied twice.
+ *
+ * 2026-11-23: a free-plan stall cancelled an inbox send's INSERT (57014) and
+ * the operator had to retype the message.
+ */
+export async function withUncommittedWriteRetry<T extends { error: DbErrorLike }>(
+  run: () => PromiseLike<T>,
+  delayMs = 400,
+): Promise<T> {
+  const first = await run();
+  if (!isUncommittedWriteError(first.error)) return first;
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  return run();
+}

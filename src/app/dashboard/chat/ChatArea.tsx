@@ -233,7 +233,6 @@ interface ChatAreaProps {
 // ── component ───────────────────────────────────────────────────────
 export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const [inputMsg, setInputMsg] = useState('');
-  const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -488,6 +487,9 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const optimisticIdRef = useRef(0);
+  // Text sends run one after another (so WhatsApp gets them in the order they
+  // were typed) without ever locking the composer.
+  const sendChainRef = useRef<Promise<void>>(Promise.resolve());
   const uploadJobsRef = useRef<Record<string, LocalUpload>>({});
   const retryingMediaRef = useRef(new Set<string>());
   const conversationIdRef = useRef(conversationId);
@@ -974,49 +976,28 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, scrollToBottom]);
 
-  // Modified handleSend: also handles attachment send
-  const handleSend = async () => {
-    // If there's a pending file, send it as attachment
-    if (pendingFile) {
-      handleSendAttachment();
-      return;
-    }
-    if (!inputMsg.trim() || !conversationId || sending) return;
-    const text = inputMsg.trim();
-    setInputMsg('');
-    setSending(true);
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
-
-    // Capture reply context BEFORE clearing it — strip disappears instantly ✓
-    const replyCtx = replyToMsg;
-    setReplyToMsg(null); // ← clear immediately so strip is gone the moment user hits send
-
-    // Add optimistic bubble immediately (shows clock icon while API processes)
-    const optimisticId = `__optimistic__${++optimisticIdRef.current}`;
-    const optimisticMsg: Message = {
-      id: optimisticId,
-      conversation_id: conversationId,
-      content: text,
-      direction: 'outbound',
-      status: 'pending',
-      created_at: new Date().toISOString(),
-      ai_generated: false,
-      reply_to_message_id: replyCtx?.id || null,
-    } as unknown as Message;
-    setMessages(prev => [...prev, optimisticMsg]);
-    setTimeout(() => scrollToBottom(true), 30);
-
+  // Send one text message for the bubble `optimisticId`. Never throws.
+  const deliverText = async (optimisticId: string, convId: string, text: string, replyToId: string | null) => {
+    // The operator may have opened another chat while this was in flight —
+    // only touch the bubble list if it still belongs to this conversation.
+    const stillHere = () => conversationIdRef.current === convId;
     try {
       const res = await fetch('/api/chat/send', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId, message: text, replyToMessageId: replyCtx?.id }),
+        body: JSON.stringify({ conversationId: convId, message: text, replyToMessageId: replyToId || undefined }),
+        // Without a cap, one hung request would hold every message queued behind it.
+        signal: AbortSignal.timeout(30_000),
       });
-      const apiData = await res.json();
-      if (!res.ok || !apiData.success) throw new Error(apiData.error || 'Failed');
+      // A gateway error page is HTML, not JSON — don't let that surface as a parse error.
+      const apiData = await res.json().catch(() => null);
+      if (!res.ok || !apiData?.success) {
+        throw new Error(apiData?.error || `Server error (${res.status})`);
+      }
 
       // Replace optimistic bubble with the real saved message from DB
       // This gives us the real UUID, correct timestamp, and 'sent' status (✓)
       const realMsg: Message | null = apiData.message;
+      if (!stillHere()) return;
       setMessages(prev => {
         const withoutOptimistic = prev.filter(m => m.id !== optimisticId);
         if (!realMsg) {
@@ -1028,13 +1009,64 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
         return [...withoutOptimistic, realMsg];
       });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Message failed to send.';
-      toast.error(msg);
+      const timedOut = err instanceof DOMException && err.name === 'TimeoutError';
+      // fetch() rejects with a TypeError when the network is down; each browser
+      // words it differently ("Failed to fetch", "Load failed", …).
+      const reason = timedOut
+        ? 'No reply from the server. It may still go through, so check before retrying.'
+        : err instanceof TypeError
+          ? 'No internet connection.'
+          : err instanceof Error
+            ? err.message
+            : 'Message failed to send.';
+      toast.error('Message not sent', { description: `${reason} Tap the red icon on the message to retry.` });
+      if (!stillHere()) return;
       setMessages(prev => prev.map(m =>
-        m.id === optimisticId ? { ...m, status: 'failed' as Message['status'] } : m
+        m.id === optimisticId ? { ...m, status: 'failed' as Message['status'], error_message: reason } : m
       ));
-      setInputMsg(text);
-    } finally { setSending(false); }
+    }
+  };
+
+  // Show a bubble now and queue the actual send behind any still in flight.
+  // The composer is never disabled: disabling the focused textarea threw the
+  // cursor out of it after every send, so the next message was typed into
+  // nothing (Adventure Island, 2026-11-23: "I have to try 4-5 times").
+  const queueText = (text: string, replyToId: string | null) => {
+    if (!conversationId) return;
+    const convId = conversationId;
+    const optimisticId = `__optimistic__${++optimisticIdRef.current}`;
+    const optimisticMsg: Message = {
+      id: optimisticId,
+      conversation_id: convId,
+      content: text,
+      direction: 'outbound',
+      status: 'pending',
+      created_at: new Date().toISOString(),
+      ai_generated: false,
+      reply_to_message_id: replyToId,
+    } as unknown as Message;
+    setMessages(prev => [...prev, optimisticMsg]);
+    setTimeout(() => scrollToBottom(true), 30);
+    sendChainRef.current = sendChainRef.current.then(() => deliverText(optimisticId, convId, text, replyToId));
+  };
+
+  // Modified handleSend: also handles attachment send
+  const handleSend = () => {
+    // If there's a pending file, send it as attachment
+    if (pendingFile) {
+      handleSendAttachment();
+      return;
+    }
+    if (!inputMsg.trim() || !conversationId) return;
+    const text = inputMsg.trim();
+    setInputMsg('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+
+    // Capture reply context BEFORE clearing it — strip disappears instantly ✓
+    const replyCtx = replyToMsg;
+    setReplyToMsg(null); // ← clear immediately so strip is gone the moment user hits send
+
+    queueText(text, replyCtx?.id || null);
   };
 
   // ── Channel-level health ──
@@ -1210,17 +1242,11 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
       toast.error('This attachment can’t be re-sent automatically', { description: 'Attach the file again to resend it.' });
       return;
     }
+    if (!msg.content?.trim()) return;
+    // Swap the failed bubble for a fresh pending one that goes through the same
+    // ordered queue as typed messages (and shows its own failure if it fails again).
     setMessages(prev => prev.filter(m => m.id !== msg.id));
-    try {
-      const res = await fetch('/api/chat/send', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId, message: msg.content }),
-      });
-      if (!res.ok) throw new Error('Failed');
-    } catch {
-      toast.error('Resend failed.');
-      setMessages(prev => [...prev, { ...msg, status: 'failed' as Message['status'] }]);
-    }
+    queueText(msg.content.trim(), msg.reply_to_message_id || null);
   };
 
   const toggleHumanMode = async () => {
@@ -1886,6 +1912,15 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                           <AlertCircle className="w-3.5 h-3.5 text-red-500" />
                         </button>
                       );
+                    // Checked before the optimistic clock: a send that failed before
+                    // reaching the DB is still optimistic, and used to sit on a clock
+                    // forever — it looked like it was still sending, with no retry.
+                    if (msg.status === 'failed')
+                      return (
+                        <button onClick={() => handleResend(msg)} title="Retry" className="flex items-center cursor-pointer hover:opacity-70 transition-opacity">
+                          <AlertCircle className="w-3.5 h-3.5 text-red-500" />
+                        </button>
+                      );
                     if (msg.status === 'read')
                       return <CheckCheck className="w-3.5 h-3.5 text-[#53BDEB]" />;
                     if (msg.status === 'delivered')
@@ -1894,12 +1929,6 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                       return <Check className="w-3.5 h-3.5 text-[#667781] dark:text-[#aebac1]" />;
                     if (msg.status === 'pending' || isOptimistic)
                       return <Clock className="w-3 h-3 text-[#667781]/70 dark:text-[#aebac1]/70" />;
-                    if (msg.status === 'failed')
-                      return (
-                        <button onClick={() => handleResend(msg)} title="Retry" className="flex items-center cursor-pointer hover:opacity-70 transition-opacity">
-                          <AlertCircle className="w-3.5 h-3.5 text-red-500" />
-                        </button>
-                      );
                     // Default fallback: single tick
                     return <Check className="w-3.5 h-3.5 text-[#667781] dark:text-[#aebac1]" />;
                   })();
@@ -2376,7 +2405,7 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
                               landing but had no way to find out why — which is how a 25-day
                               outbound outage went unreported. Media bubbles already explain
                               themselves via mediaNotice above; this covers everything else. */}
-                          {!isInbound && !isOptimistic && msg.status === 'failed' && !msg.media_url && (
+                          {!isInbound && !localUpload && msg.status === 'failed' && !msg.media_url && (
                             <div
                               role="alert"
                               className="flex items-start gap-1.5 mt-1 pt-1.5 border-t border-red-500/20 text-[11.5px] leading-snug text-red-600 dark:text-red-400"
@@ -2690,7 +2719,6 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
             placeholder={pendingFile ? 'Add a caption… (optional)' : 'Type a message…'}
             rows={1}
-            disabled={sending}
             className="flex-1 bg-transparent border-0 resize-none outline-none text-[13.5px] text-foreground placeholder:text-muted-foreground/50 py-1.5 px-1 min-h-[36px] max-h-32"
           />
 
@@ -2712,16 +2740,18 @@ export default function ChatArea({ onDataLoaded }: ChatAreaProps) {
 
           {/* Send button — active when text typed OR file pending */}
           <button
-            disabled={(!inputMsg.trim() && !pendingFile) || sending || preparingFile}
+            disabled={(!inputMsg.trim() && !pendingFile) || preparingFile}
+            // Keep focus (and the phone keyboard) in the textarea when tapping send.
+            onMouseDown={e => e.preventDefault()}
             onClick={() => handleSend()}
             className={cn(
               "w-11 h-11 lg:w-8 lg:h-8 rounded-full flex items-center justify-center flex-shrink-0 mb-0.5 transition-all duration-150",
-              (inputMsg.trim() || pendingFile) && !sending && !preparingFile
+              (inputMsg.trim() || pendingFile) && !preparingFile
                 ? "bg-[#00A884] text-white hover:bg-[#009874]"
                 : "text-muted-foreground/30 cursor-not-allowed"
             )}
           >
-            {(sending || preparingFile) ? (
+            {preparingFile ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
               <Send className="w-3.5 h-3.5" />
