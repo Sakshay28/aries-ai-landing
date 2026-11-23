@@ -12,8 +12,37 @@
 // ═══════════════════════════════════════════════════════════
 
 import { getAI } from '@/lib/ai/client';
+import type Anthropic from '@anthropic-ai/sdk';
+import { callClaude, getClaude, CLAUDE_IMAGE_TYPES, CLAUDE_MODEL } from '@/lib/ai/claude';
 
+// Video stays on Gemini (Claude does not accept video); images, PDFs and
+// document classification run on Claude.
 const VISION_MODEL = 'gemini-2.5-flash';
+
+const CATALOG_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['title', 'description', 'tags', 'category', 'ocr_text'],
+  properties: {
+    title: { type: 'string' },
+    description: { type: 'string' },
+    tags: { type: 'array', items: { type: 'string' } },
+    category: { type: 'string' },
+    ocr_text: { type: 'string' },
+  },
+};
+
+const DOC_CLASSIFY_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['title', 'description', 'tags', 'category'],
+  properties: {
+    title: { type: 'string' },
+    description: { type: 'string' },
+    tags: { type: 'array', items: { type: 'string' } },
+    category: { type: 'string' },
+  },
+};
 
 export interface MediaAnalysisResult {
   title:       string;
@@ -64,15 +93,21 @@ Return ONLY a JSON object with these exact keys:
 }`;
 
   try {
-    const response = await getAI().models.generateContent({
-      model: VISION_MODEL,
-      contents: [
-        { inlineData: { mimeType, data: buffer.toString('base64') } },
-        prompt,
-      ],
-      config: { responseMimeType: 'application/json', temperature: 0.2 },
+    const mediaType = mimeType === 'image/jpg' ? 'image/jpeg' : mimeType;
+    if (!CLAUDE_IMAGE_TYPES.has(mediaType)) throw new Error(`unsupported image type ${mimeType}`);
+    const response = await callClaude({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType as 'image/jpeg', data: buffer.toString('base64') } },
+          { type: 'text', text: prompt },
+        ],
+      }],
+      effort: 'low',
+      jsonSchema: CATALOG_SCHEMA,
+      timeoutMs: 60000,
     });
-    return toResult(parseJsonResponse(response.text || ''));
+    return toResult(parseJsonResponse(response.text));
   } catch (err) {
     console.error('media-analysis: analyzeImage failed:', (err as Error).message);
     return EMPTY_RESULT;
@@ -226,17 +261,25 @@ export function extractSpreadsheetText(buffer: Buffer): string {
   }
 }
 
-// ── Extract raw text from a PDF via Gemini ──
+// ── Extract raw text from a PDF via Claude ──
 export async function extractPdfText(buffer: Buffer): Promise<string> {
   try {
-    const response = await getAI().models.generateContent({
-      model: VISION_MODEL,
-      contents: [
-        { inlineData: { mimeType: 'application/pdf', data: buffer.toString('base64') } },
-        'Extract all text content from this document exactly as it is written. Do not summarize, do not translate, do not add any comments. Just return the raw extracted text.',
-      ],
-    });
-    return response.text || '';
+    const response = await getClaude().beta.messages.stream({
+      model: CLAUDE_MODEL,
+      max_tokens: 64000,
+      output_config: { effort: 'low' },
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: buffer.toString('base64') } },
+          { type: 'text', text: 'Extract all text content from this document exactly as it is written. Do not summarize, do not translate, do not add any comments. Just return the raw extracted text.' },
+        ],
+      }],
+    }).finalMessage();
+    return response.content
+      .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('');
   } catch (err) {
     console.error('media-analysis: extractPdfText failed:', (err as Error).message);
     return '';
@@ -287,12 +330,13 @@ DOCUMENT TEXT (truncated):
 ${contentText.slice(0, 6000)}`;
 
   try {
-    const response = await getAI().models.generateContent({
-      model: VISION_MODEL,
-      contents: prompt,
-      config: { responseMimeType: 'application/json', temperature: 0.2 },
+    const response = await callClaude({
+      messages: [{ role: 'user', content: prompt }],
+      effort: 'low',
+      jsonSchema: DOC_CLASSIFY_SCHEMA,
+      timeoutMs: 60000,
     });
-    const raw = parseJsonResponse(response.text || '');
+    const raw = parseJsonResponse(response.text);
     return {
       title: typeof raw.title === 'string' ? raw.title.slice(0, 200) : '',
       description: typeof raw.description === 'string' ? raw.description.slice(0, 2000) : '',

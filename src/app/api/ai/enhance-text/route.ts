@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAI } from '@/lib/ai/client';
+import { claudeText } from '@/lib/ai/claude';
 import { getTenantId } from '@/lib/auth/getTenantId';
 
 export async function POST(req: NextRequest) {
@@ -26,16 +26,7 @@ Enhance the following draft message written by a customer support agent:
 
 Draft message: "${text.trim()}"`;
 
-    const response = await getAI().models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: {
-        temperature: 0.3,
-        maxOutputTokens: 300,
-      },
-    });
-
-    const enhanced = response.text?.trim();
+    const enhanced = await claudeText(prompt, { effort: 'low', maxTokens: 2000, timeoutMs: 30000 });
     if (!enhanced) throw new Error('Empty response from AI');
 
     return NextResponse.json({ enhanced });

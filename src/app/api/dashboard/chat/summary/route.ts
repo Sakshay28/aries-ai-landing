@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTenantId } from '@/lib/auth/getTenantId';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { getAI } from '@/lib/ai/client';
+import { claudeText } from '@/lib/ai/claude';
 
 export interface AISummaryBrief {
   conversationGoal: string;
@@ -100,14 +100,7 @@ Rules:
 - DO NOT mention message counts, AI reply counts, or any stats
 - Output pure JSON only`;
 
-    const ai = getAI();
-    const result = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: { temperature: 0.3, maxOutputTokens: 800 },
-    });
-
-    const raw = result.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    const raw = await claudeText(prompt, { effort: 'low', maxTokens: 4000, timeoutMs: 30000 });
     const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     const brief: AISummaryBrief = JSON.parse(cleaned);
 

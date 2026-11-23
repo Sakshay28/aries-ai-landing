@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAI } from '@/lib/ai/client';
+import { claudeText } from '@/lib/ai/claude';
 import { getTenantId } from '@/lib/auth/getTenantId';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -227,17 +227,7 @@ export async function POST(req: NextRequest) {
     const prompt = buildPrompt(body);
     const systemPrompt = buildSystemPrompt();
 
-    const response = await getAI().models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: {
-        systemInstruction: systemPrompt,
-        temperature: 0.4,
-        maxOutputTokens: 512,
-      },
-    });
-
-    const result = response.text?.trim();
+    const result = await claudeText(prompt, { system: systemPrompt, effort: 'low', maxTokens: 2000, timeoutMs: 30000 });
     if (!result) throw new Error('Empty AI response');
 
     // For smart_reply mode, split into multiple suggestions
