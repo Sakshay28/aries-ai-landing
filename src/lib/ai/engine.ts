@@ -20,7 +20,12 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { callClaude, chatEffort, claudeText, toClaudeMessages, CLAUDE_MODEL } from '@/lib/ai/claude';
 import { getRedisClient } from '@/lib/redis/client';
 const MODEL = CLAUDE_MODEL;
-const AI_REPLY_TIMEOUT_MS = 10000;
+// The webhook runs on Vercel fluid compute (300s limit) with a typing
+// indicator showing, so a slow reply is far better than the canned fallback:
+// each attempt gets AI_ATTEMPT_TIMEOUT_MS and the SDK retries a timed-out
+// attempt once; AI_REPLY_TIMEOUT_MS caps the whole thing.
+const AI_ATTEMPT_TIMEOUT_MS = 12000;
+const AI_REPLY_TIMEOUT_MS = 25000;
 
 const INTENTS = [
   'greeting', 'reserve_table', 'private_event', 'corporate_booking', 'gift_occasion',
@@ -787,11 +792,15 @@ export async function processMessageWithAI(
   // ("hi, I'd like to book a table") is deliberately excluded — isBareGreeting
   // requires nothing but the greeting (plus filler/business-name) to match.
   if (!tenantConfig.isFirstMessage && isBareGreeting(safeMessage, tenantConfig.businessName)) {
-    const prevUserMsgs = conversationHistory.filter(m => m.role === 'user').map(m => m.content).join(' ').toLowerCase();
-    const isHinglish = /(kaise|kya|hai|bhai|yaar|batao|chahiye|mujhe|aap|hum|theek|accha|bilkul|zaroor|bol|kar|karo)/.test(prevUserMsgs);
+    // Language follows THIS message only (as the system prompt's auto mode
+    // does), never earlier ones: a bare "hi"/"hello" carries no Hinglish, so it
+    // gets English. (The old check scanned the whole history with substrings
+    // like "hum"/"kar"/"hai", which matched "human"/"chair" and made one
+    // Hinglish message stick to every later greeting.)
+    const hindiMode = tenantConfig.languageMode === 'hindi';
     return {
-      reply: isHinglish
-        ? `Haan batao! 😊 Kaise help karun ${tenantConfig.businessName} ke liye?`
+      reply: hindiMode
+        ? `हाँ बताइए! 😊 ${tenantConfig.businessName} के लिए कैसे मदद करूँ?`
         : `Hey! 😊 How can I help you with ${tenantConfig.businessName} today?`,
       extractedData: {},
       intent: 'greeting',
@@ -837,9 +846,9 @@ export async function processMessageWithAI(
         messages: toClaudeMessages(conversationHistory, safeMessage),
         effort: chatEffort(),
         jsonSchema: CHAT_REPLY_SCHEMA,
-        timeoutMs: AI_REPLY_TIMEOUT_MS,
+        timeoutMs: AI_ATTEMPT_TIMEOUT_MS,
       }),
-      AI_REPLY_TIMEOUT_MS // hard ceiling — WhatsApp users expect fast replies
+      AI_REPLY_TIMEOUT_MS // hard ceiling for both attempts
     );
 
     if (tenantId && response.totalTokens) {
